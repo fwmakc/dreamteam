@@ -1,0 +1,26 @@
+{
+  "default": "openai",
+  "providers":{
+    "mock":{
+      "adapter":"mock"
+    },
+    "openai": {
+      "adapter": "openai-compatible",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "model": "glm-5-turbo"
+    },
+    "claude": {
+      "adapter": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "model": "claude-sonnet-4-5"
+    },
+    "gigachat": {
+      "adapter": "gigachat",
+      "keyEnv": "GIGA_API_KEY",
+      "scope": "GIGACHAT_API_PERS",
+      "caCertPath": "certs/russian_trusted_root_ca.pem",
+      "model": "GigaChat"
+    }
+  }
+}

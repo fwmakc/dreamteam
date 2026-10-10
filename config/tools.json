@@ -1,0 +1,5 @@
+{
+  "workspace": "./workspace",
+  "runTimeoutMs": 180000,
+  "maxOutputChars": 4000
+}
