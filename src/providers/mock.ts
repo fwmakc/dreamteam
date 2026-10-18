@@ -73,9 +73,39 @@ export class MockProvider implements LLMProvider {
 
   async *stream(req: StreamRequest): AsyncGenerator<string> {
     let text = this.fixedReply ?? pickReply(req);
-    // демо инструментов: у агента в промпте есть блок ```file — показываем протокол в деле.
-    // По числу результатов в истории ступеньки: файл → команда → итог (детерминированно для тестов).
-    if (!this.fixedReply && (req.system ?? '').includes('```file')) {
+    // mock-зрение: запрос с картинкой — это инструмент look, отвечаем заготовленным разбором
+    if (!this.fixedReply && req.messages.some((m) => m.images?.length)) {
+      text =
+        'Смотрю на изображение: тёмно-синяя шапка с логотипом слева, под ней крупный светлый заголовок ' +
+        'и градиентная кнопка по центру. Ниже три карточки с тонкими рамками и подписями. ' +
+        'Стиль — плоский минимализм, шрифт без засечек.';
+    } else if (!this.fixedReply && (req.system ?? '').includes('```image')) {
+      // демо художника: генерация → look на свой файл → итог. Детерминировано для тестов.
+      const steps = req.messages.filter((m) => m.content.includes('⚙ Результаты твоих действий')).length;
+      if (steps === 0) {
+        text =
+          'Принесла первые наброски — четыре варианта в маленьком разрешении, дёшево и сердито:\n' +
+          '```image\nprompt: poster sketch, minimal flat style, deep blue palette, high contrast\nsize: 512x768\nn: 4\n```\n' +
+          'Сейчас сама посмотрю, что вышло, и покажу вам.';
+      } else if (steps === 1) {
+        const lastTool = [...req.messages]
+          .reverse()
+          .find((m) => m.content.includes('⚙ Результаты твоих действий'));
+        const path =
+          lastTool?.content.match(/[\w./\\-]*images[/\\][\w./\\-]+\.(?:png|jpe?g|webp)/i)?.[0] ??
+          'images/sketch-1.png';
+        text =
+          'Проверю глазами, что там сгенерировалось, прежде чем показывать выводы:\n' +
+          '```look ' + path + '\nчто на картинке? опиши точно\n```\n' +
+          'Секунду.';
+      } else {
+        text =
+          'Смотрела: варианты на месте, стиль выдержан. Выбирайте номер — выбранный возьму референсом ' +
+          'и дорисую в высоком разрешении или поправлю по вашим правкам.';
+      }
+    } else if (!this.fixedReply && (req.system ?? '').includes('```file')) {
+      // демо инструментов: у агента в промпте есть блок ```file — показываем протокол в деле.
+      // По числу результатов в истории ступеньки: файл → команда → итог (детерминированно для тестов).
       const steps = req.messages.filter((m) => m.content.includes('⚙ Результаты твоих действий')).length;
       if (steps === 0) {
         text = 'Так, это я могу не на словах. Держи стартовый файл:\n```file demo-agent.txt\nПривет от mock-агента: инструменты реально работают.\nВторая строка — для порядка.\n```\nЗаписал, дальше по обстановке.';

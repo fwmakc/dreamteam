@@ -49,8 +49,12 @@ export interface TeamMemory {
   agents: Record<string, AgentGlobalMemory>;
 }
 
-/** Инструменты, которыми агент реально действует (а не только говорит) */
-export type AgentTool = 'files' | 'shell';
+/**
+ * Инструменты, которыми агент реально действует (а не только говорит):
+ *  files — запись файлов; shell — команды на этом ПК; ssh — команды на настроенных серверах;
+ *  look — посмотреть картинку глазами vision-модели; image — сгенерировать изображение.
+ */
+export type AgentTool = 'files' | 'shell' | 'ssh' | 'look' | 'image';
 
 /** Участник команды из config/team.json */
 export interface Agent {
@@ -66,8 +70,18 @@ export interface Agent {
   /** Свой провайдер из config/providers.json (необязательно) */
   provider?: string;
   temperature?: number;
-  /** Инструменты (config/tools.json + поле tools в team.json): files — запись файлов, shell — команды */
+  /** Инструменты (config/tools.json + поле tools в team.json) */
   tools?: AgentTool[];
+  /** Проекты из реестра tools.json, куда агенту можно писать и запускать команды */
+  projects?: string[];
+  /** Хосты из config/hosts.json, на которые агенту можно ходить по ssh (для инструмента ssh) */
+  hosts?: string[];
+  /** Проект по умолчанию (id из реестра) или путь — куда идут блоки без префикса */
+  workspace?: string;
+  /** Чем агент смотрит картинки (```look): id провайдера с "vision": true; по умолчанию — его же провайдер */
+  vision?: string;
+  /** Чем агент рисует (```image): id image-провайдера из providers.json */
+  image?: string;
 }
 
 /** Сообщение в истории разговора */
@@ -115,6 +129,8 @@ export interface SessionMeta {
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Картинки (data: URL) — vision-моделям, обычно в запросе инструмента look */
+  images?: string[];
 }
 
 /** Запрос к провайдеру */
@@ -139,4 +155,43 @@ export interface LLMProvider {
   readonly model: string;
   /** Поток кусочков текста ответа */
   stream(req: StreamRequest): AsyncIterable<string>;
+}
+
+/** Запрос к image-модели: генерация с нуля или перерисовка по референсам */
+export interface ImageRequest {
+  prompt: string;
+  /** Сколько вариантов (по умолчанию 1) */
+  n?: number;
+  /** «512x768», «1024x1024»… */
+  size?: string;
+  /** Шаги диффузии: больше — качественнее и дольше */
+  steps?: number;
+  /** Насколько строго модель следует промпту (guidance scale) */
+  guidance?: number;
+  seed?: number;
+  /** Референсы как data: URL — режим перерисовки (images/edits) */
+  refImages?: string[];
+}
+
+/** Одна сгенерированная картинка: base64 без префикса */
+export interface GeneratedImage {
+  data: string;
+  mediaType: string;
+}
+
+export interface ImageResult {
+  ok: boolean;
+  images: GeneratedImage[];
+  error?: string;
+}
+
+/**
+ * Единый интерфейс image-моделей (Flux, SD-Turbo, Qwen-Image-Edit, облачные API).
+ * Адаптер — только транспорт: файлы на диск кладёт приложение, в рабочую папку.
+ */
+export interface ImageProvider {
+  readonly id: string;
+  readonly kind: string;
+  readonly model: string;
+  generate(req: ImageRequest, signal?: AbortSignal): Promise<ImageResult>;
 }

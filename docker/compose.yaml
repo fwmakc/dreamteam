@@ -1,0 +1,182 @@
+# Dream Team — контейнеры с моделями. Приложению сюда заходить не нужно:
+# папка самодостаточна, её можно скопировать на любую машину и поднять там,
+# а в config/providers.json приложения указать адрес этой машины.
+#
+# Каждый сервис — одна модель, профиль назван именем модели.
+# Запуск одной:     docker compose --profile qwen2-vl-2b up -d
+# Нескольких сразу: docker compose --profile qwen2-vl-2b --profile flux-schnell up -d
+# Логи:             docker compose logs -f qwen2-vl-2b
+# Модели скачиваются с Hugging Face при первом старте (кэш в named volume).
+#
+# Подробности и таблица моделей — README.md рядом.
+
+services:
+  # ─── Зрение: OpenAI-совместимый /v1/chat/completions с приёмом картинок ───
+
+  # Лёгкие глаза на CPU (~3 ГБ RAM): llama.cpp сам скачает GGUF и vision-энкодер (-hf).
+  qwen2-vl-2b:
+    profiles: ["qwen2-vl-2b"]
+    image: ghcr.io/ggml-org/llama.cpp:server
+    ports: ["8000:8080"]
+    volumes: ["llama-cache:/root/.cache/llama.cpp"]
+    command: ["-hf", "ggml-org/Qwen2-VL-2B-Instruct-GGUF", "--host", "0.0.0.0", "--port", "8080", "-c", "4096"]
+
+  # Зрение посвежее, тоже на CPU (~5 ГБ RAM).
+  qwen3-vl-4b:
+    profiles: ["qwen3-vl-4b"]
+    image: ghcr.io/ggml-org/llama.cpp:server
+    ports: ["8003:8080"]
+    volumes: ["llama-cache:/root/.cache/llama.cpp"]
+    command: ["-hf", "ggml-org/Qwen3-VL-4B-Instruct-GGUF", "--host", "0.0.0.0", "--port", "8080", "-c", "4096"]
+
+  # Зрение на GPU (~16 ГБ VRAM): vLLM, тот же OpenAI-протокол.
+  qwen2.5-vl-7b:
+    profiles: ["qwen2.5-vl-7b"]
+    image: vllm/vllm-openai:v0.11.0
+    command: --model Qwen/Qwen2.5-VL-7B-Instruct --max-model-len 8192 --port 8000
+    ports: ["8001:8000"]
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes: ["hf-cache:/root/.cache/huggingface"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Зрение на GPU (~20 ГБ VRAM), новее и точнее qwen2.5.
+  qwen3-vl-8b:
+    profiles: ["qwen3-vl-8b"]
+    image: vllm/vllm-openai:v0.11.0
+    command: --model Qwen/Qwen3-VL-8B-Instruct --max-model-len 8192 --port 8000
+    ports: ["8002:8000"]
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes: ["hf-cache:/root/.cache/huggingface"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ─── Картинки: наш facade над diffusers (OpenAI images API) ───
+
+  # Генерация на CPU (~6 ГБ RAM): 512px за 1–4 шага, для проверки цикла без GPU.
+  sd-turbo:
+    profiles: ["sd-turbo"]
+    build:
+      context: ./facade
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cpu
+    environment:
+      MODELS: "sd-turbo=sd-turbo:stabilityai/sd-turbo"
+      DEVICE: "cpu"
+    ports: ["8100:8100"]
+    volumes: ["hf-cache:/root/.cache/huggingface"]
+
+  # Самая лёгкая генерация на CPU (~3 ГБ RAM): BK-SDM-tiny — SD1.5 с вырезанными
+  # блоками UNet. Качество черновое — для проверки цикла и дешёвых эскизов.
+  bk-sdm:
+    profiles: ["bk-sdm"]
+    build:
+      context: ./facade
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cpu
+    environment:
+      MODELS: "bk-sdm=sd-small:nota-ai/bk-sdm-tiny"
+      DEVICE: "cpu"
+      # LCM-адаптер: генерация за 4–8 шагов вместо 25. Убрать строку — вернётся медленный режим.
+      LCM_LORA: "latent-consistency/lcm-lora-sd1.5"
+    ports: ["8105:8100"]
+    volumes: ["hf-cache:/root/.cache/huggingface"]
+
+  # Быстрая генерация на GPU (~16 ГБ VRAM), Apache-2.0, токен HF не нужен.
+  flux-schnell:
+    profiles: ["flux-schnell"]
+    build:
+      context: ./facade
+      args:
+        TORCH_INDEX: https://pypi.org/simple
+    environment:
+      MODELS: "flux-schnell=flux-schnell:black-forest-labs/FLUX.1-schnell"
+      DEVICE: "cuda"
+    ports: ["8101:8100"]
+    volumes: ["hf-cache:/root/.cache/huggingface"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Качественная генерация на GPU (~16 ГБ VRAM с offload). Gated: примите лицензию
+  # на huggingface.co/black-forest-labs/FLUX.1-dev и впишите HF_TOKEN в .env рядом с compose.
+  flux-dev:
+    profiles: ["flux-dev"]
+    build:
+      context: ./facade
+      args:
+        TORCH_INDEX: https://pypi.org/simple
+    environment:
+      MODELS: "flux-dev=flux:black-forest-labs/FLUX.1-dev"
+      DEVICE: "cuda"
+      HF_TOKEN: ${HF_TOKEN:-}
+    ports: ["8102:8100"]
+    volumes: ["hf-cache:/root/.cache/huggingface"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Контроль лиц на GPU (~12 ГБ VRAM): PhotoMaker V2 поверх RealVisXL.
+  # Фото человека кладёте референсами (refs) — модель рисует именно его.
+  photomaker:
+    profiles: ["photomaker"]
+    build:
+      context: ./facade
+      args:
+        TORCH_INDEX: https://pypi.org/simple
+    environment:
+      MODELS: "photomaker=photomaker:SG161222/RealVisXL_V4.0"
+      DEVICE: "cuda"
+    ports: ["8103:8100"]
+    volumes: ["hf-cache:/root/.cache/huggingface"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Перерисовка на GPU (~40 ГБ VRAM): Qwen-Image-Edit-2509, принимает несколько референсов.
+  qwen-image-edit:
+    profiles: ["qwen-image-edit"]
+    build:
+      context: ./facade
+      args:
+        TORCH_INDEX: https://pypi.org/simple
+    environment:
+      MODELS: "qwen-image-edit=edit:Qwen/Qwen-Image-Edit-2509"
+      DEVICE: "cuda"
+    ports: ["8104:8100"]
+    volumes: ["hf-cache:/root/.cache/huggingface"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  llama-cache:
+  hf-cache:

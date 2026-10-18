@@ -1,13 +1,27 @@
 import 'dotenv/config';
 import { createInterface } from 'node:readline/promises';
 import { writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { format } from 'node:util';
 import pc from 'picocolors';
 import { findMentions, loadTeam, loadUserProfile } from './agents.js';
-import { describeAction, executeAction, loadToolsConfig, parseActions, actionsHint } from './actions.js';
+import {
+  actionsHint,
+  checkPermission,
+  describeAction,
+  executeAction,
+  loadToolsConfig,
+  parseActions,
+  type Action,
+  type ToolsConfig,
+  type ToolContext,
+} from './actions.js';
 import { SessionStore } from './sessions.js';
-import { COMMANDS, HintPanel, hintRowsFor, makeCompleter, type CompletionContext } from './completion.js';
+import { COMMANDS, HintPanel, MentionPicker, hintRowsFor, makeCompleter, type CompletionContext } from './completion.js';
+import { Editor } from './editor.js';
+import { Screen, loadUiConfig } from './screen.js';
 import { planTurns, type PlanResult } from './orchestrator.js';
 import { compressIfNeeded, contextSlice } from './compress.js';
 import {
@@ -22,8 +36,8 @@ import {
   reflectSessionMemory,
   saveTeamMemory,
 } from './memory.js';
-import { loadProviders, type ProviderStatus } from './providers/registry.js';
-import { agentHeader, colorFn, printDim, printError, rosterLine, Spinner } from './ui.js';
+import { loadProviders, loadImageProviders, type ImageProviderStatus, type ProviderStatus } from './providers/registry.js';
+import { agentHeader, colorFn, printDim, printError, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 import type {
   Agent,
   ChatMessage,
@@ -39,13 +53,88 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_DIR = join(ROOT, 'config');
 const DATA_DIR = join(ROOT, 'data', 'sessions');
 const USER_FILE = join(CONFIG_DIR, 'user.json');
+const UI_FILE = join(CONFIG_DIR, 'ui.json');
 const MEMORY_FILE = join(ROOT, 'data', 'memory.json');
 
 // доступен командам /exit: закрытие readline завершает приложение через 'close'
-let rl: ReturnType<typeof createInterface>;
+let rl: ReturnType<typeof createInterface> | null = null;
+
+/** Управляемый экран и редактор ввода — в TTY; null в пайпе (там readline) */
+let screen: Screen | null = null;
+let editor: Editor | null = null;
+
+/** Подсказки на пустом вводе: постоянная шпаргалка вместо пустой зоны */
+const STATIC_HINTS = [
+  pc.dim('  /help — команды · /new — новый разговор · /sessions — список разговоров'),
+  pc.dim('  @имя — вопрос участнику · Esc — прервать раунд · /exit — выход'),
+];
+
+/** Таймер «Скопировано» в строке статуса, чтобы не висел вечно */
+let statusTimer: NodeJS.Timeout | null = null;
+
+function flashStatus(screen: Screen, text: string): void {
+  if (statusTimer) clearTimeout(statusTimer);
+  screen.setStatus(text);
+  statusTimer = setTimeout(() => {
+    statusTimer = null;
+    screen.setStatus(null);
+  }, 2500);
+  statusTimer.unref?.();
+}
+
+/** Текст в системный буфер: Windows — clip.exe (UTF-16LE с BOM ради кириллицы), иначе OSC 52 */
+function copyToClipboard(text: string): void {
+  if (process.platform === 'win32') {
+    try {
+      const child = spawn('clip', [], { stdio: ['pipe', 'ignore', 'ignore'] });
+      child.stdin?.end(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]));
+      child.on('error', () => {});
+    } catch {
+      // нет clip.exe — не страшно
+    }
+  } else {
+    // буфер обмена самого терминала (работает и через ssh)
+    const b64 = Buffer.from(text, 'utf8').toString('base64');
+    process.stdout.write(`\x1b]52;c;${b64}\x07`);
+  }
+}
+
+/** Скопировать выделенное (если есть); true — было что копировать */
+function copySelection(screen: Screen | null): boolean {
+  const text = screen?.selectedText() ?? '';
+  if (!text) return false;
+  copyToClipboard(text);
+  screen?.clearSelection();
+  if (screen) flashStatus(screen, `  ✓ Скопировано в буфер (${text.length} симв.)`);
+  return true;
+}
+
+/** Сырой вывод: в экране — в панель чата, без экрана — в stdout как есть */
+function out(text: string): void {
+  if (screen) screen.push(text);
+  else process.stdout.write(text);
+}
+
+/** Плавный выход из TUI: вернуть терминал, закрыть очередь ввода */
+function requestExit(): void {
+  if (editor) {
+    editor.stop();
+    editor = null;
+  }
+  if (screen) {
+    screen.stop();
+    screen = null;
+  }
+  stdinLines.closed = true;
+  stdinLines.wake?.();
+  stdinLines.wake = null;
+}
 
 /** Живая панель подсказок команд под строкой ввода (вне TTY молчит) */
 const hintPanel = new HintPanel(process.stdout);
+
+/** Всплывашка @упоминаний: стрелки/Tab/Enter/Esc поверх обычного ввода */
+const mentionPicker = new MentionPicker();
 
 /** Пока true — keypress-ы рисуют панель подсказок (REPL ждёт строку) */
 let awaitingInput = false;
@@ -149,11 +238,14 @@ async function readMultiline(): Promise<string | null> {
     if (!stdinLines.closed) {
       // пайп может закрыться раньше, чем вычитана очередь: тогда продолжаем
       // без промпта (он чисто косметический), только по строкам из очереди
-      rl.setPrompt(pc.dim('  … '));
-      try {
-        rl.prompt();
-      } catch {
-        // readline уже закрыт
+      if (editor) editor.setPrompt(pc.dim('  … '));
+      else if (rl) {
+        rl.setPrompt(pc.dim('  … '));
+        try {
+          rl.prompt();
+        } catch {
+          // readline уже закрыт
+        }
       }
     }
     const next = await nextInput();
@@ -169,19 +261,28 @@ async function readMultiline(): Promise<string | null> {
  * Живые данные для автодополнения: список разговоров и состав команды читаем
  * не на каждый keystroke, а раз в секунду.
  */
-let completionCache: { at: number; sessions: { title: string }[]; team: string[] } | null = null;
+let completionCache: {
+  at: number;
+  sessions: { title: string }[];
+  team: string[];
+  chat: { name: string; role?: string }[];
+} | null = null;
 
 function refreshCompletionCache(): void {
   const now = Date.now();
   if (completionCache && now - completionCache.at < 1000) return;
   const sessions = appRef ? appRef.store.list().map((s) => ({ title: s.title })) : [];
   let team: string[] = [];
+  let chat: { name: string; role?: string }[] = [];
   try {
-    team = loadTeam(join(CONFIG_DIR, 'team.json')).map((a) => a.name);
+    const agents = loadTeam(join(CONFIG_DIR, 'team.json'));
+    team = agents.map((a) => a.name);
+    // всплывашка @упоминаний предлагает только позванных в текущий чат
+    if (appRef) chat = chatTeam(appRef.session, agents).map((a) => ({ name: a.name, role: a.role }));
   } catch {
     // без team.json дополняем без имён
   }
-  completionCache = { at: now, sessions, team };
+  completionCache = { at: now, sessions, team, chat };
 }
 
 function completionCtx(): CompletionContext {
@@ -193,6 +294,10 @@ function completionCtx(): CompletionContext {
     teamNames() {
       refreshCompletionCache();
       return completionCache?.team ?? [];
+    },
+    chatAgents() {
+      refreshCompletionCache();
+      return completionCache?.chat ?? [];
     },
     providerIds() {
       return appRef ? [...appRef.providers.keys()] : [];
@@ -218,6 +323,8 @@ interface App {
   store: SessionStore;
   session: Session;
   providers: Map<string, ProviderStatus>;
+  /** image-провайдеры (генерация картинок) из того же providers.json */
+  images: Map<string, ImageProviderStatus>;
   defaultProviderId: string;
   profile: UserProfile;
   memory: TeamMemory;
@@ -350,7 +457,7 @@ function buildRequest(
     blocks.push(`Твоя память (субъективно и сжато, это то, что ты помнишь сам):\n${personal}`);
   }
   if (agent.tools?.length) {
-    const hint = actionsHint(agent.tools, loadToolsConfig(ROOT));
+    const hint = actionsHint(agent, loadToolsConfig(ROOT));
     if (hint) blocks.push(hint);
   }
   blocks.push(COMMON_RULES);
@@ -595,7 +702,7 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
           textStarted = true;
         }
         full += chunk;
-        process.stdout.write(chunk);
+        out(chunk);
       }
     } catch (err) {
       streamError = err;
@@ -606,7 +713,7 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
       printError(`ошибка провайдера «${provider.id}»: ${streamError instanceof Error ? streamError.message : streamError}`);
     }
     if (full.trim()) {
-      process.stdout.write('\n\n');
+      out('\n\n');
       session.messages.push({
         authorId: turn.agent.id,
         authorName: turn.agent.name,
@@ -634,25 +741,76 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
 const MAX_TOOL_ITERATIONS = 3;
 
 /** Действия, разрешённые пользователем «до конца сессии» (ответ [a] в подтверждении). */
-const sessionAllowed = new Set<'file' | 'run'>();
+const sessionAllowed = new Set<string>();
+
+/** «Разрешить такие» привязываем к типу действия и его цели: ssh:prod ≠ ssh:staging. */
+function actionScope(action: Action): string {
+  if (action.kind === 'ssh') return `ssh:${action.host}`;
+  return `${action.kind}:${action.project ?? '*'}`;
+}
+
+const KIND_LABEL: Record<Action['kind'], string> = {
+  file: 'Запись файла',
+  run: 'Команда',
+  ssh: 'Команда по ssh',
+  look: 'Просмотр картинки',
+  image: 'Генерация изображений',
+};
+
+/** Глаза и руки агентов: vision-провайдер для look и image-провайдер для image. */
+function toolContext(app: App): ToolContext {
+  return {
+    getVisionProvider(agent) {
+      const pid = agent?.vision ?? agent?.provider ?? app.defaultProviderId;
+      const status = app.providers.get(pid);
+      if (!status) return { error: `провайдер «${pid}» не найден (см. providers.json)` };
+      if (!status.vision) {
+        return {
+          error: `провайдер «${pid}» (${status.provider.model}) не умеет смотреть картинки — задайте агенту поле "vision" с провайдером, у которого в providers.json "vision": true`,
+        };
+      }
+      return { provider: status.provider };
+    },
+    getImageProvider(agent) {
+      const pid = agent?.image;
+      if (!pid) return { error: 'агенту не назначен image-провайдер (поле "image" в team.json)' };
+      const status = app.images.get(pid);
+      if (!status) return { error: `image-провайдер «${pid}» не найден (см. providers.json)` };
+      if (!status.ok) return { error: `image-провайдер «${pid}» не настроен: ${status.note ?? ''}` };
+      return { provider: status.provider };
+    },
+  };
+}
 
 /**
  * Спрашивает пользователя перед реальным действием агента. 'a' запоминает
- * разрешение на весь тип действий до закрытия разговора (/new, /session).
+ * разрешение на такие действия (тип + цель) до закрытия разговора (/new, /session).
  */
-async function confirmToolAction(kind: 'file' | 'run', detail: string): Promise<boolean> {
-  if (sessionAllowed.has(kind)) return true;
-  printDim(`  ⚙ ${kind === 'file' ? 'Запись файла' : 'Команда'}: ${detail}`);
-  printDim('    y — выполнить · n — отказать · a — такие действия до конца сессии');
-  rl.setPrompt(pc.dim('  y/n/a › '));
-  try {
-    rl.prompt();
-  } catch {
-    return false; // readline закрыт (конец пайпа) — молча отказываем
+async function confirmToolAction(action: Action, who: string): Promise<boolean> {
+  const scope = actionScope(action);
+  if (sessionAllowed.has(scope)) return true;
+  printDim(`  ⚙ ${KIND_LABEL[action.kind]}: ${who}: ${describeAction(action)}`);
+  const hint = pc.dim('    y — выполнить · n — отказать · a — такие действия до конца сессии');
+  if (editor && screen) {
+    // вопрос — в строку статуса над вводом; ответ придёт обычной строкой
+    screen.setStatus(hint);
+  } else if (rl) {
+    rl.setPrompt(pc.dim('  y/n/a › '));
+    try {
+      rl.prompt();
+    } catch {
+      // readline уже закрыт (пайп кончился) — но ответы могли уже лежать в очереди,
+      // поэтому не отказываем сразу, а пробуем вычитать ответ как обычно
+    }
   }
-  const answer = ((await stdinLines.next()) ?? '').trim().toLowerCase();
+  let answer = '';
+  try {
+    answer = ((await stdinLines.next()) ?? '').trim().toLowerCase();
+  } finally {
+    screen?.setStatus(null);
+  }
   if (answer === 'a' || answer === 'а') {
-    sessionAllowed.add(kind);
+    sessionAllowed.add(scope);
     return true;
   }
   return answer === 'y' || answer === 'д';
@@ -693,7 +851,7 @@ async function streamFollowUp(
         textStarted = true;
       }
       full += chunk;
-      process.stdout.write(chunk);
+      out(chunk);
     }
   } catch (err) {
     if (!signal.aborted) {
@@ -728,15 +886,18 @@ async function runToolLoop(
     const results: string[] = [];
     for (const action of actions) {
       if (signal.aborted) break;
-      const allowed = await confirmToolAction(
-        action.kind,
-        `${agent.emoji} ${agent.name}: ${describeAction(action)}`,
-      );
+      // права агента проверяем до вопроса пользователю: чужой проект/хост — сразу отказ
+      const deny = checkPermission(agent, action, cfg);
+      if (deny) {
+        results.push(`⛔ ${describeAction(action)} — запрещено: ${deny}`);
+        continue;
+      }
+      const allowed = await confirmToolAction(action, `${agent.emoji} ${agent.name}`);
       if (!allowed) {
         results.push(`⛔ ${describeAction(action)} — отклонено пользователем`);
         continue;
       }
-      const res = await executeAction(action, cfg, signal);
+      const res = await executeAction(action, cfg, signal, agent, toolContext(app));
       results.push(`${res.ok ? '✅' : '❌'} ${res.output}`);
     }
     if (results.length === 0) break;
@@ -891,8 +1052,22 @@ function queueFlush(app: App, session: Session): void {
     });
 }
 
-function printBanner(app: App): void {
-  console.log(pc.bold(pc.cyan('\n  ╔══════════════════════════════════════════════╗')));
+/** Строки одного сообщения в фирменном формате (шапка с автором и текст) */
+function messageRows(m: ChatMessage, team: Agent[]): string[] {
+  const agent = team.find((a) => a.id === m.authorId);
+  const who = m.authorId === 'user'
+    ? pc.cyan('Вы')
+    : m.authorId === 'tool'
+      ? pc.dim('⚙ инструменты')
+      : isSessionRef(m)
+        ? pc.dim(`📎 разговор «${m.authorName}»`)
+        : colorFn(agent?.color)(`${agent?.emoji ?? '🤖'} ${m.authorName}`);
+  const rows = [`  ${who} ${pc.dim(`· ${new Date(m.ts).toLocaleTimeString('ru-RU')}`)}`];
+  for (const line of m.text.split('\n')) rows.push('  ' + line);
+  return rows;
+}
+
+function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔══════════════════════════════════════════════╗')));
   console.log(pc.bold(pc.cyan('  ║   🎬  DREAM TEAM — совещание начинается      ║')));
   console.log(pc.bold(pc.cyan('  ╚══════════════════════════════════════════════╝')));
 
@@ -910,9 +1085,19 @@ function printBanner(app: App): void {
     const state = status.ok
       ? pc.green('✓ готов')
       : pc.yellow(`✗ ${status.note ?? 'не настроен'}`);
+    const vision = status.vision ? pc.magenta(' ◉ зрение') : '';
     console.log(
-      `  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${mark}`,
+      `  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${vision}${mark}`,
     );
+  }
+  if (app.images.size > 0) {
+    console.log(pc.dim('  Картинки:'));
+    for (const [pid, status] of app.images) {
+      const state = status.ok
+        ? pc.green('✓ готов')
+        : pc.yellow(`✗ ${status.note ?? 'не настроен'}`);
+      console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}`);
+    }
   }
 
   if (defaultProvider(app).kind === 'mock') {
@@ -950,11 +1135,13 @@ function printTeam(app: App): void {
   try {
     const fullTeam = loadTeam(join(CONFIG_DIR, 'team.json'));
     const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
+    const cfg = loadToolsConfig(ROOT);
     console.log(pc.dim('\n  Команда:'));
     for (const agent of fullTeam) {
       const own = agent.provider ? pc.dim(` [провайдер: ${agent.provider}]`) : '';
+      const access = accessLine(agent, cfg);
       const mark = inChat.has(agent.id) ? '' : pc.dim(' · не в этом чате (/add ' + agent.name + ')');
-      console.log(rosterLine(agent) + own + mark);
+      console.log(rosterLine(agent) + own + access + mark);
     }
     console.log();
   } catch (err) {
@@ -962,14 +1149,38 @@ function printTeam(app: App): void {
   }
 }
 
+/** Короткая строка о доступах агента: инструменты, проекты, серверы, глаза и руки. */
+function accessLine(agent: Agent, cfg: ToolsConfig): string {
+  if (!agent.tools?.length) return '';
+  const parts: string[] = [];
+  const projects = (agent.projects ?? []).filter((p) => cfg.projects.has(p) || p === agent.workspace);
+  if (projects.length > 0) parts.push(`проекты: ${projects.join(', ')}`);
+  const hosts = agent.hosts ?? [];
+  if (hosts.length > 0) parts.push(`серверы: ${hosts.join(', ')}`);
+  if (agent.vision) parts.push(`глаза: ${agent.vision}`);
+  if (agent.image) parts.push(`рисует: ${agent.image}`);
+  const labels = agent.tools.map((t) =>
+    t === 'files' ? 'файлы' : t === 'shell' ? 'консоль' : t === 'ssh' ? 'ssh' : t === 'look' ? 'зрение' : 'картинки',
+  );
+  return pc.dim(` [${labels.join(', ')}${parts.length ? ' · ' + parts.join(' · ') : ''}]`);
+}
+
 function printProviders(app: App): void {
   console.log(pc.dim('\n  Провайдеры (★ — основной):'));
   for (const [pid, status] of app.providers) {
     const mark = pid === app.defaultProviderId ? pc.cyan(' ★') : '';
     const state = status.ok ? pc.green('✓ готов') : pc.yellow(`✗ ${status.note ?? 'не настроен'}`);
-    console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${mark}`);
+    const vision = status.vision ? pc.magenta(' ◉ зрение') : '';
+    console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${vision}${mark}`);
   }
-  printDim('  Сменить основной: /provider <id>. Свой провайдер агенту — поле "provider" в team.json.');
+  if (app.images.size > 0) {
+    console.log(pc.dim('  Картинки (для инструмента image):'));
+    for (const [pid, status] of app.images) {
+      const state = status.ok ? pc.green('✓ готов') : pc.yellow(`✗ ${status.note ?? 'не настроен'}`);
+      console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}`);
+    }
+  }
+  printDim('  Сменить основной: /provider <id>. Свой провайдер агенту — поля "provider", "vision", "image" в team.json.');
 }
 
 function replaySession(session: Session): void {
@@ -1069,17 +1280,8 @@ async function runCommand(app: App, line: string): Promise<boolean> {
         pc.dim(`\n  Разговор «${app.session.title}» — показано ${shown.length} из ${all.length} сообщений:`),
       );
       for (const m of shown) {
-        const agent = team.find((a) => a.id === m.authorId);
-        const who = m.authorId === 'user'
-          ? pc.cyan('Вы')
-          : m.authorId === 'tool'
-            ? pc.dim('⚙ инструменты')
-            : isSessionRef(m)
-              ? pc.dim(`📎 разговор «${m.authorName}»`)
-              : colorFn(agent?.color)(`${agent?.emoji ?? '🤖'} ${m.authorName}`);
         console.log('');
-        console.log(`  ${who} ${pc.dim(`· ${new Date(m.ts).toLocaleTimeString('ru-RU')}`)}`);
-        for (const line of m.text.split('\n')) console.log('  ' + line);
+        for (const row of messageRows(m, team)) console.log(row);
       }
       console.log('');
       break;
@@ -1251,7 +1453,11 @@ async function runCommand(app: App, line: string): Promise<boolean> {
     case 'quit':
     case 'q':
       exitRequested = true;
-      rl.close();
+      if (editor) {
+        requestExit();
+        return true;
+      }
+      rl?.close();
       return true;
     default:
       printDim('  Неизвестная команда. /help — список команд.');
@@ -1260,8 +1466,12 @@ async function runCommand(app: App, line: string): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+  // конфиг экрана читаем до всего вывода: ошибка конфига видна в обычном терминале
+  const ui = loadUiConfig(UI_FILE, process.stdout.columns || 0);
   const store = new SessionStore(DATA_DIR);
-  const loaded = loadProviders(join(CONFIG_DIR, 'providers.json'));
+  const providersFile = join(CONFIG_DIR, 'providers.json');
+  const loaded = loadProviders(providersFile);
+  const images = loadImageProviders(providersFile);
   // при старте продолжаем последний разговор, а не плодим пустые сессии
   const existing = store.list();
   const session = existing.length > 0 ? store.load(existing[0].id) ?? store.create() : store.create();
@@ -1269,19 +1479,134 @@ async function main(): Promise<void> {
     store,
     session,
     providers: loaded.providers,
+    images: images.images,
     defaultProviderId: loaded.defaultId,
     profile: loadUserProfile(USER_FILE),
     memory: loadTeamMemory(MEMORY_FILE),
   };
   appRef = app;
+
+  // Управляемый экран: альтернативный буфер, зоны чата/подсказок/ввода и свой
+  // редактор строки. В пайпе (не TTY) — прежний readline-режим ниже.
+  if (ui.screen && process.stdout.isTTY && process.stdin.isTTY) {
+    screen = new Screen(process.stdout, ui.width, ui.margin);
+    const completer = makeCompleter(completionCtx());
+    editor = new Editor(
+      {
+        interceptKey: (key) => {
+          if (mentionPicker.active) {
+            const picked = mentionPicker.key(key.name);
+            if (picked === 'handled') return 'handled';
+            if (picked) return { text: picked.line, cursor: picked.cursor };
+          }
+          if (key.name === 'escape' && screen?.hasSelection()) {
+            screen.clearSelection();
+            return 'handled';
+          }
+          if (key.name === 'tab') {
+            const line = editor?.text ?? '';
+            const [hits, base] = completer(line);
+            if (hits.length > 0) {
+              const text = line.slice(0, line.length - base.length) + hits[0];
+              return { text, cursor: text.length };
+            }
+            return 'handled';
+          }
+          return null;
+        },
+        onEdit: (buf, cur) => {
+          const ctx = completionCtx();
+          const rows = mentionPicker.update(buf, cur, ctx);
+          if (rows) screen?.setOverlay(rows);
+          else {
+            screen?.setOverlay(null);
+            // без контекстных подсказок (пустой ввод) — постоянная шпаргалка
+            screen?.setHints(hintRowsFor(buf, ctx) ?? STATIC_HINTS);
+          }
+        },
+        onScroll: (dir, lines) => {
+          if (dir === 'up') screen?.scrollUp(lines);
+          else if (dir === 'down') screen?.scrollDown(lines);
+          else if (dir === 'top') screen?.scrollToStart();
+          else screen?.scrollToEnd();
+        },
+        onMouse: (type, col, row) => {
+          if (!screen) return;
+          if (type === 'down') screen.selMouseDown(col, row);
+          else if (type === 'drag') screen.selMouseDrag(col, row);
+          else if (copySelection(screen)) {
+            // текст уже в буфере и в статусе; выделение остаётся до Esc/Ctrl+C
+          }
+        },
+        onSelectKey: (dir) => {
+          screen?.selMoveKeyboard(dir);
+        },
+        onSubmit: (line, soft) => {
+          stdinLines.queue.push((ceEnabled && soft ? CE_PREFIX : '') + line);
+          stdinLines.wake?.();
+          stdinLines.wake = null;
+        },
+        onCtrlC: () => {
+          const selText = editor?.selectionText() ?? '';
+          if (selText) {
+            // выделение в поле ввода: копируем, не снимая и не выходя
+            copyToClipboard(selText);
+            if (screen) flashStatus(screen, `  ✓ Скопировано в буфер (${selText.length} симв.)`);
+            return;
+          }
+          if (copySelection(screen)) return; // есть выделение панели — копируем, а не выходим
+          if (abortActiveRound) abortActiveRound();
+          else requestExit();
+        },
+        onEof: () => requestExit(),
+      },
+      screen,
+      process.stdin,
+    );
+    // весь вывод приложения — в панель чата экрана
+    setOutputSink((t) => {
+      if (screen) screen.push(t);
+    });
+    setSpinnerRenderer((t) => {
+      screen?.setStatus(t);
+    });
+    // console.log по всему коду тоже ведёт в экран
+    const nativeLog = console.log.bind(console);
+    console.log = (...args: unknown[]) => {
+      if (screen) screen.push(format(...args) + '\n');
+      else nativeLog(...args);
+    };
+    screen.start();
+    editor.start();
+  }
+
   printBanner(app);
   printDim(
     `  Вы — ${app.profile.name}${app.profile.role ? ` (${app.profile.role})` : ''}. ` +
     'Представиться команде: /me Имя; роль; о себе',
   );
-  if (session.messages.length > 0) {
-    printDim(`  Продолжаю разговор «${session.title}» (${session.messages.length} сообщ.) — /new для нового, /sessions для списка`);
+  // Прошлый разговор сразу в панель: внизу виден хвост, вся старая история —
+  // колесом/PgUp. В линейном режиме не нужно — там прокручивает сам терминал.
+  if (screen && session.messages.length > 0) {
+    let team: Agent[] = [];
+    try {
+      team = loadTeam(join(CONFIG_DIR, 'team.json'));
+    } catch {
+      // без team.json история засеивается без фирменных цветов агентов
+    }
+    const rows: string[] = [];
+    for (const m of session.messages) {
+      rows.push('');
+      rows.push(...messageRows(m, team));
+    }
+    screen.seed(rows);
+    printDim(
+      `  Продолжаю разговор «${session.title}» (${session.messages.length} сообщ.) — /new для нового, /sessions для списка`,
+    );
   }
+  // страховка от потерянных первых кадров терминала: одна полная перерисовка
+  // после того, как весь стартовый вывод уже в состоянии экрана
+  screen?.repaint();
 
   // Цветной промпт передаём самому readline: иначе при перерисовке строки
   // (например, при стирании текста) он подставит свой дефолтный белый '> '.
@@ -1290,37 +1615,95 @@ async function main(): Promise<void> {
     const title = session.title.length > 24 ? session.title.slice(0, 24) + '…' : session.title;
     return pc.dim(`[${title}] `) + pc.cyan('Ты > ');
   };
-  rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: promptFor(app.session),
-    completer: makeCompleter(completionCtx()),
-  });
 
-  // Enter всегда стирает панель подсказок — до того, как пойдёт вывод приложения
-  rl.on('line', () => hintPanel.clear());
-  rl.on('line', (line: string) => {
-    stdinLines.queue.push(line);
-    stdinLines.wake?.();
-    stdinLines.wake = null;
-  });
-  rl.on('close', () => {
-    hintPanel.clear();
-    stdinLines.closed = true;
-    stdinLines.wake?.();
-    stdinLines.wake = null;
-  });
-  // Живая панель: на каждый вводимый символ фильтруем подсказки под строкой.
-  // readline обрабатывает клавишу раньше нас, поэтому rl.line уже новый.
-  rl.on('keypress', (_str: string, key?: { name?: string }) => {
-    if (!awaitingInput || key?.name === 'return' || key?.name === 'enter') return;
-    hintPanel.render(hintRowsFor(rl.line ?? '', completionCtx()));
-  });
-  rl.on('SIGINT', () => {
-    // Ctrl+C во время ответа команды — прервать раунд; на промпте — выход
-    if (abortActiveRound) abortActiveRound();
-    else rl.close();
-  });
+  if (!editor) {
+    rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      prompt: promptFor(app.session),
+      completer: makeCompleter(completionCtx()),
+    });
+
+    // Enter всегда стирает панель подсказок — до того, как пойдёт вывод приложения
+    rl.on('line', () => hintPanel.clear());
+    rl.on('line', (line: string) => {
+      stdinLines.queue.push(line);
+      stdinLines.wake?.();
+      stdinLines.wake = null;
+    });
+    rl.on('close', () => {
+      hintPanel.clear();
+      stdinLines.closed = true;
+      stdinLines.wake?.();
+      stdinLines.wake = null;
+    });
+    // Живая панель: на каждый вводимый символ фильтруем подсказки под строкой.
+    // Ключевое: в современном Node интерфейс readline не эмитит 'keypress' —
+    // события приходят только на входной поток (process.stdin), а readline
+    // обрабатывает клавишу раньше нас (подписан первым), поэтому rl.line и
+    // rl.cursor здесь уже новые.
+    process.stdin.on('keypress', (_str: string, key?: { name?: string }) => {
+      if (!awaitingInput || key?.name === 'return' || key?.name === 'enter') return;
+      const line = rl?.line ?? '';
+      const rows = mentionPicker.update(line, rl?.cursor ?? 0, completionCtx()) ?? hintRowsFor(line, completionCtx());
+      hintPanel.render(rows);
+    });
+    rl.on('SIGINT', () => {
+      // Ctrl+C во время ответа команды — прервать раунд; на промпте — выход
+      if (abortActiveRound) abortActiveRound();
+      else rl?.close();
+    });
+    // Мягкий перенос: Ctrl+Enter приходит как \n (LF), Alt+Enter как \x1b\r —
+    // readline считает их обычным Enter и отправил бы строку. Перехватываем до
+    // отправки: текущую строку — в очередь с пометкой продолжения, буфер чистим.
+    // Shift+Enter обычные терминалы неотличимы от Enter — для него переноса нет.
+    {
+      const iface = rl as unknown as {
+        _ttyWrite?: (s: string, key: { sequence?: string; name?: string; meta?: boolean }) => void;
+        line: string;
+        cursor: number;
+        _refreshLine: () => void;
+      };
+      const orig = iface._ttyWrite?.bind(rl);
+      if (orig) {
+        iface._ttyWrite = (s, key) => {
+          const seq = key?.sequence ?? '';
+          const softNewline =
+            seq === '\n' ||
+            seq === '\x1b\n' ||
+            ((key?.name === 'return' || key?.name === 'enter') && (seq === '\x1b\r' || key?.meta));
+          if (ceEnabled && softNewline) {
+            hintPanel.clear();
+            stdinLines.queue.push(CE_PREFIX + (iface.line ?? ''));
+            stdinLines.wake?.();
+            stdinLines.wake = null;
+            iface.line = '';
+            iface.cursor = 0;
+            process.stdout.write('\n');
+            iface._refreshLine();
+            return;
+          }
+          // Всплывашка @упоминаний: стрелки/Tab/Enter/Esc разбираем до readline,
+          // иначе стрелки листали бы историю, а Enter отправлял строку.
+          if (awaitingInput && key?.name) {
+            const picked = mentionPicker.key(key.name);
+            if (picked === 'handled') {
+              hintPanel.render(mentionPicker.active ? mentionPicker.rows() : null);
+              return;
+            }
+            if (picked) {
+              iface.line = picked.line;
+              iface.cursor = picked.cursor;
+              iface._refreshLine();
+              hintPanel.clear();
+              return;
+            }
+          }
+          orig(s, key);
+        };
+      }
+    }
+  }
   // Esc в сыром терминальном вводе приходит одиноким байтом \x1b, а стрелки
   // и F-клавиши — последовательностями \x1b[…/\x1bO…; последние не считаем прерыванием.
   process.stdin.on('data', (chunk: Buffer | string) => {
@@ -1331,50 +1714,19 @@ async function main(): Promise<void> {
     }
   });
 
-  // Мягкий перенос: Ctrl+Enter приходит как \n (LF), Alt+Enter как \x1b\r —
-  // readline считает их обычным Enter и отправил бы строку. Перехватываем до
-  // отправки: текущую строку — в очередь с пометкой продолжения, буфер чистим.
-  // Shift+Enter обычные терминалы неотличимы от Enter — для него переноса нет.
-  {
-    const iface = rl as unknown as {
-      _ttyWrite?: (s: string, key: { sequence?: string; name?: string; meta?: boolean }) => void;
-      line: string;
-      cursor: number;
-      _refreshLine: () => void;
-    };
-    const orig = iface._ttyWrite?.bind(rl);
-    if (orig) {
-      iface._ttyWrite = (s, key) => {
-        const seq = key?.sequence ?? '';
-        const softNewline =
-          seq === '\n' ||
-          seq === '\x1b\n' ||
-          ((key?.name === 'return' || key?.name === 'enter') && (seq === '\x1b\r' || key?.meta));
-        if (ceEnabled && softNewline) {
-          hintPanel.clear();
-          stdinLines.queue.push(CE_PREFIX + (iface.line ?? ''));
-          stdinLines.wake?.();
-          stdinLines.wake = null;
-          iface.line = '';
-          iface.cursor = 0;
-          process.stdout.write('\n');
-          iface._refreshLine();
-          return;
-        }
-        orig(s, key);
-      };
-    }
-  }
-
   while (true) {
     if (stdinLines.closed && stdinLines.queue.length === 0) break;
-    rl.setPrompt(promptFor(app.session));
-    if (!stdinLines.closed) {
-      process.stdout.write('\n');
-      try {
-        rl.prompt();
-      } catch {
-        break; // readline уже закрыт (например, после /exit)
+    if (editor) {
+      editor.setPrompt(promptFor(app.session));
+    } else if (rl) {
+      rl.setPrompt(promptFor(app.session));
+      if (!stdinLines.closed) {
+        process.stdout.write('\n');
+        try {
+          rl.prompt();
+        } catch {
+          break; // readline уже закрыт (например, после /exit)
+        }
       }
     }
     const raw = await readMultiline();
@@ -1392,6 +1744,14 @@ async function main(): Promise<void> {
       printError(`ошибка: ${err instanceof Error ? err.message : err}`);
     }
   }
+  // страховка: выход мимо requestExit (закрытие stdin и т.п.) — гасим экран,
+  // чтобы прощание и приглашение ОС печатались в обычном терминале
+  if (editor || screen) {
+    editor?.stop();
+    editor = null;
+    screen?.stop();
+    screen = null;
+  }
   // плавный /exit: вливаем итоги, только если конспект свежий (дешёвый путь),
   // иначе откладываем до следующего /new — выход не должен ждать LLM
   if (exitRequested) {
@@ -1407,6 +1767,13 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  // сначала возвращаем терминал из альтернативного буфера, потом диагностика
+  try {
+    screen?.stop();
+    editor?.stop();
+  } catch {
+    // экран мог не успеть стартовать
+  }
   console.error(pc.red(`Фатальная ошибка: ${err instanceof Error ? err.stack ?? err.message : err}`));
   process.exit(1);
 });

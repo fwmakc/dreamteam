@@ -35,6 +35,19 @@ export const openAiCompatibleFactory: ProviderFactory = (
   const defaultMaxTokens = num(config.maxTokens);
   const defaultTemperature = num(config.temperature) ?? 0.7;
 
+  /** Сообщения с картинками превращаем в content-parts формата OpenAI vision */
+  const toApiMessages = (messages: LLMMessage[]): unknown[] =>
+    messages.map((m) => {
+      if (!m.images?.length) return m;
+      return {
+        role: m.role,
+        content: [
+          { type: 'text', text: m.content },
+          ...m.images.map((url) => ({ type: 'image_url', image_url: { url } })),
+        ],
+      };
+    });
+
   const provider: LLMProvider = {
     id,
     kind: 'openai-compatible',
@@ -46,7 +59,7 @@ export const openAiCompatibleFactory: ProviderFactory = (
         : req.messages;
       const body: Record<string, unknown> = {
         model,
-        messages,
+        messages: toApiMessages(messages),
         stream: true,
         temperature: req.temperature ?? defaultTemperature,
       };

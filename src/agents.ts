@@ -34,8 +34,16 @@ export function loadTeam(file: string): Agent[] {
       provider: a.provider ? String(a.provider) : undefined,
       temperature: typeof a.temperature === 'number' ? a.temperature : undefined,
       tools: Array.isArray(a.tools)
-        ? a.tools.filter((t): t is AgentTool => t === 'files' || t === 'shell')
+        ? a.tools.filter(
+            (t): t is AgentTool =>
+              t === 'files' || t === 'shell' || t === 'ssh' || t === 'look' || t === 'image',
+          )
         : undefined,
+      projects: Array.isArray(a.projects) ? a.projects.map(String) : undefined,
+      hosts: Array.isArray(a.hosts) ? a.hosts.map(String) : undefined,
+      workspace: typeof a.workspace === 'string' && a.workspace.trim() ? a.workspace.trim() : undefined,
+      vision: typeof a.vision === 'string' && a.vision.trim() ? a.vision.trim() : undefined,
+      image: typeof a.image === 'string' && a.image.trim() ? a.image.trim() : undefined,
     };
   });
 }

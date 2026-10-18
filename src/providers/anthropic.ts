@@ -37,6 +37,21 @@ export const anthropicFactory: ProviderFactory = (
 
     async *stream(req: StreamRequest): AsyncGenerator<string> {
       const { system, messages } = splitSystem(req);
+      // Сообщения с картинками превращаем в content-blocks формата Anthropic vision
+      const apiMessages = messages.map((m) => {
+        if (!m.images?.length) return m;
+        const blocks: unknown[] = [];
+        if (m.content) blocks.push({ type: 'text', text: m.content });
+        for (const dataUrl of m.images) {
+          const match = /^data:([^;,]+);base64,([\s\S]*)$/s.exec(dataUrl);
+          blocks.push(
+            match
+              ? { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } }
+              : { type: 'text', text: '(картинка в неподдерживаемом формате — не data:URL/base64)' },
+          );
+        }
+        return { role: m.role, content: blocks };
+      });
       const res = await fetch(`${baseUrl}/v1/messages`, {
         method: 'POST',
         headers: {
@@ -50,7 +65,7 @@ export const anthropicFactory: ProviderFactory = (
           temperature: req.temperature ?? 0.7,
           stream: true,
           ...(system ? { system } : {}),
-          messages,
+          messages: apiMessages,
         }),
         signal: withTimeout(req.signal, REQUEST_TIMEOUT_MS),
       });

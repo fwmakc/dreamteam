@@ -33,6 +33,8 @@ export interface CompletionContext {
   /** Разговоры в порядке /sessions (свежие сверху) — номер = индекс + 1 */
   sessions(): { title: string }[];
   teamNames(): string[];
+  /** Участники текущего чата — их предлагает всплывашка @упоминаний */
+  chatAgents(): { name: string; role?: string }[];
   providerIds(): string[];
 }
 
@@ -134,9 +136,9 @@ export function makeCompleter(ctx: CompletionContext) {
   };
 }
 
-/** Варианты упоминаний: имена участников (их и понимает findMentions) и session. */
+/** Варианты упоминаний для Tab: участники текущего чата и session. */
 function mentionOptions(ctx: CompletionContext): string[] {
-  return [...ctx.teamNames(), 'session'].map((o) => o + ' ');
+  return [...ctx.chatAgents().map((a) => a.name), 'session'].map((o) => o + ' ');
 }
 
 const PANEL_MAX = 12;
@@ -170,16 +172,7 @@ export function hintRowsFor(line: string, ctx: CompletionContext): string[] | nu
   }
   const ses = /@session[ \t]+(\S*)$/.exec(line);
   if (ses) return sessionRows(ctx, ses[1]);
-  const at = /@(\S*)$/.exec(line);
-  if (at) {
-    const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
-    const fragment = norm(at[1]);
-    const names = ctx.teamNames().filter((v) => norm(v).startsWith(fragment));
-    const opts = [...names];
-    if ('session'.startsWith(fragment)) opts.push('session');
-    if (opts.length === 0) return null; // не похоже на упоминание — молчим
-    return [`  @${pc.dim('<имя | session>')}:`, pc.dim('    ' + opts.slice(0, PANEL_MAX).join('   '))];
-  }
+  // @упоминания рисует MentionPicker (с выбором стрелками) — здесь молчим
   return null;
 }
 
@@ -272,5 +265,160 @@ export class HintPanel {
 
   clear(): void {
     this.render(null);
+  }
+}
+
+/** Один вариант во всплывашке @упоминаний */
+interface MentionItem {
+  label: string;
+  hint?: string;
+}
+
+/** @session — спец-упоминание: приложить конспект другого разговора */
+const SESSION_ITEM: MentionItem = { label: 'session', hint: 'конспект другого разговора' };
+
+const normName = (s: string): string => s.toLowerCase().replace(/ё/g, 'е');
+
+/** @фрагмент, за которым курсор: @ в начале строки или после пробела, без пробелов до курсора */
+const MENTION_RE = /(?:^|\s)@([^\s@]*)$/;
+
+/** Сколько вариантов видно в всплывашке без прокрутки */
+const MENTION_VISIBLE = 8;
+
+/** Ширина всплывашки, больше которой подсказка обрезается */
+const MENTION_MAX_WIDTH = 52;
+
+function mentionItems(ctx: CompletionContext): MentionItem[] {
+  return [...ctx.chatAgents().map((a) => ({ label: a.name, hint: a.role })), SESSION_ITEM];
+}
+
+/**
+ * Всплывающий выбор @упоминания под строкой ввода: рамка, выбранный вариант
+ * подсвечен, при длинном списке — полоса прокрутки. Стрелки двигают выбор,
+ * Tab/Enter вставляют, Esc закрывает, оставляя набранный @фрагмент как есть.
+ * Живёт на протяжении ввода: фильтрация не сбивает выбор, Esc действует до
+ * изменения фрагмента.
+ */
+export class MentionPicker {
+  private items: MentionItem[] = [];
+  private sel = 0;
+  /** Индекс '@' во вставленном варианте и срез строки на последний пересчёт */
+  private at = 0;
+  private line = '';
+  private cursor = 0;
+  /** Фрагмент, для которого Esc уже закрыл панель (наберёшь другой — откроется) */
+  private dismissed: string | null = null;
+
+  get active(): boolean {
+    return this.items.length > 0;
+  }
+
+  /**
+   * Пересчёт по строке и позиции курсора: совпал @фрагмент перед курсором —
+   * возвращает строки панели, иначе null (панель скрыта).
+   */
+  update(line: string, cursor: number, ctx: CompletionContext): string[] | null {
+    this.line = line;
+    this.cursor = cursor;
+    const before = line.slice(0, cursor);
+    const m = MENTION_RE.exec(before);
+    if (!m) {
+      this.items = [];
+      return null;
+    }
+    const fragment = normName(m[1]);
+    if (this.dismissed !== null && fragment !== this.dismissed) this.dismissed = null;
+    if (fragment === this.dismissed) {
+      this.items = [];
+      return null;
+    }
+    const items = mentionItems(ctx).filter((it) => normName(it.label).startsWith(fragment));
+    if (items.length === 0) {
+      this.items = [];
+      return null;
+    }
+    const prev = this.items[this.sel]?.label;
+    this.at = before.length - 1 - m[1].length;
+    this.items = items;
+    const keep = prev ? items.findIndex((it) => it.label === prev) : -1;
+    this.sel = keep >= 0 ? keep : 0;
+    return this.rows();
+  }
+
+  /**
+   * Клавиша при открытой панели. 'handled' — клавиша съедена (стрелки, Esc);
+   * {line, cursor} — вставить выбранный вариант (Tab/Enter); null — панели это
+   * не касается, клавиша уходит в readline.
+   */
+  key(name: string): 'handled' | { line: string; cursor: number } | null {
+    if (!this.active) return null;
+    const n = this.items.length;
+    switch (name) {
+      case 'up':
+        this.sel = (this.sel - 1 + n) % n;
+        return 'handled';
+      case 'down':
+        this.sel = (this.sel + 1) % n;
+        return 'handled';
+      case 'escape':
+        this.dismissed = normName(this.line.slice(this.at + 1, this.cursor));
+        this.items = [];
+        return 'handled';
+      case 'tab':
+      case 'return':
+      case 'enter': {
+        const item = this.items[this.sel];
+        this.items = [];
+        const inserted = item.label + ' ';
+        return {
+          line: this.line.slice(0, this.at) + '@' + inserted + this.line.slice(this.cursor),
+          cursor: this.at + 1 + inserted.length,
+        };
+      }
+      default:
+        return null;
+    }
+  }
+
+  /** Строки панели: рамка, подсветка выбранного, полоса прокрутки. */
+  rows(): string[] {
+    if (!this.active) return [];
+    const n = this.items.length;
+    const visible = Math.min(n, MENTION_VISIBLE);
+    let off = this.sel - Math.floor((visible - 1) / 2);
+    off = Math.max(0, Math.min(off, n - visible));
+    const scroll = n > visible;
+    const thumbSize = Math.max(1, Math.round((visible * visible) / n));
+    const thumbAt = Math.round((this.sel / (n - 1)) * (visible - thumbSize));
+
+    const plain: string[] = [];
+    const colored: string[] = [];
+    for (let i = off; i < off + visible; i++) {
+      const it = this.items[i];
+      let hint = it.hint ? ' — ' + it.hint : '';
+      let label = '@' + it.label;
+      if (label.length + hint.length > MENTION_MAX_WIDTH) {
+        hint = hint.slice(0, Math.max(0, MENTION_MAX_WIDTH - label.length - 1)) + '…';
+      }
+      if (label.length + hint.length > MENTION_MAX_WIDTH) {
+        label = label.slice(0, MENTION_MAX_WIDTH - 1) + '…';
+        hint = '';
+      }
+      plain.push(label + hint);
+      colored.push(label + (hint ? pc.dim(hint) : ''));
+    }
+    const width = Math.max(...plain.map((p) => p.length));
+    const edge = '─'.repeat(width + 4 + (scroll ? 1 : 0));
+    const rows = ['┌' + edge + '┐'];
+    for (let r = 0; r < visible; r++) {
+      const pad = ' '.repeat(width - plain[r].length);
+      let cell = colored[r] + pad + '  ';
+      if (scroll) {
+        cell += off + r >= thumbAt && off + r < thumbAt + thumbSize ? '▓' : '░';
+      }
+      rows.push('│ ' + (off + r === this.sel ? pc.inverse(cell) : cell) + ' │');
+    }
+    rows.push('└' + edge + '┘');
+    return rows;
   }
 }
