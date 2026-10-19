@@ -117,7 +117,7 @@ export interface CommandRules {
 }
 
 /** Подстановки и перенаправления: в таком теле первые слова больше не описывают происходящее. */
-const SUBST = /[$()<>`]/;
+export const SUBST = /[$()<>`]/;
 
 const toks = (s: string): string[] => s.trim().split(/\s+/);
 

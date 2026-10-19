@@ -25,6 +25,7 @@ import {
 import { checkPermission, parseActions, type ToolContext, type ToolsConfig } from '../src/actions.js';
 import { buildToolset, loadUserTools } from '../src/tools-registry.js';
 import { loadTeam } from '../src/agents.js';
+import gitFactory from '../tools/git.js';
 import type { Agent } from '../src/types.js';
 
 let fails = 0;
@@ -255,6 +256,45 @@ const tctx: ToolContext = {
   }
   check('shell.run: ненулевой код — ошибка с выводом', runThrew.includes('код выхода'), runThrew);
   rmSync(root, { recursive: true, force: true });
+}
+
+// --- тул git (tools/git.ts): политика check() и запуск настоящего git ---
+{
+  const git = gitFactory({});
+  check('git: status — молча', git.check('status') === 'allow');
+  check('git: log с аргументами — молча', git.check('log --oneline -5') === 'allow');
+  check('git: branch без аргументов — молча', git.check('branch') === 'allow');
+  check('git: branch -D — вопрос', git.check('branch -D эксперимент') === 'ask');
+  check('git: commit — вопрос', git.check('commit -m «фикс»') === 'ask');
+  check('git: push — вопрос', git.check('push origin main') === 'ask');
+  check('git: цепочка read-only — молча', git.check('status && log --oneline') === 'allow');
+  check('git: цепочка с мутацией — вопрос', git.check('status && stash pop') === 'ask');
+  check('git: подстановка — вопрос', git.check('diff $(cat f)') === 'ask');
+  check('git: перенаправление — вопрос', git.check('log > out.txt') === 'ask');
+  check('git: пустое тело — вопрос', git.check('') === 'ask');
+
+  const strict = gitFactory({ allow: ['commit *'], deny: ['push *'] });
+  check('git: карточка — commit по правилу молча', strict.check('commit -m fix') === 'allow');
+  check('git: карточка — push в deny', strict.check('push origin') === 'deny');
+  check('git: карточка вытесняет дефолт (status — вопрос)', strict.check('status') === 'ask');
+
+  let threw = '';
+  try { gitFactory({ repo: 'C:/нет/такой/папки' }); } catch (e) { threw = (e as Error).message; }
+  check('git: несуществующий repo — отказ', threw.includes('"repo"'), threw);
+  threw = '';
+  try { gitFactory({ maxOutput: -5 }); } catch (e) { threw = (e as Error).message; }
+  check('git: кривой maxOutput — отказ', threw.includes('maxOutput'), threw);
+
+  const base = { run: async () => ({ ok: false, output: '' }), http: async () => ({ ok: false, output: '' }), confirm: async () => false };
+  let notRepo = '';
+  try { await git.run('status', { ...base, cwd: dir }); } catch (e) { notRepo = (e as Error).message; }
+  check('git: запуск мимо репозитория — ошибка', notRepo.includes('код выхода'), notRepo);
+
+  const pinned = gitFactory({ repo: '.' });
+  const log = await pinned.run('log --oneline -1', { ...base, cwd: dir });
+  check('git: запуск в закреплённом repo — вывод есть', /^[a-f0-9]{7,}/m.test(log), log);
+  const multi = await pinned.run('log\n--oneline\n-1', { ...base, cwd: dir });
+  check('git: многострочное тело — одна команда', /^[a-f0-9]{7,}/m.test(multi), multi);
 }
 
 // --- parseActions: кастомные тула и защита код-блоков ---
