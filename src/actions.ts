@@ -1,18 +1,25 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { Agent, AgentTool, ImageProvider, LLMProvider } from './types.js';
+import type { Agent, ImageProvider, LLMProvider } from './types.js';
+import { agentToolIds, BUILTIN_TOOL_IDS, type Tool } from './tools-api.js';
+import { loadSettings } from './settings.js';
 
 /**
  * Инструменты агентов: текстовый протокол поверх обычного ответа модели.
- * Агент вставляет в ответ markdown-блоки ```file / ```run / ```ssh / ```look / ```image,
- * приложение парсит их после стрима, проверяет права агента, выполняет (с
- * подтверждением пользователя) и возвращает результаты следующим сообщением в истории.
+ * Агент вставляет в ответ markdown-блоки ```file / ```run / ```ssh / ```look /
+ * ```image и блоки кастомных тулов (```<имя> из tools/), приложение парсит их
+ * после стрима, проверяет структурные права агента, спрашивает вердикт check()
+ * у тула ('allow' — молча, 'deny' — отказ, 'ask' — вопрос y/n), выполняет и
+ * возвращает результаты следующим сообщением в истории.
  *
- * Проекты: реестр в config/tools.json ("projects": {id: путь}); в блоках
- * адресуются префиксом — ```file lms:src/app.ts, ```run shop:docker compose up.
- * Серверы: реестр в config/hosts.json; блок ```ssh <host> выполняет команду
- * на сервере штатным ssh-клиентом этого ПК (только по ключу, BatchMode).
+ * Проекты: реестр в config/projects.json — {id: {dir?, hosts?}}: папка проекта
+ * и его ssh-серверы; в блоках адресуются префиксом — ```file lms:src/app.ts,
+ * ```run shop:docker compose up. Доступ агенту выдаётся полем projects в
+ * agents.json и покрывает проект целиком: и папку, и серверы.
+ * Серверы: блок ```ssh shop:prod выполняет команду на сервере штатным
+ * ssh-клиентом этого ПК (только по ключу, BatchMode); голое имя («prod») —
+ * если такой хост ровно у одного проекта.
  * Картинки: ```look показывает файл vision-модели агента, ```image уходит в
  * image-провайдер агента; файлы сохраняются в images/ рабочей папки.
  */
@@ -23,17 +30,21 @@ export interface HostConfig {
   port?: number;
 }
 
-export interface ToolsConfig {
-  /** Путь из конфига, как написано (по умолчанию) */
-  workspace: string;
-  /** Тот же путь, разрешённый относительно корня приложения */
-  workspaceAbs: string;
-  /** Именованные проекты: id → абсолютный путь */
-  projects: Map<string, string>;
-  /** Именованные ssh-хосты: id → параметры подключения */
+/** Проект из config/projects.json: папка (может не быть) и его ssh-серверы. */
+export interface ProjectEntry {
+  /** Абсолютный путь папки проекта; без папки проект — только про серверы */
+  dirAbs?: string;
   hosts: Map<string, HostConfig>;
+}
+
+/** Лимиты инструментов из config/settings.json + реестр проектов. */
+export interface ToolsConfig {
+  /** Общая рабочая папка, разрешённая относительно корня приложения */
+  workspaceAbs: string;
   runTimeoutMs: number;
   maxOutputChars: number;
+  /** Именованные проекты: id → папка и хосты */
+  projects: Map<string, ProjectEntry>;
 }
 
 /** Параметры генерации из блока ```image — всё решает агент, пользователь даёт задачу словами */
@@ -50,9 +61,11 @@ export interface ImageParams {
 export type Action =
   | { kind: 'file'; path: string; content: string; project?: string }
   | { kind: 'run'; command: string; project?: string }
-  | { kind: 'ssh'; host: string; command: string }
+  | { kind: 'ssh'; host: string; command: string; project?: string }
   | { kind: 'look'; path: string; question: string; project?: string }
-  | { kind: 'image'; params: ImageParams; project?: string };
+  | { kind: 'image'; params: ImageParams; project?: string }
+  /** Кастомный тул из tools/<tool>.ts: тело блока — то, что тул парсит сам */
+  | { kind: 'tool'; tool: string; command: string; project?: string };
 
 export interface ActionResult {
   ok: boolean;
@@ -71,79 +84,154 @@ export interface ToolContext {
   getImageProvider(agent: Agent | undefined): { provider: ImageProvider } | { error: string };
 }
 
-/** Читает config/tools.json + config/hosts.json; нет файлов или полей — дефолты. */
+/** Читает config/settings.json (лимиты) + config/projects.json (реестр); оба файла обязательны. */
 export function loadToolsConfig(root: string): ToolsConfig {
-  let raw: Record<string, unknown> = {};
-  try {
-    raw = JSON.parse(readFileSync(join(root, 'config', 'tools.json'), 'utf8'));
-  } catch {
-    // нет файла — работаем на дефолтах
-  }
-  let hostsRaw: Record<string, unknown> = {};
-  try {
-    hostsRaw = JSON.parse(readFileSync(join(root, 'config', 'hosts.json'), 'utf8'));
-  } catch {
-    // нет hosts.json — ssh-блоки будут отклоняться как «хост не настроен»
-  }
+  const settings = loadSettings(join(root, 'config', 'settings.json'), 0);
+  return {
+    workspaceAbs: settings.workspaceAbs,
+    runTimeoutMs: settings.runTimeoutMs,
+    maxOutputChars: settings.maxOutputChars,
+    projects: loadProjects(root),
+  };
+}
 
-  const workspace =
-    typeof raw.workspace === 'string' && raw.workspace.trim() ? raw.workspace.trim() : '.';
-  const projects = new Map<string, string>();
-  if (raw.projects && typeof raw.projects === 'object' && !Array.isArray(raw.projects)) {
-    for (const [id, p] of Object.entries(raw.projects as Record<string, unknown>)) {
-      if (typeof p === 'string' && p.trim()) projects.set(id, resolve(root, p.trim()));
-    }
+/** Читает config/projects.json: {id: {dir?, hosts?}}; нет файла или битые поля — внятная ошибка. */
+export function loadProjects(root: string): Map<string, ProjectEntry> {
+  const file = join(root, 'config', 'projects.json');
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(`не удалось прочитать ${file}: ${err instanceof Error ? err.message : err}`);
   }
-  const hosts = new Map<string, HostConfig>();
-  if (hostsRaw.hosts && typeof hostsRaw.hosts === 'object' && !Array.isArray(hostsRaw.hosts)) {
-    for (const [id, h] of Object.entries(hostsRaw.hosts as Record<string, unknown>)) {
-      const hc = h as Partial<HostConfig>;
-      if (hc && typeof hc.host === 'string' && hc.host.trim()) {
-        hosts.set(id, {
-          host: hc.host.trim(),
-          user: typeof hc.user === 'string' && hc.user.trim() ? hc.user.trim() : undefined,
-          port: typeof hc.port === 'number' && hc.port > 0 ? hc.port : undefined,
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${file}: ожидается объект { "id": { "dir": "…", "hosts": { … } } }`);
+  }
+  const projects = new Map<string, ProjectEntry>();
+  for (const [id, v] of Object.entries(raw)) {
+    // id — префикс в блоках («shop:…»), поэтому строчные буквы/цифры/-/_ от 2 символов
+    if (!/^[a-z][a-z0-9_-]{1,}$/.test(id)) {
+      throw new Error(`${file}: «${id}» — id проекта: строчные буквы/цифры/-/_ от 2 символов`);
+    }
+    if (!v || typeof v !== 'object' || Array.isArray(v)) {
+      throw new Error(`${file}: «${id}» — ожидается объект { "dir": "…", "hosts": { … } }`);
+    }
+    const o = v as Record<string, unknown>;
+    if (o.dir !== undefined && (typeof o.dir !== 'string' || !o.dir.trim())) {
+      throw new Error(`${file}: «${id}».dir — путь к папке или убери поле`);
+    }
+    const hosts = new Map<string, HostConfig>();
+    if (o.hosts !== undefined) {
+      if (!o.hosts || typeof o.hosts !== 'object' || Array.isArray(o.hosts)) {
+        throw new Error(`${file}: «${id}».hosts — объект { "имя": { "host": "…" } }`);
+      }
+      for (const [hid, hv] of Object.entries(o.hosts as Record<string, unknown>)) {
+        if (!hv || typeof hv !== 'object' || Array.isArray(hv)) {
+          throw new Error(`${file}: «${id}».hosts.${hid} — объект { "host": "…", "user": "…", "port": 22 }`);
+        }
+        const h = hv as Partial<HostConfig>;
+        if (typeof h.host !== 'string' || !h.host.trim()) {
+          throw new Error(`${file}: «${id}».hosts.${hid} — обязательное поле "host"`);
+        }
+        hosts.set(hid, {
+          host: h.host.trim(),
+          user: typeof h.user === 'string' && h.user.trim() ? h.user.trim() : undefined,
+          port: typeof h.port === 'number' && h.port > 0 ? h.port : undefined,
         });
       }
     }
+    if (o.dir === undefined && hosts.size === 0) {
+      throw new Error(`${file}: «${id}» — нужен "dir" (папка) или "hosts" (серверы), хоть что-то одно`);
+    }
+    projects.set(id, {
+      dirAbs: o.dir !== undefined ? resolve(root, (o.dir as string).trim()) : undefined,
+      hosts,
+    });
   }
+  return projects;
+}
 
-  const runTimeoutMs =
-    typeof raw.runTimeoutMs === 'number' && raw.runTimeoutMs > 0 ? raw.runTimeoutMs : 180000;
-  const maxOutputChars =
-    typeof raw.maxOutputChars === 'number' && raw.maxOutputChars > 0 ? raw.maxOutputChars : 4000;
-  return { workspace, workspaceAbs: resolve(root, workspace), projects, hosts, runTimeoutMs, maxOutputChars };
+/** Куда бьёт ссылка на хост: проект + имя внутри проекта + параметры подключения. */
+export interface HostTarget {
+  project: string;
+  id: string;
+  host: HostConfig;
 }
 
 /**
- * Блоки ```file / ```run / ```ssh / ```look / ```image в ответе агента, в порядке появления.
- * Префикс проекта: «lms:путь» у file/look, «shop:команда» у run, «shop:» у image
- * (id — строчные буквы/цифры, от 2 символов — чтобы не путать с «C:/...» на Windows).
+ * «shop:prod» → хост prod проекта shop. Голое имя («prod») — если такой хост
+ * ровно у одного проекта; иначе отказ с подсказкой уточнить проект.
  */
-export function parseActions(text: string): Action[] {
-  const re = /^```(file|run|ssh|look|image)[ \t]*([^\n]*)\n([\s\S]*?)^```[ \t]*$/gm;
+export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error: string } {
+  const qi = ref.indexOf(':');
+  if (qi > 0) {
+    const pid = ref.slice(0, qi);
+    const hid = ref.slice(qi + 1);
+    const h = cfg.projects.get(pid)?.hosts.get(hid);
+    if (!h) return { error: `хост «${ref}» не настроен в config/projects.json` };
+    return { project: pid, id: hid, host: h };
+  }
+  const hits: HostTarget[] = [];
+  for (const [pid, entry] of cfg.projects) {
+    const h = entry.hosts.get(ref);
+    if (h) hits.push({ project: pid, id: ref, host: h });
+  }
+  if (hits.length === 0) return { error: `хост «${ref}» не настроен в config/projects.json` };
+  if (hits.length > 1) {
+    const fulls = hits.map((h) => `${h.project}:${ref}`).join(' или ');
+    return {
+      error: `хост «${ref}» у нескольких проектов (${hits.map((h) => h.project).join(', ')}) — уточните: ssh ${fulls}`,
+    };
+  }
+  return hits[0]!;
+}
+
+/**
+ * Блоки ```file / ```run / ```ssh / ```look / ```image и кастомных тулов
+ * (extraTools — имена файлов из tools/) в ответе агента, в порядке появления.
+ * Префикс проекта: «lms:путь» у file/look, «shop:команда» у run и кастомных,
+ * «shop:» у image (id — строчные буквы/цифры, от 2 символов — чтобы не путать
+ * с «C:/...» на Windows). Кастомные имена передаются явно, чтобы обычные
+ * код-блоки (```json, ```ts) не принимались за вызовы тулов.
+ */
+export function parseActions(text: string, extraTools: readonly string[] = []): Action[] {
+  // виды блоков: встроенные имена + кастомные тула; сортировка по длине, чтобы
+  // «```runner» не съелся более коротким «```run» из альтернации
+  const kinds = [...new Set([...extraTools, 'file', 'run', 'ssh', 'look', 'image'])].sort(
+    (a, b) => b.length - a.length,
+  );
+  const re = new RegExp(
+    '^```(' + kinds.join('|') + ')[ \\t]*([^\\n]*)\\n([\\s\\S]*?)^```[ \\t]*$',
+    'gm',
+  );
   const actions: Action[] = [];
   for (const m of text.matchAll(re)) {
-    if (m[1] === 'file') {
+    const kind = m[1]!;
+    if (kind === 'file') {
       const { target, rest } = splitTarget(m[2].trim().replace(/^["']|["']$/g, ''));
       if (rest) actions.push({ kind: 'file', path: rest, content: m[3].replace(/\n$/, ''), project: target });
-    } else if (m[1] === 'run') {
+    } else if (kind === 'run') {
       // команда может быть и на строке блока («```run shop:cmd»), и в теле — склеиваем
       const combined = (m[2].trim() + '\n' + m[3].trim()).replace(/^\n+/, '').trim();
       const { target, rest } = splitTarget(combined);
       if (rest) actions.push({ kind: 'run', command: rest, project: target });
-    } else if (m[1] === 'ssh') {
+    } else if (kind === 'ssh') {
       const host = m[2].trim().replace(/^["']|["']$/g, '').toLowerCase();
       const command = m[3].trim();
       if (host && command) actions.push({ kind: 'ssh', host, command });
-    } else if (m[1] === 'look') {
+    } else if (kind === 'look') {
       const { target, rest } = splitTarget(m[2].trim().replace(/^["']|["']$/g, ''));
       const question = m[3].trim() || 'Подробно опиши это изображение.';
       actions.push({ kind: 'look', path: rest ?? '', question, project: target });
-    } else {
+    } else if (kind === 'image') {
       // image: на строке блока — только префикс проекта («shop:»), параметры — в теле
       const pm = /^([a-z][a-z0-9_-]{1,}):(.*)$/.exec(m[2].trim());
       actions.push({ kind: 'image', params: parseImageParams(m[3]), project: pm?.[1] });
+    } else {
+      // кастомный тул: тело склеивается так же, как у run — аргумент на строке блока плюс тело
+      const combined = (m[2].trim() + '\n' + m[3].trim()).replace(/^\n+/, '').trim();
+      const { target, rest } = splitTarget(combined);
+      if (rest) actions.push({ kind: 'tool', tool: kind, command: rest, project: target });
     }
   }
   return actions;
@@ -196,6 +284,7 @@ export function describeAction(a: Action): string {
   const at = (t?: string) => (t ? `[${t}] ` : '');
   if (a.kind === 'file') return `${at(a.project)}файл ${a.path} (${a.content.length} символов)`;
   if (a.kind === 'run') return `${at(a.project)}команда: ${a.command.replace(/\s+/g, ' ').slice(0, 140)}`;
+  if (a.kind === 'tool') return `${at(a.project)}тул «${a.tool}»: ${a.command.replace(/\s+/g, ' ').slice(0, 140)}`;
   if (a.kind === 'look') return `${at(a.project)}смотреть картинку: ${a.path || '(путь не указан)'}`;
   if (a.kind === 'image') {
     const p = a.params;
@@ -206,37 +295,43 @@ export function describeAction(a: Action): string {
 }
 
 /**
- * Проверяет права агента на действие: инструмент включён, проект/хост назначены
- * и настроены. Возвращает null, если действие разрешено, иначе текст отказа.
+ * Структурные гейты действия: инструмент включён агенту, проект назначен
+ * (доступ к проекту — это и папка, и его серверы) и настроен. Сюда входит
+ * «кому вообще можно»; «можно ли молча» решает только check() тула.
+ * Возвращает null, если структурно действие возможно, иначе текст отказа.
  */
 export function checkPermission(agent: Agent, action: Action, cfg: ToolsConfig): string | null {
+  const ids = agentToolIds(agent);
   if (action.kind === 'ssh') {
-    if (!agent.tools?.includes('ssh')) return 'инструмент ssh этому агенту не включён';
-    if (!agent.hosts?.includes(action.host)) return `хост «${action.host}» этому агенту не назначен`;
-    if (!cfg.hosts.has(action.host)) return `хост «${action.host}» не настроен в config/hosts.json`;
+    if (!ids.includes('ssh')) return 'инструмент ssh этому агенту не включён';
+    const r = resolveHost(action.host, cfg);
+    if ('error' in r) return r.error;
+    if (!agent.projects?.includes(r.project)) {
+      return `хост «${r.id}» относится к проекту «${r.project}» — этот проект тебе не назначен`;
+    }
     return null;
   }
-  if (action.kind === 'look' || action.kind === 'image') {
-    if (!agent.tools?.includes(action.kind)) {
+  if (action.kind === 'tool') {
+    if (!ids.includes(action.tool)) return `тул «${action.tool}» этому агенту не включён`;
+  } else if (action.kind === 'look' || action.kind === 'image') {
+    if (!ids.includes(action.kind)) {
       return action.kind === 'look'
         ? 'инструмент look (зрение) этому агенту не включён'
         : 'инструмент image (генерация) этому агенту не включён';
     }
-    if (action.project) {
-      if (!agent.projects?.includes(action.project)) return `проект «${action.project}» этому агенту не назначен`;
-      if (!cfg.projects.has(action.project)) return `проект «${action.project}» не настроен в config/tools.json`;
+  } else {
+    const tool = action.kind === 'file' ? 'files' : 'shell';
+    if (!ids.includes(tool)) {
+      return tool === 'files'
+        ? 'инструмент files этому агенту не включён'
+        : 'локальная консоль (shell) этому агенту не включена';
     }
-    return null;
-  }
-  const tool: AgentTool = action.kind === 'file' ? 'files' : 'shell';
-  if (!agent.tools?.includes(tool)) {
-    return tool === 'files'
-      ? 'инструмент files этому агенту не включён'
-      : 'локальная консоль (shell) этому агенту не включена';
   }
   if (action.project) {
     if (!agent.projects?.includes(action.project)) return `проект «${action.project}» этому агенту не назначен`;
-    if (!cfg.projects.has(action.project)) return `проект «${action.project}» не настроен в config/tools.json`;
+    const entry = cfg.projects.get(action.project);
+    if (!entry) return `проект «${action.project}» не настроен в config/projects.json`;
+    if (!entry.dirAbs) return `у проекта «${action.project}» нет папки — он настроен только на серверы`;
   }
   return null;
 }
@@ -246,10 +341,13 @@ export function checkPermission(agent: Agent, action: Action, cfg: ToolsConfig):
  * (agent.workspace: id из реестра или путь), иначе общий workspace.
  */
 export function workspaceFor(agent: Agent | undefined, action: { project?: string }, cfg: ToolsConfig): string {
-  if (action.project && cfg.projects.has(action.project)) return cfg.projects.get(action.project)!;
+  const target = action.project ?? agent?.workspace;
+  if (target && cfg.projects.has(target)) {
+    const dir = cfg.projects.get(target)!.dirAbs;
+    if (dir) return dir;
+  }
   const w = agent?.workspace;
-  if (w && cfg.projects.has(w)) return cfg.projects.get(w)!;
-  if (w) return resolve(cfg.workspaceAbs, w);
+  if (w && !cfg.projects.has(w)) return resolve(cfg.workspaceAbs, w);
   return cfg.workspaceAbs;
 }
 
@@ -274,9 +372,8 @@ function killTree(child: ChildProcess): void {
 }
 
 /** Собирает аргументы запуска ssh: только по ключу, без интерактивных паролей. */
-export function sshArgs(hostId: string, cfg: ToolsConfig, command: string): string[] | null {
-  const h = cfg.hosts.get(hostId);
-  if (!h) return null;
+function sshArgs(t: HostTarget, command: string): string[] {
+  const h = t.host;
   const args = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
   if (h.port) args.push('-p', String(h.port));
   args.push(h.user ? `${h.user}@${h.host}` : h.host, command);
@@ -320,15 +417,14 @@ export function executeSshAction(
   cfg: ToolsConfig,
   signal?: AbortSignal,
 ): Promise<ActionResult> {
-  const args = sshArgs(action.host, cfg, action.command);
-  if (!args) {
-    return Promise.resolve({
-      ok: false,
-      label: describeAction(action),
-      output: `отказ: хост «${action.host}» не настроен в config/hosts.json`,
-    });
+  const r = resolveHost(action.host, cfg);
+  if ('error' in r) {
+    return Promise.resolve({ ok: false, label: describeAction(action), output: `отказ: ${r.error}` });
   }
-  return executeProcess({ argv: args }, cfg, signal).then((r) => ({ ...r, label: describeAction(action) }));
+  return executeProcess({ argv: sshArgs(r, action.command) }, cfg, signal).then((res) => ({
+    ...res,
+    label: describeAction(action),
+  }));
 }
 
 const LOOK_SYSTEM =
@@ -560,15 +656,15 @@ export function executeAction(
   if (action.kind === 'run') return executeRunAction(action, cfg, signal, agent);
   if (action.kind === 'look') return executeLookAction(action, cfg, agent, ctx, signal);
   if (action.kind === 'image') return executeImageAction(action, cfg, agent, ctx, signal);
-  return executeSshAction(action, cfg, signal);
+  if (action.kind === 'ssh') return executeSshAction(action, cfg, signal);
+  throw new Error(`у действия «${(action as { kind: string }).kind}» нет прямого исполнения — оно выполняется тулом`);
 }
 
 /** Блок в системный промпт: как этому агенту пользоваться его инструментами. */
-export function actionsHint(agent: Agent, cfg: ToolsConfig): string | null {
-  const tools = agent.tools ?? [];
-  if (tools.length === 0) return null;
+export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<string, Tool>): string | null {
+  const ids = agentToolIds(agent);
+  if (ids.length === 0) return null;
   const projects = (agent.projects ?? []).filter((p) => cfg.projects.has(p));
-  const hosts = (agent.hosts ?? []).filter((h) => cfg.hosts.has(h));
   const ws = workspaceFor(agent, {}, cfg);
   const lines: string[] = [
     '## Инструменты',
@@ -580,22 +676,29 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig): string | null {
     );
   }
   lines.push('Чтобы подействовать, вставь в свой ответ блок одного из видов:');
-  if (tools.includes('files')) {
+  if (ids.includes('files')) {
     const sample = projects.length > 0 ? `${projects[0]}:относительный/путь/к/файлу.txt` : 'относительный/путь/к/файлу.txt';
     lines.push('```file ' + sample, '<полное содержимое файла>', '```');
   }
-  if (tools.includes('shell')) {
+  if (ids.includes('shell')) {
     lines.push('```run', projects.length > 0 ? `${projects[0]}:одна команда оболочки, например docker ps` : '<одна команда оболочки, например docker ps>', '```');
   }
-  if (tools.includes('ssh') && hosts.length > 0) {
-    lines.push(
-      '```ssh ' + hosts[0],
-      '<команда для выполнения на сервере по ssh>',
-      '```',
-      `Доступные тебе серверы: ${hosts.join(', ')}.`,
-    );
+  if (ids.includes('ssh')) {
+    // цели ssh — хосты тех проектов, что назначены агенту; адресуем «проект:хост»
+    const targets: string[] = [];
+    for (const p of projects) {
+      for (const hid of cfg.projects.get(p)!.hosts.keys()) targets.push(`${p}:${hid}`);
+    }
+    if (targets.length > 0) {
+      lines.push(
+        '```ssh ' + targets[0],
+        '<команда для выполнения на сервере по ssh>',
+        '```',
+        `Доступные тебе серверы: ${targets.join(', ')}. Если имя хоста не повторяется в других твоих проектах, можно без префикса проекта.`,
+      );
+    }
   }
-  if (tools.includes('look')) {
+  if (ids.includes('look')) {
     lines.push(
       '```look относительный/путь/к/картинке.png',
       '<вопрос по картинке: что именно разглядеть>',
@@ -603,7 +706,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig): string | null {
       'look показывает файл твоей vision-модели; описание придёт результатом действия.',
     );
   }
-  if (tools.includes('image')) {
+  if (ids.includes('image')) {
     lines.push(
       '```image',
       'prompt: подробное описание изображения — пишешь сам: стиль, композиция, палитра, свет',
@@ -615,6 +718,15 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig): string | null {
       'image рисует image-моделью. Промпт, размер, число вариантов (n, до 8), шаги и референсы выбираешь ты сам; ' +
         'refs — необязательны, включают режим перерисовки по образцам. Файлы сохраняются в images/ рабочей папки, ' +
         'пути придут в результате; прежде чем рассказывать, что получилось, посмотри файлы через look.',
+    );
+  }
+  for (const id of ids.filter((t) => !(BUILTIN_TOOL_IDS as readonly string[]).includes(t))) {
+    const tool = customTools?.get(id);
+    lines.push(
+      '```' + id,
+      projects.length > 0 ? `${projects[0]}:тело запроса к тулу` : 'тело запроса к тулу',
+      '```',
+      tool?.desc ?? `Кастомный тул «${id}»: формат тела описан в его описании (tools/${id}.ts).`,
     );
   }
   lines.push(

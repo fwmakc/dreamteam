@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
-import type { Agent, AgentTool, UserProfile } from './types.js';
+import { normalizeAgentTools } from './tools-api.js';
+import type { Agent, UserProfile } from './types.js';
 
 /**
  * Читает состав команды. Вызывается перед каждым раундом, поэтому правки
- * config/team.json подхватываются без перезапуска приложения.
+ * config/agents.json подхватываются без перезапуска приложения.
  */
 export function loadTeam(file: string): Agent[] {
   let raw: unknown;
@@ -21,7 +22,7 @@ export function loadTeam(file: string): Agent[] {
   return list.map((item, i): Agent => {
     const a = item as Partial<Agent>;
     if (!a?.id || !a?.name || !a?.prompt) {
-      throw new Error(`агент №${i + 1} в team.json: обязательны поля id, name, prompt`);
+      throw new Error(`агент №${i + 1} в agents.json: обязательны поля id, name, prompt`);
     }
     return {
       id: String(a.id),
@@ -33,14 +34,8 @@ export function loadTeam(file: string): Agent[] {
       prompt: String(a.prompt),
       provider: a.provider ? String(a.provider) : undefined,
       temperature: typeof a.temperature === 'number' ? a.temperature : undefined,
-      tools: Array.isArray(a.tools)
-        ? a.tools.filter(
-            (t): t is AgentTool =>
-              t === 'files' || t === 'shell' || t === 'ssh' || t === 'look' || t === 'image',
-          )
-        : undefined,
+      tools: normalizeAgentTools(String(a.id), a.tools),
       projects: Array.isArray(a.projects) ? a.projects.map(String) : undefined,
-      hosts: Array.isArray(a.hosts) ? a.hosts.map(String) : undefined,
       workspace: typeof a.workspace === 'string' && a.workspace.trim() ? a.workspace.trim() : undefined,
       vision: typeof a.vision === 'string' && a.vision.trim() ? a.vision.trim() : undefined,
       image: typeof a.image === 'string' && a.image.trim() ? a.image.trim() : undefined,
@@ -64,13 +59,21 @@ export function loadUserProfile(file: string): UserProfile {
   }
 }
 
-/** Находит @упоминания участников: работает и по имени (@марина), и по id (@marina). */
+/**
+ * Символы-триггеры упоминания: «@» — общепринятый, «№» — полный синоним для
+ * русской раскладки (Shift+3, переключать раскладку не нужно).
+ */
+export const MENTION_TRIGGERS = ['@', '№'] as const;
+
+/** Находит упоминания участников: работает и по имени (@марина), и по id (@marina). */
 export function findMentions(text: string, team: Agent[]): Agent[] {
   const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
   const t = norm(text);
   const found: Agent[] = [];
   for (const agent of team) {
-    if (t.includes('@' + norm(agent.name)) || t.includes('@' + norm(agent.id))) {
+    const name = norm(agent.name);
+    const id = norm(agent.id);
+    if (MENTION_TRIGGERS.some((p) => t.includes(p + name) || t.includes(p + id))) {
       found.push(agent);
     }
   }

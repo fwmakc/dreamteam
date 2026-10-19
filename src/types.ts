@@ -50,13 +50,17 @@ export interface TeamMemory {
 }
 
 /**
- * Инструменты, которыми агент реально действует (а не только говорит):
- *  files — запись файлов; shell — команды на этом ПК; ssh — команды на настроенных серверах;
- *  look — посмотреть картинку глазами vision-модели; image — сгенерировать изображение.
+ * Инструменты, которыми агент реально действует (а не только говорит).
+ * Встроенные: files — запись файлов; shell — команды на этом ПК; ssh — команды
+ * на настроенных серверах; look — посмотреть картинку глазами vision-модели;
+ * image — сгенерировать изображение. Свои тула — файлы tools/*.ts, их имена
+ * свободны. Форма поля tools в agents.json — только объект карточек
+ * ({"shell": {…} или "shell": null}); карточка (или {} для null) уходит
+ * в фабрику тула.
  */
-export type AgentTool = 'files' | 'shell' | 'ssh' | 'look' | 'image';
+export type AgentTools = Record<string, unknown>;
 
-/** Участник команды из config/team.json */
+/** Участник команды из config/agents.json */
 export interface Agent {
   id: string;
   name: string;
@@ -70,13 +74,11 @@ export interface Agent {
   /** Свой провайдер из config/providers.json (необязательно) */
   provider?: string;
   temperature?: number;
-  /** Инструменты (config/tools.json + поле tools в team.json) */
-  tools?: AgentTool[];
-  /** Проекты из реестра tools.json, куда агенту можно писать и запускать команды */
+  /** Инструменты-карточки {"shell": {…} или null} (поле tools в agents.json) */
+  tools?: AgentTools;
+  /** Проекты из config/projects.json — агенту доступны и папка проекта, и его серверы */
   projects?: string[];
-  /** Хосты из config/hosts.json, на которые агенту можно ходить по ssh (для инструмента ssh) */
-  hosts?: string[];
-  /** Проект по умолчанию (id из реестра) или путь — куда идут блоки без префикса */
+  /** Проект по умолчанию (id из config/projects.json) или путь — куда идут блоки без префикса */
   workspace?: string;
   /** Чем агент смотрит картинки (```look): id провайдера с "vision": true; по умолчанию — его же провайдер */
   vision?: string;
@@ -141,6 +143,62 @@ export interface StreamRequest {
   maxTokens?: number;
   /** Отмена запроса извне (Esc во время раунда) */
   signal?: AbortSignal;
+}
+
+/**
+ * Менеджер переговорки: config/manager.json. Это тот самый модератор-оркестратор,
+ * но с собственным минимальным конфигом: свой провайдер, имя, вид. Через него
+ * (@менеджер) выполняются все конфигурационные операции — состав команды,
+ * состав чата, разговоры.
+ */
+export interface ManagerConfig {
+  /** id провайдера из config/providers.json (модель берётся из записи провайдера) */
+  provider: string;
+  name: string;
+  emoji: string;
+  color: string;
+  temperature: number;
+}
+
+/** Правка существующего участника (белый список полей для team.update) */
+export interface ManagerUpdateFields {
+  name?: string;
+  emoji?: string;
+  color?: string;
+  role?: string;
+  description?: string;
+  prompt?: string;
+  provider?: string;
+  temperature?: number;
+}
+
+/** Действие менеджера из его ответа (JSON-объект после текста) */
+export type ManagerAction =
+  | {
+      op: 'team.add';
+      id: string;
+      name: string;
+      role?: string;
+      prompt?: string;
+      emoji?: string;
+      color?: string;
+      description?: string;
+      temperature?: number;
+      provider?: string;
+      tools?: AgentTools;
+    }
+  | { op: 'team.update'; id: string; fields: ManagerUpdateFields }
+  | { op: 'chat.add'; who: string }
+  | { op: 'chat.remove'; who: string }
+  | { op: 'session.list' }
+  | { op: 'session.open'; n: number }
+  | { op: 'session.new'; title?: string; participants?: string[] }
+  | { op: 'session.delete'; n: number };
+
+/** Разобранный ответ менеджера: текст для человека + действия */
+export interface ManagerReply {
+  say: string;
+  actions: ManagerAction[];
 }
 
 /**
