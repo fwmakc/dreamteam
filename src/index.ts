@@ -2,8 +2,6 @@ import 'dotenv/config';
 import { createInterface } from 'node:readline/promises';
 import { writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { format } from 'node:util';
 import pc from 'picocolors';
 import { findMentions, loadTeam, loadUserProfile } from './agents.js';
@@ -38,6 +36,20 @@ import { COMMANDS, HintPanel, MentionPicker, hintRowsFor, makeCompleter, type Co
 import { Editor } from './editor.js';
 import { Screen } from './screen.js';
 import { loadSettings } from './settings.js';
+// пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
+import {
+  AGENTS_FILE,
+  MANAGER_FILE,
+  MEMORY_FILE,
+  PROJECTS_FILE,
+  PROVIDERS_FILE,
+  SESSIONS_DIR,
+  SETTINGS_FILE,
+  TOOLS_DIR,
+  USER_FILE,
+  WORKSPACE,
+  migrateLegacy,
+} from './paths.js';
 import { planTurns, type PlanResult } from './orchestrator.js';
 import { compressIfNeeded, contextSlice } from './compress.js';
 import {
@@ -67,15 +79,6 @@ import type {
   UserProfile,
 } from './types.js';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const CONFIG_DIR = join(ROOT, 'config');
-const DATA_DIR = join(ROOT, 'data', 'sessions');
-const USER_FILE = join(CONFIG_DIR, 'user.json');
-const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json');
-const AGENTS_FILE = join(CONFIG_DIR, 'agents.json');
-const MANAGER_FILE = join(CONFIG_DIR, 'manager.json');
-const MEMORY_FILE = join(ROOT, 'data', 'memory.json');
-
 // доступен командам /exit: закрытие readline завершает приложение через 'close'
 let rl: ReturnType<typeof createInterface> | null = null;
 
@@ -101,7 +104,7 @@ let userTools = new Map<string, ToolFactory>();
 
 async function refreshUserTools(): Promise<void> {
   try {
-    userTools = await loadUserTools(ROOT);
+    userTools = await loadUserTools(TOOLS_DIR);
   } catch (err) {
     userTools = new Map();
     printError(`тулы: ${err instanceof Error ? err.message : err}`);
@@ -525,7 +528,7 @@ function buildRequest(
         }
       }
     }
-    const hint = actionsHint(agent, loadToolsConfig(ROOT), custom);
+    const hint = actionsHint(agent, loadToolsConfig(SETTINGS_FILE, PROJECTS_FILE, WORKSPACE), custom);
     if (hint) blocks.push(hint);
   }
   blocks.push(COMMON_RULES);
@@ -1236,7 +1239,7 @@ async function runToolLoop(
   signal: AbortSignal,
 ): Promise<void> {
   const { session, store } = app;
-  const cfg = loadToolsConfig(ROOT);
+  const cfg = loadToolsConfig(SETTINGS_FILE, PROJECTS_FILE, WORKSPACE);
   let toolset: Map<string, Tool>;
   try {
     toolset = toolsetFor(agent, cfg, signal, toolContext(app));
@@ -1537,7 +1540,7 @@ function printTeam(app: App): void {
   try {
     const fullTeam = loadTeam(AGENTS_FILE);
     const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
-    const cfg = loadToolsConfig(ROOT);
+    const cfg = loadToolsConfig(SETTINGS_FILE, PROJECTS_FILE, WORKSPACE);
     console.log(pc.dim('\n  Команда:'));
     for (const agent of fullTeam) {
       const own = agent.provider ? pc.dim(` [провайдер: ${agent.provider}]`) : '';
@@ -1840,16 +1843,17 @@ async function runCommand(app: App, line: string): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+  // однократная миграция старой схемы (config/ и data/ в корне пакета) на слои
+  for (const note of migrateLegacy()) console.log(pc.dim(`  миграция: ${note}`));
   // настройки читаем до всего вывода: ошибка конфига видна в обычном терминале
   const ui = loadSettings(SETTINGS_FILE, process.stdout.columns || 0);
-  const store = new SessionStore(DATA_DIR);
-  const providersFile = join(CONFIG_DIR, 'providers.json');
-  const loaded = loadProviders(providersFile);
-  const images = loadImageProviders(providersFile);
+  const store = new SessionStore(SESSIONS_DIR);
+  const loaded = loadProviders(PROVIDERS_FILE);
+  const images = loadImageProviders(PROVIDERS_FILE);
   // менеджер переговорки: обязательный конфиг, неизвестный провайдер — падение до старта TUI
   const mgr = loadManagerConfig(MANAGER_FILE, loaded.providers.keys());
   // тула: fail-fast — кривой файл в tools/ или карточка в agents.json видны до старта TUI
-  userTools = await loadUserTools(ROOT);
+  userTools = await loadUserTools(TOOLS_DIR);
   // при старте продолжаем последний разговор, а не плодим пустые сессии
   const existing = store.list();
   const session = existing.length > 0 ? store.load(existing[0].id) ?? store.create() : store.create();

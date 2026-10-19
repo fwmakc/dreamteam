@@ -6,27 +6,17 @@
  * Внимание: ConPTY (псевдотерминал Windows) перехватывает смену буферов и
  * scroll-region — эти коды здесь не проверить, см. tests/probe-screen.ts.
  *
- * ПРАВИЛА ЗАПУСКА (проба отправляет настоящее сообщение — пишет новые файлы
- * в data/!):
- *   1. Изолировать данные пользователя:
- *      mv data/sessions data/sessions.hold && mv data/transcripts data/transcripts.hold
- *      mkdir -p data/sessions data/transcripts
- *   2. Переключить провайдера на mock (и запомнить прежнее значение):
- *      cp config/providers.json /tmp/providers.bak
- *      sed -i 's/"default": "[a-z]*"/"default": "mock"/' config/providers.json
- *   3. Прогнать пробу: npx tsx tests/probe-tui.ts
- *   4. Убрать тестовые данные и вернуть всё как было:
- *      rm -rf data/sessions data/transcripts
- *      mv data/sessions.hold data/sessions && mv data/transcripts.hold data/transcripts
- *      mv /tmp/providers.bak config/providers.json
- *
- * config/agents.json и config/manager.json зонд бэкапит сам: блок @менеджер
- * реально добавляет участника «Тест» в agents.json, а менеджера на время пробы
- * переключает на mock (иначе он пошёл бы на настоящий API). Оба файла
- * возвращаются при любом завершении зонда.
+ * Изоляция: зонд полностью герметичен и реальные данные не трогает. Приложение
+ * запускается во временном проекте (cwd) с переменными DT_HOME/DT_PROJECT во
+ * временные папки: там свои providers.json (всё на mock — ни одного настоящего
+ * запроса к API), settings.json, user.json и копия боевой команды. Раунд
+ * менеджера реально пишет team.add во временный agents.json — зонд проверяет
+ * это по файлу и убирает за собой всё при любом завершении.
  */
 import { createRequire } from 'node:module';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 // node-pty ставится отдельно (npm i --no-save node-pty); грузим в обход
 // статического импорта, чтобы tsc не требовал его всему проекту
@@ -48,37 +38,47 @@ function check(name: string, cond: boolean, detail?: string): void {
   }
 }
 
-// --- изоляция конфигов: agents.json вернём нетронутым, менеджера сажаем на mock ---
-const AGENTS_FILE = 'config/agents.json';
-const MANAGER_FILE = 'config/manager.json';
-const teamBackup = readFileSync(AGENTS_FILE, 'utf8');
-const mgrBackup = readFileSync(MANAGER_FILE, 'utf8');
-writeFileSync(
-  MANAGER_FILE,
-  JSON.stringify({ provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 }, null, 2) + '\n',
-);
-let restored = false;
-function restoreConfigs(): void {
-  if (restored) return;
-  restored = true;
-  try {
-    writeFileSync(AGENTS_FILE, teamBackup);
-    writeFileSync(MANAGER_FILE, mgrBackup);
-  } catch {
-    // пытаемся вернуть хотя бы что-то
-  }
+// --- герметичные слои: временный дом и временный проект ---
+const root = mkdtempSync(join(tmpdir(), 'dt-tui-'));
+const home = join(root, 'home');
+const proj = join(root, 'proj');
+mkdirSync(home, { recursive: true });
+mkdirSync(join(proj, '.dreamteam'), { recursive: true });
+const j = (p: string, v: unknown): void =>
+  writeFileSync(join(home, p), JSON.stringify(v, null, 2) + '\n');
+const pj = (p: string, v: unknown): void =>
+  writeFileSync(join(proj, '.dreamteam', p), JSON.stringify(v, null, 2) + '\n');
+j('providers.json', {
+  default: 'mock',
+  providers: { mock: { adapter: 'mock' }, 'mock-images': { adapter: 'mock-images' } },
+});
+j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000 });
+j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
+pj('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
+pj('projects.json', { dreamteam: { hosts: { dev: { host: '192.0.2.1' } } } });
+// команда — копия боевой: имена и роли важны для сценария, провайдеры сажаем на mock
+const team = JSON.parse(readFileSync('.dreamteam/agents.json', 'utf8')) as Array<Record<string, unknown>>;
+for (const a of team) {
+  if (a.provider) a.provider = 'mock';
+  if (a.vision) a.vision = 'mock';
+  if (a.image) a.image = 'mock-images';
 }
-process.on('exit', restoreConfigs);
+pj('agents.json', team);
+process.on('exit', () => rmSync(root, { recursive: true, force: true }));
 process.on('SIGINT', () => process.exit(130));
 process.on('SIGTERM', () => process.exit(143));
 
-const term = pty.spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'src/index.ts'], {
-  name: 'xterm-256color',
-  cols: 100,
-  rows: 30,
-  env: { ...process.env },
-  cwd: process.cwd(),
-});
+const term = pty.spawn(
+  process.execPath,
+  [resolve('node_modules/tsx/dist/cli.mjs'), resolve('src/index.ts')],
+  {
+    name: 'xterm-256color',
+    cols: 100,
+    rows: 30,
+    env: { ...process.env, DT_HOME: home, DT_PROJECT: join(proj, '.dreamteam') },
+    cwd: proj,
+  },
+);
 
 let out = '';
 term.onData((d: string) => (out += d));
@@ -145,7 +145,7 @@ check('tui: дефолтная политика — без вопросов че
 check('tui: статус-строка спиннера рисовалась', out.includes('печатает'), out.slice(-300));
 
 // @менеджер (здесь через синоним «№» — как его и будут звать с русской раскладки):
-// mock-менеджер детерминированно добавляет участника «Тест» (id test_probe) в config/agents.json.
+// mock-менеджер детерминированно добавляет участника «Тест» (id test_probe) в agents.json проекта.
 await write('№менеджер, позови Теста\r');
 check(
   'tui: менеджер ответил заготовкой',
@@ -182,9 +182,9 @@ const code = await Promise.race([
 check('tui: процесс завершился сам', code === 0, String(code));
 if (code === null) term.kill();
 writeFileSync('/tmp/dt-tui-raw.txt', out, 'utf8');
-restoreConfigs();
-check('tui: agents.json вернулся нетронутым', readFileSync(AGENTS_FILE, 'utf8') === teamBackup);
-check('tui: manager.json вернулся нетронутым', readFileSync(MANAGER_FILE, 'utf8') === mgrBackup);
+// team.add менеджера писал в agents.json временного проекта — проверяем по файлу
+check('tui: «Тест» записан в агенты временного проекта', readFileSync(join(proj, '.dreamteam', 'agents.json'), 'utf8').includes('test_probe'));
+check('tui: разговор сохранился во временном доме', readdirSync(join(home, 'sessions')).length === 1);
 
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);

@@ -13,13 +13,15 @@ import { loadSettings } from './settings.js';
  * у тула ('allow' — молча, 'deny' — отказ, 'ask' — вопрос y/n), выполняет и
  * возвращает результаты следующим сообщением в истории.
  *
- * Проекты: реестр в config/projects.json — {id: {dir?, hosts?}}: папка проекта
- * и его ssh-серверы; в блоках адресуются префиксом — ```file lms:src/app.ts,
- * ```run shop:docker compose up. Доступ агенту выдаётся полем projects в
- * agents.json и покрывает проект целиком: и папку, и серверы.
+ * Проекты: реестр в projects.json (в .dreamteam проекта) — {id: {hosts?}}:
+ * именованные группы ssh-серверов; в блоках адресуются префиксом —
+ * ```run shop:docker compose up, ```ssh shop:prod systemctl status nginx.
+ * Доступ агенту выдаётся полем projects в agents.json. Локально инструменты
+ * работают всегда в текущей папке (проект = где запущено приложение), префикс
+ * проекта адресует только его серверы.
  * Серверы: блок ```ssh shop:prod выполняет команду на сервере штатным
- * ssh-клиентом этого ПК (только по ключу, BatchMode); голое имя («prod») —
- * если такой хост ровно у одного проекта.
+ * ssh-клиентом этого ПК; голое имя («prod») — если такой хост ровно у одного
+ * проекта.
  * Картинки: ```look показывает файл vision-модели агента, ```image уходит в
  * image-провайдер агента; файлы сохраняются в images/ рабочей папки.
  */
@@ -34,16 +36,14 @@ export interface HostConfig {
   dir?: string;
 }
 
-/** Проект из config/projects.json: папка (может не быть) и его ssh-серверы. */
+/** Проект из projects.json: именованная группа его ssh-серверов. */
 export interface ProjectEntry {
-  /** Абсолютный путь папки проекта; без папки проект — только про серверы */
-  dirAbs?: string;
   hosts: Map<string, HostConfig>;
 }
 
-/** Лимиты инструментов из config/settings.json + реестр проектов. */
+/** Лимиты инструментов из settings.json + реестр серверов проектов. */
 export interface ToolsConfig {
-  /** Общая рабочая папка, разрешённая относительно корня приложения */
+  /** Рабочая папка инструментов — текущая папка (проект = где запущено) */
   workspaceAbs: string;
   runTimeoutMs: number;
   maxOutputChars: number;
@@ -88,20 +88,19 @@ export interface ToolContext {
   getImageProvider(agent: Agent | undefined): { provider: ImageProvider } | { error: string };
 }
 
-/** Читает config/settings.json (лимиты) + config/projects.json (реестр); оба файла обязательны. */
-export function loadToolsConfig(root: string): ToolsConfig {
-  const settings = loadSettings(join(root, 'config', 'settings.json'), 0);
+/** Читает settings.json (лимиты) + projects.json (серверы); оба файла обязательны. */
+export function loadToolsConfig(settingsFile: string, projectsFile: string, workspaceAbs: string): ToolsConfig {
+  const settings = loadSettings(settingsFile, 0);
   return {
-    workspaceAbs: settings.workspaceAbs,
+    workspaceAbs,
     runTimeoutMs: settings.runTimeoutMs,
     maxOutputChars: settings.maxOutputChars,
-    projects: loadProjects(root),
+    projects: loadProjects(projectsFile),
   };
 }
 
-/** Читает config/projects.json: {id: {dir?, hosts?}}; нет файла или битые поля — внятная ошибка. */
-export function loadProjects(root: string): Map<string, ProjectEntry> {
-  const file = join(root, 'config', 'projects.json');
+/** Читает projects.json: {id: {hosts?}}; нет файла или битые поля — внятная ошибка. */
+export function loadProjects(file: string): Map<string, ProjectEntry> {
   let raw: Record<string, unknown>;
   try {
     raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
@@ -121,8 +120,10 @@ export function loadProjects(root: string): Map<string, ProjectEntry> {
       throw new Error(`${file}: «${id}» — ожидается объект { "dir": "…", "hosts": { … } }`);
     }
     const o = v as Record<string, unknown>;
-    if (o.dir !== undefined && (typeof o.dir !== 'string' || !o.dir.trim())) {
-      throw new Error(`${file}: «${id}».dir — путь к папке или убери поле`);
+    if (o.dir !== undefined) {
+      throw new Error(
+        `${file}: «${id}».dir — поле удалено: приложение работает в папке, где запущено; у проекта остались только "hosts"`,
+      );
     }
     const hosts = new Map<string, HostConfig>();
     if (o.hosts !== undefined) {
@@ -152,13 +153,10 @@ export function loadProjects(root: string): Map<string, ProjectEntry> {
         });
       }
     }
-    if (o.dir === undefined && hosts.size === 0) {
-      throw new Error(`${file}: «${id}» — нужен "dir" (папка) или "hosts" (серверы), хоть что-то одно`);
+    if (hosts.size === 0) {
+      throw new Error(`${file}: «${id}» — нужен "hosts" (серверы проекта), хоть один`);
     }
-    projects.set(id, {
-      dirAbs: o.dir !== undefined ? resolve(root, (o.dir as string).trim()) : undefined,
-      hosts,
-    });
+    projects.set(id, { hosts });
   }
   return projects;
 }
@@ -180,7 +178,7 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
     const pid = ref.slice(0, qi);
     const hid = ref.slice(qi + 1);
     const h = cfg.projects.get(pid)?.hosts.get(hid);
-    if (!h) return { error: `хост «${ref}» не настроен в config/projects.json` };
+    if (!h) return { error: `хост «${ref}» не настроен в projects.json` };
     return { project: pid, id: hid, host: h };
   }
   const hits: HostTarget[] = [];
@@ -188,7 +186,7 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
     const h = entry.hosts.get(ref);
     if (h) hits.push({ project: pid, id: ref, host: h });
   }
-  if (hits.length === 0) return { error: `хост «${ref}» не настроен в config/projects.json` };
+  if (hits.length === 0) return { error: `хост «${ref}» не настроен в projects.json` };
   if (hits.length > 1) {
     const fulls = hits.map((h) => `${h.project}:${ref}`).join(' или ');
     return {
@@ -341,25 +339,18 @@ export function checkPermission(agent: Agent, action: Action, cfg: ToolsConfig):
   }
   if (action.project) {
     if (!agent.projects?.includes(action.project)) return `проект «${action.project}» этому агенту не назначен`;
-    const entry = cfg.projects.get(action.project);
-    if (!entry) return `проект «${action.project}» не настроен в config/projects.json`;
-    if (!entry.dirAbs) return `у проекта «${action.project}» нет папки — он настроен только на серверы`;
+    if (!cfg.projects.has(action.project)) return `проект «${action.project}» не настроен в projects.json`;
   }
   return null;
 }
 
 /**
- * Рабочая папка действия: проект из префикса, иначе проект по умолчанию агента
- * (agent.workspace: id из реестра или путь), иначе общий workspace.
+ * Рабочая папка действия: всегда текущая папка; agent.workspace может уточнить
+ * её подпапкой (путь относительно рабочей).
  */
-export function workspaceFor(agent: Agent | undefined, action: { project?: string }, cfg: ToolsConfig): string {
-  const target = action.project ?? agent?.workspace;
-  if (target && cfg.projects.has(target)) {
-    const dir = cfg.projects.get(target)!.dirAbs;
-    if (dir) return dir;
-  }
+export function workspaceFor(agent: Agent | undefined, _action: { project?: string }, cfg: ToolsConfig): string {
   const w = agent?.workspace;
-  if (w && !cfg.projects.has(w)) return resolve(cfg.workspaceAbs, w);
+  if (w) return resolve(cfg.workspaceAbs, w);
   return cfg.workspaceAbs;
 }
 

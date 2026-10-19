@@ -7,13 +7,13 @@
  *  - addTeamAgent/updateTeamAgent на временных agents.json: валидность после
  *    записи (loadTeam), дефолты, белый список tools, сохранение неизвестных
  *    полей корня, дубликаты, «неудачная правка не портит файл».
- *  - loadProjects/resolveHost/checkPermission: проекты с папками и серверами,
- *    ssh-адресация «проект:хост», права через проекты; loadSettings: лимиты.
+ *  - loadProjects/resolveHost/checkPermission: серверы проектов, ssh-адресация
+ *    «проект:хост», права через проекты; loadSettings: лимиты.
  * Запуск: npm run probe:manager
  */
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { findMentions, loadTeam } from '../src/agents.js';
 import { checkPermission, loadProjects, resolveHost, type ToolsConfig } from '../src/actions.js';
 import { loadSettings } from '../src/settings.js';
@@ -88,8 +88,8 @@ const agentsFile = join(dir, 'agents.json');
 }
 // конфиг из репозитория валиден
 {
-  const repoCfg = loadManagerConfig(join('config', 'manager.json'), ['openai', 'mock']);
-  check('конфиг: config/manager.json из репозитория читается', repoCfg.provider === 'openai' && repoCfg.name === 'Менеджер');
+  const repoCfg = loadManagerConfig(join('.dreamteam', 'manager.json'), ['openai', 'mock']);
+  check('конфиг: .dreamteam/manager.json из репозитория читается', repoCfg.provider === 'openai' && repoCfg.name === 'Менеджер');
 }
 
 // --- managerMentioned ---
@@ -256,29 +256,25 @@ const agentsFile = join(dir, 'agents.json');
   check('легаси: правка сохранила обёртку и поля корня', Array.isArray(legacy.agents) && legacy.agents.length === 2 && legacy.note === 'не трогать', JSON.stringify(legacy).slice(0, 120));
 }
 
-// --- loadProjects / resolveHost / checkPermission: проекты с папками и серверами ---
+// --- loadProjects / resolveHost / checkPermission: серверы проектов ---
 {
-  const cfgDir = join(dir, 'config');
-  mkdirSync(cfgDir, { recursive: true });
-  const projFile = join(cfgDir, 'projects.json');
+  const projFile = join(dir, 'projects.json');
   writeFileSync(
     projFile,
     JSON.stringify({
       shop: {
-        dir: 'repo',
         hosts: { prod: { user: 'deploy', host: '203.0.113.10', port: 22 }, staging: { host: 'stg.example.com' } },
       },
       infra: { hosts: { prod: { host: '10.0.0.1' } } },
     }),
   );
   let threw = '';
-  try { loadProjects(dir); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
   check('projects: два проекта с «prod» читаются', threw === '' && true, threw);
-  const projects = loadProjects(dir);
+  const projects = loadProjects(projFile);
   const shop = projects.get('shop');
-  check('projects: папка разрешена от корня', shop?.dirAbs === join(dir, 'repo'), shop?.dirAbs);
   check('projects: хосты с user/port', shop?.hosts.get('prod')?.host === '203.0.113.10' && shop?.hosts.get('prod')?.port === 22, JSON.stringify([...shop?.hosts ?? []]));
-  check('projects: infra без папки', projects.get('infra')?.dirAbs === undefined);
+  check('projects: infra только с хостами', projects.get('infra')?.hosts.size === 1);
 
   const cfg: ToolsConfig = { workspaceAbs: join(dir, 'ws'), runTimeoutMs: 1000, maxOutputChars: 100, projects };
   const full = resolveHost('shop:prod', cfg);
@@ -295,36 +291,41 @@ const agentsFile = join(dir, 'agents.json');
   check('права: ssh чужого проекта — отказ «не назначен»', deny !== null && deny.includes('не назначен'), deny ?? '');
   const noSsh: Agent = { ...devops, tools: { files: {} } };
   check('права: без инструмента ssh — отказ', checkPermission(noSsh, { kind: 'ssh', host: 'shop:prod', command: 'x' }, cfg)?.includes('ssh') === true);
-  const fileDeny = checkPermission({ ...devops, tools: { ssh: {}, files: {} }, projects: ['shop', 'infra'] }, { kind: 'file', path: 'a.txt', content: 'x', project: 'infra' }, cfg);
-  check('права: файл в проект без папки — отказ', fileDeny !== null && fileDeny.includes('нет папки'), fileDeny ?? '');
+  const fileDeny = checkPermission({ ...devops, tools: { ssh: {}, files: {} }, projects: ['shop', 'ghost'] }, { kind: 'file', path: 'a.txt', content: 'x', project: 'ghost' }, cfg);
+  check('права: проект не настроен — отказ', fileDeny !== null && fileDeny.includes('не настроен'), fileDeny ?? '');
 
+  writeFileSync(projFile, JSON.stringify({ bad: { dir: 'repo', hosts: { h1: { host: 'x' } } } }));
+  threw = '';
+  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
+  check('projects: поле dir удалено — ошибка', threw.includes('bad') && threw.includes('dir'), threw);
   writeFileSync(projFile, JSON.stringify({ bad: {} }));
   threw = '';
-  try { loadProjects(dir); } catch (e) { threw = (e as Error).message; }
-  check('projects: без dir и без hosts — ошибка', threw.includes('bad') && threw.includes('dir'), threw);
+  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
+  check('projects: без hosts — ошибка', threw.includes('bad') && threw.includes('hosts'), threw);
   writeFileSync(projFile, JSON.stringify({ bad: { hosts: { h1: { user: 'x' } } } }));
   threw = '';
-  try { loadProjects(dir); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
   check('projects: хост без поля host — ошибка', threw.includes('h1') && threw.includes('host'), threw);
   writeFileSync(projFile, JSON.stringify({ Bad: {} }));
   threw = '';
-  try { loadProjects(dir); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
   check('projects: id не по шаблону — ошибка', threw.includes('Bad'), threw);
   unlinkSync(projFile);
   threw = '';
-  try { loadProjects(dir); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
   check('projects: файла нет — ошибка', threw.includes('не удалось прочитать'), threw);
 
   // --- loadSettings: лимиты и дефолты ---
-  const sf = join(cfgDir, 'settings.json');
+  const sf = join(dir, 'settings.json');
   writeFileSync(sf, JSON.stringify({ width: 100 }));
   const s = loadSettings(sf, 0);
   check('settings: дефолты лимитов', s.margin === 2 && s.screen === true && s.runTimeoutMs === 180000 && s.maxOutputChars === 4000, JSON.stringify(s));
-  check('settings: рабочая папка по умолчанию — config/..', s.workspaceAbs === dirname(cfgDir), s.workspaceAbs);
-  writeFileSync(sf, JSON.stringify({ width: 100, workspace: 'ws', runTimeoutMs: 5000 }));
-  const s2 = loadSettings(sf, 0);
-  check('settings: свой workspace разрешается', s2.workspaceAbs === join(dir, 'ws'), s2.workspaceAbs);
-  check('settings: свой таймаут читается', s2.runTimeoutMs === 5000);
+  writeFileSync(sf, JSON.stringify({ width: 100, workspace: 'ws' }));
+  threw = '';
+  try { loadSettings(sf, 0); } catch (e) { threw = (e as Error).message; }
+  check('settings: поле workspace удалено — ошибка', threw.includes('workspace'), threw);
+  writeFileSync(sf, JSON.stringify({ width: 100, runTimeoutMs: 5000 }));
+  check('settings: свой таймаут читается', loadSettings(sf, 0).runTimeoutMs === 5000);
 }
 
 rmSync(dir, { recursive: true, force: true });

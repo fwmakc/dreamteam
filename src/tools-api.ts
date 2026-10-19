@@ -227,10 +227,25 @@ export function splitArgs(command: string): string[] {
 const SENSITIVE = /(^|[\\/])(\.env|\.netrc|\.git-credentials|id_rsa|id_ed25519|id_ecdsa)([.\w-]*)$|\.(pem|key|p12|pfx)$/i;
 
 /**
- * Скан аргументов сегмента на пути: секреты и выход за рабочую папку —
- * причина для deny. cwd задан — пути сверяются с папкой честно (resolve);
- * не задан (ssh: папка на чужой машине) — только синтаксика: абсолютный путь,
- * «..» и «~» считаются выходом, относительные — своим.
+ * Служебная папка приложения внутри проекта: конфиги команды, серверов, памяти
+ * и код тулов. Тулам она не доступна ни на чтение, ни на запись — иначе агент
+ * смог бы переписать свои own права и настройки. rel — путь относительно
+ * рабочей папки; возвращает причину отказа или null.
+ */
+export function protectedPath(rel: string): string | null {
+  const norm = rel.replaceAll('\\', '/');
+  if (norm === '.dreamteam' || norm.startsWith('.dreamteam/')) {
+    return `«${rel}» — служебная папка .dreamteam (конфиги и тула приложения), тулам не доступна`;
+  }
+  return null;
+}
+
+/**
+ * Скан аргументов сегмента на пути: секреты, служебная папка .dreamteam и
+ * выход за рабочую папку — причина для deny. cwd задан — пути сверяются
+ * с папкой честно (resolve); не задан (ssh: папка на чужой машине) — только
+ * синтаксика: абсолютный путь, «..» и «~» считаются выходом, относительные —
+ * своим.
  */
 export function pathScan(segment: string, cwd: string | undefined): string | null {
   for (const a of splitArgs(segment).slice(1)) {
@@ -238,10 +253,15 @@ export function pathScan(segment: string, cwd: string | undefined): string | nul
     if (!(a === '.' || a === '..' || a.startsWith('~') || a.startsWith('.') || a.includes('/') || a.includes('\\'))) continue;
     if (SENSITIVE.test(a)) return `«${a}» похоже на секретный файл — читать и показывать его нельзя`;
     if (a.startsWith('~')) return `«${a}» — домашняя папка, работа только внутри рабочей`;
+    if (a === '.dreamteam' || a.startsWith('.dreamteam/') || a.startsWith('.dreamteam\\')) {
+      return protectedPath(a);
+    }
     if (cwd) {
       const rel = relative(cwd, resolve(cwd, a));
       const inside = rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
       if (!inside) return `путь «${a}» вне рабочей папки «${cwd}» — работа только внутри неё`;
+      const prot = protectedPath(rel);
+      if (prot) return prot;
     } else if (a === '..' || a.startsWith('../') || a.startsWith('..\\') || /^[\\/]|[a-zA-Z]:/.test(a)) {
       return `путь «${a}» вне рабочей папки — работа только внутри неё`;
     }

@@ -5,7 +5,9 @@
  * прокрутка, margin, всплывашка. Запуск: npm run probe
  */
 import { PassThrough } from 'node:stream';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { wrapAnsi, visibleWidth, Screen } from '../src/screen.js';
 import { loadSettings } from '../src/settings.js';
 import { wrapPlain } from '../src/editor.js';
@@ -66,9 +68,11 @@ check('width: ANSI не считается', visibleWidth('\x1b[31mок\x1b[0m')
 check('width: CJK = 2', visibleWidth('中文') === 4);
 check('width: эмодзи = 2', visibleWidth('🎯') === 2);
 
-// --- loadSettings: строгая валидация ---
+// --- loadSettings: строгая валидация (на своих файлах во временной папке) ---
 {
-  const f = 'config/settings.json';
+  const tmp = mkdtempSync(join(tmpdir(), 'dt-screen-'));
+  const f = join(tmp, 'settings.json');
+  writeFileSync(f, JSON.stringify({ width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000 }));
   const cfg = loadSettings(f, 120);
   check(
     'settings: читается',
@@ -77,38 +81,28 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   );
   const clamped = loadSettings(f, 80);
   check('settings: обрезка по терминалу', clamped.width === 80, JSON.stringify(clamped));
-  writeFileSync('config/settings.probe.tmp.json', JSON.stringify({ width: 10 }), 'utf8');
-  let threw = '';
-  try {
-    loadSettings('config/settings.probe.tmp.json', 100);
-  } catch (e) {
-    threw = e instanceof Error ? e.message : String(e);
-  }
-  check('settings: width=10 → ошибка', threw.includes('width'), threw);
-  writeFileSync('config/settings.probe.tmp.json', JSON.stringify({ width: 80, margin: 11 }), 'utf8');
-  let marginErr = '';
-  try {
-    loadSettings('config/settings.probe.tmp.json', 100);
-  } catch (e) {
-    marginErr = e instanceof Error ? e.message : String(e);
-  }
-  check('settings: margin=11 → ошибка', marginErr.includes('margin'), marginErr);
-  writeFileSync('config/settings.probe.tmp.json', JSON.stringify({ width: 80, runTimeoutMs: -1 }), 'utf8');
-  let timeoutErr = '';
-  try {
-    loadSettings('config/settings.probe.tmp.json', 100);
-  } catch (e) {
-    timeoutErr = e instanceof Error ? e.message : String(e);
-  }
-  check('settings: runTimeoutMs=-1 → ошибка', timeoutErr.includes('runTimeoutMs'), timeoutErr);
+  const bad = (json: unknown, part: string, what: string) => {
+    writeFileSync(f, JSON.stringify(json));
+    let threw = '';
+    try {
+      loadSettings(f, 100);
+    } catch (e) {
+      threw = e instanceof Error ? e.message : String(e);
+    }
+    check(`settings: ${what} → ошибка`, threw.includes(part), threw);
+  };
+  bad({ width: 10 }, 'width', 'width=10');
+  bad({ width: 80, margin: 11 }, 'margin', 'margin=11');
+  bad({ width: 80, runTimeoutMs: -1 }, 'runTimeoutMs', 'runTimeoutMs=-1');
+  bad({ width: 80, workspace: 'ws' }, 'workspace', 'workspace удалён');
   let missing = '';
   try {
-    loadSettings('config/settings.nope.json', 100);
+    loadSettings(join(tmp, 'settings.nope.json'), 100);
   } catch (e) {
     missing = e instanceof Error ? e.message : String(e);
   }
   check('settings: файла нет → ошибка', missing.includes('settings.nope'), missing);
-  unlinkSync('config/settings.probe.tmp.json'); // временный файл валидации — убрать за собой
+  rmSync(tmp, { recursive: true, force: true });
 }
 
 // --- Screen: зоны на фейковом выходе ---

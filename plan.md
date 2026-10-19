@@ -59,7 +59,7 @@ opencode). Приложение создаёт там служебную пап�
 
 ## Фазы
 
-### Фаза 0 — слой путей (фундамент)
+### Фаза 0 — слой путей (фундамент) — ВЫПОЛНЕНА
 
 Сейчас всё резолвится от корня приложения (`src/index.ts:70-77`: `ROOT`,
 `CONFIG_DIR`, `DATA_DIR`, `MEMORY_FILE`; `src/settings.ts:73`; загрузки в
@@ -83,6 +83,19 @@ opencode). Приложение создаёт там служебную пап�
   больше нет (валидация: только hosts).
 - Пробники переводятся на `DT_HOME` во временных каталогах (сейчас они и так
   на tmp — подстроить вызовы).
+
+Сделано: `src/paths.ts` (APP_ROOT / DT_HOME / DT_PROJECT / WORKSPACE +
+`migrateLegacy()` с env-предохранителем — при заданных DT_HOME/DT_PROJECT
+миграция молча не работает, пробники никогда не трогают реальные данные);
+`dir` в projects.json и `workspace` в settings.json удалены (fail-fast с
+внятной ошибкой); рабочая папка инструментов — всегда cwd; префикс проекта
+адресует только серверы. Сверх плана: служебная папка `.dreamteam` запрещена
+тулам на чтение и запись (pathScan, files, scp put/get) — иначе агент мог бы
+править собственные конфиги. Пробники герметичны: TUI/стартовые гоняются
+в tmp-доме и tmp-проекте с mock-провайдерами. Этот репозиторий переведён:
+`config/` → `.dreamteam` (agents/manager/projects) + `~/.dreamteam`
+(providers/settings/user), `data/` → `~/.dreamteam` (sessions/transcripts),
+`tools/` → `.dreamteam/tools`; предохранительная копия — `migration-backup/`.
 
 Проверка: tsc, `npm run probe`, `probe:e2e`, `probe:tui` (изоляция данных),
 md5-контроль. Коммит «слой путей».

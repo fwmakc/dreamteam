@@ -4,13 +4,19 @@
  * а не поток байт. Снимок делается до любого ввода, затем после «@» и
  * после Esc — воспроизводит жалобу «ввод вверху, после @ всё встаёт на место».
  * Запуск: npm run probe:e2e (нужен node-pty: npm i --no-save node-pty).
- * Данные не трогает (только читает config/ и хвост истории) — md5 data/
- * до и после совпадает; но жмёт Ctrl+C с выделением и КЛАДЁТ ТЕКСТ В БУФЕР
- * ОБМЕНА — сохраните буфер перед прогоном и верните после.
+ * Изоляция: приложение стартует во временном проекте с DT_HOME/DT_PROJECT во
+ * временные папки (всё на mock); в дом заранее кладётся разговор с историей,
+ * чтобы было что листать. Реальные данные не трогает; но жмёт Ctrl+C
+ * с выделением и КЛАДЁТ ТЕКСТ В БУФЕР ОБМЕНА — сохраните буфер перед
+ * прогоном и верните после.
  */
 import { createRequire } from 'node:module';
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { VtScreen } from './vt.js';
+import { SessionStore } from '../src/sessions.js';
+import type { ChatMessage } from '../src/types.js';
 
 const req = createRequire(import.meta.url);
 let pty: { spawn: (...args: unknown[]) => any };
@@ -21,15 +27,68 @@ try {
   process.exit(2);
 }
 
+// --- герметичные слои: временный дом (с разговором) и временный проект ---
+const root = mkdtempSync(join(tmpdir(), 'dt-startup-'));
+const home = join(root, 'home');
+const proj = join(root, 'proj');
+mkdirSync(home, { recursive: true });
+mkdirSync(join(proj, '.dreamteam'), { recursive: true });
+const j = (p: string, v: unknown): void =>
+  writeFileSync(join(home, p), JSON.stringify(v, null, 2) + '\n');
+const pj = (p: string, v: unknown): void =>
+  writeFileSync(join(proj, '.dreamteam', p), JSON.stringify(v, null, 2) + '\n');
+j('providers.json', {
+  default: 'mock',
+  providers: { mock: { adapter: 'mock' }, 'mock-images': { adapter: 'mock-images' } },
+});
+j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000 });
+j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
+pj('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
+pj('projects.json', { dreamteam: { hosts: { dev: { host: '192.0.2.1' } } } });
+const team = JSON.parse(readFileSync('.dreamteam/agents.json', 'utf8')) as Array<Record<string, unknown>>;
+for (const a of team) {
+  if (a.provider) a.provider = 'mock';
+  if (a.vision) a.vision = 'mock';
+  if (a.image) a.image = 'mock-images';
+}
+pj('agents.json', team);
+// прошлый разговор с историей: хвост в панели, «Продолжаю разговор», @Глеб в попапе
+{
+  const store = new SessionStore(join(home, 'sessions'));
+  const s = store.create();
+  s.title = 'Прошлый разговор';
+  let ts = Date.now() - 180_000;
+  const msg = (authorId: string, authorName: string, text: string, role?: string): ChatMessage => ({
+    authorId,
+    authorName,
+    authorRole: role,
+    text,
+    ts: (ts += 60_000),
+  });
+  s.messages = [
+    msg('user', 'Босс', 'привет, команда'),
+    msg('gleb_cyber', 'Глеб', 'Привет! Продолжаю разговор: серваки на месте, можно работать :)', 'Главный по архитектуре и коду'),
+    msg('katya_uiux', 'Катя', 'И вам привет ^_^', 'Арт-директор и UI/UX'),
+  ];
+  store.save(s);
+}
+process.on('exit', () => rmSync(root, { recursive: true, force: true }));
+process.on('SIGINT', () => process.exit(130));
+process.on('SIGTERM', () => process.exit(143));
+
 const COLS = 100;
 const ROWS = 30;
-const term = pty.spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'src/index.ts'], {
-  name: 'xterm-256color',
-  cols: COLS,
-  rows: ROWS,
-  env: { ...process.env },
-  cwd: process.cwd(),
-});
+const term = pty.spawn(
+  process.execPath,
+  [resolve('node_modules/tsx/dist/cli.mjs'), resolve('src/index.ts')],
+  {
+    name: 'xterm-256color',
+    cols: COLS,
+    rows: ROWS,
+    env: { ...process.env, DT_HOME: home, DT_PROJECT: join(proj, '.dreamteam') },
+    cwd: proj,
+  },
+);
 
 const vt = new VtScreen(COLS, ROWS);
 let raw = ''; // сырой поток: для проверки управляющих кодов (реверс-вид и т.п.)

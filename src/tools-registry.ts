@@ -57,13 +57,14 @@ function validateInstance(id: string, source: string, value: unknown): Tool {
 }
 
 /**
- * Читает tools/*.ts|js: имя файла — id тула. Папки может не быть — тогда
- * кастомных тулов нет; файл с кривым именем или без export default — ошибка.
- * Каждый вызов переимпортирует файлы (кэш модулей обходится версий-параметром),
- * поэтому правки кода тулов подхватываются без перезапуска.
+ * Читает пользовательские тула из папки (<проект>/tools/*.ts|js): имя файла —
+ * id тула. Папки может не быть — тогда кастомных тулов нет; файл с кривым
+ * именем или без export default — ошибка. Каждый вызов переимпортирует файлы
+ * (кэш модулей обходится версий-параметром), поэтому правки кода тулов
+ * подхватываются без перезапуска.
  */
-export async function loadUserTools(root: string): Promise<Map<string, ToolFactory>> {
-  const dir = join(root, 'tools');
+export async function loadUserTools(toolsDir: string): Promise<Map<string, ToolFactory>> {
+  const dir = toolsDir;
   const map = new Map<string, ToolFactory>();
   let names: string[];
   try {

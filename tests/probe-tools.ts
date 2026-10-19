@@ -5,10 +5,11 @@
  *    подстановки/перенаправления — всегда вопрос;
  *  - parseCommandRules: валидация правил из карточки (fail-fast);
  *  - normalizeAgentTools/loadTeam: карточки тулов в agents.json;
- *  - loadUserTools: загрузка tools/*.ts, кривые файлы, резерв имён,
+ *  - loadUserTools: загрузка <проект>/tools/*.ts, кривые файлы, резерв имён,
  *    переимпорт без перезапуска;
  *  - buildToolset + встроенные тула: check() файлов/консоли по карточке,
- *    files.run пишет файл, shell.run запускает команду;
+ *    files.run пишет файл, shell.run запускает команду; служебная папка
+ *    .dreamteam тулам запрещена;
  *  - parseActions с кастомными тулами и гейты для них.
  * Запуск: tsx tests/probe-tools.ts (входит в npm run probe)
  */
@@ -27,7 +28,7 @@ import {
 import { checkPermission, loadProjects, parseActions, type ToolContext, type ToolsConfig } from '../src/actions.js';
 import { buildToolset, loadUserTools } from '../src/tools-registry.js';
 import { loadTeam } from '../src/agents.js';
-import gitFactory from '../tools/git.js';
+import gitFactory from '../.dreamteam/tools/git.js';
 import type { Agent } from '../src/types.js';
 
 let fails = 0;
@@ -150,36 +151,36 @@ const tctx: ToolContext = {
   const good = join(toolsDir, 'good.ts');
   writeFileSync(good, "export default (config: unknown) => ({ desc: 'v1:' + String((config as {tag?: string})?.tag ?? ''), check: () => 'ask' as const, run: async () => 'сделано' });\n");
 
-  let tools = await loadUserTools(root);
+  let tools = await loadUserTools(toolsDir);
   check('загрузчик: тул найден', tools.has('good'));
   check('загрузчик: карточка доходит до фабрики', tools.get('good')!({ tag: 'карточка' }).desc === 'v1:карточка');
 
   writeFileSync(good, "export default () => ({ desc: 'v2', check: () => 'allow' as const, run: async () => '' });\n");
-  tools = await loadUserTools(root);
+  tools = await loadUserTools(toolsDir);
   check('загрузчик: правка кода подхватывается без перезапуска', tools.get('good')!({}).desc === 'v2');
 
   writeFileSync(join(toolsDir, 'bad.ts'), 'export default 42;\n');
   let threw = '';
-  try { await loadUserTools(root); } catch (e) { threw = (e as Error).message; }
+  try { await loadUserTools(toolsDir); } catch (e) { threw = (e as Error).message; }
   check('загрузчик: не фабрика — ошибка с именем файла', threw.includes('bad.ts') && threw.includes('export default'), threw);
   rmSync(join(toolsDir, 'bad.ts'));
 
   writeFileSync(join(toolsDir, 'shell.ts'), 'export default () => ({});\n');
   threw = '';
-  try { await loadUserTools(root); } catch (e) { threw = (e as Error).message; }
+  try { await loadUserTools(toolsDir); } catch (e) { threw = (e as Error).message; }
   check('загрузчик: встроенное имя занять нельзя', threw.includes('занято'), threw);
   rmSync(join(toolsDir, 'shell.ts'));
 
   writeFileSync(join(toolsDir, 'Кривой!.ts'), 'export default () => ({});\n');
   threw = '';
-  try { await loadUserTools(root); } catch (e) { threw = (e as Error).message; }
+  try { await loadUserTools(toolsDir); } catch (e) { threw = (e as Error).message; }
   check('загрузчик: кривое имя файла — ошибка', threw.includes('id тула'), threw);
   rmSync(join(toolsDir, 'Кривой!.ts'));
 
   const agent: Agent = { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p', tools: {} };
   const missing = (name: string, code: string) => {
     writeFileSync(join(toolsDir, `${name}.ts`), code);
-    return loadUserTools(root).then((m) => {
+    return loadUserTools(toolsDir).then((m) => {
       let err = '';
       try { buildToolset({ ...agent, tools: { [name]: {} } }, cfg, tctx, undefined, m); } catch (e) { err = (e as Error).message; }
       return err;
@@ -290,6 +291,10 @@ const tctx: ToolContext = {
   const secret = shell.check('cat .env', { cwd: root });
   check('shell дефолт: .env — отказ «секретный»', typeof secret === 'object' && secret.deny.includes('секретн'), JSON.stringify(secret));
   check('shell дефолт: ssh-ключ — отказ', typeof shell.check('cat ~/.ssh/id_rsa') === 'object');
+  const svc = shell.check('cat .dreamteam/agents.json', { cwd: root });
+  check('shell дефолт: служебная .dreamteam — отказ', typeof svc === 'object' && svc.deny.includes('dreamteam'), JSON.stringify(svc));
+  check('shell дефолт: запись в .dreamteam — отказ', typeof shell.check('ls .dreamteam/tools', { cwd: root }) === 'object');
+  check('ssh дефолт: .dreamteam на сервере тоже запрет', typeof ssh.check('cat .dreamteam/agents.json') === 'object');
 
   check('ssh дефолт: uptime — молча', ssh.check('uptime') === 'allow');
   check('ssh дефолт: цепочка read-only — молча', ssh.check('df -h && free -m') === 'allow');
@@ -371,26 +376,24 @@ const tctx: ToolContext = {
 // --- loadProjects: пароль и папка проекта на сервере ---
 {
   const root = mkdtempSync(join(tmpdir(), 'dt-projects-'));
-  mkdirSync(join(root, 'config'), { recursive: true });
-  const file = join(root, 'config', 'projects.json');
+  const file = join(root, 'projects.json');
   writeFileSync(
     file,
     JSON.stringify({
       shop: {
-        dir: './w',
         hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 2222, password: 'p @ w', dir: '/var/www/app' } },
       },
     }),
   );
-  const host = loadProjects(root).get('shop')!.hosts.get('prod')!;
+  const host = loadProjects(file).get('shop')!.hosts.get('prod')!;
   check('loadProjects: пароль и папка хоста дошли', host.password === 'p @ w' && host.dir === '/var/www/app', JSON.stringify(host));
   writeFileSync(file, JSON.stringify({ shop: { hosts: { prod: { host: 'h', password: 5 } } } }));
   let threw = '';
-  try { loadProjects(root); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(file); } catch (e) { threw = (e as Error).message; }
   check('loadProjects: кривой password — отказ', threw.includes('"password"'), threw);
   writeFileSync(file, JSON.stringify({ shop: { hosts: { prod: { host: 'h', dir: '  ' } } } }));
   threw = '';
-  try { loadProjects(root); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(file); } catch (e) { threw = (e as Error).message; }
   check('loadProjects: пустой dir — отказ', threw.includes('"dir"'), threw);
   rmSync(root, { recursive: true, force: true });
 }
@@ -399,7 +402,7 @@ const tctx: ToolContext = {
 {
   const root = mkdtempSync(join(tmpdir(), 'dt-sshdir-'));
   const projects = new Map([
-    ['shop', { dirAbs: root, hosts: new Map([['prod', { host: '203.0.113.10', user: 'deploy', dir: '/var/www/app' }]]) }],
+    ['shop', { hosts: new Map([['prod', { host: '203.0.113.10', user: 'deploy', dir: '/var/www/app' }]]) }],
   ]);
   const cfgS: ToolsConfig = { ...cfg, projects };
   const mk = (card: ToolConfig) =>
@@ -431,6 +434,8 @@ const tctx: ToolContext = {
   check('scp: put мимо папки сервера — отказ', typeof putOut === 'object' && putOut.deny.includes('вне рабочей папки'), JSON.stringify(putOut));
   const putLocal = ssh.check('put ../leak.txt /var/www/app/x', ctx);
   check('scp: локальная сторона вне папки — отказ', typeof putLocal === 'object' && putLocal.deny.includes('локальный путь'), JSON.stringify(putLocal));
+  const putSvc = ssh.check('put .dreamteam/projects.json /var/www/app/x', ctx);
+  check('scp: локальная .dreamteam — отказ', typeof putSvc === 'object' && putSvc.deny.includes('dreamteam'), JSON.stringify(putSvc));
   const bad = ssh.check('put report.txt', ctx);
   check('scp: кривое тело — отказ с форматом', typeof bad === 'object' && bad.deny.includes('два пути'), JSON.stringify(bad));
   check('scp: get внутрь — вопрос (по умолчанию)', ssh.check('get /var/www/app/log.txt ./log.txt', ctx) === 'ask');
@@ -456,6 +461,10 @@ const tctx: ToolContext = {
   check('files+маски: «!»-исключение — можно', files.check('safe.key', { cwd: root }) === 'allow');
   check('files+маски: глубже тоже под маской', typeof files.check('etc/server.key', { cwd: root }) === 'object');
   check('files+маски: обычный файл — молча', files.check('readme.md', { cwd: root }) === 'allow');
+  const svc = files.check('.dreamteam/agents.json', { cwd: root });
+  check('files: служебная .dreamteam — отказ', typeof svc === 'object' && svc.deny.includes('dreamteam'), JSON.stringify(svc));
+  const svcDeep = files.check('.dreamteam/tools/x.ts', { cwd: root });
+  check('files: .dreamteam на глубине — отказ', typeof svcDeep === 'object' && svcDeep.deny.includes('dreamteam'), JSON.stringify(svcDeep));
   rmSync(root, { recursive: true, force: true });
 }
 
@@ -486,7 +495,7 @@ const tctx: ToolContext = {
 
 // --- checkPermission для кастомного тула ---
 {
-  const projects = new Map([['shop', { dirAbs: dir, hosts: new Map() }]]);
+  const projects = new Map([['shop', { hosts: new Map() }]]);
   const withShop: ToolsConfig = { ...cfg, projects };
   const noTool: Agent = { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p' };
   const action = { kind: 'tool', tool: 'git', command: 'status', project: 'shop' } as const;

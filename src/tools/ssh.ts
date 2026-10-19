@@ -22,6 +22,7 @@ import {
   parseCommandRules,
   parseMasks,
   pathScan,
+  protectedPath,
   splitArgs,
   splitChain,
   type BuiltinDeps,
@@ -93,6 +94,8 @@ export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
     if (!localAbs) {
       return { deny: `локальный путь «${local}» вне рабочей папки — обмен только внутри неё` };
     }
+    const protLocal = protectedPath(relative(ctx!.cwd, localAbs));
+    if (protLocal) return { deny: protLocal };
     const maskedLocal = maskDeny(masks, relative(ctx!.cwd, localAbs));
     if (maskedLocal) return { deny: maskedLocal };
     if (dir) {
@@ -135,6 +138,8 @@ export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
         const [local, remote] = words[0] === 'put' ? [words[1]!, words[2]!] : [words[2]!, words[1]!];
         const localAbs = safePath(ctx.cwd, local);
         if (!localAbs) throw new Error(`локальный путь «${local}» вне рабочей папки`);
+        const prot = protectedPath(relative(ctx.cwd, localAbs));
+        if (prot) throw new Error(prot);
         if (!ctx.arg) throw new Error('в блоке ssh не указан хост');
         const ref = ctx.arg.includes(':') || !ctx.project ? ctx.arg : `${ctx.project}:${ctx.arg}`;
         const t = resolveHost(ref, deps.cfg);
