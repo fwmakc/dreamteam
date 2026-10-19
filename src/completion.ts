@@ -21,7 +21,7 @@ export const COMMANDS: CommandSpec[] = [
   { cmd: '/add', args: '<имя|номер>', help: 'позвать участника в текущий чат' },
   { cmd: '/out', args: '<имя|номер>', help: 'вывести участника из текущего чата' },
   { cmd: '/providers', help: 'провайдеры и их статус' },
-  { cmd: '/provider', args: '<id>', help: 'сменить основного провайдера' },
+  { cmd: '/provider', args: '<id>', help: 'сменить основного провайдера (у менеджера свой)' },
   { cmd: '/me', args: '[Имя; роль; о себе]', help: 'как вас видит команда' },
   { cmd: '/memory', args: '[имя|shared]', help: 'что помнит участник; shared — общая память' },
   { cmd: '/help', help: 'эта справка' },
@@ -36,6 +36,8 @@ export interface CompletionContext {
   /** Участники текущего чата — их предлагает всплывашка @упоминаний */
   chatAgents(): { name: string; role?: string }[];
   providerIds(): string[];
+  /** Имя менеджера переговорки (config/manager.json) — первый пункт всплывашки @ */
+  managerName(): string;
 }
 
 function commonPrefix(items: string[]): string {
@@ -117,7 +119,7 @@ export function makeCompleter(ctx: CompletionContext) {
       const hits = options ? tabInsert(options, fragment) : [];
       return hits.length > 0 ? [hits, line.slice(line.length - fragment.length)] : [[], line];
     }
-    const ses = /@session[ \t]+(\S*)$/.exec(line);
+    const ses = /[@№]session[ \t]+(\S*)$/.exec(line);
     if (ses) {
       const fragment = ses[1];
       const hits = tabInsert(
@@ -126,7 +128,7 @@ export function makeCompleter(ctx: CompletionContext) {
       );
       return hits.length > 0 ? [hits, line.slice(line.length - fragment.length)] : [[], line];
     }
-    const at = /@(\S*)$/.exec(line);
+    const at = /[@№](\S*)$/.exec(line);
     if (at) {
       const fragment = at[1];
       const hits = tabInsert(mentionOptions(ctx), fragment);
@@ -136,9 +138,9 @@ export function makeCompleter(ctx: CompletionContext) {
   };
 }
 
-/** Варианты упоминаний для Tab: участники текущего чата и session. */
+/** Варианты упоминаний для Tab: менеджер, участники текущего чата и session. */
 function mentionOptions(ctx: CompletionContext): string[] {
-  return [...ctx.chatAgents().map((a) => a.name), 'session'].map((o) => o + ' ');
+  return [ctx.managerName(), ...ctx.chatAgents().map((a) => a.name), 'session'].map((o) => o + ' ');
 }
 
 const PANEL_MAX = 12;
@@ -170,7 +172,7 @@ export function hintRowsFor(line: string, ctx: CompletionContext): string[] | nu
   if (line.startsWith('/')) {
     return hintRowsForCommand(line, ctx);
   }
-  const ses = /@session[ \t]+(\S*)$/.exec(line);
+  const ses = /[@№]session[ \t]+(\S*)$/.exec(line);
   if (ses) return sessionRows(ctx, ses[1]);
   // @упоминания рисует MentionPicker (с выбором стрелками) — здесь молчим
   return null;
@@ -279,8 +281,8 @@ const SESSION_ITEM: MentionItem = { label: 'session', hint: 'конспект д
 
 const normName = (s: string): string => s.toLowerCase().replace(/ё/g, 'е');
 
-/** @фрагмент, за которым курсор: @ в начале строки или после пробела, без пробелов до курсора */
-const MENTION_RE = /(?:^|\s)@([^\s@]*)$/;
+/** @фрагмент, за которым курсор: @ или № в начале строки или после пробела, без пробелов до курсора */
+const MENTION_RE = /(?:^|\s)([@№])([^\s@№]*)$/;
 
 /** Сколько вариантов видно в всплывашке без прокрутки */
 const MENTION_VISIBLE = 8;
@@ -289,7 +291,11 @@ const MENTION_VISIBLE = 8;
 const MENTION_MAX_WIDTH = 52;
 
 function mentionItems(ctx: CompletionContext): MentionItem[] {
-  return [...ctx.chatAgents().map((a) => ({ label: a.name, hint: a.role })), SESSION_ITEM];
+  return [
+    { label: ctx.managerName(), hint: 'менеджер переговорки' },
+    ...ctx.chatAgents().map((a) => ({ label: a.name, hint: a.role })),
+    SESSION_ITEM,
+  ];
 }
 
 /**
@@ -302,8 +308,10 @@ function mentionItems(ctx: CompletionContext): MentionItem[] {
 export class MentionPicker {
   private items: MentionItem[] = [];
   private sel = 0;
-  /** Индекс '@' во вставленном варианте и срез строки на последний пересчёт */
+  /** Индекс триггера (@ или №) во вставленном варианте и срез строки на последний пересчёт */
   private at = 0;
+  /** Какой триггер набрал пользователь — его же и вставляем */
+  private trigger = '@';
   private line = '';
   private cursor = 0;
   /** Фрагмент, для которого Esc уже закрыл панель (наберёшь другой — откроется) */
@@ -326,7 +334,7 @@ export class MentionPicker {
       this.items = [];
       return null;
     }
-    const fragment = normName(m[1]);
+    const fragment = normName(m[2]);
     if (this.dismissed !== null && fragment !== this.dismissed) this.dismissed = null;
     if (fragment === this.dismissed) {
       this.items = [];
@@ -338,7 +346,8 @@ export class MentionPicker {
       return null;
     }
     const prev = this.items[this.sel]?.label;
-    this.at = before.length - 1 - m[1].length;
+    this.at = before.length - 1 - m[2].length;
+    this.trigger = m[1];
     this.items = items;
     const keep = prev ? items.findIndex((it) => it.label === prev) : -1;
     this.sel = keep >= 0 ? keep : 0;
@@ -371,7 +380,7 @@ export class MentionPicker {
         this.items = [];
         const inserted = item.label + ' ';
         return {
-          line: this.line.slice(0, this.at) + '@' + inserted + this.line.slice(this.cursor),
+          line: this.line.slice(0, this.at) + this.trigger + inserted + this.line.slice(this.cursor),
           cursor: this.at + 1 + inserted.length,
         };
       }
@@ -396,7 +405,7 @@ export class MentionPicker {
     for (let i = off; i < off + visible; i++) {
       const it = this.items[i];
       let hint = it.hint ? ' — ' + it.hint : '';
-      let label = '@' + it.label;
+      let label = this.trigger + it.label;
       if (label.length + hint.length > MENTION_MAX_WIDTH) {
         hint = hint.slice(0, Math.max(0, MENTION_MAX_WIDTH - label.length - 1)) + '…';
       }

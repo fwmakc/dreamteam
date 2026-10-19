@@ -8,20 +8,36 @@ import { format } from 'node:util';
 import pc from 'picocolors';
 import { findMentions, loadTeam, loadUserProfile } from './agents.js';
 import {
+  MANAGER_ID,
+  MANAGER_PROMPT,
+  MANAGER_ROLE,
+  addTeamAgent,
+  loadManagerConfig,
+  managerAsAgent,
+  managerMentioned,
+  managerStateInput,
+  parseManagerReply,
+  updateTeamAgent,
+} from './manager.js';
+import {
   actionsHint,
   checkPermission,
   describeAction,
-  executeAction,
+  executeRunAction,
   loadToolsConfig,
   parseActions,
+  workspaceFor,
   type Action,
   type ToolsConfig,
   type ToolContext,
 } from './actions.js';
+import { agentToolConfig, agentToolIds, type Tool, type ToolCheckContext, type ToolConfig, type ToolFactory, type ToolRunContext } from './tools-api.js';
+import { buildToolset, loadUserTools } from './tools-registry.js';
 import { SessionStore } from './sessions.js';
 import { COMMANDS, HintPanel, MentionPicker, hintRowsFor, makeCompleter, type CompletionContext } from './completion.js';
 import { Editor } from './editor.js';
-import { Screen, loadUiConfig } from './screen.js';
+import { Screen } from './screen.js';
+import { loadSettings } from './settings.js';
 import { planTurns, type PlanResult } from './orchestrator.js';
 import { compressIfNeeded, contextSlice } from './compress.js';
 import {
@@ -43,6 +59,8 @@ import type {
   ChatMessage,
   LLMMessage,
   LLMProvider,
+  ManagerAction,
+  ManagerConfig,
   Session,
   StreamRequest,
   TeamMemory,
@@ -53,7 +71,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_DIR = join(ROOT, 'config');
 const DATA_DIR = join(ROOT, 'data', 'sessions');
 const USER_FILE = join(CONFIG_DIR, 'user.json');
-const UI_FILE = join(CONFIG_DIR, 'ui.json');
+const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json');
+const AGENTS_FILE = join(CONFIG_DIR, 'agents.json');
+const MANAGER_FILE = join(CONFIG_DIR, 'manager.json');
 const MEMORY_FILE = join(ROOT, 'data', 'memory.json');
 
 // доступен командам /exit: закрытие readline завершает приложение через 'close'
@@ -66,11 +86,32 @@ let editor: Editor | null = null;
 /** Подсказки на пустом вводе: постоянная шпаргалка вместо пустой зоны */
 const STATIC_HINTS = [
   pc.dim('  /help — команды · /new — новый разговор · /sessions — список разговоров'),
-  pc.dim('  @имя — вопрос участнику · Esc — прервать раунд · /exit — выход'),
+  pc.dim('  @имя или №имя — участнику · Esc — прервать раунд · /exit — выход'),
 ];
 
 /** Таймер «Скопировано» в строке статуса, чтобы не висел вечно */
 let statusTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Пользовательские тула (tools/*.ts), перечитываются раз в раунд: фабрики
+ * переимпортируются с обходом кэша модулей, поэтому правки кода тулов
+ * подхватываются без перезапуска. Кэш нужен и синхронному промпту (desc).
+ */
+let userTools = new Map<string, ToolFactory>();
+
+async function refreshUserTools(): Promise<void> {
+  try {
+    userTools = await loadUserTools(ROOT);
+  } catch (err) {
+    userTools = new Map();
+    printError(`тулы: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** Карточки → экземпляры Tool для агента (пересобирается на каждый раунд). */
+function toolsetFor(agent: Agent, cfg: ToolsConfig, signal: AbortSignal, tctx: ToolContext): Map<string, Tool> {
+  return buildToolset(agent, cfg, tctx, signal, userTools);
+}
 
 function flashStatus(screen: Screen, text: string): void {
   if (statusTimer) clearTimeout(statusTimer);
@@ -275,12 +316,12 @@ function refreshCompletionCache(): void {
   let team: string[] = [];
   let chat: { name: string; role?: string }[] = [];
   try {
-    const agents = loadTeam(join(CONFIG_DIR, 'team.json'));
+    const agents = loadTeam(AGENTS_FILE);
     team = agents.map((a) => a.name);
     // всплывашка @упоминаний предлагает только позванных в текущий чат
     if (appRef) chat = chatTeam(appRef.session, agents).map((a) => ({ name: a.name, role: a.role }));
   } catch {
-    // без team.json дополняем без имён
+    // без agents.json дополняем без имён
   }
   completionCache = { at: now, sessions, team, chat };
 }
@@ -301,6 +342,9 @@ function completionCtx(): CompletionContext {
     },
     providerIds() {
       return appRef ? [...appRef.providers.keys()] : [];
+    },
+    managerName() {
+      return appRef?.mgr.name ?? 'Менеджер';
     },
   };
 }
@@ -326,6 +370,8 @@ interface App {
   /** image-провайдеры (генерация картинок) из того же providers.json */
   images: Map<string, ImageProviderStatus>;
   defaultProviderId: string;
+  /** Мозг модератора и шлюз конфигурации (config/manager.json) */
+  mgr: ManagerConfig;
   profile: UserProfile;
   memory: TeamMemory;
 }
@@ -334,6 +380,15 @@ function defaultProvider(app: App): LLMProvider {
   const status = app.providers.get(app.defaultProviderId);
   if (!status) {
     throw new Error('не настроен ни один провайдер — проверьте config/providers.json');
+  }
+  return status.provider;
+}
+
+/** Провайдер менеджера переговорки: только его, /provider на это не влияет */
+function managerProvider(app: App): LLMProvider {
+  const status = app.providers.get(app.mgr.provider);
+  if (!status) {
+    throw new Error(`у менеджера переговорки неизвестный провайдер «${app.mgr.provider}» (config/manager.json)`);
   }
   return status.provider;
 }
@@ -357,11 +412,11 @@ function chatTeam(session: Session, fullTeam: Agent[]): Agent[] {
   return picked.length > 0 ? picked : fullTeam;
 }
 
-/** Имена участников чата для подписи (без чтения team.json возвращает null). */
+/** Имена участников чата для подписи (без чтения agents.json возвращает null). */
 function participantsLine(session: Session): string | null {
   if (!session.participants || session.participants.length === 0) return null;
   try {
-    const full = loadTeam(join(CONFIG_DIR, 'team.json'));
+    const full = loadTeam(AGENTS_FILE);
     return chatTeam(session, full).map((a) => `${a.emoji} ${a.name}`).join(', ');
   } catch {
     return null;
@@ -375,9 +430,9 @@ function participantsLine(session: Session): string | null {
 async function pickParticipants(app: App): Promise<void> {
   let fullTeam: Agent[];
   try {
-    fullTeam = loadTeam(join(CONFIG_DIR, 'team.json'));
+    fullTeam = loadTeam(AGENTS_FILE);
   } catch {
-    return; // нет team.json — чат без явного списка, живёт всей командой
+    return; // нет agents.json — чат без явного списка, живёт всей командой
   }
   console.log(pc.dim('  Кого зовём в чат? (Enter — вся команда)'));
   fullTeam.forEach((a, i) => console.log(`    ${i + 1}. ${rosterLine(a)}`));
@@ -456,8 +511,21 @@ function buildRequest(
   if (personal) {
     blocks.push(`Твоя память (субъективно и сжато, это то, что ты помнишь сам):\n${personal}`);
   }
-  if (agent.tools?.length) {
-    const hint = actionsHint(agent, loadToolsConfig(ROOT));
+  if (agentToolIds(agent).length > 0) {
+    // desc кастомных тулов — из живых экземпляров; кривая карточка не должна
+    // ронять сборку промпта: об ошибке отрапортует конвейер при выполнении
+    const custom = new Map<string, Tool>();
+    for (const id of agentToolIds(agent)) {
+      const factory = userTools.get(id);
+      if (factory) {
+        try {
+          custom.set(id, factory(agentToolConfig(agent, id)));
+        } catch {
+          // невалидная карточка — подсказка для этого тула будет общей
+        }
+      }
+    }
+    const hint = actionsHint(agent, loadToolsConfig(ROOT), custom);
     if (hint) blocks.push(hint);
   }
   blocks.push(COMMON_RULES);
@@ -571,7 +639,7 @@ async function getSessionDigest(
 async function handleMessage(app: App, text: string): Promise<void> {
   let team: Agent[];
   try {
-    team = loadTeam(join(CONFIG_DIR, 'team.json'));
+    team = loadTeam(AGENTS_FILE);
   } catch (err) {
     printError(`не удалось прочитать команду: ${err instanceof Error ? err.message : err}`);
     return;
@@ -593,6 +661,8 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
   // профиль читаем каждый раунд: правки config/user.json подхватываются на лету
   const profile = loadUserProfile(USER_FILE);
   app.profile = profile;
+  // тула тоже: переимпорт tools/*.ts и свежие карточки — без перезапуска
+  await refreshUserTools();
   // в чате отвечают только позванные (старые чаты без списка — вся команда)
   const team = chatTeam(session, fullTeam);
 
@@ -600,7 +670,7 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
   const attachments: ChatMessage[] = [];
   const usedIds = new Set<string>();
   let cleaned = text;
-  const refRegex = /@session(?:\s+(\d+))?/gi;
+  const refRegex = /[@№]session(?:\s+(\d+))?/gi;
   for (const match of text.matchAll(refRegex)) {
     const picked = await pickSession(app, match[1]);
     if (!picked || picked.id === session.id || usedIds.has(picked.id)) continue;
@@ -636,7 +706,14 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
   }
   store.save(session);
 
-  const moderator = defaultProvider(app);
+  // @менеджер — конфигурация переговорки через разговор: состав команды,
+  // состав чата, разговоры. Другого пути менять agents.json в приложении нет.
+  if (managerMentioned(text, app.mgr)) {
+    await managerTurn(app, text, fullTeam, profile, signal);
+    return;
+  }
+
+  const moderator = managerProvider(app);
 
   // не даём контексту расти бесконечно: старые сообщения сворачиваются в конспект
   const compressing = new Spinner('Проверяю длину разговора…');
@@ -722,7 +799,7 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
         ts: Date.now(),
       });
       store.save(session);
-      if (turn.agent.tools?.length && !signal.aborted) {
+      if (agentToolIds(turn.agent).length > 0 && !signal.aborted) {
         await runToolLoop(app, turn.agent, full.trim(), fullTeam, profile, provider, signal);
       }
     } else if (!signal.aborted) {
@@ -737,17 +814,211 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
   await updateMemories(app, team, profile, plan, signal);
 }
 
+// ─── Менеджер переговорки (@менеджер) ───────────────────────────────────────
+
+/**
+ * Ответ менеджера на @менеджер. Реплика буферизуется целиком: ответ короткий,
+ * а сырой JSON действий показывать нельзя. Действия исполняются по одному,
+ * отчёты «✓/✗» печатаются и сохраняются в реплике — менеджер видит их итоги
+ * в своей истории. Смена разговора (session.open/new) применяется строго
+ * после сохранения реплики, иначе ответ ушёл бы в новый разговор.
+ */
+async function managerTurn(
+  app: App,
+  text: string,
+  fullTeam: Agent[],
+  profile: UserProfile,
+  signal: AbortSignal,
+): Promise<void> {
+  const { session, store } = app;
+  const agent = managerAsAgent(app.mgr);
+  const provider = managerProvider(app);
+  console.log('\n' + agentHeader(agent));
+  const spinner = new Spinner(`${agent.emoji} ${agent.name} разбирается…`);
+  spinner.start();
+  let full = '';
+  let streamError: unknown = null;
+  try {
+    for await (const chunk of provider.stream({
+      system: MANAGER_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: managerStateInput({
+            team: fullTeam,
+            participants: session.participants,
+            sessions: store.list(),
+            currentSessionId: session.id,
+            userName: profile.name,
+            history: session.messages.slice(-12),
+            request: text,
+          }),
+        },
+      ],
+      temperature: app.mgr.temperature,
+      signal,
+    })) {
+      full += chunk;
+    }
+  } catch (err) {
+    streamError = err;
+  } finally {
+    spinner.stop();
+  }
+  if (streamError && !signal.aborted) {
+    printError(`ошибка провайдера «${provider.id}»: ${streamError instanceof Error ? streamError.message : streamError}`);
+  }
+  if (signal.aborted) {
+    printDim('  ⏹ Прервано (Esc).');
+    return;
+  }
+  const reply = parseManagerReply(full);
+  if (!reply.say && reply.actions.length === 0) {
+    printDim('(менеджер молчит — пустой ответ)');
+    return;
+  }
+  if (reply.say) {
+    out(reply.say);
+    out('\n\n');
+  }
+
+  const reports: string[] = [];
+  const pendingSwitches: (() => Promise<void> | void)[] = [];
+  for (const action of reply.actions) {
+    let report: string;
+    try {
+      report = await execManagerAction(app, action, fullTeam, pendingSwitches);
+    } catch (err) {
+      report = `✗ ${err instanceof Error ? err.message : err}`;
+    }
+    reports.push(report);
+    printDim('  ' + report);
+  }
+
+  session.messages.push({
+    authorId: MANAGER_ID,
+    authorName: agent.name,
+    authorRole: MANAGER_ROLE,
+    text: [reply.say, ...reports].filter(Boolean).join('\n\n'),
+    ts: Date.now(),
+  });
+  store.save(session);
+  for (const apply of pendingSwitches) await apply();
+}
+
+/** Исполнение одного действия менеджера; то, что меняет app.session, уходит в pendingSwitches. */
+async function execManagerAction(
+  app: App,
+  action: ManagerAction,
+  fullTeam: Agent[],
+  pendingSwitches: (() => Promise<void> | void)[],
+): Promise<string> {
+  switch (action.op) {
+    case 'team.add':
+      return addTeamAgent(AGENTS_FILE, action);
+    case 'team.update':
+      return updateTeamAgent(AGENTS_FILE, action.id, action.fields);
+    case 'chat.add':
+      return addToChat(app, action.who, fullTeam);
+    case 'chat.remove':
+      return removeFromChat(app, action.who, fullTeam);
+    case 'session.list':
+      return sessionsListText(app);
+    case 'session.open': {
+      const meta = Number.isInteger(action.n) && action.n > 0 ? app.store.list()[action.n - 1] : undefined;
+      if (!meta) return `Не нашёл разговор №${action.n} — см. /sessions`;
+      if (meta.id === app.session.id) return `Разговор «${meta.title}» и так открыт.`;
+      const loaded = app.store.load(meta.id);
+      if (!loaded) return `Не удалось прочитать разговор «${meta.title}».`;
+      pendingSwitches.push(() => applySessionSwitch(app, loaded));
+      return `✓ Открываю разговор «${loaded.title}» (${loaded.messages.length} сообщ.)`;
+    }
+    case 'session.new': {
+      const title = (action.title ?? '').trim() || 'Новый разговор';
+      const known = new Set(fullTeam.map((a) => a.id as string));
+      const ids = [...new Set((action.participants ?? []).map((p) => String(p).trim()).filter(Boolean))]
+        .filter((id) => known.has(id));
+      pendingSwitches.push(() => {
+        const old = app.session;
+        app.session = app.store.create();
+        app.session.title = title;
+        if (ids.length > 0) app.session.participants = ids;
+        app.store.save(app.session);
+        queueFlush(app, old);
+        printDim(`  Новый разговор «${app.session.title}» (${app.session.id})`);
+        const line = participantsLine(app.session);
+        if (line) printDim(`  Участники: ${line}`);
+      });
+      return `✓ Создаю разговор «${title}»${ids.length ? `, в чате: ${ids.join(', ')}` : ''}`;
+    }
+    case 'session.delete':
+      return deleteSessionByNumber(app, action.n);
+  }
+}
+
+/** Список разговоров текстом — для действия session.list. */
+function sessionsListText(app: App): string {
+  const list = app.store.list();
+  if (list.length === 0) return 'Разговоров пока нет.';
+  return list
+    .map((s, i) => `${i + 1}. ${s.title} — ${s.count} сообщ.${s.id === app.session.id ? ' (текущий)' : ''}`)
+    .join('\n');
+}
+
+/** Удаление разговора по номеру списка; текущий не удаляется. */
+function deleteSessionByNumber(app: App, n: number): string {
+  const meta = Number.isInteger(n) && n > 0 ? app.store.list()[n - 1] : undefined;
+  if (!meta) return `Не нашёл разговор №${n} — см. /sessions`;
+  if (meta.id === app.session.id) return 'Текущий разговор удалить нельзя — сначала откройте другой.';
+  app.store.delete(meta.id);
+  return `Разговор «${meta.title}» удалён.`;
+}
+
+/** Позвать участника в текущий чат: общее для /add и действия менеджера chat.add. */
+function addToChat(app: App, arg: string, fullTeam: Agent[]): string {
+  const agent = findAgentByArg(fullTeam, arg);
+  if (!agent) return `Нет участника «${arg}» — см. /team`;
+  if (chatTeam(app.session, fullTeam).some((a) => a.id === agent.id)) {
+    return `${agent.emoji} ${agent.name} уже в чате.`;
+  }
+  app.session.participants ??= fullTeam.map((a) => a.id);
+  if (!app.session.participants.includes(agent.id)) app.session.participants.push(agent.id);
+  app.store.save(app.session);
+  return `${agent.emoji} ${agent.name} присоединился к чату.`;
+}
+
+/** Вывести участника из чата: общее для /out и действия менеджера chat.remove. */
+function removeFromChat(app: App, arg: string, fullTeam: Agent[]): string {
+  const kicked = findAgentByArg(fullTeam, arg);
+  if (!kicked) return `Нет участника «${arg}» — см. /team`;
+  if (!chatTeam(app.session, fullTeam).some((a) => a.id === kicked.id)) {
+    return `${kicked.emoji} ${kicked.name} и так не в этом чате.`;
+  }
+  // материализуем явный список, иначе выгон «вернул» бы всю команду
+  app.session.participants ??= fullTeam.map((a) => a.id);
+  if (app.session.participants.length <= 1) {
+    return 'Это последний участник — совсем без команды нельзя. Создайте новый: /new';
+  }
+  app.session.participants = app.session.participants.filter((id) => id !== kicked.id);
+  app.store.save(app.session);
+  return `${kicked.emoji} ${kicked.name} покинул(а) чат. Реплики останутся в истории.`;
+}
+
+/** Переключение на другой разговор: общее для /session и действия менеджера session.open. */
+function applySessionSwitch(app: App, loaded: Session): void {
+  if (loaded.id !== app.session.id) {
+    const old = app.session;
+    app.session = loaded;
+    queueFlush(app, old);
+  }
+  printDim(`  Открыт разговор «${loaded.title}» (${loaded.messages.length} сообщ.)`);
+  const line = participantsLine(loaded);
+  if (line) printDim(`  Участники: ${line}`);
+  replaySession(loaded);
+}
+
 /** Максимум циклов «ответ с действиями → результаты → продолжение» на один ответ агента. */
 const MAX_TOOL_ITERATIONS = 3;
-
-/** Действия, разрешённые пользователем «до конца сессии» (ответ [a] в подтверждении). */
-const sessionAllowed = new Set<string>();
-
-/** «Разрешить такие» привязываем к типу действия и его цели: ssh:prod ≠ ssh:staging. */
-function actionScope(action: Action): string {
-  if (action.kind === 'ssh') return `ssh:${action.host}`;
-  return `${action.kind}:${action.project ?? '*'}`;
-}
 
 const KIND_LABEL: Record<Action['kind'], string> = {
   file: 'Запись файла',
@@ -755,7 +1026,12 @@ const KIND_LABEL: Record<Action['kind'], string> = {
   ssh: 'Команда по ssh',
   look: 'Просмотр картинки',
   image: 'Генерация изображений',
+  tool: 'Кастомный тул',
 };
+
+function toolLabelOf(action: Action): string {
+  return action.kind === 'tool' ? `Тул «${action.tool}»` : KIND_LABEL[action.kind];
+}
 
 /** Глаза и руки агентов: vision-провайдер для look и image-провайдер для image. */
 function toolContext(app: App): ToolContext {
@@ -773,7 +1049,7 @@ function toolContext(app: App): ToolContext {
     },
     getImageProvider(agent) {
       const pid = agent?.image;
-      if (!pid) return { error: 'агенту не назначен image-провайдер (поле "image" в team.json)' };
+      if (!pid) return { error: 'агенту не назначен image-провайдер (поле "image" в agents.json)' };
       const status = app.images.get(pid);
       if (!status) return { error: `image-провайдер «${pid}» не найден (см. providers.json)` };
       if (!status.ok) return { error: `image-провайдер «${pid}» не настроен: ${status.note ?? ''}` };
@@ -783,19 +1059,18 @@ function toolContext(app: App): ToolContext {
 }
 
 /**
- * Спрашивает пользователя перед реальным действием агента. 'a' запоминает
- * разрешение на такие действия (тип + цель) до закрытия разговора (/new, /session).
+ * Живой вопрос человеку перед действием, которое тул передал наверх
+ * (check() сказал 'ask'). Только y/n: «разрешений на будущее» больше нет —
+ * то, что должно ходить молча, записано в карточке тула или решено его check().
  */
-async function confirmToolAction(action: Action, who: string): Promise<boolean> {
-  const scope = actionScope(action);
-  if (sessionAllowed.has(scope)) return true;
-  printDim(`  ⚙ ${KIND_LABEL[action.kind]}: ${who}: ${describeAction(action)}`);
-  const hint = pc.dim('    y — выполнить · n — отказать · a — такие действия до конца сессии');
+async function confirmAction(label: string, desc: string, who: string): Promise<boolean> {
+  printDim(`  ⚙ ${label}: ${who}: ${desc}`);
+  const hint = pc.dim('    y — выполнить · n — отказать');
   if (editor && screen) {
     // вопрос — в строку статуса над вводом; ответ придёт обычной строкой
     screen.setStatus(hint);
   } else if (rl) {
-    rl.setPrompt(pc.dim('  y/n/a › '));
+    rl.setPrompt(pc.dim('  y/n › '));
     try {
       rl.prompt();
     } catch {
@@ -808,10 +1083,6 @@ async function confirmToolAction(action: Action, who: string): Promise<boolean> 
     answer = ((await stdinLines.next()) ?? '').trim().toLowerCase();
   } finally {
     screen?.setStatus(null);
-  }
-  if (answer === 'a' || answer === 'а') {
-    sessionAllowed.add(scope);
-    return true;
   }
   return answer === 'y' || answer === 'д';
 }
@@ -863,9 +1134,94 @@ async function streamFollowUp(
   return full.trim();
 }
 
+/** «Тело» действия для check(): то, по каким словам тул решает свою судьбу. */
+function checkTargetOf(action: Action): string {
+  if (action.kind === 'file' || action.kind === 'look') return action.path;
+  if (action.kind === 'image') return action.params.prompt;
+  return action.command; // run, ssh, tool
+}
+
+/** «Тело» действия для run(): что тул получает в body (у file это содержимое файла). */
+function actionBody(action: Action): string {
+  if (action.kind === 'file') return action.content;
+  if (action.kind === 'look') return action.question;
+  if (action.kind === 'image') {
+    const p = action.params;
+    const lines = [
+      p.prompt && `prompt: ${p.prompt}`,
+      p.size && `size: ${p.size}`,
+      p.n && `n: ${p.n}`,
+      p.steps && `steps: ${p.steps}`,
+      p.guidance && `guidance: ${p.guidance}`,
+      p.seed !== undefined && `seed: ${p.seed}`,
+      p.refs?.length && `refs: ${p.refs.join(', ')}`,
+    ].filter(Boolean);
+    return lines.join('\n');
+  }
+  return action.command; // run, ssh, tool
+}
+
+/** Мосты к хосту для тулов: рабочая папка, полный конвейер shell, http и живой вопрос. */
+function runContext(
+  app: App,
+  agent: Agent,
+  action: Action,
+  cfg: ToolsConfig,
+  signal: AbortSignal,
+  toolset: Map<string, Tool>,
+): ToolRunContext {
+  const who = `${agent.emoji} ${agent.name}`;
+  const base: ToolCheckContext = {
+    cwd: workspaceFor(agent, action, cfg),
+    project: action.project,
+    arg:
+      action.kind === 'file' || action.kind === 'look'
+        ? action.path
+        : action.kind === 'ssh'
+          ? action.host
+          : undefined,
+  };
+  return {
+    ...base,
+    async run(command) {
+      // полный конвейер shell-тула: check тула → живой вопрос → запуск
+      const shell = toolset.get('shell');
+      if (!shell) return { ok: false, output: 'тул shell этому агенту не включён' };
+      const verdict = shell.check(command, base);
+      if (verdict === 'deny') return { ok: false, output: `отказ: shell отклонил команду «${command}»` };
+      if (verdict === 'ask' && !(await confirmAction('Команда', `команда: ${command}`, who))) {
+        return { ok: false, output: 'отклонено пользователем' };
+      }
+      const r = await executeRunAction({ kind: 'run', command, project: base.project }, cfg, signal, agent);
+      return { ok: r.ok, output: r.output };
+    },
+    async http(url, body) {
+      try {
+        const res = await fetch(url, {
+          method: body === undefined ? 'GET' : 'POST',
+          headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal,
+        });
+        let output = await res.text();
+        if (output.length > cfg.maxOutputChars) {
+          output = output.slice(0, cfg.maxOutputChars) + `… (обрезано, всего ${output.length} символов)`;
+        }
+        return { ok: res.ok, output: output || `(HTTP ${res.status})` };
+      } catch (err) {
+        return { ok: false, output: `ошибка http: ${err instanceof Error ? err.message : err}` };
+      }
+    },
+    async confirm(text) {
+      return confirmAction('Вопрос тула', text, who);
+    },
+  };
+}
+
 /**
- * Цикл инструментов: разбираем блоки ```file / ```run из ответа агента,
- * выполняем с подтверждением, отдаём результаты в историю и просим агента
+ * Цикл инструментов: разбираем блоки ```file / ```run / ```тул из ответа
+ * агента, спрашиваем вердикт check() у тула ('allow' — молча, 'deny' — отказ,
+ * 'ask' — живой y/n), выполняем, отдаём результаты в историю и просим агента
  * продолжить — до трёх итераций или пока блоки не кончатся.
  */
 async function runToolLoop(
@@ -879,26 +1235,57 @@ async function runToolLoop(
 ): Promise<void> {
   const { session, store } = app;
   const cfg = loadToolsConfig(ROOT);
+  let toolset: Map<string, Tool>;
+  try {
+    toolset = toolsetFor(agent, cfg, signal, toolContext(app));
+  } catch (err) {
+    // кривая карточка или код тула: конфигурация чинится в файлах, раунд громко об этом скажет
+    printDim(`  ⚠ тула не собраны: ${err instanceof Error ? err.message : err}`);
+    return;
+  }
+  const customIds = [...userTools.keys()];
   let text = firstText;
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS && !signal.aborted; iteration++) {
-    const actions = parseActions(text);
+    const actions = parseActions(text, customIds);
     if (actions.length === 0) break;
+    const who = `${agent.emoji} ${agent.name}`;
     const results: string[] = [];
     for (const action of actions) {
       if (signal.aborted) break;
-      // права агента проверяем до вопроса пользователю: чужой проект/хост — сразу отказ
-      const deny = checkPermission(agent, action, cfg);
-      if (deny) {
-        results.push(`⛔ ${describeAction(action)} — запрещено: ${deny}`);
+      // структурные гейты до всего остального: чужой проект/хост/тул — сразу отказ
+      const gate = checkPermission(agent, action, cfg);
+      if (gate) {
+        results.push(`⛔ ${describeAction(action)} — запрещено: ${gate}`);
         continue;
       }
-      const allowed = await confirmToolAction(action, `${agent.emoji} ${agent.name}`);
-      if (!allowed) {
-        results.push(`⛔ ${describeAction(action)} — отклонено пользователем`);
+      const tool = toolset.get(action.kind === 'tool' ? action.tool : action.kind === 'file' ? 'files' : action.kind === 'run' ? 'shell' : action.kind)!;
+      const verdict = tool.check(checkTargetOf(action), {
+        cwd: workspaceFor(agent, action, cfg),
+        project: action.project,
+        arg:
+          action.kind === 'file' || action.kind === 'look'
+            ? action.path
+            : action.kind === 'ssh'
+              ? action.host
+              : undefined,
+      });
+      if (verdict === 'deny') {
+        results.push(`⛔ ${describeAction(action)} — тул отклонил действие`);
         continue;
       }
-      const res = await executeAction(action, cfg, signal, agent, toolContext(app));
-      results.push(`${res.ok ? '✅' : '❌'} ${res.output}`);
+      if (verdict === 'ask') {
+        const ok = await confirmAction(toolLabelOf(action), describeAction(action), who);
+        if (!ok) {
+          results.push(`⛔ ${describeAction(action)} — отклонено пользователем`);
+          continue;
+        }
+      }
+      try {
+        const out = await tool.run(actionBody(action), runContext(app, agent, action, cfg, signal, toolset));
+        results.push(`✅ ${out}`);
+      } catch (err) {
+        results.push(`❌ ${err instanceof Error ? err.message : err}`);
+      }
     }
     if (results.length === 0) break;
     console.log();
@@ -1054,7 +1441,9 @@ function queueFlush(app: App, session: Session): void {
 
 /** Строки одного сообщения в фирменном формате (шапка с автором и текст) */
 function messageRows(m: ChatMessage, team: Agent[]): string[] {
-  const agent = team.find((a) => a.id === m.authorId);
+  const agent = m.authorId === MANAGER_ID && appRef
+    ? managerAsAgent(appRef.mgr)
+    : team.find((a) => a.id === m.authorId);
   const who = m.authorId === 'user'
     ? pc.cyan('Вы')
     : m.authorId === 'tool'
@@ -1072,22 +1461,27 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
   console.log(pc.bold(pc.cyan('  ╚══════════════════════════════════════════════╝')));
 
   try {
-    const team = loadTeam(join(CONFIG_DIR, 'team.json'));
+    const team = loadTeam(AGENTS_FILE);
     console.log(pc.dim('\n  Команда:'));
     for (const agent of team) console.log(rosterLine(agent));
   } catch (err) {
-    printError(`проблема с config/team.json: ${err instanceof Error ? err.message : err}`);
+    printError(`проблема с config/agents.json: ${err instanceof Error ? err.message : err}`);
   }
+
+  const mgrAgent = managerAsAgent(app.mgr);
+  console.log(pc.dim('\n  Менеджер переговорки (обращение: @менеджер):'));
+  console.log(rosterLine(mgrAgent) + pc.dim(` [провайдер: ${app.mgr.provider}]`));
 
   console.log(pc.dim('\n  Провайдеры:'));
   for (const [pid, status] of app.providers) {
     const mark = pid === app.defaultProviderId ? pc.cyan(' ★') : '';
+    const mgr = pid === app.mgr.provider ? pc.yellow(' 🛎 менеджер') : '';
     const state = status.ok
       ? pc.green('✓ готов')
       : pc.yellow(`✗ ${status.note ?? 'не настроен'}`);
     const vision = status.vision ? pc.magenta(' ◉ зрение') : '';
     console.log(
-      `  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${vision}${mark}`,
+      `  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${vision}${mark}${mgr}`,
     );
   }
   if (app.images.size > 0) {
@@ -1106,7 +1500,7 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
     );
   }
 
-  printDim('\n  /help — команды · @имя — участнику · @session — приложить разговор · Esc — прервать · /exit — выход');
+  printDim('\n  /help — команды · @имя или №имя — участнику · @session — приложить разговор · Esc — прервать · /exit — выход');
 }
 
 function printHelp(): void {
@@ -1124,6 +1518,8 @@ function printHelp(): void {
       '  Перенос строки в сообщении: \\ + Enter или Ctrl+Enter; пустая строка — разрыв абзаца;',
       '  двойной Enter или «.» — закончить ввод. Вставка многострочного текста тоже работает.',
       '  В сообщении можно адресовать участников: @марина, @viktor и т.д.',
+      '  «№» — полный синоним «@» (Shift+3 в русской раскладке): №марина, №менеджер, №session.',
+      '  @менеджер — конфигурация переговорки: состав команды и чата, разговоры.',
       '  @session — приложить конспект другого разговора (@session 2 — сразу номер).',
       '  Начните ввод с «/» — под строкой появятся подсказки (фильтруются при наборе), Tab — дополнить.',
       '',
@@ -1133,7 +1529,7 @@ function printHelp(): void {
 
 function printTeam(app: App): void {
   try {
-    const fullTeam = loadTeam(join(CONFIG_DIR, 'team.json'));
+    const fullTeam = loadTeam(AGENTS_FILE);
     const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
     const cfg = loadToolsConfig(ROOT);
     console.log(pc.dim('\n  Команда:'));
@@ -1151,16 +1547,28 @@ function printTeam(app: App): void {
 
 /** Короткая строка о доступах агента: инструменты, проекты, серверы, глаза и руки. */
 function accessLine(agent: Agent, cfg: ToolsConfig): string {
-  if (!agent.tools?.length) return '';
+  const toolIds = agentToolIds(agent);
+  if (toolIds.length === 0) return '';
   const parts: string[] = [];
   const projects = (agent.projects ?? []).filter((p) => cfg.projects.has(p) || p === agent.workspace);
   if (projects.length > 0) parts.push(`проекты: ${projects.join(', ')}`);
-  const hosts = agent.hosts ?? [];
-  if (hosts.length > 0) parts.push(`серверы: ${hosts.join(', ')}`);
+  // серверы живут внутри проектов: «проект:хост» для каждого назначенного проекта
+  const servers = projects.flatMap((p) => [...(cfg.projects.get(p)?.hosts.keys() ?? [])].map((h) => `${p}:${h}`));
+  if (servers.length > 0) parts.push(`серверы: ${servers.join(', ')}`);
   if (agent.vision) parts.push(`глаза: ${agent.vision}`);
   if (agent.image) parts.push(`рисует: ${agent.image}`);
-  const labels = agent.tools.map((t) =>
-    t === 'files' ? 'файлы' : t === 'shell' ? 'консоль' : t === 'ssh' ? 'ssh' : t === 'look' ? 'зрение' : 'картинки',
+  const labels = toolIds.map((t) =>
+    t === 'files'
+      ? 'файлы'
+      : t === 'shell'
+        ? 'консоль'
+        : t === 'ssh'
+          ? 'ssh'
+          : t === 'look'
+            ? 'зрение'
+            : t === 'image'
+              ? 'картинки'
+              : t,
   );
   return pc.dim(` [${labels.join(', ')}${parts.length ? ' · ' + parts.join(' · ') : ''}]`);
 }
@@ -1169,9 +1577,10 @@ function printProviders(app: App): void {
   console.log(pc.dim('\n  Провайдеры (★ — основной):'));
   for (const [pid, status] of app.providers) {
     const mark = pid === app.defaultProviderId ? pc.cyan(' ★') : '';
+    const mgr = pid === app.mgr.provider ? pc.yellow(' 🛎 менеджер') : '';
     const state = status.ok ? pc.green('✓ готов') : pc.yellow(`✗ ${status.note ?? 'не настроен'}`);
     const vision = status.vision ? pc.magenta(' ◉ зрение') : '';
-    console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${vision}${mark}`);
+    console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${vision}${mark}${mgr}`);
   }
   if (app.images.size > 0) {
     console.log(pc.dim('  Картинки (для инструмента image):'));
@@ -1180,7 +1589,8 @@ function printProviders(app: App): void {
       console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}`);
     }
   }
-  printDim('  Сменить основной: /provider <id>. Свой провайдер агенту — поля "provider", "vision", "image" в team.json.');
+  printDim('  Сменить основной: /provider <id> — он для агентов; у менеджера переговорки свой (config/manager.json).');
+  printDim('  Свой провайдер агенту — поля "provider", "vision", "image" в agents.json.');
 }
 
 function replaySession(session: Session): void {
@@ -1221,7 +1631,6 @@ async function runCommand(app: App, line: string): Promise<boolean> {
       // чат создаём мгновенно; итоги предыдущего вольются в общую память в фоне
       const old = app.session;
       app.session = app.store.create();
-      sessionAllowed.clear(); // разрешения «до конца сессии» не переезжают в новый чат
       printDim(`  Новый разговор ${app.session.id}`);
       await pickParticipants(app);
       queueFlush(app, old);
@@ -1250,16 +1659,7 @@ async function runCommand(app: App, line: string): Promise<boolean> {
         printDim(`  Не нашёл разговор №${arg}. Посмотрите список: /sessions`);
         break;
       }
-      if (loaded.id !== app.session.id) {
-        const old = app.session;
-        app.session = loaded;
-        sessionAllowed.clear(); // разрешения «до конца сессии» не переезжают в другой чат
-        queueFlush(app, old);
-      }
-      printDim(`  Открыт разговор «${loaded.title}» (${loaded.messages.length} сообщ.)`);
-      const line = participantsLine(loaded);
-      if (line) printDim(`  Участники: ${line}`);
-      replaySession(loaded);
+      applySessionSwitch(app, loaded);
       break;
     }
     case 'history': {
@@ -1272,9 +1672,9 @@ async function runCommand(app: App, line: string): Promise<boolean> {
       }
       let team: Agent[] = [];
       try {
-        team = loadTeam(join(CONFIG_DIR, 'team.json'));
+        team = loadTeam(AGENTS_FILE);
       } catch {
-        // без team.json печатаем без фирменных цветов
+        // без agents.json печатаем без фирменных цветов
       }
       console.log(
         pc.dim(`\n  Разговор «${app.session.title}» — показано ${shown.length} из ${all.length} сообщений:`),
@@ -1288,17 +1688,11 @@ async function runCommand(app: App, line: string): Promise<boolean> {
     }
     case 'delete': {
       const n = Number.parseInt(arg, 10);
-      const meta = Number.isInteger(n) && n > 0 ? app.store.list()[n - 1] : undefined;
-      if (!meta) {
+      if (!Number.isInteger(n) || n <= 0) {
         printDim(`  Не нашёл разговор №${arg} — см. /sessions`);
         break;
       }
-      if (meta.id === app.session.id) {
-        printDim('  Текущий разговор удалить нельзя — сначала /new или /session.');
-        break;
-      }
-      app.store.delete(meta.id);
-      printDim(`  Разговор «${meta.title}» удалён.`);
+      printDim('  ' + deleteSessionByNumber(app, n));
       break;
     }
     case 'team':
@@ -1307,60 +1701,31 @@ async function runCommand(app: App, line: string): Promise<boolean> {
     case 'add': {
       let fullTeam: Agent[] = [];
       try {
-        fullTeam = loadTeam(join(CONFIG_DIR, 'team.json'));
+        fullTeam = loadTeam(AGENTS_FILE);
       } catch {
-        printDim('  team.json недоступен — позвать никого не получится.');
+        printDim('  agents.json недоступен — позвать никого не получится.');
         break;
       }
       if (!arg) {
         printDim('  Кого позвать? /add <имя или номер> (список — /team)');
         break;
       }
-      const agent = findAgentByArg(fullTeam, arg);
-      if (!agent) {
-        printDim(`  Нет участника «${arg}» — см. /team`);
-        break;
-      }
-      if (chatTeam(app.session, fullTeam).some((a) => a.id === agent.id)) {
-        printDim(`  ${agent.emoji} ${agent.name} уже в чате.`);
-        break;
-      }
-      app.session.participants ??= fullTeam.map((a) => a.id);
-      if (!app.session.participants.includes(agent.id)) app.session.participants.push(agent.id);
-      app.store.save(app.session);
-      printDim(`  ${agent.emoji} ${agent.name} присоединился к чату.`);
+      printDim('  ' + addToChat(app, arg, fullTeam));
       break;
     }
     case 'out': {
       let fullTeam: Agent[] = [];
       try {
-        fullTeam = loadTeam(join(CONFIG_DIR, 'team.json'));
+        fullTeam = loadTeam(AGENTS_FILE);
       } catch {
-        printDim('  team.json недоступен — выгнать никого не получится.');
+        printDim('  agents.json недоступен — выгнать никого не получится.');
         break;
       }
       if (!arg) {
         printDim('  Кого выгнать? /out <имя или номер> (список — /team)');
         break;
       }
-      const kicked = findAgentByArg(fullTeam, arg);
-      if (!kicked) {
-        printDim(`  Нет участника «${arg}» — см. /team`);
-        break;
-      }
-      if (!chatTeam(app.session, fullTeam).some((a) => a.id === kicked.id)) {
-        printDim(`  ${kicked.emoji} ${kicked.name} и так не в этом чате.`);
-        break;
-      }
-      // материализуем явный список, иначе выгон «вернул» бы всю команду
-      app.session.participants ??= fullTeam.map((a) => a.id);
-      if (app.session.participants.length <= 1) {
-        printDim('  Это последний участник — совсем без команды нельзя. Создайте новый: /new');
-        break;
-      }
-      app.session.participants = app.session.participants.filter((id) => id !== kicked.id);
-      app.store.save(app.session);
-      printDim(`  ${kicked.emoji} ${kicked.name} покинул(а) чат. Реплики останутся в истории.`);
+      printDim('  ' + removeFromChat(app, arg, fullTeam));
       break;
     }
     case 'providers':
@@ -1368,7 +1733,10 @@ async function runCommand(app: App, line: string): Promise<boolean> {
       break;
     case 'provider':
       if (!arg) {
-        printDim(`  Основной провайдер: ${app.defaultProviderId}`);
+        printDim(
+          `  Основной провайдер: ${app.defaultProviderId}. ` +
+          `Менеджер переговорки: ${app.mgr.provider} (меняется только в config/manager.json)`,
+        );
       } else if (app.providers.has(arg)) {
         app.defaultProviderId = arg;
         printDim(`  Основной провайдер: ${arg}`);
@@ -1382,9 +1750,9 @@ async function runCommand(app: App, line: string): Promise<boolean> {
     case 'memory': {
       let memTeam: Agent[] = [];
       try {
-        memTeam = loadTeam(join(CONFIG_DIR, 'team.json'));
+        memTeam = loadTeam(AGENTS_FILE);
       } catch {
-        // без team.json показываем только общую память
+        // без agents.json показываем только общую память
       }
       if (arg === 'shared') {
         if (app.memory.shared) {
@@ -1466,12 +1834,16 @@ async function runCommand(app: App, line: string): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  // конфиг экрана читаем до всего вывода: ошибка конфига видна в обычном терминале
-  const ui = loadUiConfig(UI_FILE, process.stdout.columns || 0);
+  // настройки читаем до всего вывода: ошибка конфига видна в обычном терминале
+  const ui = loadSettings(SETTINGS_FILE, process.stdout.columns || 0);
   const store = new SessionStore(DATA_DIR);
   const providersFile = join(CONFIG_DIR, 'providers.json');
   const loaded = loadProviders(providersFile);
   const images = loadImageProviders(providersFile);
+  // менеджер переговорки: обязательный конфиг, неизвестный провайдер — падение до старта TUI
+  const mgr = loadManagerConfig(MANAGER_FILE, loaded.providers.keys());
+  // тула: fail-fast — кривой файл в tools/ или карточка в agents.json видны до старта TUI
+  userTools = await loadUserTools(ROOT);
   // при старте продолжаем последний разговор, а не плодим пустые сессии
   const existing = store.list();
   const session = existing.length > 0 ? store.load(existing[0].id) ?? store.create() : store.create();
@@ -1481,6 +1853,7 @@ async function main(): Promise<void> {
     providers: loaded.providers,
     images: images.images,
     defaultProviderId: loaded.defaultId,
+    mgr,
     profile: loadUserProfile(USER_FILE),
     memory: loadTeamMemory(MEMORY_FILE),
   };
@@ -1590,9 +1963,9 @@ async function main(): Promise<void> {
   if (screen && session.messages.length > 0) {
     let team: Agent[] = [];
     try {
-      team = loadTeam(join(CONFIG_DIR, 'team.json'));
+      team = loadTeam(AGENTS_FILE);
     } catch {
-      // без team.json история засеивается без фирменных цветов агентов
+      // без agents.json история засеивается без фирменных цветов агентов
     }
     const rows: string[] = [];
     for (const m of session.messages) {

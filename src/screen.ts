@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-
 /** Строк зоны подсказок между чатом и вводом */
 export const HINT_ROWS = 5;
 /** Пустых строк ниже поля ввода */
@@ -158,42 +156,6 @@ export function wrapAnsi(text: string, width: number): string[] {
   }
   if (line || lines.length === 0) push();
   return lines;
-}
-
-/** Конфиг экрана: config/ui.json. Явное лучше неявного — файла нет, ошибка. */
-export interface UiConfig {
-  /** Логическая ширина экрана (обрезается по ширине терминала) */
-  width: number;
-  /** Отступы по краям экрана в колонках/строках (0–10) */
-  margin: number;
-  /** false — прежний readline-интерфейс без альтернативного экрана */
-  screen: boolean;
-}
-
-export function loadUiConfig(file: string, termCols: number): UiConfig {
-  let raw: Record<string, unknown>;
-  try {
-    raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  } catch (err) {
-    throw new Error(`не удалось прочитать ${file}: ${err instanceof Error ? err.message : err}`);
-  }
-  const width = raw.width;
-  if (typeof width !== 'number' || !Number.isInteger(width) || width < 40 || width > 500) {
-    throw new Error(`${file}: поле "width" — целое число от 40 до 500`);
-  }
-  const margin = raw.margin;
-  if (margin !== undefined && (typeof margin !== 'number' || !Number.isInteger(margin) || margin < 0 || margin > 10)) {
-    throw new Error(`${file}: поле "margin" — целое число от 0 до 10`);
-  }
-  const screen = raw.screen;
-  if (screen !== undefined && typeof screen !== 'boolean') {
-    throw new Error(`${file}: поле "screen" — true или false`);
-  }
-  return {
-    width: termCols > 0 ? Math.min(width, termCols) : width,
-    margin: typeof margin === 'number' ? margin : 2,
-    screen: screen !== false,
-  };
 }
 
 /**

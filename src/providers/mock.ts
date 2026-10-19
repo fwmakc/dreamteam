@@ -4,7 +4,7 @@ import type { ProviderConfig, ProviderFactory } from './types.js';
 
 /**
  * Заготовленные ответы участников для работы без API-ключей.
- * Подбираются по id агента из config/team.json, поэтому демо выглядит живым.
+ * Подбираются по id агента из config/agents.json, поэтому демо выглядит живым.
  */
 const CANNED: Record<string, string[]> = {
   marina: [
@@ -73,8 +73,14 @@ export class MockProvider implements LLMProvider {
 
   async *stream(req: StreamRequest): AsyncGenerator<string> {
     let text = this.fixedReply ?? pickReply(req);
-    // mock-зрение: запрос с картинкой — это инструмент look, отвечаем заготовленным разбором
-    if (!this.fixedReply && req.messages.some((m) => m.images?.length)) {
+    // демо менеджера переговорки: детерминированное JSON-действие (в команде появляется «Тест»)
+    if (!this.fixedReply && (req.system ?? '').startsWith('Ты — менеджер переговорки')) {
+      const hasTest = (req.messages[0]?.content ?? '').includes('test_probe');
+      text = hasTest
+        ? '«Тест» уже в команде — второй раз не дублирую.'
+        : '{"say":"Позываю нового участника «Тест».","actions":[{"op":"team.add","id":"test_probe","name":"Тест","role":"гость","prompt":"Ты — Тест, гость переговорки. Отвечай коротко.","emoji":"🧪","color":"cyan"}]}';
+    } else if (!this.fixedReply && req.messages.some((m) => m.images?.length)) {
+      // mock-зрение: запрос с картинкой — это инструмент look, отвечаем заготовленным разбором
       text =
         'Смотрю на изображение: тёмно-синяя шапка с логотипом слева, под ней крупный светлый заголовок ' +
         'и градиентная кнопка по центру. Ниже три карточки с тонкими рамками и подписями. ' +
