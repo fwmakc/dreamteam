@@ -16,6 +16,7 @@
  */
 
 import type { Agent, AgentTools } from './types.js';
+import type { ToolsConfig, ToolContext } from './actions.js';
 
 export type ToolVerdict = 'allow' | 'deny' | 'ask';
 
@@ -177,4 +178,34 @@ export function commandCheck(rules: CommandRules, body: string): ToolVerdict {
     if (segs.every((seg) => rules.allow!.some((p) => patternMatches(p, seg)))) return 'allow';
   }
   return 'ask';
+}
+
+// ─── Встроенные тула: мосты и строгая карточка ──────────────────────────────
+
+/** Всё, что встроенному тулу нужно на run: конвейер собирает это перед раундом. */
+export interface BuiltinDeps {
+  cfg: ToolsConfig;
+  agent: Agent;
+  tctx: ToolContext;
+  signal?: AbortSignal;
+}
+
+/** Фабрика встроенного тула: карточка агента + мосты к коду исполнения. */
+export type BuiltinFactory = (config: ToolConfig, deps?: BuiltinDeps) => Tool;
+
+/**
+ * Строгая карточка встроенного тула: поля вне разрешённых — fail-fast ошибка.
+ * Опечатка («allowd» вместо «allow») не должна молча делать вид, что всё
+ * хорошо: правило просто не сработало бы.
+ */
+export function checkCardKeys(config: ToolConfig, toolId: string, ...permitted: string[]): void {
+  const extra = Object.keys(config).filter((k) => !permitted.includes(k));
+  if (extra.length === 0) return;
+  const allowed =
+    permitted.length > 0
+      ? `разрешены только: ${permitted.map((k) => `"${k}"`).join(', ')}`
+      : 'у тула настроек нет — пустой объект или null';
+  throw new Error(
+    `карточка тула ${toolId}: неизвестные поля ${extra.map((k) => `"${k}"`).join(', ')} — ${allowed}`,
+  );
 }

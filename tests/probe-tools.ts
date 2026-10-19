@@ -215,6 +215,22 @@ const tctx: ToolContext = {
   const toolset = buildToolset(agent, localCfg, tctx, undefined, new Map());
   check('сборка: shell и files на месте', toolset.has('shell') && toolset.has('files'));
 
+  // строгая карточка: неизвестные поля — fail-fast ошибка с именем тула и поля
+  const cardErr = (id: string, card: ToolConfig) => {
+    let err = '';
+    try {
+      buildToolset({ ...agent, tools: { [id]: card } }, localCfg, tctx, undefined, new Map());
+    } catch (e) {
+      err = (e as Error).message;
+    }
+    return err;
+  };
+  check('карточка files: лишнее поле — отказ', cardErr('files', { encoding: 'utf8' }).includes('"encoding"'));
+  check('карточка look: лишнее поле — отказ', cardErr('look', { model: 'x' }).includes('настроек нет'));
+  check('карточка shell: опечатка в правиле — отказ', cardErr('shell', { allowd: ['ls'] }).includes('"allowd"'));
+  check('карточка shell: только allow/deny — ок', cardErr('shell', { allow: ['ls'], deny: [] }) === '');
+  check('карточка image: пустая — ок', cardErr('image', {}) === '');
+
   const shell = toolset.get('shell')!;
   check('shell.check: разрешённое echo — молча', shell.check('echo привет') === 'allow');
   check('shell.check: rm в deny — отказ', shell.check('rm -rf build') === 'deny');
