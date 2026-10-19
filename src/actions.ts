@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Agent, ImageProvider, LLMProvider } from './types.js';
@@ -27,7 +27,11 @@ import { loadSettings } from './settings.js';
 export interface HostConfig {
   host: string;
   user?: string;
+  /** Пароль для sshpass (в конфиге лежит открытым текстом — машина ваша); без него — только ключи */
+  password?: string;
   port?: number;
+  /** Папка проекта на сервере: после коннекта всё исполняется из неё (cd, проверка по pwd) */
+  dir?: string;
 }
 
 /** Проект из config/projects.json: папка (может не быть) и его ssh-серверы. */
@@ -133,10 +137,18 @@ export function loadProjects(root: string): Map<string, ProjectEntry> {
         if (typeof h.host !== 'string' || !h.host.trim()) {
           throw new Error(`${file}: «${id}».hosts.${hid} — обязательное поле "host"`);
         }
+        for (const [k, want] of [['password', 'строку'], ['dir', 'строку']] as const) {
+          const v = h[k];
+          if (v !== undefined && (typeof v !== 'string' || !v.trim())) {
+            throw new Error(`${file}: «${id}».hosts.${hid} — "${k}" жду ${want} или убери поле`);
+          }
+        }
         hosts.set(hid, {
           host: h.host.trim(),
           user: typeof h.user === 'string' && h.user.trim() ? h.user.trim() : undefined,
+          password: typeof h.password === 'string' && h.password.trim() ? h.password.trim() : undefined,
           port: typeof h.port === 'number' && h.port > 0 ? h.port : undefined,
+          dir: typeof h.dir === 'string' && h.dir.trim() ? h.dir.trim() : undefined,
         });
       }
     }
@@ -371,13 +383,33 @@ function killTree(child: ChildProcess): void {
   }
 }
 
-/** Собирает аргументы запуска ssh: только по ключу, без интерактивных паролей. */
-function sshArgs(t: HostTarget, command: string): string[] {
+/** Кавычки для удалённого шелла: путь с пробелами доживёт до cd. */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+let sshpassOk: boolean | null = null;
+/** Парольный режим требует sshpass (штатный ssh пароль из конфига не возьмёт). */
+function sshpassAvailable(): boolean {
+  if (sshpassOk === null) {
+    const r = spawnSync('sshpass', ['-V'], { stdio: 'ignore' });
+    sshpassOk = !r.error;
+  }
+  return sshpassOk;
+}
+
+/**
+ * Собирает аргументы запуска ssh: без пароля — только ключи (BatchMode),
+ * с паролем — через sshpass -e (пароль идёт в env, а не в список процессов).
+ */
+function sshArgs(t: HostTarget, command: string): { argv: string[]; env?: NodeJS.ProcessEnv } {
   const h = t.host;
-  const args = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
+  const args = ['ssh', '-o', 'ConnectTimeout=15'];
+  if (!h.password) args.push('-o', 'BatchMode=yes');
   if (h.port) args.push('-p', String(h.port));
   args.push(h.user ? `${h.user}@${h.host}` : h.host, command);
-  return args;
+  if (h.password) return { argv: ['sshpass', '-e', ...args], env: { SSHPASS: h.password } };
+  return { argv: args };
 }
 
 export function executeFileAction(
@@ -421,10 +453,62 @@ export function executeSshAction(
   if ('error' in r) {
     return Promise.resolve({ ok: false, label: describeAction(action), output: `отказ: ${r.error}` });
   }
-  return executeProcess({ argv: sshArgs(r, action.command) }, cfg, signal).then((res) => ({
+  if (r.host.password && !sshpassAvailable()) {
+    return Promise.resolve({
+      ok: false,
+      label: describeAction(action),
+      output: 'отказ: у хоста задан "password", но sshpass не найден на PATH — установите sshpass или уберите пароль (ключи тоже работают)',
+    });
+  }
+  // папка проекта на сервере: cd и pwd — гарант, что команда исполняется в ней
+  const command = r.host.dir ? `cd ${shq(r.host.dir)} && pwd && ${action.command}` : action.command;
+  const { argv, env } = sshArgs(r, command);
+  return executeProcess({ argv, env }, cfg, signal).then((res) => ({
     ...res,
     label: describeAction(action),
   }));
+}
+
+/**
+ * put/get через штатный scp: обмен файлами с хостом. Локальная сторона уже
+ * проверена тулом и пришла абсолютной; удалённая — внутри папки проекта.
+ */
+export function executeScpTransfer(
+  direction: 'put' | 'get',
+  localAbs: string,
+  remotePath: string,
+  target: HostTarget,
+  cfg: ToolsConfig,
+  signal?: AbortSignal,
+): Promise<ActionResult> {
+  const h = target.host;
+  if (h.password && !sshpassAvailable()) {
+    return Promise.resolve({
+      ok: false,
+      label: `scp ${direction}`,
+      output: 'отказ: у хоста задан "password", но sshpass не найден на PATH — установите sshpass или уберите пароль',
+    });
+  }
+  if (direction === 'get') {
+    try {
+      mkdirSync(dirname(localAbs), { recursive: true });
+    } catch (err) {
+      return Promise.resolve({
+        ok: false,
+        label: 'scp get',
+        output: `ошибка: не создать папку для «${localAbs}»: ${err instanceof Error ? err.message : err}`,
+      });
+    }
+  }
+  const remoteArg = `${h.user ? `${h.user}@${h.host}` : h.host}:${shq(remotePath)}`;
+  const args = ['scp', '-o', 'ConnectTimeout=15'];
+  if (!h.password) args.push('-o', 'BatchMode=yes');
+  if (h.port) args.push('-P', String(h.port));
+  args.push(...(direction === 'put' ? [localAbs, remoteArg] : [remoteArg, localAbs]));
+  const { argv, env } = h.password
+    ? { argv: ['sshpass', '-e', ...args], env: { SSHPASS: h.password } }
+    : { argv: args, env: undefined };
+  return executeProcess({ argv, env }, cfg, signal).then((res) => ({ ...res, label: `scp ${direction}` }));
 }
 
 const LOOK_SYSTEM =
@@ -585,7 +669,7 @@ export async function executeImageAction(
 
 /** Запускает процесс (командой через shell или argv напрямую), копит вывод, следит за таймаутом. */
 function executeProcess(
-  opts: { command?: string; argv?: string[]; cwd?: string },
+  opts: { command?: string; argv?: string[]; cwd?: string; env?: NodeJS.ProcessEnv },
   cfg: ToolsConfig,
   signal?: AbortSignal,
 ): Promise<Omit<ActionResult, 'label'>> {
@@ -593,7 +677,7 @@ function executeProcess(
     let child: ChildProcess;
     try {
       child = opts.argv
-        ? spawn(opts.argv[0]!, opts.argv.slice(1), { cwd: opts.cwd ?? cfg.workspaceAbs, signal })
+        ? spawn(opts.argv[0]!, opts.argv.slice(1), { cwd: opts.cwd ?? cfg.workspaceAbs, signal, env: opts.env })
         : spawn(opts.command!, { shell: true, cwd: opts.cwd ?? cfg.workspaceAbs, signal });
     } catch (err) {
       done({ ok: false, output: `ошибка запуска: ${err instanceof Error ? err.message : err}` });

@@ -1,19 +1,24 @@
 /**
  * Тул «files»: запись файлов в рабочую папку (```file путь, тело — содержимое).
- * check(): путь внутри рабочей папки действия — allow, иначе вопрос человеку.
- * Карточки у тула нет: настройка — какие проекты назначены агенту.
+ * check(): путь внутри рабочей папки действия — allow, иначе вопрос человеку;
+ * маски из карточки ("masks", синтаксис gitignore) — отказ с обоснованием:
+ * ещё один слой поверх рамки рабочей папки.
  */
+import { relative } from 'node:path';
 import { executeFileAction, safePath } from '../actions.js';
-import { checkCardKeys } from '../tools-api.js';
+import { checkCardKeys, maskDeny, parseMasks } from '../tools-api.js';
 import type { BuiltinDeps, Tool, ToolCheckContext, ToolConfig } from '../tools-api.js';
 
 export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
-  checkCardKeys(config, 'files');
+  checkCardKeys(config, 'files', 'masks');
+  const masks = parseMasks(config, 'files');
   return {
     desc: 'Запись файлов в рабочую папку (```file путь, тело — полное содержимое файла). Внутри папки пишется молча.',
     check(path: string, ctx?: ToolCheckContext) {
-      const inside = ctx ? safePath(ctx.cwd, path) !== null : false;
-      return inside ? 'allow' : 'ask';
+      const target = ctx ? safePath(ctx.cwd, path) : null;
+      if (!target) return 'ask';
+      const masked = maskDeny(masks, relative(ctx!.cwd, target));
+      return masked ? { deny: masked } : 'allow';
     },
     async run(body, ctx) {
       if (!deps) throw new Error('тул files собран без конвейера — это внутренняя ошибка');

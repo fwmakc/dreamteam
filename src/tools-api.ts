@@ -286,6 +286,79 @@ export function defaultCommandCheck(
   return 'allow';
 }
 
+// ─── Маски файлов в духе gitignore ──────────────────────────────────────────
+
+/**
+ * Читает маски из карточки ("masks"): массив непустых строк. Маска без «!» —
+ * запрет, с «!» — разрешение; последняя совпавшая решает, не совпало ничего —
+ * можно. Так выражаются и «всё, кроме…» («*», «!*.pem»), и «только…»
+ * («*», «!src/**»).
+ */
+export function parseMasks(config: ToolConfig, toolId: string): string[] | undefined {
+  const v = config.masks;
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || (v as unknown[]).some((s) => typeof s !== 'string' || !s.trim())) {
+    throw new Error(`карточка тула ${toolId}: "masks" — массив непустых строк в духе gitignore («*.env», "!src/**")`);
+  }
+  return (v as string[]).length > 0 ? (v as string[]) : undefined;
+}
+
+/** Звёзды и «?» сегмента: '*' — любые символы внутри сегмента, '?' — один. */
+function segWild(pat: string, s: string): boolean {
+  const re = pat
+    .split('*')
+    .map((p) => p.replace(/[.+^${}()|[\]\\]/g, '\\$&').split('?').join('[^/]'))
+    .join('[^/]*');
+  return new RegExp(`^${re}$`).test(s);
+}
+
+/** '**' — любое число сегментов, остальные — по одному. */
+function segMatchList(pat: string[], segs: string[]): boolean {
+  if (pat.length === 0) return segs.length === 0;
+  const [p, ...rest] = pat;
+  if (p === '**') {
+    for (let i = 0; i <= segs.length; i++) if (segMatchList(rest, segs.slice(i))) return true;
+    return false;
+  }
+  return segs.length > 0 && segWild(p, segs[0]!) && segMatchList(rest, segs.slice(1));
+}
+
+/**
+ * Совпала ли маска с путём: маска без слэша — по имени на любой глубине
+ * (как в gitignore: «*.log» ловит и logs/x.log); якорная — по полному пути
+ * или любому каталогу-предку (запрет каталога запирает и содержимое).
+ */
+function maskMatches(pattern: string, segs: string[]): boolean {
+  let pat = pattern.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (pat.startsWith('/')) pat = pat.slice(1);
+  if (pat.endsWith('/')) pat += '**';
+  const parts = pat.split('/').filter(Boolean);
+  if (parts.length === 0) return false;
+  if (!pattern.includes('/') && !pattern.includes('\\')) {
+    return segs.some((s) => segWild(parts[0]!, s));
+  }
+  for (let k = 1; k <= segs.length; k++) {
+    if (segMatchList(parts, segs.slice(0, k))) return true;
+  }
+  return false;
+}
+
+/**
+ * Вердикт масок для пути: последняя совпавшая решает («!» — разрешение).
+ * Возвращает причину отказа или null (можно); без масок — всегда null.
+ */
+export function maskDeny(masks: string[] | undefined, relPath: string): string | null {
+  if (!masks?.length) return null;
+  const segs = relPath.split(/[\\/]+/).filter((s) => s && s !== '.');
+  let hit: string | null = null;
+  for (const raw of masks) {
+    const negated = raw.startsWith('!');
+    const pat = (negated ? raw.slice(1) : raw).trim();
+    if (pat && maskMatches(pat, segs)) hit = negated ? null : raw;
+  }
+  return hit ? `файл «${relPath}» под маской «${hit}»` : null;
+}
+
 // ─── Встроенные тула: мосты и строгая карточка ──────────────────────────────
 
 /** Всё, что встроенному тулу нужно на run: конвейер собирает это перед раундом. */

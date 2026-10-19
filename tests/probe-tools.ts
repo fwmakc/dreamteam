@@ -17,12 +17,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   commandCheck,
+  maskDeny,
   normalizeAgentTools,
   parseCommandRules,
+  parseMasks,
   splitChain,
   type ToolConfig,
 } from '../src/tools-api.js';
-import { checkPermission, parseActions, type ToolContext, type ToolsConfig } from '../src/actions.js';
+import { checkPermission, loadProjects, parseActions, type ToolContext, type ToolsConfig } from '../src/actions.js';
 import { buildToolset, loadUserTools } from '../src/tools-registry.js';
 import { loadTeam } from '../src/agents.js';
 import gitFactory from '../tools/git.js';
@@ -341,6 +343,120 @@ const tctx: ToolContext = {
   check('git: запуск в закреплённом repo — вывод есть', /^[a-f0-9]{7,}/m.test(log), log);
   const multi = await pinned.run('log\n--oneline\n-1', { ...base, cwd: dir });
   check('git: многострочное тело — одна команда', /^[a-f0-9]{7,}/m.test(multi), multi);
+}
+
+// --- маски в духе gitignore: последняя совпавшая решает ---
+{
+  const m = (masks: string[] | undefined, path: string) => maskDeny(masks, path);
+  check('маски: пусто — можно', m(undefined, 'x.env') === null);
+  check('маски: прямой запрет', m(['*.env'], 'config/.env') !== null);
+  check('маски: имя на любой глубине', m(['*.log'], 'deep/logs/app.log') !== null);
+  check('маски: нет совпадения — можно', m(['*.env'], 'src/app.ts') === null);
+  check('маски: «!» разрешает поверх запрета', m(['*', '!*.pem'], 'cert.pem') === null);
+  check('маски: «*» без «!» — запрет всего', m(['*'], 'src/app.ts') !== null);
+  check('маски: каталог запирает содержимое', m(['secrets'], 'secrets/api.key') !== null);
+  check('маски: ** по сегментам', m(['src/**/*.ts'], 'src/a/b/x.ts') !== null);
+  check('маски: ** не матчит чужой корень', m(['src/**/*.ts'], 'lib/x.ts') === null);
+  check('маски: последняя решает (запрет после разрешения)', m(['!*.md', 'spec/*.md'], 'spec/a.md') !== null);
+  check('маски: последняя решает (разрешение после запрета)', m(['spec/*.md', '!spec/keep.md'], 'spec/keep.md') === null);
+  check('маски: «?» — ровно один символ', m(['file?.txt'], 'file1.txt') !== null && m(['file?.txt'], 'file10.txt') === null);
+  let threw = '';
+  try { parseMasks({ masks: [42] }, 'files'); } catch (e) { threw = (e as Error).message; }
+  check('маски: не строки — отказ', threw.includes('"masks"'), threw);
+  threw = '';
+  try { parseMasks({ masks: [] }, 'files'); } catch { threw = 'бросил'; }
+  check('маски: пустой массив — это «нет масок»', threw === '', threw);
+}
+
+// --- loadProjects: пароль и папка проекта на сервере ---
+{
+  const root = mkdtempSync(join(tmpdir(), 'dt-projects-'));
+  mkdirSync(join(root, 'config'), { recursive: true });
+  const file = join(root, 'config', 'projects.json');
+  writeFileSync(
+    file,
+    JSON.stringify({
+      shop: {
+        dir: './w',
+        hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 2222, password: 'p @ w', dir: '/var/www/app' } },
+      },
+    }),
+  );
+  const host = loadProjects(root).get('shop')!.hosts.get('prod')!;
+  check('loadProjects: пароль и папка хоста дошли', host.password === 'p @ w' && host.dir === '/var/www/app', JSON.stringify(host));
+  writeFileSync(file, JSON.stringify({ shop: { hosts: { prod: { host: 'h', password: 5 } } } }));
+  let threw = '';
+  try { loadProjects(root); } catch (e) { threw = (e as Error).message; }
+  check('loadProjects: кривой password — отказ', threw.includes('"password"'), threw);
+  writeFileSync(file, JSON.stringify({ shop: { hosts: { prod: { host: 'h', dir: '  ' } } } }));
+  threw = '';
+  try { loadProjects(root); } catch (e) { threw = (e as Error).message; }
+  check('loadProjects: пустой dir — отказ', threw.includes('"dir"'), threw);
+  rmSync(root, { recursive: true, force: true });
+}
+
+// --- ssh: папка сервера как рамка, маски, put/get (scp) ---
+{
+  const root = mkdtempSync(join(tmpdir(), 'dt-sshdir-'));
+  const projects = new Map([
+    ['shop', { dirAbs: root, hosts: new Map([['prod', { host: '203.0.113.10', user: 'deploy', dir: '/var/www/app' }]]) }],
+  ]);
+  const cfgS: ToolsConfig = { ...cfg, projects };
+  const mk = (card: ToolConfig) =>
+    buildToolset(
+      { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p', tools: { ssh: card }, projects: ['shop'] },
+      cfgS, tctx, undefined, new Map(),
+    ).get('ssh')!;
+  const ctx = { cwd: root, project: 'shop', arg: 'shop:prod' };
+
+  const ssh = mk({});
+  check('ssh+dir: uptime — молча', ssh.check('uptime', ctx) === 'allow');
+  check('ssh+dir: относительный путь — свой', ssh.check('tail -n 20 logs/app.log', ctx) === 'allow');
+  check('ssh+dir: абсолютный путь внутри папки — свой', ssh.check('ls /var/www/app/config', ctx) === 'allow');
+  const abs = ssh.check('cat /etc/passwd', ctx);
+  check('ssh+dir: абсолютный вне папки — отказ', typeof abs === 'object' && abs.deny.includes('вне рабочей папки'), JSON.stringify(abs));
+  const up = ssh.check('cat ../shared/x', ctx);
+  check('ssh+dir: «..» из папки — отказ', typeof up === 'object' && up.deny.includes('вне рабочей папки'), JSON.stringify(up));
+  const cd = ssh.check('cd / && ls', ctx);
+  check('ssh+dir: cd за пределы — отказ', typeof cd === 'object' && cd.deny.includes('вне рабочей папки'), JSON.stringify(cd));
+
+  const masked = mk({ masks: ['*.log', '!keep.log'] });
+  const m1 = masked.check('tail -n 5 run/app.log', ctx);
+  check('ssh+маски: запретный файл — отказ под маской', typeof m1 === 'object' && m1.deny.includes('под маской'), JSON.stringify(m1));
+  check('ssh+маски: «!»-исключение — можно', masked.check('cat keep.log', ctx) === 'allow');
+  check('ssh+маски: немаскированное — как раньше', masked.check('cat notes.txt', ctx) === 'allow');
+
+  check('scp: put внутрь — вопрос (по умолчанию)', ssh.check('put report.txt /var/www/app/report.txt', ctx) === 'ask');
+  const putOut = ssh.check('put report.txt /etc/report.txt', ctx);
+  check('scp: put мимо папки сервера — отказ', typeof putOut === 'object' && putOut.deny.includes('вне рабочей папки'), JSON.stringify(putOut));
+  const putLocal = ssh.check('put ../leak.txt /var/www/app/x', ctx);
+  check('scp: локальная сторона вне папки — отказ', typeof putLocal === 'object' && putLocal.deny.includes('локальный путь'), JSON.stringify(putLocal));
+  const bad = ssh.check('put report.txt', ctx);
+  check('scp: кривое тело — отказ с форматом', typeof bad === 'object' && bad.deny.includes('два пути'), JSON.stringify(bad));
+  check('scp: get внутрь — вопрос (по умолчанию)', ssh.check('get /var/www/app/log.txt ./log.txt', ctx) === 'ask');
+
+  const allowed = mk({ allow: ['put *', 'get *'], masks: ['*.log'] });
+  check('scp: правило карточки — put молча', allowed.check('put report.txt /var/www/app/report.txt', ctx) === 'allow');
+  const maskedGet = allowed.check('get /var/www/app/run/error.log ./err.log', ctx);
+  check('scp: маска сильнее правила — отказ', typeof maskedGet === 'object' && maskedGet.deny.includes('под маской'), JSON.stringify(maskedGet));
+  rmSync(root, { recursive: true, force: true });
+}
+
+// --- files: маски из карточки ---
+{
+  const root = mkdtempSync(join(tmpdir(), 'dt-filesmask-'));
+  const localCfg: ToolsConfig = { ...cfg, workspaceAbs: root };
+  const toolset = buildToolset(
+    { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p', tools: { files: { masks: ['*.key', '!safe.key'] } } },
+    localCfg, tctx, undefined, new Map(),
+  );
+  const files = toolset.get('files')!;
+  const key = files.check('server.key', { cwd: root });
+  check('files+маски: ключ — отказ под маской', typeof key === 'object' && key.deny.includes('под маской'), JSON.stringify(key));
+  check('files+маски: «!»-исключение — можно', files.check('safe.key', { cwd: root }) === 'allow');
+  check('files+маски: глубже тоже под маской', typeof files.check('etc/server.key', { cwd: root }) === 'object');
+  check('files+маски: обычный файл — молча', files.check('readme.md', { cwd: root }) === 'allow');
+  rmSync(root, { recursive: true, force: true });
 }
 
 // --- parseActions: кастомные тула и защита код-блоков ---
