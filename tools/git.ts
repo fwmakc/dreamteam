@@ -23,54 +23,28 @@ import { resolve } from 'node:path';
 import {
   checkCardKeys,
   commandCheck,
+  GIT_READONLY_SUBCOMMANDS,
   parseCommandRules,
+  splitArgs,
   splitChain,
   SUBST,
   type Tool,
   type ToolConfig,
   type ToolRunContext,
+  type ToolVerdict,
 } from '../src/tools-api.js';
 
-/** Read-only подкоманды: первое слово каждого сегмента сверяем с этим набором. */
-const READONLY = new Set([
-  'status', 'log', 'diff', 'show', 'blame', 'shortlog', 'describe', 'rev-parse',
-  'reflog', 'grep', 'cat-file', 'diff-tree', 'merge-base', 'ls-files',
-  'branch', 'tag', 'help', 'version',
-]);
-
 /** Дефолтная политика без карточки: каждая команда цепочки должна быть read-only. */
-function defaultCheck(body: string): 'allow' | 'deny' | 'ask' {
+function defaultCheck(body: string): ToolVerdict {
   const segs = splitChain(body);
   if (segs.length === 0 || SUBST.test(body)) return 'ask';
   for (const seg of segs) {
-    const words = seg.split(/\s+/);
+    const words = splitArgs(seg);
     // «branch»/«tag» без аргументов — просто список; с аргументами уже мутация
     if ((words[0] === 'branch' || words[0] === 'tag') && words.length > 1) return 'ask';
-    if (!READONLY.has(words[0]!)) return 'ask';
+    if (!GIT_READONLY_SUBCOMMANDS.has(words[0]!)) return 'ask';
   }
   return 'allow';
-}
-
-/** Строка команды → аргументы spawn: пробелы вне кавычек — границы. */
-function argify(command: string): string[] {
-  const out: string[] = [];
-  let cur = '';
-  let quote: string | null = null;
-  for (const ch of command) {
-    if (quote) {
-      if (ch === quote) quote = null;
-      else cur += ch;
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-    } else if (/\s/.test(ch)) {
-      if (cur) out.push(cur);
-      cur = '';
-    } else {
-      cur += ch;
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
 }
 
 function execGit(gitArgs: string[], cwd: string, timeoutMs: number, maxOutput: number): Promise<string> {
@@ -146,7 +120,7 @@ export default (config: ToolConfig, _deps?: unknown): Tool => {
       const where = repo ?? ctx.cwd;
       // многострочное тело («log\n--oneline -5») — одна команда: переводы — пробелы
       const command = body.trim().replace(/\s*\n\s*/g, ' ');
-      const gitArgs = argify(command);
+      const gitArgs = splitArgs(command);
       if (gitArgs.length === 0) throw new Error('пустая команда git');
       return execGit(gitArgs, where, timeoutMs, maxOutput);
     },

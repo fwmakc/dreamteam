@@ -4,10 +4,12 @@
  * Тул — фабрика make(config) → Tool: desc (что это и как пользоваться),
  * check(body) и run(body, ctx). Валидация в приложении ровно одна — check()
  * самого тула: 'allow' — выполнить молча, 'deny' — отказ, 'ask' — спросить
- * человека (живой y/n). Хост ничего не матчит и слов allow/deny не знает;
- * карточка тула в agents.json ("tools": {"git": {…}}) — это конфиг, который
- * прилетает в make(): встроенные shell/ssh читают из неё свои списки,
- * кастомный тул волен читать что угодно своё.
+ * человека (живой y/n). Отказ можно обосновать: { deny: 'причина' } — причина
+ * попадёт в историю агенту, и он сможет переформулировать запрос, а не тыкаться
+ * наугад. Хост ничего не матчит и слов allow/deny не знает; карточка тула в
+ * agents.json ("tools": {"git": {…}}) — это конфиг, который прилетает в make():
+ * встроенные shell/ssh читают из неё свои списки, кастомный тул волен читать
+ * что угодно своё.
  *
  * Хост даёт тулу мосты: ctx.run — полный конвейер shell-тула (с check и y/n),
  * ctx.http — запрос по сети, ctx.confirm — задать человеку вопрос.
@@ -15,10 +17,18 @@
  * но «разрешить молча» — тоже его ответственность, хозяин читает его код.
  */
 
+import { isAbsolute, relative, resolve } from 'node:path';
+
 import type { Agent, AgentTools } from './types.js';
 import type { ToolsConfig, ToolContext } from './actions.js';
 
-export type ToolVerdict = 'allow' | 'deny' | 'ask';
+/** Отказ с обоснованием: причина уходит агенту в отчёт «⚙ инструменты». */
+export interface DenyVerdict {
+  deny: string;
+}
+
+/** Простой 'deny' тоже законен — просто без объяснения причины. */
+export type ToolVerdict = 'allow' | 'deny' | 'ask' | DenyVerdict;
 
 export interface ToolResult {
   ok: boolean;
@@ -47,7 +57,7 @@ export interface ToolRunContext extends ToolCheckContext {
 export interface Tool {
   /** Что это и как пользоваться — попадает в шпаргалку агента */
   desc: string;
-  /** Единственная инстанция валидации: 'allow' | 'deny' | 'ask' */
+  /** Единственная инстанция валидации: 'allow' | 'ask' | 'deny' | {deny: причина} */
   check(body: string, ctx?: ToolCheckContext): ToolVerdict;
   /** Действие; результат — строка, ошибка — throw Error */
   run(body: string, ctx: ToolRunContext): Promise<string>;
@@ -167,17 +177,113 @@ export function parseCommandRules(config: ToolConfig, toolId: string): CommandRu
  * Матч по телу команды: deny — по сегментам цепочки (запрещённое не пройдёт
  * и внутри «echo ok && git push»); allow — только на чистом теле, где каждый
  * сегмент разрешён («npm run build && npm run test» течёт молча); всё
- * остальное — ask: вопрос человеку.
+ * остальное — ask: вопрос человеку. Отказ возвращается с обоснованием:
+ * агенту полезно знать, какое правило его остановило.
  */
 export function commandCheck(rules: CommandRules, body: string): ToolVerdict {
   const segs = splitChain(body);
   for (const seg of segs) {
-    if (rules.deny?.some((p) => patternMatches(p, seg))) return 'deny';
+    const hit = rules.deny?.find((p) => patternMatches(p, seg));
+    if (hit) return { deny: `команда «${seg}» запрещена правилом «${hit}»` };
   }
   if (segs.length > 0 && !SUBST.test(body) && rules.allow?.length) {
     if (segs.every((seg) => rules.allow!.some((p) => patternMatches(p, seg)))) return 'allow';
   }
   return 'ask';
+}
+
+// ─── Дефолтная политика командных тулов (shell, ssh) ────────────────────────
+
+/** Read-only подкоманды git — общий набор для тула git и для shell (git …). */
+export const GIT_READONLY_SUBCOMMANDS = new Set([
+  'status', 'log', 'diff', 'show', 'blame', 'shortlog', 'describe', 'rev-parse',
+  'reflog', 'grep', 'cat-file', 'diff-tree', 'merge-base', 'ls-files',
+  'branch', 'tag', 'help', 'version',
+]);
+
+/** Строка команды → аргументы: пробелы вне кавычек — границы, кавычки снимаются. */
+export function splitArgs(command: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quote: string | null = null;
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (/\s/.test(ch)) {
+      if (cur) out.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/** Ключи и пароли читать/показывать нельзя — даже внутри рабочей папки. */
+const SENSITIVE = /(^|[\\/])(\.env|\.netrc|\.git-credentials|id_rsa|id_ed25519|id_ecdsa)([.\w-]*)$|\.(pem|key|p12|pfx)$/i;
+
+/**
+ * Скан аргументов сегмента на пути: секреты и выход за рабочую папку —
+ * причина для deny. cwd задан — пути сверяются с папкой честно (resolve);
+ * не задан (ssh: папка на чужой машине) — только синтаксика: абсолютный путь,
+ * «..» и «~» считаются выходом, относительные — своим.
+ */
+export function pathScan(segment: string, cwd: string | undefined): string | null {
+  for (const a of splitArgs(segment).slice(1)) {
+    if (a.startsWith('-')) continue; // флаги — не пути
+    if (!(a === '.' || a === '..' || a.startsWith('~') || a.startsWith('.') || a.includes('/') || a.includes('\\'))) continue;
+    if (SENSITIVE.test(a)) return `«${a}» похоже на секретный файл — читать и показывать его нельзя`;
+    if (a.startsWith('~')) return `«${a}» — домашняя папка, работа только внутри рабочей`;
+    if (cwd) {
+      const rel = relative(cwd, resolve(cwd, a));
+      const inside = rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+      if (!inside) return `путь «${a}» вне рабочей папки «${cwd}» — работа только внутри неё`;
+    } else if (a === '..' || a.startsWith('../') || a.startsWith('..\\') || /^[\\/]|[a-zA-Z]:/.test(a)) {
+      return `путь «${a}» вне рабочей папки — работа только внутри неё`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Дефолтная политика без правил в карточке: сегменты цепочки с безопасными
+ * первыми словами текут молча, всё остальное — вопрос человеку; пути при этом
+ * сканируются всегда, и выход за рабочую папку — не вопрос, а отказ
+ * с обоснованием (deny). nested — команда, чьё второе слово сверяется со своим
+ * набором (git в shell, systemctl в ssh); bareOnly — подкоманды, безопасные
+ * только без аргументов.
+ */
+export function defaultCommandCheck(
+  body: string,
+  policy: {
+    safe: ReadonlySet<string>;
+    nested?: { command: string; readonlySet: ReadonlySet<string>; bareOnly?: string[] };
+    cwd?: string;
+    askIf?: RegExp;
+  },
+): ToolVerdict {
+  const segs = splitChain(body);
+  if (segs.length === 0 || SUBST.test(body)) return 'ask';
+  for (const seg of segs) {
+    const words = splitArgs(seg);
+    const first = words[0] ?? '';
+    if (policy.nested && first === policy.nested.command) {
+      const rest = words.slice(1);
+      const sub = rest[0] ?? '';
+      if (sub && !policy.nested.readonlySet.has(sub)) return 'ask';
+      if (sub && policy.nested.bareOnly?.includes(sub) && rest.length > 1) return 'ask';
+    } else if (!policy.safe.has(first)) {
+      return 'ask';
+    }
+    if (policy.askIf?.test(seg)) return 'ask';
+    const bad = pathScan(seg, policy.cwd);
+    if (bad) return { deny: bad };
+  }
+  return 'allow';
 }
 
 // ─── Встроенные тула: мосты и строгая карточка ──────────────────────────────

@@ -1188,6 +1188,8 @@ function runContext(
       const shell = toolset.get('shell');
       if (!shell) return { ok: false, output: 'тул shell этому агенту не включён' };
       const verdict = shell.check(command, base);
+      if (typeof verdict === 'object')
+        return { ok: false, output: `отказ: shell отклонил команду «${command}»: ${verdict.deny}` };
       if (verdict === 'deny') return { ok: false, output: `отказ: shell отклонил команду «${command}»` };
       if (verdict === 'ask' && !(await confirmAction('Команда', `команда: ${command}`, who))) {
         return { ok: false, output: 'отклонено пользователем' };
@@ -1269,6 +1271,10 @@ async function runToolLoop(
               ? action.host
               : undefined,
       });
+      if (typeof verdict === 'object') {
+        results.push(`⛔ ${describeAction(action)} — тул отклонил: ${verdict.deny}`);
+        continue;
+      }
       if (verdict === 'deny') {
         results.push(`⛔ ${describeAction(action)} — тул отклонил действие`);
         continue;

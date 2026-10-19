@@ -72,9 +72,10 @@ const tctx: ToolContext = {
   check('sudo — другое первое слово', commandCheck(rules, 'sudo git status') === 'ask');
   check('регистр значим', commandCheck(rules, 'Git status') === 'ask');
   check('ls без «*» — префикс', commandCheck(rules, 'ls -la src') === 'allow');
-  check('deny сильнее allow', commandCheck(rules, 'git push origin main') === 'deny');
-  check('deny бьёт даже с подстановкой', commandCheck(rules, 'git push > log.txt') === 'deny');
-  check('deny по сегменту цепочки', commandCheck(rules, 'echo ok && git push') === 'deny');
+  const denied = commandCheck(rules, 'git push origin main');
+  check('deny сильнее allow — с обоснованием', typeof denied === 'object' && denied.deny.includes('git push'), JSON.stringify(denied));
+  check('deny бьёт даже с подстановкой', typeof commandCheck(rules, 'git push > log.txt') === 'object');
+  check('deny по сегменту цепочки', typeof commandCheck(rules, 'echo ok && git push') === 'object');
   check('подстановки не проходят молча', commandCheck(rules, 'git log $(cat x)') === 'ask');
   check('перенаправление — вопрос', commandCheck(rules, 'git log > out.txt') === 'ask');
 
@@ -234,7 +235,8 @@ const tctx: ToolContext = {
 
   const shell = toolset.get('shell')!;
   check('shell.check: разрешённое echo — молча', shell.check('echo привет') === 'allow');
-  check('shell.check: rm в deny — отказ', shell.check('rm -rf build') === 'deny');
+  const rmDenied = shell.check('rm -rf build');
+  check('shell.check: rm в deny — отказ с причиной', typeof rmDenied === 'object' && rmDenied.deny.includes('rm'), JSON.stringify(rmDenied));
   check('shell.check: не в списках — вопрос', shell.check('ls -la') === 'ask');
   check('shell.check: цепочка целиком из разрешённых', shell.check('echo a && echo b') === 'allow');
 
@@ -258,6 +260,48 @@ const tctx: ToolContext = {
   rmSync(root, { recursive: true, force: true });
 }
 
+// --- дефолтная политика shell/ssh (пустая карточка): git+files комбо ---
+{
+  const root = mkdtempSync(join(tmpdir(), 'dt-tooldefault-'));
+  const localCfg: ToolsConfig = { ...cfg, workspaceAbs: root };
+  const agent: Agent = {
+    id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p',
+    tools: { shell: {}, ssh: {} },
+  };
+  const toolset = buildToolset(agent, localCfg, tctx, undefined, new Map());
+  const shell = toolset.get('shell')!;
+  const ssh = toolset.get('ssh')!;
+
+  check('shell дефолт: ls — молча', shell.check('ls -la', { cwd: root }) === 'allow');
+  check('shell дефолт: cat внутри папки — молча', shell.check('cat package.json', { cwd: root }) === 'allow');
+  check('shell дефолт: git read-only — молча', shell.check('git status && git log -1', { cwd: root }) === 'allow');
+  check('shell дефолт: git push — вопрос', shell.check('git push origin main') === 'ask');
+  check('shell дефолт: git branch с аргументом — вопрос', shell.check('git branch feature') === 'ask');
+  check('shell дефолт: npm test — вопрос', shell.check('npm test') === 'ask');
+  check('shell дефолт: find -delete — вопрос', shell.check('find . -name "*.tmp" -delete', { cwd: root }) === 'ask');
+  check('shell дефолт: подстановка — вопрос', shell.check('echo $(cat .env)') === 'ask');
+  check('shell дефолт: вывод в файл — вопрос', shell.check('echo hi > out.txt') === 'ask');
+  const esc = shell.check('cat ../outside.txt', { cwd: root });
+  check('shell дефолт: «..» вне папки — отказ с обоснованием', typeof esc === 'object' && esc.deny.includes('вне рабочей папки'), JSON.stringify(esc));
+  check('shell дефолт: ls .. — отказ', typeof shell.check('ls ..', { cwd: root }) === 'object');
+  check('shell дефолт: абсолютный путь мимо папки — отказ', typeof shell.check('ls C:/Windows', { cwd: root }) === 'object');
+  const secret = shell.check('cat .env', { cwd: root });
+  check('shell дефолт: .env — отказ «секретный»', typeof secret === 'object' && secret.deny.includes('секретн'), JSON.stringify(secret));
+  check('shell дефолт: ssh-ключ — отказ', typeof shell.check('cat ~/.ssh/id_rsa') === 'object');
+
+  check('ssh дефолт: uptime — молча', ssh.check('uptime') === 'allow');
+  check('ssh дефолт: цепочка read-only — молча', ssh.check('df -h && free -m') === 'allow');
+  check('ssh дефолт: systemctl status — молча', ssh.check('systemctl status nginx') === 'allow');
+  check('ssh дефолт: systemctl restart — вопрос', ssh.check('systemctl restart nginx') === 'ask');
+  check('ssh дефолт: docker ps — вопрос', ssh.check('docker ps') === 'ask');
+  check('ssh дефолт: относительный путь — свой', ssh.check('tail -n 20 logs/app.log') === 'allow');
+  const abs = ssh.check('cat /etc/passwd');
+  check('ssh дефолт: абсолютный путь — отказ с обоснованием', typeof abs === 'object' && abs.deny.includes('вне рабочей папки'), JSON.stringify(abs));
+  check('ssh дефолт: «..» на сервере — отказ', typeof ssh.check('cat ../secrets.txt') === 'object');
+  check('ssh дефолт: .env на сервере — отказ', typeof ssh.check('cat .env') === 'object');
+  rmSync(root, { recursive: true, force: true });
+}
+
 // --- тул git (tools/git.ts): политика check() и запуск настоящего git ---
 {
   const git = gitFactory({});
@@ -276,7 +320,8 @@ const tctx: ToolContext = {
 
   const strict = gitFactory({ allow: ['commit *'], deny: ['push *'] });
   check('git: карточка — commit по правилу молча', strict.check('commit -m fix') === 'allow');
-  check('git: карточка — push в deny', strict.check('push origin') === 'deny');
+  const pushDenied = strict.check('push origin');
+  check('git: карточка — push в deny с причиной', typeof pushDenied === 'object' && pushDenied.deny.includes('push'), JSON.stringify(pushDenied));
   check('git: карточка вытесняет дефолт (status — вопрос)', strict.check('status') === 'ask');
 
   let threw = '';
