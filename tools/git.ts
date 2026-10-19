@@ -136,7 +136,12 @@ export default (config: ToolConfig, _deps?: unknown): Tool => {
     ' Read-only (status, log, diff…) — молча; изменяющее — по правилам карточки или вопрос.';
   return {
     desc,
-    check: (body) => (rules ? commandCheck(rules, body) : defaultCheck(body)),
+    // тело блока многострочно («log\n--oneline -5»): в git это одна команда,
+    // а не цепочка — нормализуем так же, как в run()
+    check: (body) => {
+      const command = body.replace(/\s*\n\s*/g, ' ').trim();
+      return rules ? commandCheck(rules, command) : defaultCheck(command);
+    },
     async run(body, ctx: ToolRunContext) {
       const where = repo ?? ctx.cwd;
       // многострочное тело («log\n--oneline -5») — одна команда: переводы — пробелы

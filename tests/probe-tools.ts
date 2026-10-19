@@ -268,6 +268,7 @@ const tctx: ToolContext = {
   check('git: commit — вопрос', git.check('commit -m «фикс»') === 'ask');
   check('git: push — вопрос', git.check('push origin main') === 'ask');
   check('git: цепочка read-only — молча', git.check('status && log --oneline') === 'allow');
+  check('git: многострочное тело — одна команда, молча', git.check('log\n--oneline -5') === 'allow');
   check('git: цепочка с мутацией — вопрос', git.check('status && stash pop') === 'ask');
   check('git: подстановка — вопрос', git.check('diff $(cat f)') === 'ask');
   check('git: перенаправление — вопрос', git.check('log > out.txt') === 'ask');
