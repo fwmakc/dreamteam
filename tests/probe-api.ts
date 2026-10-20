@@ -35,6 +35,9 @@ const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
 process.env.DT_PROJECT = proj;
+// рабочая папка инструментов = cwd на момент импорта: уводим процесс в tmp,
+// чтобы mock-демонстрация писала файлы в песочницу, а не в репозиторий
+process.chdir(base);
 writeFileSync(
   join(home, 'providers.json'),
   JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
