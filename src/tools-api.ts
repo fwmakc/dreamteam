@@ -126,8 +126,9 @@ export interface CommandRules {
   deny?: string[];
 }
 
-/** Подстановки и перенаправления: в таком теле первые слова больше не описывают происходящее. */
-export const SUBST = /[$()<>`]/;
+/** Подстановки и перенаправления: в таком теле первые слова больше не описывают происходящее.
+ *  % — раскрытие переменных cmd.exe (иначе `echo %DREAMTEAM_API_KEY%` слил бы ключи молча). */
+export const SUBST = /[$()<>`%]/;
 
 const toks = (s: string): string[] => s.trim().split(/\s+/);
 

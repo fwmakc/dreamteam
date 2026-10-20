@@ -281,25 +281,36 @@ const tctx: ToolContext = {
   const shell = toolset.get('shell')!;
   const ssh = toolset.get('ssh')!;
 
-  check('shell дефолт: ls — молча', shell.check('ls -la', { cwd: root }) === 'allow');
-  check('shell дефолт: cat внутри папки — молча', shell.check('cat package.json', { cwd: root }) === 'allow');
+  const isWin = process.platform === 'win32';
+  const readCmd = (c: string) => (isWin ? c : c.replace(/^dir\b/, 'ls').replace(/^type\b/, 'cat').replace(/^findstr\b/, 'grep'));
+  check('shell дефолт: листинг папки — молча', shell.check(readCmd('dir'), { cwd: root }) === 'allow');
+  check('shell дефолт: чтение файла внутри папки — молча', shell.check(readCmd('type package.json'), { cwd: root }) === 'allow');
   check('shell дефолт: git read-only — молча', shell.check('git status && git log -1', { cwd: root }) === 'allow');
   check('shell дефолт: git push — вопрос', shell.check('git push origin main') === 'ask');
   check('shell дефолт: git branch с аргументом — вопрос', shell.check('git branch feature') === 'ask');
   check('shell дефолт: npm test — вопрос', shell.check('npm test') === 'ask');
-  check('shell дефолт: find -delete — вопрос', shell.check('find . -name "*.tmp" -delete', { cwd: root }) === 'ask');
+  check('shell дефолт: find -delete — вопрос', shell.check(readCmd('find . -name "*.tmp" -delete'), { cwd: root }) === 'ask');
   check('shell дефолт: подстановка — вопрос', shell.check('echo $(cat .env)') === 'ask');
   check('shell дефолт: вывод в файл — вопрос', shell.check('echo hi > out.txt') === 'ask');
-  const esc = shell.check('cat ../outside.txt', { cwd: root });
+  check('shell дефолт: %переменная% cmd — вопрос', shell.check('echo %DREAMTEAM_API_KEY%') === 'ask');
+  const esc = shell.check(readCmd('type ../outside.txt'), { cwd: root });
   check('shell дефолт: «..» вне папки — отказ с обоснованием', typeof esc === 'object' && esc.deny.includes('вне рабочей папки'), JSON.stringify(esc));
-  check('shell дефолт: ls .. — отказ', typeof shell.check('ls ..', { cwd: root }) === 'object');
-  check('shell дефолт: абсолютный путь мимо папки — отказ', typeof shell.check('ls C:/Windows', { cwd: root }) === 'object');
-  const secret = shell.check('cat .env', { cwd: root });
+  check('shell дефолт: листинг выше папки — отказ', typeof shell.check(readCmd('dir ..'), { cwd: root }) === 'object');
+  check('shell дефолт: абсолютный путь мимо папки — отказ', typeof shell.check(readCmd('type C:/Windows/win.ini'), { cwd: root }) === 'object');
+  const secret = shell.check(readCmd('type .env'), { cwd: root });
   check('shell дефолт: .env — отказ «секретный»', typeof secret === 'object' && secret.deny.includes('секретн'), JSON.stringify(secret));
-  check('shell дефолт: ssh-ключ — отказ', typeof shell.check('cat ~/.ssh/id_rsa') === 'object');
-  const svc = shell.check('cat .dreamteam/agents.json', { cwd: root });
+  check('shell дефолт: ssh-ключ — отказ', typeof shell.check(readCmd('type ~/.ssh/id_rsa')) === 'object');
+  if (isWin) {
+    check('shell: desc предупреждает про cmd.exe', shell.desc.includes('cmd.exe') && shell.desc.includes('bash-команды'));
+    check('shell: bash-команды на Windows — вопрос', shell.check('ls -la', { cwd: root }) === 'ask' && shell.check('pwd') === 'ask');
+    check('shell: findstr — молча', shell.check('findstr "х" package.json', { cwd: root }) === 'allow');
+    check('shell: where — молча', shell.check('where git', { cwd: root }) === 'allow');
+  } else {
+    check('shell: desc POSIX', shell.desc.includes('ls, cat, grep'));
+  }
+  const svc = shell.check(readCmd('type .dreamteam/agents.json'), { cwd: root });
   check('shell дефолт: служебная .dreamteam — отказ', typeof svc === 'object' && svc.deny.includes('dreamteam'), JSON.stringify(svc));
-  check('shell дефолт: запись в .dreamteam — отказ', typeof shell.check('ls .dreamteam/tools', { cwd: root }) === 'object');
+  check('shell дефолт: запись в .dreamteam — отказ', typeof shell.check(readCmd('dir .dreamteam/tools'), { cwd: root }) === 'object');
   check('ssh дефолт: .dreamteam на сервере тоже запрет', typeof ssh.check('cat .dreamteam/agents.json') === 'object');
 
   check('ssh дефолт: uptime — молча', ssh.check('uptime') === 'allow');
