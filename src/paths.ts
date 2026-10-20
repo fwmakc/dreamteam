@@ -58,11 +58,12 @@ export function migrateLegacy(root: string = APP_ROOT): string[] {
   const legacyData = join(root, 'data');
   if (!existsSync(legacyConfig) && !existsSync(legacyData)) return notes;
 
-  const moveFile = (from: string, to: string): void => {
-    if (!existsSync(from) || existsSync(to)) return;
+  const moveFile = (from: string, to: string): boolean => {
+    if (!existsSync(from) || existsSync(to)) return false;
     mkdirSync(dirname(to), { recursive: true });
     renameSync(from, to);
     notes.push(`${from} → ${to}`);
+    return true;
   };
 
   // config/: ключи и настройки — в дом, команда и серверы — в проект
@@ -80,9 +81,12 @@ export function migrateLegacy(root: string = APP_ROOT): string[] {
   ] as const) {
     const src = join(legacyData, sub);
     if (!existsSync(src)) continue;
-    mkdirSync(dest, { recursive: true });
-    for (const name of readdirSync(src)) moveFile(join(src, name), join(dest, name));
-    notes.push(`${src} → ${dest}`);
+    let moved = 0;
+    for (const name of readdirSync(src)) {
+      if (moveFile(join(src, name), join(dest, name))) moved++;
+    }
+    // пустой каталог-архив не повод для заметки: иначе она печатается на каждом старте
+    if (moved > 0) notes.push(`${src} → ${dest}`);
   }
   moveFile(join(legacyData, 'memory.json'), MEMORY_FILE);
 
