@@ -6,6 +6,8 @@
  * нарочно бесцветные: цветные версии остаются терминалу (index.ts), веб-оболочка
  * показывает свои панели по state.
  */
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { loadTeam } from '../agents.js';
 import {
   addProject,
@@ -17,6 +19,14 @@ import {
 import { agentToolIds } from '../tools-api.js';
 import { AGENTS_FILE, PROJECTS_FILE, TOOLS_DIR } from '../paths.js';
 import { chatTeam, isSessionRef, type App, type Engine } from './engine.js';
+import {
+  applyHomeImport,
+  applySessionImport,
+  homeEntries,
+  packEntriesZip,
+  readZipEntries,
+  sessionEntries,
+} from './transfer.js';
 import type { Agent, ManagerHostSpec } from '../types.js';
 
 /** Описание команды: справка, автодополнение и панель подсказок — из одного списка. */
@@ -37,6 +47,8 @@ export const COMMANDS: CommandSpec[] = [
   { cmd: '/session', args: '<номер>', help: 'открыть разговор из списка' },
   { cmd: '/delete', args: '<номер>', help: 'удалить разговор из списка' },
   { cmd: '/rename', args: '<новое имя>', help: 'переименовать разговор; без имени менеджер придумает' },
+  { cmd: '/export', args: '[номер]', help: 'архив настроек и истории (или одного разговора) в zip' },
+  { cmd: '/import', args: '<файл.zip>', help: 'импорт архива настроек/разговора' },
   { cmd: '/history', args: '[N]', help: 'история текущего разговора (или последние N)' },
   { cmd: '/team', help: 'состав команды (· не в этом чате)' },
   { cmd: '/add', args: '<имя|номер>', help: 'позвать участника в текущий чат' },
@@ -78,6 +90,10 @@ export async function runCommandText(
       return sessionsText(app);
     case 'rename':
       return renameCommand(engine, arg);
+    case 'export':
+      return exportCommand(engine, arg);
+    case 'import':
+      return importCommand(engine, arg);
     case 'session':
       engine.openSessionByArg(arg);
       return [];
@@ -283,6 +299,32 @@ function sessionsText(app: App): string[] {
   });
   lines.push('');
   return lines;
+}
+
+/** /export [номер]: без номера — весь дом; с номером — один разговор. */
+function exportCommand(engine: Engine, arg: string): string[] {
+  const app = engine.app;
+  const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const n = Number.parseInt(arg, 10);
+  const entries = Number.isInteger(n) && n > 0 ? sessionEntries(app, n) : homeEntries();
+  const file = join(process.cwd(), Number.isInteger(n) && n > 0 ? `dt-session-${app.store.list()[n - 1].id}.zip` : `dt-home-${ts}.zip`);
+  writeFileSync(file, packEntriesZip(entries));
+  return [`Экспорт: ${file} (${entries.length} записей${Number.isInteger(n) && n > 0 ? '' : ', без .env с ключами'})`];
+}
+
+/** /import <файл.zip>: zip с session.json — разговор, иначе — дом (с подтверждением). */
+async function importCommand(engine: Engine, arg: string): Promise<string[]> {
+  if (!arg) return ['Синтаксис: /import <файл.zip>'];
+  if (!existsSync(arg)) return [`Файла «${arg}» нет`];
+  const entries = readZipEntries(readFileSync(arg));
+  const isSession = entries.some((e) => e.rel === 'session.json');
+  if (isSession) return [await applySessionImport(engine.app, entries)];
+  const ok = await engine.confirmAction(
+    'Импортировать домашние настройки из этого архива?',
+    'Настройки/профиль/провайдеры заменяются; разговоры вливаются по id. Ключи (.env) не переносятся.',
+  );
+  if (!ok) return ['Импорт дома отменён.'];
+  return [applyHomeImport(engine.app, entries)];
 }
 
 /** /rename [имя]: с именем — напрямую, без — менеджер придумывает по разговору. */

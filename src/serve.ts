@@ -6,10 +6,12 @@ import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { loadTeam } from './agents.js';
+import { managerAsAgent } from './manager.js';
 import { AGENTS_FILE } from './paths.js';
 import { Engine, chatTeam, type App } from './core/engine.js';
 import { bootstrapApp } from './core/bootstrap.js';
 import { COMMANDS } from './core/commands.js';
+import { homeEntries, packEntriesZip, readZipEntries, sessionEntries, applyHomeImport, applySessionImport } from './core/transfer.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, Session } from './types.js';
 
@@ -286,7 +288,8 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   });
 
   type ClientSocket = WebSocket & { authed?: boolean };
-  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  const stamp = (): string => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   // токен доступа: задаётся TOKEN в ~/.dreamteam/.env; пусто — сервер открыт
   // (по умолчанию он и так слушает только 127.0.0.1)
   const authToken = String(process.env.TOKEN ?? '').trim();
@@ -356,6 +359,40 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
       case 'abort':
         activeAbort?.();
         return;
+      case 'export_home': {
+        const data = packEntriesZip(homeEntries());
+        ws.send(JSON.stringify({ type: 'export_data', name: `dt-home-${stamp()}.zip`, dataB64: data.toString('base64') }));
+        return;
+      }
+      case 'export_session': {
+        const entries = sessionEntries(app, Number(msg.n));
+        const meta = app.store.list()[Number(msg.n) - 1];
+        ws.send(JSON.stringify({ type: 'export_data', name: `dt-session-${meta?.id ?? 'x'}.zip`, dataB64: packEntriesZip(entries).toString('base64') }));
+        return;
+      }
+      case 'import_home': {
+        const entries = readZipEntries(Buffer.from(String(msg.dataB64 ?? ''), 'base64'));
+        const ok = await presenter.confirm({
+          label: 'Импортировать домашние настройки из файла?',
+          desc: 'Настройки/профиль/провайдеры заменяются; разговоры вливаются по id. Ключи (.env) не переносятся.',
+          who: managerAsAgent(app.mgr),
+        });
+        if (!ok) {
+          ws.send(JSON.stringify({ type: 'notice', text: '  Импорт дома отменён.' }));
+          return;
+        }
+        const report = applyHomeImport(app, entries);
+        presenter.notice('  ' + report);
+        broadcastState();
+        return;
+      }
+      case 'import_session': {
+        const entries = readZipEntries(Buffer.from(String(msg.dataB64 ?? ''), 'base64'));
+        const report = applySessionImport(app, entries);
+        presenter.notice('  ' + report);
+        broadcastState();
+        return;
+      }
       case 'confirm_response': {
         presenter.resolve(String(msg.id ?? ''), msg.approved === true);
         return;

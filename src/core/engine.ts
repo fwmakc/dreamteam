@@ -749,6 +749,12 @@ export class Engine {
       .join('\n');
   }
 
+  /** Подтверждение для команд уровня ядра (импорт дома и т.п.) — через Presenter. */
+  async confirmAction(label: string, desc = ''): Promise<boolean> {
+    const agent = managerAsAgent(this.app.mgr);
+    return this.presenter.confirm({ label, desc, who: { id: agent.id, name: agent.name, emoji: agent.emoji, color: agent.color, role: agent.role } });
+  }
+
   /** Удаление разговора по номеру списка; текущий не удаляется. */
   deleteSession(n: number): string {
     const meta = Number.isInteger(n) && n > 0 ? this.app.store.list()[n - 1] : undefined;
