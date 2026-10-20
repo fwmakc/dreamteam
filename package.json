@@ -11,7 +11,7 @@
     "start": "tsx src/index.ts",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "probe": "tsx tests/probe-screen.ts && tsx tests/probe-editor.ts && tsx tests/probe-manager.ts && tsx tests/probe-tools.ts",
+    "probe": "tsx tests/probe-screen.ts && tsx tests/probe-editor.ts && tsx tests/probe-manager.ts && tsx tests/probe-tools.ts && tsx tests/probe-wizard.ts",
     "probe:e2e": "npm i --no-save node-pty && tsx tests/probe-input.ts && tsx tests/probe-startup.ts && npm prune",
     "probe:tui": "tsx tests/probe-tui.ts",
     "probe:manager": "tsx tests/probe-manager.ts"

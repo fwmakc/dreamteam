@@ -1,7 +1,9 @@
 import 'dotenv/config';
+import dotenv from 'dotenv';
 import { createInterface } from 'node:readline/promises';
 import { writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import { format } from 'node:util';
 import pc from 'picocolors';
 import { findMentions, loadTeam, loadUserProfile } from './agents.js';
@@ -39,6 +41,7 @@ import { loadSettings } from './settings.js';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
 import {
   AGENTS_FILE,
+  DT_HOME,
   MANAGER_FILE,
   MEMORY_FILE,
   PROJECTS_FILE,
@@ -50,6 +53,7 @@ import {
   WORKSPACE,
   migrateLegacy,
 } from './paths.js';
+import { ensureLayers } from './wizard.js';
 import { planTurns, type PlanResult } from './orchestrator.js';
 import { compressIfNeeded, contextSlice } from './compress.js';
 import {
@@ -1843,8 +1847,18 @@ async function runCommand(app: App, line: string): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+  // ключи провайдеров могут лежать в ~/.dreamteam/.env — читаем до конфигов
+  // (проектный .env dotenv уже загрузил; он главнее при совпадении имён)
+  dotenv.config({ path: join(DT_HOME, '.env') });
   // однократная миграция старой схемы (config/ и data/ в корне пакета) на слои
   for (const note of migrateLegacy()) console.log(pc.dim(`  миграция: ${note}`));
+  // первый запуск: wizard (нет провайдеров) и скаффолдинг .dreamteam в проекте
+  try {
+    for (const note of await ensureLayers()) console.log(pc.dim(`  ${note}`));
+  } catch (err) {
+    printError(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
   // настройки читаем до всего вывода: ошибка конфига видна в обычном терминале
   const ui = loadSettings(SETTINGS_FILE, process.stdout.columns || 0);
   const store = new SessionStore(SESSIONS_DIR);
