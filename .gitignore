@@ -6,3 +6,4 @@ migration-backup/
 .env
 *.log
 workspace/
+.dreamteam/

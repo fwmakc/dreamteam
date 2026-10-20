@@ -2018,6 +2018,27 @@ async function main(): Promise<void> {
   // после того, как весь стартовый вывод уже в состоянии экрана
   screen?.repaint();
 
+  // Пустой разговор на старте (первый запуск или неиспользованная сессия) —
+  // менеджер здоровается сам, как по /new. Только в TTY: в пайпе LLM не зовём.
+  if (editor && session.messages.length === 0) {
+    session.participants = [MANAGER_ID];
+    app.store.save(session);
+    printDim(`  В чате: ${app.mgr.emoji} ${app.mgr.name} — попросите позвать кого-нибудь из команды (/team)`);
+    const ac = new AbortController();
+    abortActiveRound = () => ac.abort();
+    try {
+      let team: Agent[] = [];
+      try {
+        team = loadTeam(AGENTS_FILE);
+      } catch {
+        // нет agents.json — менеджер в приветствии сам объяснит, что дальше
+      }
+      await managerTurn(app, WELCOME_REQUEST, team, app.profile, ac.signal);
+    } finally {
+      abortActiveRound = null;
+    }
+  }
+
   // Цветной промпт передаём самому readline: иначе при перерисовке строки
   // (например, при стирании текста) он подставит свой дефолтный белый '> '.
   // Название текущего разговора видно прямо в промпте.
