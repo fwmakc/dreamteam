@@ -40,5 +40,26 @@
     "@types/node": "^22.10.1",
     "@types/ws": "^8.18.2",
     "typescript": "^5.6.3"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fwmakc/dreamteam.git"
+  },
+  "homepage": "https://github.com/fwmakc/dreamteam#readme",
+  "bugs": {
+    "url": "https://github.com/fwmakc/dreamteam/issues"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "chat",
+    "cli",
+    "tui",
+    "llm",
+    "team",
+    "assistant",
+    "web-gui",
+    "multi-agent"
+  ]
 }
