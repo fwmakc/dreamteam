@@ -1,32 +1,10 @@
 import pc from 'picocolors';
+import { COMMANDS, type CommandSpec } from './core/commands.js';
 
-/**
- * Единый список команд: из него собираются /help, Tab-автодополнение
- * и живая панель подсказок под строкой ввода.
- */
-export interface CommandSpec {
-  cmd: string;
-  /** Ожидаемые аргументы — для справки и панели; пусто, если аргументов нет */
-  args?: string;
-  help: string;
-}
-
-export const COMMANDS: CommandSpec[] = [
-  { cmd: '/new', help: 'новый разговор — один на один с менеджером, он позовёт остальных' },
-  { cmd: '/sessions', help: 'список сохранённых разговоров' },
-  { cmd: '/session', args: '<номер>', help: 'открыть разговор из списка' },
-  { cmd: '/delete', args: '<номер>', help: 'удалить разговор из списка' },
-  { cmd: '/history', args: '[N]', help: 'история текущего разговора (или последние N)' },
-  { cmd: '/team', help: 'состав команды (· не в этом чате)' },
-  { cmd: '/add', args: '<имя|номер>', help: 'позвать участника в текущий чат' },
-  { cmd: '/out', args: '<имя|номер>', help: 'вывести участника из текущего чата' },
-  { cmd: '/providers', help: 'провайдеры и их статус' },
-  { cmd: '/provider', args: '<id>', help: 'сменить основного провайдера (у менеджера свой)' },
-  { cmd: '/me', args: '[Имя; роль; о себе]', help: 'как вас видит команда' },
-  { cmd: '/memory', args: '[имя|shared]', help: 'что помнит участник; shared — общая память' },
-  { cmd: '/help', help: 'эта справка' },
-  { cmd: '/exit', help: 'выход' },
-];
+// канонический список команд живёт в ядре (src/core/commands.ts) — отсюда им
+// пользуются терминальные подсказки; /help и сервер отдают его же
+export { COMMANDS };
+export type { CommandSpec };
 
 /** Живые данные для дополнения: список разговоров, команда, провайдеры. */
 export interface CompletionContext {

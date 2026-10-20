@@ -559,35 +559,25 @@ function replaySession(session: Session): void {
   }
 }
 
-// ─── Команды: тонкие обёртки — форматирование здесь, логика в ядре ─────────
+// ─── Команды: терминал оставляет себе цветные просмотры и /exit ─────────────
+// Все остальные команды (мутации и всё новое) исполняет ядро — ввод с `/`
+// доходит до engine.handleMessage и там перехватывается (runCommandText).
 
-async function runCommand(engine: Engine, line: string): Promise<boolean> {
+type CommandVerdict = 'exit' | 'handled' | 'unknown';
+
+function runCommand(engine: Engine, line: string): CommandVerdict {
   const app = engine.app;
   const [cmd, ...rest] = line.slice(1).trim().split(/\s+/);
-  const arg = rest.join(' ');
   switch (cmd) {
     case 'help':
     case 'h':
       printHelp();
-      break;
-    case 'new': {
-      // чат создаём мгновенно; итоги предыдущего вольются в общую память в фоне.
-      // Новый разговор всегда начинается один на один с менеджером: он консьерж —
-      // позовёт команду, включит тула, настроит проекты — просто поговорите с ним.
-      const ac = new AbortController();
-      abortActiveRound = () => ac.abort();
-      try {
-        await engine.newSession(ac.signal);
-      } finally {
-        abortActiveRound = null;
-      }
-      break;
-    }
+      return 'handled';
     case 'sessions': {
       const list = app.store.list();
       if (list.length === 0) {
         printDim('  Разговоров пока нет.');
-        break;
+        return 'handled';
       }
       console.log(pc.dim('\n  Разговоры (свежие сверху):'));
       list.forEach((s, i) => {
@@ -596,18 +586,15 @@ async function runCommand(engine: Engine, line: string): Promise<boolean> {
         console.log(`    ${i + 1}. ${s.title} — ${s.count} сообщ., ${date}${cur}`);
       });
       console.log();
-      break;
+      return 'handled';
     }
-    case 'session':
-      engine.openSessionByArg(arg);
-      break;
     case 'history': {
       const n = Number.parseInt(rest[0] ?? '', 10);
       const all = app.session.messages;
       const shown = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
       if (shown.length === 0) {
         printDim('  Разговор пуст.');
-        break;
+        return 'handled';
       }
       let team: Agent[] = [];
       try {
@@ -623,146 +610,31 @@ async function runCommand(engine: Engine, line: string): Promise<boolean> {
         for (const row of messageRows(m, team)) console.log(row);
       }
       console.log('');
-      break;
-    }
-    case 'delete': {
-      const n = Number.parseInt(arg, 10);
-      if (!Number.isInteger(n) || n <= 0) {
-        printDim(`  Не нашёл разговор №${arg} — см. /sessions`);
-        break;
-      }
-      printDim('  ' + engine.deleteSession(n));
-      break;
+      return 'handled';
     }
     case 'team':
       printTeam(app);
-      break;
-    case 'add': {
-      let fullTeam: Agent[] = [];
-      try {
-        fullTeam = loadTeam(AGENTS_FILE);
-      } catch {
-        printDim('  agents.json недоступен — позвать никого не получится.');
-        break;
-      }
-      if (!arg) {
-        printDim('  Кого позвать? /add <имя или номер> (список — /team)');
-        break;
-      }
-      printDim('  ' + engine.addToChat(arg, fullTeam));
-      break;
-    }
-    case 'out': {
-      let fullTeam: Agent[] = [];
-      try {
-        fullTeam = loadTeam(AGENTS_FILE);
-      } catch {
-        printDim('  agents.json недоступен — выгнать никого не получится.');
-        break;
-      }
-      if (!arg) {
-        printDim('  Кого выгнать? /out <имя или номер> (список — /team)');
-        break;
-      }
-      printDim('  ' + engine.removeFromChat(arg, fullTeam));
-      break;
-    }
+      return 'handled';
     case 'providers':
       printProviders(app);
-      break;
-    case 'provider':
-      if (!arg) {
-        printDim(
-          `  Основной провайдер: ${app.defaultProviderId}. ` +
-          `Менеджер переговорки: ${app.mgr.provider} (меняется только в config/manager.json)`,
-        );
-      } else if (engine.setProvider(arg)) {
-        printDim(`  Основной провайдер: ${arg}`);
-      } else {
-        printDim(`  Нет провайдера «${arg}». Доступны: ${[...app.providers.keys()].join(', ')}`);
-      }
-      break;
+      return 'handled';
     case 'all':
       printDim('  Команды /all больше нет — состав отвечает по решению модератора или @упоминания.');
-      break;
-    case 'memory': {
-      let memTeam: Agent[] = [];
-      try {
-        memTeam = loadTeam(AGENTS_FILE);
-      } catch {
-        // без agents.json показываем только общую память
-      }
-      if (arg === 'shared') {
-        if (app.memory.shared) {
-          printDim('\n  Общая память команды:');
-          for (const line of app.memory.shared.split('\n')) console.log('  ' + line);
-        } else {
-          printDim('  Общая память пока пуста — заполняется при закрытии разговоров (/new, /exit).');
-        }
-        break;
-      }
-      if (!arg) {
-        const withMem = memTeam.filter((a) => app.session.memories?.[a.id]);
-        printDim('  Чья память: /memory <имя> (например, /memory Глеб), /memory shared — общая.');
-        printDim(
-          withMem.length > 0
-            ? `  Уже помнят что-то: ${withMem.map((a) => a.name).join(', ')}`
-            : '  Пока никто не «осмыслил» разговор (память обновляется примерно раз в 12 сообщений).',
-        );
-        break;
-      }
-      const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
-      const who = memTeam.find((a) => norm(a.name) === norm(arg) || a.id === norm(arg));
-      if (!who) {
-        printDim(`  Нет участника «${arg}» — см. /team`);
-        break;
-      }
-      const mine = app.session.memories?.[who.id];
-      const glob = app.memory.agents[who.id];
-      console.log(pc.dim(`\n  Что ${who.name} помнит в разговоре «${app.session.title}»:`));
-      console.log(`  Задача: ${mine?.task ?? '—'}`);
-      console.log(`  Отношение к вам: ${mine?.towardUser ?? '—'}`);
-      if (mine?.ties && Object.keys(mine.ties).length > 0) {
-        const byId = new Map(memTeam.map((a) => [a.id, a.name]));
-        for (const [id, note] of Object.entries(mine.ties)) {
-          console.log(`  ${byId.get(id) ?? id}: ${note}`);
-        }
-      } else {
-        console.log('  Коллеги: —');
-      }
-      console.log(pc.dim(`  Из других разговоров: ${glob?.otherChats ?? '—'}`));
-      console.log();
-      break;
-    }
-    case 'me': {
-      const parts = arg.split(';').map((s) => s.trim()).filter(Boolean);
-      if (parts.length === 0) {
-        const p = app.profile;
-        printDim(`  Вы: ${p.name}${p.role ? ' — ' + p.role : ''}${p.about ? ' — ' + p.about : ''}`);
-        printDim('  Представиться: /me Имя; роль; пара слов о себе (сохраняется в config/user.json)');
-        break;
-      }
-      try {
-        printDim('  ' + await engine.setProfile(parts[0], parts[1], parts[2]));
-      } catch (err) {
-        printError(err instanceof Error ? err.message : String(err));
-      }
-      break;
-    }
+      return 'handled';
     case 'exit':
     case 'quit':
     case 'q':
       exitRequested = true;
       if (editor) {
         requestExit();
-        return true;
+        return 'exit';
       }
       rl?.close();
-      return true;
+      return 'exit';
     default:
-      printDim('  Неизвестная команда. /help — список команд.');
+      // мутации и всё незнакомое — в ядро: там перехват `/` в handleMessage
+      return 'unknown';
   }
-  return false;
 }
 
 async function main(): Promise<void> {
@@ -1032,18 +904,18 @@ async function main(): Promise<void> {
     if (!line) continue;
     try {
       if (line.startsWith('/')) {
-        const done = await runCommand(engine, line);
-        if (done) break;
-      } else {
-        // Весь раунд (конспекты, сжатие, модератор, ответы агентов) под одним
-        // AbortController: Esc/Ctrl+C прерывают его, а уже сказанное остаётся в истории.
-        const ac = new AbortController();
-        abortActiveRound = () => ac.abort();
-        try {
-          await engine.handleMessage(line, ac.signal);
-        } finally {
-          abortActiveRound = null;
-        }
+        const verdict = runCommand(engine, line);
+        if (verdict === 'exit') break;
+        if (verdict === 'handled') continue;
+      }
+      // Весь путь — команды и разговоры — под одним AbortController:
+      // Esc/Ctrl+C прерывают раунд, а уже сказанное остаётся в истории.
+      const ac = new AbortController();
+      abortActiveRound = () => ac.abort();
+      try {
+        await engine.handleMessage(line, ac.signal);
+      } finally {
+        abortActiveRound = null;
       }
     } catch (err) {
       printError(`ошибка: ${err instanceof Error ? err.message : err}`);

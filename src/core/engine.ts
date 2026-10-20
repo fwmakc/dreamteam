@@ -34,7 +34,7 @@ import {
   type ToolRunContext,
 } from '../tools-api.js';
 import { buildToolset, loadUserTools } from '../tools-registry.js';
-import { COMMANDS } from '../completion.js';
+import { COMMANDS, runCommandText } from './commands.js';
 import { writeFileSync } from 'node:fs';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
 import {
@@ -395,6 +395,14 @@ export class Engine {
 
   /** Реплика пользователя: весь раунд под одним signal (Esc/Ctrl+C у оболочки). */
   async handleMessage(text: string, signal: AbortSignal): Promise<void> {
+    // команды исполняет ядро: один набор для терминала, сети и менеджера;
+    // текст команды в историю разговора не пишется
+    if (text.startsWith('/')) {
+      for (const line of await runCommandText(this, text, signal)) {
+        this.presenter.notice('  ' + line);
+      }
+      return;
+    }
     let team: Agent[];
     try {
       team = this.team();
