@@ -14,7 +14,8 @@ import type { Agent, Session } from './types.js';
 
 /**
  * Локальный API поверх ядра: `dreamteam serve` поднимает HTTP+WS на
- * 127.0.0.1 и раздаёт веб-оболочку из gui/. Ядро общается с клиентами
+ * 127.0.0.1:8080 (DT_PORT/DT_HOST, можно в ~/.dreamteam/.env) и раздаёт
+ * веб-оболочку из gui/. Ядро общается с клиентами
  * только через ServerPresenter (тот же интерфейс Presenter, что и у
  * терминала) — никакого второго ядра нет.
  *
@@ -233,6 +234,7 @@ const GUI_DIR = fileURLToPath(new URL('../gui/', import.meta.url));
 
 export interface ServeHandle {
   port: number;
+  host: string;
   close(): Promise<void>;
 }
 
@@ -405,10 +407,13 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     res.end(readFileSync(file));
   }
 
-  const port = opts.port ?? (Number(process.env.DT_PORT) || 8787);
+  const port = opts.port ?? (Number(process.env.DT_PORT) || 8080);
+  // по умолчанию — только локально; DT_HOST=0.0.0.0 открывает сервер в сеть
+  // (авторизации в API нет — так делают, только если сеть своя)
+  const host = String(process.env.DT_HOST ?? '').trim() || '127.0.0.1';
   await new Promise<void>((resolve, reject) => {
     httpServer.once('error', reject);
-    httpServer.listen(port, '127.0.0.1', resolve);
+    httpServer.listen(port, host, resolve);
   });
   const actual = httpServer.address();
   const realPort = typeof actual === 'object' && actual ? actual.port : port;
@@ -421,6 +426,7 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
 
   return {
     port: realPort,
+    host,
     close(): Promise<void> {
       return new Promise((resolve) => {
         wss.close();
@@ -437,8 +443,8 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
 const entry = (process.argv[1] ?? '').replace(/\\/g, '/');
 if (process.env.DT_SERVE === '1' || entry.endsWith('/src/serve.ts')) {
   startServe()
-    .then(({ port }) => {
-      console.log(pc.dim(`\n  API поднято: http://127.0.0.1:${port} (WS — /ws) · только локально · Ctrl+C — останов`));
+    .then(({ port, host }) => {
+      console.log(pc.dim(`\n  API поднято: http://${host}:${port} (WS — /ws) · ${host === '127.0.0.1' ? 'только локально' : 'ОТКРЫТО В СЕТЬ — авторизации нет'} · Ctrl+C — останов`));
     })
     .catch((err) => {
       console.error(pc.red(`Фатальная ошибка: ${err instanceof Error ? err.stack ?? err.message : err}`));
