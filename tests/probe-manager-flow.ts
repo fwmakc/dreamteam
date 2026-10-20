@@ -45,6 +45,11 @@ writeFileSync(
   join(home, 'providers.json'),
   JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
 );
+// язык общения задаём до старта: ensureHome не перезаписывает существующий settings
+writeFileSync(
+  join(home, 'settings.json'),
+  JSON.stringify({ width: 100, language: 'english' }, null, 2) + '\n',
+);
 
 const { bootstrapApp } = await import('../src/core/bootstrap.js');
 const { Engine } = await import('../src/core/engine.js');
@@ -63,7 +68,7 @@ const fakeProvider: LLMProvider = {
     });
     // менеджеру — заготовленный ответ; остальным (агенты, конспекты) — болтовня,
     // чтобы фон (вливания памяти) не съедал сценарную очередь
-    const reply = req.system === MANAGER_PROMPT ? (managerReplies.shift() ?? '') : 'Принято.';
+    const reply = req.system?.startsWith(MANAGER_PROMPT) ? (managerReplies.shift() ?? '') : 'Принято.';
     if (req.signal?.aborted) return;
     yield reply;
   },
@@ -112,7 +117,8 @@ function lastManagerMessage(): string {
   // пустая переговорка: скаффолд без команды, разговор один и пуст
   await askManager('Слушаю.', 'докладывай');
   const req = requests.at(-1)!;
-  check('снимок: system — это промт менеджера', req.system === MANAGER_PROMPT);
+  check('снимок: system начинается с промта менеджера', req.system?.startsWith(MANAGER_PROMPT) ?? false);
+  check('снимок: язык общения в промте менеджера', req.system?.includes('отвечай строго на языке: english') ?? false, req.system?.slice(-80));
   check('снимок: пустые участники — «вся команда»', req.user?.includes('В этом чате: вся команда') ?? false, req.user);
   check('снимок: разговоры с номерами и текущим', (req.user?.includes('1. ') && req.user?.includes('(текущий)')) ?? false);
   check('снимок: без проектов блока нет', !req.user?.includes('Проекты (реестр серверов для ssh)'), String(req.user?.slice(0, 80)));
@@ -312,6 +318,8 @@ function lastManagerMessage(): string {
 {
   const managersBefore = app.session.messages.filter((m) => m.authorId === 'manager').length;
   await engine.handleMessage('привет команде, как продвигается?', signal());
+  const agentReq = requests.filter((r) => !r.system?.startsWith(MANAGER_PROMPT)).at(-1);
+  check('роутинг: язык общения в промте агента', agentReq?.system?.includes('отвечай строго на языке: english') ?? false, agentReq?.system?.slice(-80));
   const last = app.session.messages.at(-1)!;
   check('роутинг: без @менеджер отвечает участник', last.authorId === 'katya', JSON.stringify({ authorId: last.authorId }));
   check('роутинг: менеджер молчал', app.session.messages.filter((m) => m.authorId === 'manager').length === managersBefore);

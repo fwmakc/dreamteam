@@ -10,6 +10,9 @@ import { readFileSync } from 'node:fs';
 export interface SettingsConfig {
   /** Логическая ширина экрана (обрезается по ширине терминала) */
   width: number;
+  /** Язык общения команды: попадает в системные промты как есть
+   *  («russian», «ru-RU», «русский» — нейросети поймут любую запись) */
+  language: string;
   /** Отступы по краям экрана в колонках/строках (0–10) */
   margin: number;
   /** false — прежний readline-интерфейс без альтернативного экрана */
@@ -53,8 +56,13 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   if (maxOutputChars !== undefined && (typeof maxOutputChars !== 'number' || maxOutputChars <= 0)) {
     throw new Error(`${file}: поле "maxOutputChars" — положительное число символов`);
   }
+  const language = raw.language;
+  if (language !== undefined && (typeof language !== 'string' || language.trim() === '')) {
+    throw new Error(`${file}: поле "language" — непустая строка («russian», «ru-RU», «русский» — как угодно)`);
+  }
   return {
     width: termCols > 0 ? Math.min(width, termCols) : width,
+    language: typeof language === 'string' ? language.trim() : 'русский',
     margin: typeof margin === 'number' ? margin : 2,
     screen: screen !== false,
     runTimeoutMs: typeof runTimeoutMs === 'number' ? runTimeoutMs : 180000,

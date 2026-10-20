@@ -432,6 +432,22 @@ const agentsFile = join(dir, 'agents.json');
   check('settings: поле workspace удалено — ошибка', threw.includes('workspace'), threw);
   writeFileSync(sf, JSON.stringify({ width: 100, runTimeoutMs: 5000 }));
   check('settings: свой таймаут читается', loadSettings(sf, 0).runTimeoutMs === 5000);
+  {
+    writeFileSync(sf, JSON.stringify({ width: 100 }));
+    check('settings: язык по умолчанию — русский', loadSettings(sf, 0).language === 'русский');
+    writeFileSync(sf, JSON.stringify({ width: 100, language: 'ru-RU' }));
+    check('settings: свой язык читается как есть', loadSettings(sf, 0).language === 'ru-RU');
+    writeFileSync(sf, JSON.stringify({ width: 100, language: 'english' }));
+    check('settings: latin-запись тоже проходит', loadSettings(sf, 0).language === 'english');
+    writeFileSync(sf, JSON.stringify({ width: 100, language: '   ' }));
+    let langErr = '';
+    try { loadSettings(sf, 0); } catch (e) { langErr = (e as Error).message; }
+    check('settings: пустой язык — ошибка', langErr.includes('language'), langErr);
+    writeFileSync(sf, JSON.stringify({ width: 100, language: 42 }));
+    langErr = '';
+    try { loadSettings(sf, 0); } catch (e) { langErr = (e as Error).message; }
+    check('settings: язык-число — ошибка', langErr.includes('language'), langErr);
+  }
 }
 
 rmSync(dir, { recursive: true, force: true });

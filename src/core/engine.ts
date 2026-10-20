@@ -61,6 +61,7 @@ import {
 } from '../memory.js';
 import type { ImageProviderStatus, ProviderStatus } from '../providers/registry.js';
 import { SessionStore } from '../sessions.js';
+import { loadSettings } from '../settings.js';
 import type {
   Agent,
   ChatMessage,
@@ -75,8 +76,9 @@ import type {
 } from '../types.js';
 import type { Presenter, SpeakerRef } from './presenter.js';
 
-const COMMON_RULES =
-  'Общие правила: отвечай на русском, от первого лица, коротко и живо (обычно 2–5 предложений), ' +
+/** Общие правила агента; язык общения — из settings.json, в промт идёт как есть. */
+const commonRules = (language: string) =>
+  `Общие правила: отвечай строго на языке: ${language}, от первого лица, коротко и живо (обычно 2–5 предложений), ` +
   'без заголовков и списков, если тебя прямо не просят. Не выходи из роли и не упоминай, что ты ИИ. ' +
   'Если не согласен с коллегой — говори об этом прямо и обращайся к нему по имени.';
 
@@ -144,6 +146,9 @@ export class Engine {
 
   /** Очередь фоновых вливаний: закрывают чаты подряд — merges не перетирают друг друга. */
   private flushChain: Promise<void> = Promise.resolve();
+
+  /** Язык общения из settings.json — перечитывается каждый раунд (как профиль). */
+  private language = 'русский';
 
   constructor(
     public app: App,
@@ -284,7 +289,7 @@ export class Engine {
       const hint = actionsHint(agent, this.toolsConfig(), custom);
       if (hint) blocks.push(hint);
     }
-    blocks.push(COMMON_RULES);
+    blocks.push(commonRules(this.language));
     return {
       system: blocks.join('\n\n'),
       messages,
@@ -418,6 +423,8 @@ export class Engine {
     // профиль читаем каждый раунд: правки config/user.json подхватываются на лету
     const profile = loadUserProfile(USER_FILE);
     this.app.profile = profile;
+    // язык общения — из settings.json, тоже на лету
+    this.language = loadSettings(SETTINGS_FILE, 0).language;
     // тула тоже: переимпорт tools/*.ts и свежие карточки — без перезапуска
     await this.refreshUserTools();
     // в чате отвечают только позванные (старые чаты без списка — вся команда)
@@ -587,7 +594,9 @@ export class Engine {
     let streamError: unknown = null;
     try {
       for await (const chunk of provider.stream({
-        system: MANAGER_PROMPT,
+        // язык общения добавляется хвостом: mock и пробы узнают менеджерский
+        // промт по началу («Ты — менеджер переговорки»)
+        system: `${MANAGER_PROMPT}\n\nОбщие правила: отвечай строго на языке: ${this.language}.`,
         messages: [
           {
             role: 'user',

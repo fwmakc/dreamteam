@@ -208,8 +208,8 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
   }
   if (!existsSync(settingsFile)) {
     mkdirSync(homeDir, { recursive: true });
-    writeFileSync(settingsFile, JSON.stringify({ width: 100, margin: 2, screen: true }, null, 2) + '\n');
-    notes.push(`создал ${settingsFile} (экран по умолчанию)`);
+    writeFileSync(settingsFile, JSON.stringify({ width: 100, language: 'русский', margin: 2, screen: true }, null, 2) + '\n');
+    notes.push(`создал ${settingsFile} (язык и экран по умолчанию)`);
   }
   return notes;
 }
