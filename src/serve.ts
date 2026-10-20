@@ -8,6 +8,7 @@ import { loadTeam } from './agents.js';
 import { AGENTS_FILE } from './paths.js';
 import { Engine, chatTeam, type App } from './core/engine.js';
 import { bootstrapApp } from './core/bootstrap.js';
+import { COMMANDS } from './core/commands.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, Session } from './types.js';
 
@@ -21,9 +22,14 @@ import type { Agent, Session } from './types.js';
  *  сервер → клиент: state, notice, error, turn_header, busy, busy_end,
  *    delta, turn_end, say, tool_results, attachment, confirm, choose_session,
  *    session_opened, rpc_result, rpc_error;
- *  клиент → сервер: hello, user_message, abort, confirm_response,
+ *  клиент → сервер: hello, user_message, command, abort, confirm_response,
  *    choose_response, rpc {method: state | sessions.list | session.open |
  *    session.new | session.delete | chat.add | chat.remove | provider.set}.
+ *
+ * `command` — текст `/…`: ядро исполняет те же команды, что и терминал
+ * (перехват в handleMessage), отчёты уходят notice-событиями. GUI посылает
+ * `command`, чтобы не рисовать текст команды пузырём пользователя; `user_message`
+ * с `/…` внутри исполнится так же — на стороне сервера разницы нет.
  *
  * Вопрос человеку (confirm/choose_session), оставшийся без ответа, — отказ
  * по таймауту: раунд не висит вечно, human-in-the-loop честный.
@@ -85,6 +91,10 @@ export function stateSnapshot(app: App): unknown {
     })),
     images: [...app.images].map(([id, s]) => ({ id, ok: s.ok, note: s.note })),
     profile: { name: app.profile.name, role: app.profile.role },
+    // словарь автодополнения: имена команд — из ядра; остальные данные
+    // (разговоры, команда, состав чата, провайдеры, имя менеджера) выводятся
+    // клиентом из остальных полей этого же снапшота
+    completion: { commands: COMMANDS },
   };
 }
 
@@ -285,7 +295,10 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
       case 'hello':
         ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app) }));
         return;
-      case 'user_message': {
+      case 'user_message':
+      case 'command': {
+        // `command` — `/…`-текст от GUI (не рисуется пузырём пользователя);
+        // серверу разницы нет: перехват '/' живёт в ядре
         const text = String(msg.text ?? '').trim();
         if (!text) return;
         await runRound((signal) => engine.handleMessage(text, signal));

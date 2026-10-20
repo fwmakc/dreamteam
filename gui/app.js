@@ -2,6 +2,8 @@
  * Dream Team — веб-оболочка (vanilla JS, без сборки).
  * Клиент протокола serve.ts: один WS на /ws, события рисуются в чат,
  * состояние приходит снапшотами (state) и перерисовывает всё целиком.
+ * Команды `/…` уходят типом command (ядро исполняет их так же, как терминал),
+ * автодополнение — по словарю из state (completion.commands + панели).
  */
 'use strict';
 
@@ -9,6 +11,8 @@
   // ── элементы ─────────────────────────────────────────────────
   const $ = (id) => document.getElementById(id);
   const chatEl = $('chat');
+  const msgsEl = $('msgs');
+  const feedEl = $('feed');
   const inputEl = $('input');
   const sessionsEl = $('sessions');
   const teamEl = $('team');
@@ -23,6 +27,7 @@
   const confirmDescEl = $('confirm-desc');
   const chooseEl = $('choose');
   const chooseListEl = $('choose-list');
+  const hintsEl = $('hints');
 
   // ── состояние клиента ────────────────────────────────────────
   let ws = null;
@@ -40,6 +45,7 @@
     gray: '#7f8790',
   };
   const colorOf = (name) => COLORS[String(name ?? '').toLowerCase()] ?? '#d7dae0';
+  const norm = (s) => String(s ?? '').toLowerCase().replace(/ё/g, 'е');
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -112,7 +118,7 @@
       case 'session_opened':
         state = state ?? {};
         state.session = msg.session;
-        clearLive();
+        clearMsgs();
         renderHistory(msg.session.messages);
         renderSidebar();
         break;
@@ -125,7 +131,7 @@
           `${esc(msg.agent.emoji ?? '🤖')} ${esc(msg.agent.name)}` +
           (msg.agent.role ? ` <span class="role">${esc(msg.agent.role)}</span>` : '') +
           `</div><div class="txt dim"></div>`;
-        chatEl.appendChild(el);
+        msgsEl.appendChild(el);
         currentMsg = { el, body: el.querySelector('.txt'), text: '', open: true };
         scrollDown();
         break;
@@ -158,25 +164,25 @@
           currentMsg.open = false;
           currentMsg = null;
         } else {
-          addLine(`<div class="msg"><div class="txt">${formatText(msg.text)}</div></div>`);
+          addMsg(`<div class="msg"><div class="txt">${formatText(msg.text)}</div></div>`);
         }
         scrollDown();
         break;
       case 'notice':
         closeStreaming();
-        addLine(`<div class="notice">· ${esc(msg.text)}</div>`);
+        addFeed(`<div class="notice">· ${esc(msg.text)}</div>`);
         break;
       case 'error':
         closeStreaming();
-        addLine(`<div class="errline">✗ ${esc(msg.text)}</div>`);
+        addFeed(`<div class="errline">✗ ${esc(msg.text)}</div>`);
         break;
       case 'tool_results':
         closeStreaming();
-        addLine(`<div class="toolblock">${msg.results.map((r) => `⚙ ${esc(r)}`).join('\n')}</div>`);
+        addMsg(`<div class="toolblock">${msg.results.map((r) => `⚙ ${esc(r)}`).join('\n')}</div>`);
         break;
       case 'attachment':
         closeStreaming();
-        addLine(`<div class="attachment"><b>📎 ${esc(msg.title)}</b>` +
+        addMsg(`<div class="attachment"><b>📎 ${esc(msg.title)}</b>` +
           `<div class="digest">${esc(msg.digest)}</div></div>`);
         break;
       case 'busy':
@@ -206,12 +212,18 @@
     }
   }
 
-  function addLine(html) {
+  function appendHtml(target, html) {
     const tpl = document.createElement('template');
     tpl.innerHTML = html.trim();
-    chatEl.appendChild(tpl.content.firstChild);
+    target.appendChild(tpl.content.firstChild);
     scrollDown();
   }
+
+  /** Реплики и результаты — в перерисовываемую часть (state их заменяет). */
+  function addMsg(html) { appendHtml(msgsEl, html); }
+
+  /** Журнал: уведомления ядра и отчёты команд — переживают очередной state. */
+  function addFeed(html) { appendHtml(feedEl, html); }
 
   /** Заголовок без реплики на момент следующего события — закрываем тихо. */
   function closeStreaming() {
@@ -222,9 +234,9 @@
     }
   }
 
-  function clearLive() {
+  function clearMsgs() {
     closeStreaming();
-    chatEl.innerHTML = '';
+    msgsEl.innerHTML = '';
   }
 
   // ── вопросы человеку ─────────────────────────────────────────
@@ -271,7 +283,7 @@
     renderTeam();
     renderProviders();
     renderTopbar();
-    clearLive();
+    clearMsgs();
     renderHistory(state.session.messages);
   }
 
@@ -303,8 +315,8 @@
           e.stopPropagation();
           if (confirm(`Удалить разговор «${s.title}»? Действие необратимо.`)) {
             rpc('session.delete', { n: i + 1 })
-              .then((r) => addLine(`<div class="notice">· ${esc(r.text)}</div>`))
-              .catch((err) => addLine(`<div class="errline">✗ ${esc(err.message)}</div>`));
+              .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+              .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
           }
           return;
         }
@@ -335,8 +347,8 @@
         if (roundActive) return;
         const method = a.inChat ? 'chat.remove' : 'chat.add';
         rpc(method, { name: a.name })
-          .then((r) => addLine(`<div class="notice">· ${esc(r.text)}</div>`))
-          .catch((err) => addLine(`<div class="errline">✗ ${esc(err.message)}</div>`));
+          .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+          .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
       };
       teamEl.appendChild(li);
     }
@@ -356,7 +368,7 @@
       li.onclick = () => {
         if (roundActive || p.isDefault) return;
         rpc('provider.set', { id: p.id })
-          .catch((err) => addLine(`<div class="errline">✗ ${esc(err.message)}</div>`));
+          .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
       };
       providersEl.appendChild(li);
     }
@@ -371,19 +383,174 @@
   function renderHistory(messages) {
     for (const m of messages ?? []) {
       if (m.authorId === 'user') {
-        addLine(`<div class="msg user"><div class="head">👤 ${esc(m.authorName)}` +
+        addMsg(`<div class="msg user"><div class="head">👤 ${esc(m.authorName)}` +
           `</div><div class="txt">${formatText(m.text)}</div></div>`);
       } else if (m.authorId === 'tool') {
-        addLine(`<div class="toolblock">${esc(m.text)}</div>`);
+        addMsg(`<div class="toolblock">${esc(m.text)}</div>`);
       } else if (m.authorId === 'session-ref') {
-        addLine(`<div class="attachment"><b>📎 ${esc(m.authorName)}</b>` +
+        addMsg(`<div class="attachment"><b>📎 ${esc(m.authorName)}</b>` +
           `<div class="digest">${esc(m.text)}</div></div>`);
       } else {
-        addLine(`<div class="msg"><div class="head" style="color:${colorByAuthor(m)}">` +
+        addMsg(`<div class="msg"><div class="head" style="color:${colorByAuthor(m)}">` +
           `${esc(m.authorName)}</div><div class="txt">${formatText(m.text)}</div></div>`);
       }
     }
     scrollDown();
+  }
+
+  // ── автодополнение: @-попап и /-подсказки в одной панели ─────
+  // Данные — из state: команды (completion.commands), разговоры, команда,
+  // состав чата (inChat), провайдеры, имя менеджера.
+  let hintState = null; // {kind:'at'|'cmd'|'arg', items:[{label,hint,insert}], sel, from}
+
+  function completionData() {
+    if (!state) return null;
+    return {
+      commands: state.completion?.commands ?? [],
+      sessions: state.sessions ?? [],
+      team: state.team ?? [],
+      providerIds: (state.providers ?? []).map((p) => p.id),
+      managerName: state.manager?.name ?? 'Менеджер',
+    };
+  }
+
+  function mentionItems() {
+    const d = completionData();
+    if (!d) return [];
+    return [
+      { label: d.managerName, hint: 'менеджер переговорки', insert: d.managerName + ' ' },
+      ...d.team.filter((a) => a.inChat)
+        .map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
+      { label: 'session', hint: 'конспект другого разговора', insert: 'session ' },
+    ];
+  }
+
+  /** Варианты аргументов после `/команда `; null — команда без подсказок. */
+  function argItems(cmdName, d) {
+    switch (norm(cmdName)) {
+      case '/session':
+      case '/delete':
+        return d.sessions.map((s, i) => ({ label: String(i + 1), hint: s.title, insert: (i + 1) + ' ' }));
+      case '/add':
+      case '/out':
+        return [
+          ...d.team.map((a, i) => ({ label: String(i + 1), hint: a.name, insert: (i + 1) + ' ' })),
+          ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
+        ];
+      case '/memory':
+        return [
+          ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
+          { label: 'shared', hint: 'общая память', insert: 'shared ' },
+        ];
+      case '/provider':
+        return d.providerIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
+      default:
+        return null;
+    }
+  }
+
+  function updateHints() {
+    const pos = inputEl.selectionStart ?? inputEl.value.length;
+    const before = inputEl.value.slice(0, pos);
+    const d = completionData();
+    if (!d) { hideHints(); return; }
+
+    // @/№ — попап упоминаний (менеджер, участники чата, session)
+    const at = /(?:^|\s)([@№])([^\s@№]*)$/.exec(before);
+    if (at) {
+      const items = mentionItems().filter((it) => norm(it.label).startsWith(norm(at[2])));
+      if (items.length > 0) {
+        hintState = {
+          kind: 'at', items, sel: 0,
+          from: pos - at[1].length - at[2].length,
+          insertSuffix: ' ',
+          prefix: at[1],
+        };
+        renderHints();
+        return;
+      }
+      hideHints();
+      return;
+    }
+
+    // /… — команды и их аргументы
+    if (before.startsWith('/')) {
+      const sp = before.indexOf(' ');
+      if (sp === -1) {
+        const frag = before.slice(1);
+        const items = d.commands
+          .filter((c) => norm(c.cmd).startsWith(norm('/' + frag)))
+          .map((c) => ({
+            label: c.cmd + (c.args ? ' ' + c.args : ''),
+            hint: c.help,
+            insert: c.cmd.slice(1) + ' ',
+          }));
+        if (items.length > 0) {
+          hintState = { kind: 'cmd', items, sel: 0, from: 1, insertSuffix: '', prefix: '/' };
+          renderHints();
+          return;
+        }
+      } else {
+        const cmdName = before.slice(0, sp);
+        const tail = before.slice(sp + 1);
+        const last = (/(\S*)$/.exec(tail) || [''])[1];
+        const all = argItems(cmdName, d);
+        if (all) {
+          const items = all.filter((o) => norm(o.label).startsWith(norm(last)));
+          if (items.length > 0) {
+            hintState = { kind: 'arg', items, sel: 0, from: pos - last.length, insertSuffix: '', prefix: '' };
+            renderHints();
+            return;
+          }
+        }
+      }
+      hideHints();
+      return;
+    }
+
+    hideHints();
+  }
+
+  function renderHints() {
+    const st = hintState;
+    if (!st) return;
+    hintsEl.innerHTML = '';
+    st.items.forEach((it, i) => {
+      const div = document.createElement('div');
+      div.className = 'row' + (i === st.sel ? ' sel' : '');
+      if (st.kind === 'at') {
+        div.innerHTML = `<b>${esc(st.prefix + it.label)}</b>` +
+          (it.hint ? ` <span class="dim">— ${esc(it.hint)}</span>` : '');
+      } else {
+        const firstSpace = it.label.indexOf(' ');
+        const head = firstSpace === -1 ? it.label : it.label.slice(0, firstSpace);
+        const tail = firstSpace === -1 ? '' : it.label.slice(firstSpace);
+        div.innerHTML = `<span class="cmd">${esc(head)}</span>${esc(tail)}` +
+          (it.hint ? `  <span class="dim">— ${esc(it.hint)}</span>` : '');
+      }
+      div.onclick = () => { applyHintItem(it); inputEl.focus(); };
+      hintsEl.appendChild(div);
+    });
+    hintsEl.classList.remove('hidden');
+  }
+
+  function hideHints() {
+    hintState = null;
+    hintsEl.classList.add('hidden');
+    hintsEl.innerHTML = '';
+  }
+
+  function applyHintItem(it) {
+    const st = hintState;
+    if (!st) return;
+    const pos = inputEl.selectionStart ?? inputEl.value.length;
+    const text = st.kind === 'at' ? st.prefix + it.label + st.insertSuffix : it.insert;
+    inputEl.value = inputEl.value.slice(0, st.from) + text + inputEl.value.slice(pos);
+    const np = st.from + text.length;
+    inputEl.setSelectionRange(np, np);
+    hideHints();
+    autosize();
+    updateHints(); // после вставки может открыться следующий уровень
   }
 
   // ── статус раунда и ввод ─────────────────────────────────────
@@ -402,11 +569,17 @@
     if (roundActive) return;
     inputEl.value = '';
     autosize();
-    addLine(`<div class="msg user"><div class="head">👤 ${esc(state?.profile?.name ?? 'Вы')}` +
-      `</div><div class="txt">${formatText(text)}</div></div>`);
+    hideHints();
     roundActive = true;
     renderStatus();
-    send({ type: 'user_message', text });
+    if (text.startsWith('/')) {
+      // команда: исполняет ядро, отчёты придут notice-событиями в журнал
+      send({ type: 'command', text });
+    } else {
+      addMsg(`<div class="msg user"><div class="head">👤 ${esc(state?.profile?.name ?? 'Вы')}` +
+        `</div><div class="txt">${formatText(text)}</div></div>`);
+      send({ type: 'user_message', text });
+    }
   }
 
   function autosize() {
@@ -417,19 +590,47 @@
   // ── привязки ─────────────────────────────────────────────────
   btnSend.onclick = sendUserMessage;
   inputEl.addEventListener('keydown', (e) => {
+    if (hintState) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        hintState.sel = (hintState.sel + 1) % hintState.items.length;
+        renderHints();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        hintState.sel = (hintState.sel - 1 + hintState.items.length) % hintState.items.length;
+        renderHints();
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        hideHints();
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && hintState.kind === 'at')) {
+        e.preventDefault();
+        applyHintItem(hintState.items[hintState.sel]);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendUserMessage();
     }
   });
-  inputEl.addEventListener('input', autosize);
+  inputEl.addEventListener('input', () => {
+    autosize();
+    updateHints();
+  });
+  inputEl.addEventListener('click', updateHints);
   btnAbort.onclick = () => send({ type: 'abort' });
   $('btn-new').onclick = () => {
     if (roundActive) return;
     roundActive = true;
     renderStatus();
     rpc('session.new', {}).catch((err) =>
-      addLine(`<div class="errline">✗ ${esc(err.message)}</div>`));
+      addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   };
   $('confirm-yes').onclick = () => answerConfirm(true);
   $('confirm-no').onclick = () => answerConfirm(false);

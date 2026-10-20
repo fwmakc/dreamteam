@@ -33,7 +33,10 @@
   </aside>
 
   <section id="chatwrap">
-    <div id="chat"></div>
+    <div id="chat">
+      <div id="msgs"></div>
+      <div id="feed"></div>
+    </div>
 
     <div id="confirm" class="panel hidden">
       <div id="confirm-text"></div>
@@ -55,9 +58,11 @@
       <button id="btn-abort" title="Прервать раунд (Esc в терминале)">⏹ Прервать</button>
     </div>
 
+    <div id="hints" class="hidden"></div>
+
     <div id="inputrow">
       <textarea id="input" rows="1"
-        placeholder="Напишите команде… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику)"></textarea>
+        placeholder="Напишите команде… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику, /help — команды)"></textarea>
       <button id="btn-send" title="Отправить">➤</button>
     </div>
   </section>

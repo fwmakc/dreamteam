@@ -159,6 +159,51 @@ const client = await makeClient(handle.port);
   const status = await client.next((m) => m.type === 'say' && String(m.text).includes('Команда на месте'));
   check('ws: статус команды — ответ без действий', Boolean(status));
 
+  // --- WS: команды через протокол (тот же набор, что и в терминале) ---
+  {
+    const stateCmd = await client.next(
+      (m) => m.type === 'state' && Boolean((m.state as { completion?: { commands?: unknown[] } }).completion),
+    );
+    const commands = (stateCmd.state as { completion: { commands: { cmd: string }[] } }).completion.commands;
+    check('ws: state несёт словарь команд', commands.length > 0 && commands.some((c) => c.cmd === '/help'));
+
+    client.send({ type: 'rpc', id: 'rc0', method: 'state' });
+    const snap = await client.next((m) => m.type === 'rpc_result' && m.id === 'rc0');
+    const beforeCmd = (snap.result as { session: { messages: unknown[] } }).session.messages.length;
+    client.send({ type: 'command', text: '/help' });
+    const help = await client.next((m) => m.type === 'notice' && String(m.text).includes('/new'));
+    check('ws: /help — справка notice-событием', Boolean(help));
+    const stHelp = await client.next((m) => m.type === 'state');
+    check(
+      'ws: команды не пишутся в историю',
+      (stHelp.state as { session: { messages: unknown[] } }).session.messages.length === beforeCmd,
+    );
+
+    client.send({ type: 'command', text: '/add Тест' });
+    const again = await client.next((m) => m.type === 'notice' && String(m.text).includes('уже в чате'));
+    check('ws: /add — отчёт о составе чата', Boolean(again));
+
+    client.send({ type: 'command', text: '/foobar' });
+    const unknown = await client.next((m) => m.type === 'notice' && String(m.text).includes('Неизвестная команда'));
+    check('ws: неизвестная команда — отказ', Boolean(unknown));
+
+    client.send({ type: 'command', text: '/exit' });
+    const tui = await client.next((m) => m.type === 'notice' && String(m.text).includes('терминала'));
+    check('ws: /exit — только терминал', Boolean(tui));
+
+    client.send({ type: 'command', text: '/me Иванов; инженер' });
+    const stMe = await client.next(
+      (m) => m.type === 'state' && (m.state as { profile: { name: string } }).profile.name === 'Иванов',
+    );
+    check('ws: /me меняет профиль в state', ((stMe.state as { profile: { role?: string } }).profile.role) === 'инженер');
+
+    // user_message с `/…` исполняется так же (перехват в ядре)
+    client.send({ type: 'user_message', text: '/providers' });
+    const prov = await client.next((m) => m.type === 'notice' && String(m.text).includes('• mock'));
+    check('ws: /… в user_message тоже команда', Boolean(prov));
+    await client.next((m) => m.type === 'state');
+  }
+
   // rpc: список разговоров
   client.send({ type: 'rpc', id: 'r1', method: 'sessions.list' });
   const list = await client.next((m) => m.type === 'rpc_result' && m.id === 'r1');

@@ -157,8 +157,13 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 }
 .msg .head .role { font-weight: 400; color: var(--dim); font-size: 12px; }
 
-.notice { color: var(--dim); font-style: italic; margin-bottom: 10px; }
-.errline { color: var(--bad); margin-bottom: 10px; }
+.notice { color: var(--dim); font-style: italic; margin-bottom: 10px; white-space: pre-wrap; }
+.errline { color: var(--bad); margin-bottom: 10px; white-space: pre-wrap; }
+
+/* журнал: append-only заметки ядра (отчёты команд, уведомления) — не
+   перерисовываются при очередном state */
+#feed { border-top: 1px dashed var(--border); padding-top: 8px; }
+#feed:empty { display: none; }
 .toolblock {
   font: 12px/1.6 Consolas, monospace;
   color: var(--dim);
@@ -189,7 +194,22 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 #choose-list li { padding: 4px 8px; border-radius: 6px; cursor: pointer; }
 #choose-list li:hover { background: var(--panel2); }
 
-/* ── статус и ввод ──────────────────────────────────────────── */
+/* ── статус, подсказки и ввод ───────────────────────────────── */
+#hints {
+  margin: 0 18px 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+#hints .row { padding: 2px 6px; border-radius: 4px; cursor: pointer; white-space: pre-wrap; }
+#hints .row.sel { background: var(--panel2); outline: 1px solid var(--accent); }
+#hints .row .dim { color: var(--dim); }
+#hints .row .cmd { font-weight: 600; }
+
 #statusbar {
   display: flex;
   align-items: center;
