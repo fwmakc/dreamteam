@@ -25,6 +25,7 @@ import {
 } from './tools-api.js';
 import filesTool from './tools/files.js';
 import shellTool from './tools/shell.js';
+import gitTool from './tools/git.js';
 import sshTool from './tools/ssh.js';
 import lookTool from './tools/look.js';
 import imageTool from './tools/image.js';
@@ -33,6 +34,7 @@ import type { Agent } from './types.js';
 const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
   files: filesTool,
   shell: shellTool,
+  git: gitTool,
   ssh: sshTool,
   look: lookTool,
   image: imageTool,

@@ -28,7 +28,7 @@ import {
 import { checkPermission, loadProjects, parseActions, type ToolContext, type ToolsConfig } from '../src/actions.js';
 import { buildToolset, loadUserTools } from '../src/tools-registry.js';
 import { loadTeam } from '../src/agents.js';
-import gitFactory from '../.dreamteam/tools/git.js';
+import gitFactory from '../src/tools/git.js';
 import type { Agent } from '../src/types.js';
 
 let fails = 0;
@@ -170,6 +170,12 @@ const tctx: ToolContext = {
   try { await loadUserTools(toolsDir); } catch (e) { threw = (e as Error).message; }
   check('загрузчик: встроенное имя занять нельзя', threw.includes('занято'), threw);
   rmSync(join(toolsDir, 'shell.ts'));
+
+  writeFileSync(join(toolsDir, 'git.ts'), 'export default () => ({});\n');
+  threw = '';
+  try { await loadUserTools(toolsDir); } catch (e) { threw = (e as Error).message; }
+  check('загрузчик: git — зарезервированное имя системного тула', threw.includes('git') && threw.includes('занято'), threw);
+  rmSync(join(toolsDir, 'git.ts'));
 
   writeFileSync(join(toolsDir, 'Кривой!.ts'), 'export default () => ({});\n');
   threw = '';

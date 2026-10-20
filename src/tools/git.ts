@@ -32,7 +32,7 @@ import {
   type ToolConfig,
   type ToolRunContext,
   type ToolVerdict,
-} from '../../src/tools-api.js';
+} from '../tools-api.js';
 
 /** Дефолтная политика без карточки: каждая команда цепочки должна быть read-only. */
 function defaultCheck(body: string): ToolVerdict {
