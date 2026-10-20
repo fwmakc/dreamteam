@@ -26,6 +26,7 @@ import {
 import filesTool from './tools/files.js';
 import shellTool from './tools/shell.js';
 import gitTool from './tools/git.js';
+import archTool from './tools/arch.js';
 import sshTool from './tools/ssh.js';
 import lookTool from './tools/look.js';
 import imageTool from './tools/image.js';
@@ -35,6 +36,7 @@ const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
   files: filesTool,
   shell: shellTool,
   git: gitTool,
+  arch: archTool,
   ssh: sshTool,
   look: lookTool,
   image: imageTool,

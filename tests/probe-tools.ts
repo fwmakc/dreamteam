@@ -313,6 +313,92 @@ const tctx: ToolContext = {
   check('shell дефолт: запись в .dreamteam — отказ', typeof shell.check(readCmd('dir .dreamteam/tools'), { cwd: root }) === 'object');
   check('ssh дефолт: .dreamteam на сервере тоже запрет', typeof ssh.check('cat .dreamteam/agents.json') === 'object');
 
+  // ── arch: zip/tar/tgz без внешних программ, zip-slip/секреты/лимиты ──────
+  {
+    const { default: archFactory } = await import('../src/tools/arch.js');
+    const AdmZip = (await import('adm-zip')).default;
+    const arch = archFactory({});
+    const archDir = join(dir, 'arch');
+    mkdirSync(join(archDir, 'src', 'sub'), { recursive: true });
+    writeFileSync(join(archDir, 'src', 'a.txt'), 'содержимое A');
+    writeFileSync(join(archDir, 'src', 'sub', 'b.txt'), 'содержимое B');
+    writeFileSync(join(archDir, '.env'), 'СЕКРЕТ=1');
+    mkdirSync(join(archDir, '.dreamteam'), { recursive: true });
+    writeFileSync(join(archDir, '.dreamteam', 'agents.json'), '[]');
+
+    const actx = { cwd: archDir } as unknown as Parameters<typeof arch.run>[1];
+    check('arch: неизвестная подкоманда — отказ', typeof arch.check('распакуй всё', actx) === 'object');
+    check('arch: pack без исходников — отказ', typeof arch.check('pack out.zip', actx) === 'object');
+    check('arch: выход за папку — отказ', typeof arch.check('pack ../../evil.zip src', actx) === 'object');
+    check('arch: rar — отказ с честной причиной', typeof arch.check('pack docs.rar src', actx) === 'object'
+      && (arch.check('pack docs.rar src', actx) as { deny: string }).deny.includes('проприетарные'));
+
+    // pack zip → list → unpack в другую папку → содержимое совпадает
+    const pack = await arch.run('pack out.zip src', actx);
+    check('arch pack: zip собран', String(pack).includes('упаковано'), String(pack));
+    const listing = await arch.run('list out.zip', actx);
+    check('arch list: имена внутри', listing.includes('src/a.txt') && listing.includes('src/sub/b.txt'), listing);
+    const unpack = await arch.run('unpack out.zip unpacked', actx);
+    check('arch unpack: отчёт', String(unpack).includes('распаковано'), String(unpack));
+    check('arch unpack: содержимое совпадает',
+      readFileSync(join(archDir, 'unpacked', 'src', 'a.txt'), 'utf8') === 'содержимое A'
+      && readFileSync(join(archDir, 'unpacked', 'src', 'sub', 'b.txt'), 'utf8') === 'содержимое B');
+
+    // секреты и служебная папка в pack — отказ с перечнем
+    let threw = '';
+    try { await arch.run('pack secrets.zip src .env .dreamteam', actx); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
+    check('arch pack: секреты и .dreamteam — отказ перечнем', threw.includes('.env') && threw.includes('dreamteam'), threw.slice(0, 160));
+
+    // tar и tgz roundtrip
+    for (const name of ['out.tar', 'out.tgz']) {
+      await arch.run(`pack ${name} src`, actx);
+      await arch.run(`unpack ${name} unpacked-${name}`, actx);
+      check(`arch ${name}: roundtrip`,
+        readFileSync(join(archDir, `unpacked-${name}`, 'src', 'sub', 'b.txt'), 'utf8') === 'содержимое B');
+    }
+
+    // zip-slip: adm-zip санитизирует имена при addFile, поэтому «../» вшиваем
+    // подменой имени в готовом zip — равная длина, оба заголовка согласованы
+    const raw = readFileSync(join(archDir, 'out.zip'));
+    const marker = Buffer.from('src/a.txt');
+    const evilName = Buffer.from('../aa.txt');
+    let patched = Buffer.concat([raw, Buffer.alloc(0)]);
+    for (let at = patched.indexOf(marker); at !== -1; at = patched.indexOf(marker)) {
+      patched = Buffer.concat([patched.subarray(0, at), evilName, patched.subarray(at + marker.length)]);
+    }
+    writeFileSync(join(archDir, 'evil.zip'), patched);
+    threw = '';
+    try { await arch.run('unpack evil.zip unpacked-evil', actx); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
+    check('arch: zip-slip — отказ', threw.includes('zip-slip'), threw.slice(0, 160));
+    check('arch: zip-slip — файл не записан', !existsSync(join(archDir, 'evil.txt')));
+
+    // симлинк в tar — отказ
+    const linkPath = join(archDir, 'src', 'link.txt');
+    try { (await import('node:fs')).symlinkSync('a.txt', linkPath); } catch { /* на Windows может не быть прав */ }
+    if (existsSync(linkPath)) {
+      await arch.run('pack withlink.tar src', actx);
+      threw = '';
+      try { await arch.run('unpack withlink.tar unpacked-link', actx); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
+      check('arch: симлинк в tar — отказ', threw.includes('симлинк'), threw.slice(0, 160));
+      rmSync(join(archDir, 'withlink.tar'));
+    }
+
+    // лимиты карточки: архив-бомба отсечена до распаковки
+    const tiny = archFactory({ maxEntries: 1 });
+    threw = '';
+    try { await tiny.run('unpack out.zip unpacked-tiny', actx); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
+    check('arch: лимит maxEntries — архив-бомба отсечена', threw.includes('лимит'), threw.slice(0, 160));
+    const tinyBytes = archFactory({ maxTotalBytes: 1 });
+    threw = '';
+    try { await tinyBytes.run('unpack out.zip unpacked-tiny2', actx); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
+    check('arch: лимит maxTotalBytes — отсечена', threw.includes('лимит'), threw.slice(0, 160));
+
+    // кривые карточки
+    threw = '';
+    try { archFactory({ maxEntries: -1 }); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
+    check('arch: кривой maxEntries — отказ', threw.includes('maxEntries'), threw);
+  }
+
   check('ssh дефолт: uptime — молча', ssh.check('uptime') === 'allow');
   check('ssh дефолт: цепочка read-only — молча', ssh.check('df -h && free -m') === 'allow');
   check('ssh дефолт: systemctl status — молча', ssh.check('systemctl status nginx') === 'allow');

@@ -69,7 +69,7 @@ export type ToolConfig = Record<string, unknown>;
 export type ToolFactory = (config: ToolConfig) => Tool;
 
 /** Встроенные тула: их имена нельзя занимать файлами в tools/ */
-export const BUILTIN_TOOL_IDS = ['files', 'shell', 'git', 'ssh', 'look', 'image'] as const;
+export const BUILTIN_TOOL_IDS = ['files', 'shell', 'git', 'arch', 'ssh', 'look', 'image'] as const;
 
 /** id тула: имя файла в tools/ или встроенный; строчные буквы/цифры/-/_ от 2 символов */
 export const TOOL_ID_RE = /^[a-z][a-z0-9_-]{1,}$/;
@@ -224,8 +224,9 @@ export function splitArgs(command: string): string[] {
   return out;
 }
 
-/** Ключи и пароли читать/показывать нельзя — даже внутри рабочей папки. */
-const SENSITIVE = /(^|[\\/])(\.env|\.netrc|\.git-credentials|id_rsa|id_ed25519|id_ecdsa)([.\w-]*)$|\.(pem|key|p12|pfx)$/i;
+/** Ключи и пароли читать/показывать нельзя — даже внутри рабочей папки.
+ *  Экспортирован: тулу arch те же запреты нужны при упаковке/распаковке. */
+export const SENSITIVE = /(^|[\\/])(\.env|\.netrc|\.git-credentials|id_rsa|id_ed25519|id_ecdsa)([.\w-]*)$|\.(pem|key|p12|pfx)$/i;
 
 /**
  * Служебная папка приложения внутри проекта: конфиги команды, серверов, памяти

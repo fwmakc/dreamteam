@@ -32,8 +32,10 @@
     "probe:consistency": "tsx tests/probe-consistency.ts"
   },
   "dependencies": {
+    "adm-zip": "^0.6.1",
     "dotenv": "^16.4.5",
     "picocolors": "^1.1.1",
+    "tar": "^7.5.22",
     "tsx": "^4.19.2",
     "ws": "^8.22.0"
   },
