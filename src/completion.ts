@@ -72,6 +72,12 @@ function argOptions(cmd: string, ctx: CompletionContext): string[] | null {
       return [...ctx.teamNames(), 'shared'];
     case '/provider':
       return ctx.providerIds();
+    case '/grant':
+      return ctx.teamNames();
+    case '/agent':
+      return ['add', 'set'];
+    case '/project':
+      return ['add', 'host'];
     case '/new':
     case '/sessions':
     case '/history':

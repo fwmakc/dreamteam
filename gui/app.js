@@ -444,6 +444,18 @@
         ];
       case '/provider':
         return d.providerIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
+      case '/grant':
+        return d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' }));
+      case '/agent':
+        return [
+          { label: 'add', hint: '<id> <Имя> [роль]', insert: 'add ' },
+          { label: 'set', hint: '<id> поле=значение', insert: 'set ' },
+        ];
+      case '/project':
+        return [
+          { label: 'add', hint: '<id>; <имя>: хост', insert: 'add ' },
+          { label: 'host', hint: '<проект> <имя>=<хост>', insert: 'host ' },
+        ];
       default:
         return null;
     }

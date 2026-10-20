@@ -7,10 +7,17 @@
  * показывает свои панели по state.
  */
 import { loadTeam } from '../agents.js';
+import {
+  addProject,
+  addProjectHost,
+  addTeamAgent,
+  grantTool,
+  updateTeamAgent,
+} from '../manager.js';
 import { agentToolIds } from '../tools-api.js';
-import { AGENTS_FILE } from '../paths.js';
+import { AGENTS_FILE, PROJECTS_FILE, TOOLS_DIR } from '../paths.js';
 import { chatTeam, isSessionRef, type App, type Engine } from './engine.js';
-import type { Agent } from '../types.js';
+import type { Agent, ManagerHostSpec } from '../types.js';
 
 /** Описание команды: справка, автодополнение и панель подсказок — из одного списка. */
 export interface CommandSpec {
@@ -37,6 +44,9 @@ export const COMMANDS: CommandSpec[] = [
   { cmd: '/provider', args: '<id>', help: 'сменить основного провайдера (у менеджера свой)' },
   { cmd: '/me', args: '[Имя; роль; о себе]', help: 'как вас видит команда' },
   { cmd: '/memory', args: '[имя|shared]', help: 'что помнит участник; shared — общая память' },
+  { cmd: '/agent', args: 'add <id> <Имя> [роль] | set <id> поле=знач…', help: 'участник команды: добавить или править (как менеджер)' },
+  { cmd: '/grant', args: '<агент> <тул>', help: 'включить агенту тул: files, shell, ssh, look, image или свой' },
+  { cmd: '/project', args: 'add <id>; <имя>: [польз.@]хост[:порт]', help: 'проект с серверами; /project host <проект> <имя>=<хост>' },
   { cmd: '/help', help: 'эта справка', aliases: ['h'] },
   { cmd: '/exit', help: 'выход (только в терминале)', tuiOnly: true, aliases: ['quit', 'q'] },
 ];
@@ -98,6 +108,15 @@ export async function runCommandText(
       return ['Команды /all больше нет — состав отвечает по решению модератора или @упоминания.'];
     case 'memory':
       return memoryText(app, arg);
+    case 'agent':
+      return agentCommand(rest);
+    case 'grant': {
+      const [who, tool] = rest;
+      if (!who || !tool) return ['Синтаксис: /grant <агент> <тул> (files, shell, ssh, look, image или свой из tools/)'];
+      return [grantTool(AGENTS_FILE, who, tool, undefined, TOOLS_DIR)];
+    }
+    case 'project':
+      return projectCommand(rest);
     case 'me': {
       const parts = arg.split(';').map((s) => s.trim()).filter(Boolean);
       if (parts.length === 0) {
@@ -128,6 +147,112 @@ function chatChangeText(engine: Engine, arg: string, verb: string): string[] {
     return [`agents.json недоступен — ${verb} никого не получится.`];
   }
   return [verb === 'позвать' ? engine.addToChat(arg, fullTeam) : engine.removeFromChat(arg, fullTeam)];
+}
+
+/**
+ * /agent add|set — управление составом поверх тех же helpers, что исполняет
+ * менеджер переговорки (addTeamAgent/updateTeamAgent): валидация и
+ * tmp+rename-откат там общие. Ошибки летят вызывающему — оболочка покажет.
+ */
+function agentCommand(rest: string[]): string[] {
+  const [sub, ...tail] = rest;
+  if (sub === 'add') {
+    const [id, name, ...roleParts] = tail;
+    if (!id || !name) return ['Синтаксис: /agent add <id> <Имя> [роль]'];
+    const role = roleParts.join(' ');
+    return [addTeamAgent(AGENTS_FILE, { id, name, role: role || undefined })];
+  }
+  if (sub === 'set') {
+    const [id, ...pairs] = tail;
+    if (!id || pairs.length === 0) {
+      return [
+        'Синтаксис: /agent set <id> поле=значение…',
+        'Поля: name, role, emoji, color, description, prompt, provider, temperature',
+      ];
+    }
+    const fields: Record<string, string | number> = {};
+    for (const pair of pairs) {
+      const eq = pair.indexOf('=');
+      if (eq === -1) return [`Поле без значения: «${pair}» — жду поле=значение`];
+      const key = pair.slice(0, eq).toLowerCase();
+      const value = pair.slice(eq + 1);
+      if (!value) return [`Пустое значение у поля «${key}»`];
+      if (key === 'temperature') {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return [`temperature — жду числом, а не «${value}»`];
+        fields[key] = num;
+      } else {
+        fields[key] = value;
+      }
+    }
+    return [updateTeamAgent(AGENTS_FILE, id, fields)];
+  }
+  return ['Синтаксис: /agent add <id> <Имя> [роль] · /agent set <id> поле=значение…'];
+}
+
+/**
+ * Адрес в командной строке: [пользователь@]хост[:порт]. Пароля тут сознательно
+ * нет — он остался бы в транскрипте; пароли через разговор с менеджером или
+ * руками в projects.json.
+ */
+function parseHostSpec(spec: string): ManagerHostSpec {
+  let rest = spec.trim();
+  let user: string | undefined;
+  let port: number | undefined;
+  const at = rest.lastIndexOf('@');
+  if (at !== -1) {
+    user = rest.slice(0, at);
+    rest = rest.slice(at + 1);
+  }
+  const colon = rest.lastIndexOf(':');
+  if (colon !== -1) {
+    const p = Number.parseInt(rest.slice(colon + 1), 10);
+    if (Number.isInteger(p) && p > 0) {
+      port = p;
+      rest = rest.slice(0, colon);
+    }
+  }
+  if (!rest) throw new Error(`в «${spec}» нет адреса хоста`);
+  const out: ManagerHostSpec = { host: rest };
+  if (user) out.user = user;
+  if (port !== undefined) out.port = port;
+  return out;
+}
+
+/** /project add|host — реестр серверов поверх addProject/addProjectHost. */
+function projectCommand(rest: string[]): string[] {
+  const [sub, ...tail] = rest;
+  if (sub === 'add') {
+    const segs = tail.join(' ').split(';').map((s) => s.trim()).filter(Boolean);
+    const pid = segs.shift() ?? '';
+    if (!pid || segs.length === 0) {
+      return ['Синтаксис: /project add <id>; <имя>: [пользователь@]хост[:порт] …'];
+    }
+    const hosts: Record<string, ManagerHostSpec> = {};
+    for (const seg of segs) {
+      const colon = seg.indexOf(':');
+      if (colon === -1) return [`Сервер без адреса: «${seg}» — жду <имя>: <хост>`];
+      const name = seg.slice(0, colon).trim();
+      const spec = seg.slice(colon + 1).trim();
+      if (!name || !spec) return [`Сервер без имени или адреса: «${seg}»`];
+      hosts[name] = parseHostSpec(spec);
+    }
+    return [addProject(PROJECTS_FILE, pid, hosts)];
+  }
+  if (sub === 'host') {
+    const body = tail.join(' ');
+    const space = body.indexOf(' ');
+    const eq = body.indexOf('=');
+    if (!body || space === -1 || eq === -1 || eq < space) {
+      return ['Синтаксис: /project host <проект> <имя>=[пользователь@]хост[:порт]'];
+    }
+    const pid = body.slice(0, space).trim();
+    const name = body.slice(space + 1, eq).trim();
+    const spec = body.slice(eq + 1).trim();
+    if (!name || !spec) return ['Синтаксис: /project host <проект> <имя>=[пользователь@]хост[:порт]'];
+    return [addProjectHost(PROJECTS_FILE, pid, name, parseHostSpec(spec))];
+  }
+  return ['Синтаксис: /project add <id>; <имя>: <хост> … · /project host <проект> <имя>=<хост>'];
 }
 
 function helpText(): string[] {

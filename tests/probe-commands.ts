@@ -4,7 +4,7 @@
  * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер, команды не пишутся
  * в историю разговора. Запуск: npm run probe:commands
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -143,6 +143,70 @@ function check(name: string, cond: boolean): void {
   check('team: не в чате — метка с подсказкой', lines.some((l) => l.includes('не в этом чате (/add Тест)')) ?? false);
   lines = await runCommandText(engine, '/providers');
   check('providers: mock со статусом', lines.some((l) => l.includes('mock') && l.includes('готов')) ?? false);
+}
+
+// ── /agent, /grant, /project — управление теми же helpers, что у менеджера ──
+{
+  let lines = await runCommandText(engine, '/agent');
+  check('agent: без подкоманды — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+  lines = await runCommandText(engine, '/agent add test2 Второй лаборант');
+  check('agent add: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
+  let team = (await import('../src/agents.js')).loadTeam(join(proj, 'agents.json'));
+  const second = team.find((a) => a.id === 'test2');
+  check('agent add: записан с ролью', second?.name === 'Второй' && second?.role === 'лаборант');
+  check('agent add: дефолты эмодзи/цвета', second?.emoji === '🤖' && second?.color === 'white');
+  let threw = '';
+  try {
+    await runCommandText(engine, '/agent add test2 Дубль');
+  } catch (err) {
+    threw = err instanceof Error ? err.message : String(err);
+  }
+  check('agent add: дубликат id — ошибка', threw.includes('уже есть'));
+  lines = await runCommandText(engine, '/agent set test2 role=сметана provider=mock');
+  check('agent set: отчёт с полями', lines[0]?.includes('role="сметана"') ?? false);
+  team = (await import('../src/agents.js')).loadTeam(join(proj, 'agents.json'));
+  check('agent set: роль и провайдер записаны', team.find((a) => a.id === 'test2')?.role === 'сметана');
+  const badTemp = await runCommandText(engine, '/agent set test2 temperature=жарко');
+  check('agent set: temperature не число — отказ', badTemp[0]?.includes('числом') ?? false);
+
+  lines = await runCommandText(engine, '/grant');
+  check('grant: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+  lines = await runCommandText(engine, '/grant test2 files');
+  check('grant: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
+  team = (await import('../src/agents.js')).loadTeam(join(proj, 'agents.json'));
+  check('grant: тул files у агента', Boolean((team.find((a) => a.id === 'test2')?.tools as { files?: unknown })?.files));
+  threw = '';
+  try {
+    await runCommandText(engine, '/grant test2 nosuchtool');
+  } catch (err) {
+    threw = err instanceof Error ? err.message : String(err);
+  }
+  check('grant: неизвестный тул — отказ', threw.includes('nosuchtool'));
+
+  lines = await runCommandText(engine, '/project');
+  check('project: без подкоманды — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+  lines = await runCommandText(
+    engine,
+    '/project add web; prod: deploy@10.0.0.1:2202; backup: 10.0.0.2',
+  );
+  check('project add: отчёт с серверами', lines[0]?.includes('prod, backup') ?? false);
+  const projects = JSON.parse(readFileSync(join(proj, 'projects.json'), 'utf8')) as {
+    web?: { hosts: Record<string, { host: string; user?: string; port?: number }> };
+  };
+  check(
+    'project add: user и порт разобраны',
+    projects.web?.hosts.prod?.user === 'deploy' && projects.web.hosts.prod.port === 2202
+      && projects.web.hosts.backup?.host === '10.0.0.2',
+  );
+  lines = await runCommandText(engine, '/project host web staging=10.0.0.3');
+  check('project host: отчёт ✓', lines[0]?.includes('staging') ?? false);
+  threw = '';
+  try {
+    await runCommandText(engine, '/project host nope x=1.2.3.4');
+  } catch (err) {
+    threw = err instanceof Error ? err.message : String(err);
+  }
+  check('project host: нет проекта — отказ', threw.includes('nope'));
 }
 
 // ── неизвестная и терминальная ───────────────────────────────────────────────
