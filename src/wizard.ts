@@ -12,6 +12,7 @@
  * Битый конфиг мастером не лечится: чтение конфигов позже уронит приложение
  * с внятной ошибкой, как и раньше (явное лучше неявного).
  */
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { PassThrough } from 'node:stream';
@@ -145,7 +146,13 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
       writeEnvKey(envFile, PROVIDER_KEY_ENV, key);
       process.env[PROVIDER_KEY_ENV] = key; // чтобы провайдер заработал без перезапуска
       notes.push(`ключ сохранил в ${envFile} (${PROVIDER_KEY_ENV})`);
+    } else {
+      notes.push(`ключ не указан — провайдер будет работать в mock-режиме`);
     }
+    // токен доступа к API (dreamteam serve): мастер генерирует сам, вручную
+    // можно перегенерировать (README «Доступ извне»)
+    writeEnvKey(envFile, 'TOKEN', randomBytes(32).toString('base64url'));
+    notes.push(`создал токен доступа TOKEN в ${envFile} (для dreamteam serve)`);
     io.output.write(pc.green(`\n  Готово. Дальше — живой менеджер: спроси его «что ты умеешь?»\n`));
     return notes;
   } finally {
@@ -211,7 +218,21 @@ function readScaffold(rel: string): Record<string, unknown> {
 export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promise<string[]> {
   const providersFile = join(homeDir, 'providers.json');
   const settingsFile = join(homeDir, 'settings.json');
+  const envFile = join(homeDir, '.env');
   const notes: string[] = [];
+  if (!existsSync(settingsFile)) {
+    mkdirSync(homeDir, { recursive: true });
+    writeFileSync(settingsFile, JSON.stringify(readScaffold(join('home', 'settings.json')), null, 2) + '\n');
+    notes.push(`создал ${settingsFile} (язык и экран по умолчанию)`);
+  }
+  if (!existsSync(envFile)) {
+    // пример со всеми переменными (ключи закомментированы): мастер допишет
+    // настоящий ключ и токен поверх, остальное разбирается руками.
+    // До wizard: его дописки должны лечь в файл с примерами
+    mkdirSync(homeDir, { recursive: true });
+    writeFileSync(envFile, readFileSync(join(SCAFFOLD_DIR, 'home', 'env.example'), 'utf8'), { mode: 0o600 });
+    notes.push(`создал ${envFile} из примера (env.example) — впиши ключи`);
+  }
   if (!existsSync(providersFile)) {
     if (!io.isTTY) {
       throw new Error(
@@ -219,19 +240,6 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
       );
     }
     notes.push(...(await runWizard(io, homeDir)));
-  }
-  if (!existsSync(settingsFile)) {
-    mkdirSync(homeDir, { recursive: true });
-    writeFileSync(settingsFile, JSON.stringify(readScaffold(join('home', 'settings.json')), null, 2) + '\n');
-    notes.push(`создал ${settingsFile} (язык и экран по умолчанию)`);
-  }
-  const envFile = join(homeDir, '.env');
-  if (!existsSync(envFile)) {
-    // пример со всеми переменными (ключи закомментированы): мастер допишет
-    // настоящий ключ поверх, остальное разбирается руками
-    mkdirSync(homeDir, { recursive: true });
-    writeFileSync(envFile, readFileSync(join(SCAFFOLD_DIR, 'home', 'env.example'), 'utf8'), { mode: 0o600 });
-    notes.push(`создал ${envFile} из примера (env.example) — впиши ключи`);
   }
   return notes;
 }

@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
@@ -106,16 +107,20 @@ export function stateSnapshot(app: App): unknown {
  * вопросы (confirm/choose) ждут первый ответ — или таймаут-отказ.
  */
 export class ServerPresenter implements Presenter {
+  /** true — клиенты обязаны авторизоваться (см. TOKEN); рассылка — только им */
+  authRequired = false;
   private nextId = 1;
-  private clients = new Set<WebSocket>();
+  private clients = new Set<WebSocket & { authed?: boolean }>();
   private pending = new Map<string, (value: unknown) => void>();
 
   constructor(private confirmTimeoutMs: number = CONFIRM_TIMEOUT_MS) {}
 
   addClient(ws: WebSocket): void {
-    this.clients.add(ws);
+    const socket = ws as WebSocket & { authed?: boolean };
+    socket.authed = !this.authRequired;
+    this.clients.add(socket);
     ws.on('close', () => {
-      this.clients.delete(ws);
+      this.clients.delete(socket);
     });
   }
 
@@ -131,7 +136,7 @@ export class ServerPresenter implements Presenter {
   private send(msg: unknown): void {
     const data = JSON.stringify(msg);
     for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+      if (ws.readyState === WebSocket.OPEN && ws.authed) ws.send(data);
     }
   }
 
@@ -280,10 +285,23 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     serveStatic(url.pathname, res);
   });
 
+  type ClientSocket = WebSocket & { authed?: boolean };
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-  wss.on('connection', (ws: WebSocket) => {
+  // токен доступа: задаётся TOKEN в ~/.dreamteam/.env; пусто — сервер открыт
+  // (по умолчанию он и так слушает только 127.0.0.1)
+  const authToken = String(process.env.TOKEN ?? '').trim();
+  if (authToken) presenter.authRequired = true;
+
+  wss.on('connection', (plain: WebSocket) => {
+    const ws = plain as ClientSocket;
     presenter.addClient(ws);
-    ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app) }));
+    if (authToken) {
+      ws.authed = false;
+      ws.send(JSON.stringify({ type: 'auth_required' }));
+    } else {
+      ws.authed = true;
+      ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app) }));
+    }
     ws.on('message', (raw: RawData) => {
       let msg: unknown;
       try {
@@ -297,12 +315,31 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
         presenter.error('кривое сообщение (не объект) — проигнорировано');
         return;
       }
-      void handleClientMessage(ws, msg as Record<string, unknown>);
+      const typed = msg as Record<string, unknown>;
+      // без авторизации — только попытка авторизоваться
+      if (!ws.authed && typed.type !== 'auth') {
+        ws.send(JSON.stringify({ type: 'auth_required' }));
+        return;
+      }
+      void handleClientMessage(ws, typed);
     });
   });
 
-  async function handleClientMessage(ws: WebSocket, msg: Record<string, unknown>): Promise<void> {
+  /** Токен сверяется с постоянным временем (утечка через тайминги исключена). */
+  function tokenMatches(candidate: string): boolean {
+    const sha = (v: string) => createHash('sha256').update(v).digest();
+    return timingSafeEqual(sha(candidate), sha(authToken));
+  }
+
+  async function handleClientMessage(ws: ClientSocket, msg: Record<string, unknown>): Promise<void> {
     const type = String(msg.type ?? '');
+    if (type === 'auth') {
+      const ok = typeof msg.token === 'string' && tokenMatches(String(msg.token));
+      ws.authed = ok;
+      ws.send(JSON.stringify(ok ? { type: 'auth_ok' } : { type: 'auth_failed' }));
+      if (ok) ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app) }));
+      return;
+    }
     switch (type) {
       case 'hello':
         ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app) }));

@@ -534,6 +534,32 @@ const client = await makeClient(handle.port);
   client.close();
 }
 
+// --- AUTH: сервер с TOKEN требует авторизацию первым сообщением ---
+{
+  process.env.TOKEN = 'секрет-тест-123';
+  const secured = await startServe({ port: 0 });
+  const c1 = await makeClient(secured.port);
+  const need = await c1.next((m) => m.type === 'auth_required');
+  check('auth: сервер с TOKEN требует авторизацию', Boolean(need));
+
+  c1.send({ type: 'auth', token: 'неверный-токен' });
+  const fail = await c1.next((m) => m.type === 'auth_failed');
+  check('auth: неверный токен — отказ', Boolean(fail));
+
+  c1.send({ type: 'user_message', text: 'попытка без токена' });
+  const again = await c1.next((m) => m.type === 'auth_required');
+  check('auth: неавторизованные сообщения игнорируются', Boolean(again));
+
+  c1.send({ type: 'auth', token: 'секрет-тест-123' });
+  const ok = await c1.next((m) => m.type === 'auth_ok');
+  const st = await c1.next((m) => m.type === 'state');
+  check('auth: верный токен — пускает со state', Boolean(ok && st.state));
+
+  c1.close();
+  await secured.close();
+  delete process.env.TOKEN;
+}
+
 // --- ServerPresenter отдельно: вопросы и таймауты ---
 {
   const captured: string[] = [];

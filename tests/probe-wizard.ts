@@ -84,6 +84,7 @@ const {
   check('env: ключи в примере закомментированы', !/^DREAMTEAM_API_KEY=/m.test(readFileSync(envFile, 'utf8')) && readFileSync(envFile, 'utf8').includes('# DREAMTEAM_API_KEY='));
   check('env: порт и адрес примера на месте', readFileSync(envFile, 'utf8').includes('# PORT=8080') && readFileSync(envFile, 'utf8').includes('# HOST=127.0.0.1'));
   check('env: права только у владельца (POSIX)', process.platform === 'win32' || envMode === 0o600, envMode.toString(8));
+  check('env: мастер создал токен доступа TOKEN', /^TOKEN=.+/m.test(readFileSync(envFile, 'utf8')));
 
   // --- скелеты конфигов: настоящие JSON-файлы в пакете, валидны по загрузчикам ---
   {

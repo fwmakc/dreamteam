@@ -28,6 +28,11 @@
   const chooseEl = $('choose');
   const chooseListEl = $('choose-list');
   const hintsEl = $('hints');
+  const authEl = $('auth');
+  const authInput = $('auth-token');
+  const authError = $('auth-error');
+  const authEnter = $('auth-enter');
+  const btnLogout = $('btn-logout');
 
   // ── состояние клиента ────────────────────────────────────────
   let ws = null;
@@ -38,6 +43,9 @@
   const pendingRpc = new Map(); // rpc id → {resolve, reject}
   let rpcSeq = 0;
   let retryTimer = null;
+  // сервер без TOKEN шлёт state сразу — клиент считает себя «в системе»;
+  // auth_required переводит в ложь до успешного auth
+  let authed = true;
 
   const COLORS = {
     black: '#9aa3af', red: '#e06c75', green: '#98c379', yellow: '#e5c07b',
@@ -97,6 +105,37 @@
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
   }
 
+  function sendAuth(token) {
+    send({ type: 'auth', token });
+  }
+
+  function tryStoredToken() {
+    const saved = localStorage.getItem('dt-token');
+    if (saved) {
+      sendAuth(saved);
+      return true;
+    }
+    return false;
+  }
+
+  function showAuthForm(errorText) {
+    authed = false;
+    authEl.classList.remove('hidden');
+    authError.textContent = errorText ?? '';
+    authError.classList.toggle('hidden', !errorText);
+    authInput.value = '';
+    authInput.focus();
+  }
+
+  function enterWithToken() {
+    const token = authInput.value.trim();
+    if (!token) return;
+    localStorage.setItem('dt-token', token);
+    authed = true;
+    sendAuth(token);
+    authEl.classList.add('hidden');
+  }
+
   function rpc(method, args) {
     return new Promise((resolve, reject) => {
       const id = `c${++rpcSeq}`;
@@ -108,10 +147,26 @@
   // ── диспетчер событий сервера ────────────────────────────────
   function dispatch(msg) {
     switch (msg.type) {
+      case 'auth_required': {
+        authed = false;
+        btnLogout.classList.remove('hidden');
+        if (!tryStoredToken()) showAuthForm();
+        break;
+      }
+      case 'auth_ok':
+        authed = true;
+        authEl.classList.add('hidden');
+        btnLogout.classList.remove('hidden');
+        break;
+      case 'auth_failed':
+        localStorage.removeItem('dt-token');
+        showAuthForm('Неверный токен — попробуйте ещё раз.');
+        break;
       case 'state':
         roundActive = false;
         state = msg.state;
         hidePrompts();
+        authEl.classList.add('hidden');
         renderAll();
         renderStatus();
         break;
@@ -578,7 +633,7 @@
   function sendUserMessage() {
     const text = inputEl.value.trim();
     if (!text) return;
-    if (roundActive) return;
+    if (roundActive || !authed) return;
     inputEl.value = '';
     autosize();
     hideHints();
@@ -644,6 +699,15 @@
     rpc('session.new', {}).catch((err) =>
       addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   };
+  btnLogout.onclick = () => {
+    localStorage.removeItem('dt-token');
+    location.reload();
+  };
+  authEnter.onclick = enterWithToken;
+  authInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') enterWithToken();
+  });
+
   $('confirm-yes').onclick = () => answerConfirm(true);
   $('confirm-no').onclick = () => answerConfirm(false);
   $('choose-cancel').onclick = () => {

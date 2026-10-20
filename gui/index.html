@@ -12,8 +12,18 @@
   <span id="logo">🎬 Dream Team</span>
   <span id="profile-badge" class="badge hidden"></span>
   <span id="conn" class="conn off">подключение…</span>
+  <button id="btn-logout" class="hidden" title="Забыть токен доступа на этом устройстве">Выйти</button>
 </header>
 
+<div id="auth" class="hidden">
+  <div class="auth-box">
+    <h2>Доступ к Dream Team</h2>
+    <p class="dim">Введите токен доступа (TOKEN из ~/.dreamteam/.env сервера).</p>
+    <input id="auth-token" type="password" placeholder="токен" autocomplete="current-password">
+    <div id="auth-error" class="errline hidden"></div>
+    <button id="auth-enter">Войти</button>
+  </div>
+</div>
 <main id="layout">
   <aside id="sidebar">
     <section>
