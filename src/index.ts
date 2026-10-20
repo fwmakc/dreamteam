@@ -1,41 +1,20 @@
-import 'dotenv/config';
-import dotenv from 'dotenv';
 import { createInterface } from 'node:readline/promises';
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
 import { format } from 'node:util';
 import pc from 'picocolors';
-import { loadTeam, loadUserProfile } from './agents.js';
-import { loadManagerConfig, managerAsAgent } from './manager.js';
+import { loadTeam } from './agents.js';
+import { managerAsAgent } from './manager.js';
 import { agentToolIds } from './tools-api.js';
 import { loadToolsConfig, type ToolsConfig } from './actions.js';
-import { loadUserTools } from './tools-registry.js';
-import { SessionStore } from './sessions.js';
 import { COMMANDS, HintPanel, MentionPicker, hintRowsFor, makeCompleter, type CompletionContext } from './completion.js';
 import { Editor } from './editor.js';
 import { Screen } from './screen.js';
-import { loadSettings } from './settings.js';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
-import {
-  AGENTS_FILE,
-  DT_HOME,
-  MANAGER_FILE,
-  MEMORY_FILE,
-  PROJECTS_FILE,
-  PROVIDERS_FILE,
-  SESSIONS_DIR,
-  SETTINGS_FILE,
-  TOOLS_DIR,
-  USER_FILE,
-  WORKSPACE,
-  migrateLegacy,
-} from './paths.js';
-import { ensureLayers } from './wizard.js';
-import { loadProviders, loadImageProviders } from './providers/registry.js';
-import { loadTeamMemory } from './memory.js';
+import { AGENTS_FILE, PROJECTS_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
 import { agentHeader, colorFn, printDim, printError, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 // ядро: раунды, менеджер, инструменты, память — общение только через Presenter
 import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
+import { bootstrapApp } from './core/bootstrap.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, ChatMessage, Session } from './types.js';
 
@@ -787,41 +766,8 @@ async function runCommand(engine: Engine, line: string): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  // ключи провайдеров могут лежать в ~/.dreamteam/.env — читаем до конфигов
-  // (проектный .env dotenv уже загрузил; он главнее при совпадении имён)
-  dotenv.config({ path: join(DT_HOME, '.env') });
-  // однократная миграция старой схемы (config/ и data/ в корне пакета) на слои
-  for (const note of migrateLegacy()) console.log(pc.dim(`  миграция: ${note}`));
-  // первый запуск: wizard (нет провайдеров) и скаффолдинг .dreamteam в проекте
-  try {
-    for (const note of await ensureLayers()) console.log(pc.dim(`  ${note}`));
-  } catch (err) {
-    printError(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  }
-  // настройки читаем до всего вывода: ошибка конфига видна в обычном терминале
-  const ui = loadSettings(SETTINGS_FILE, process.stdout.columns || 0);
-  const store = new SessionStore(SESSIONS_DIR);
-  const loaded = loadProviders(PROVIDERS_FILE);
-  const images = loadImageProviders(PROVIDERS_FILE);
-  // менеджер переговорки: обязательный конфиг, неизвестный провайдер — падение до старта TUI
-  const mgr = loadManagerConfig(MANAGER_FILE, loaded.providers.keys());
-  // тула: fail-fast — кривой файл в tools/ или карточка в agents.json видны до старта TUI
-  // (дальше они перечитываются каждый раунд уже с мягкой обработкой)
-  await loadUserTools(TOOLS_DIR);
-  // при старте продолжаем последний разговор, а не плодим пустые сессии
-  const existing = store.list();
-  const session = existing.length > 0 ? store.load(existing[0].id) ?? store.create() : store.create();
-  const app: App = {
-    store,
-    session,
-    providers: loaded.providers,
-    images: images.images,
-    defaultProviderId: loaded.defaultId,
-    mgr,
-    profile: loadUserProfile(USER_FILE),
-    memory: loadTeamMemory(MEMORY_FILE),
-  };
+  // общий старт ядра: env дома, миграция, wizard, конфиги, fail-fast на тулах
+  const { app, ui } = await bootstrapApp();
   appRef = app;
   const engine = new Engine(app, new CliPresenter());
 
@@ -926,7 +872,7 @@ async function main(): Promise<void> {
   );
   // Прошлый разговор сразу в панель: внизу виден хвост, вся старая история —
   // колесом/PgUp. В линейном режиме не нужно — там прокручивает сам терминал.
-  if (screen && session.messages.length > 0) {
+  if (screen && app.session.messages.length > 0) {
     let team: Agent[] = [];
     try {
       team = loadTeam(AGENTS_FILE);
@@ -934,13 +880,13 @@ async function main(): Promise<void> {
       // без agents.json история засеивается без фирменных цветов агентов
     }
     const rows: string[] = [];
-    for (const m of session.messages) {
+    for (const m of app.session.messages) {
       rows.push('');
       rows.push(...messageRows(m, team));
     }
     screen.seed(rows);
     printDim(
-      `  Продолжаю разговор «${session.title}» (${session.messages.length} сообщ.) — /new для нового, /sessions для списка`,
+      `  Продолжаю разговор «${app.session.title}» (${app.session.messages.length} сообщ.) — /new для нового, /sessions для списка`,
     );
   }
   // страховка от потерянных первых кадров терминала: одна полная перерисовка
@@ -949,7 +895,7 @@ async function main(): Promise<void> {
 
   // Пустой разговор на старте (первый запуск или неиспользованная сессия) —
   // менеджер здоровается сам, как по /new. Только в TTY: в пайпе LLM не зовём.
-  if (editor && session.messages.length === 0) {
+  if (editor && app.session.messages.length === 0) {
     const ac = new AbortController();
     abortActiveRound = () => ac.abort();
     try {
