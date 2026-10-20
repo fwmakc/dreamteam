@@ -21,12 +21,13 @@
     "dev": "tsx src/index.ts",
     "serve": "tsx src/serve.ts",
     "typecheck": "tsc --noEmit",
-    "probe": "tsx tests/probe-screen.ts && tsx tests/probe-editor.ts && tsx tests/probe-manager.ts && tsx tests/probe-tools.ts && tsx tests/probe-wizard.ts && tsx tests/probe-migrate.ts && tsx tests/probe-commands.ts",
+    "probe": "tsx tests/probe-screen.ts && tsx tests/probe-editor.ts && tsx tests/probe-manager.ts && tsx tests/probe-tools.ts && tsx tests/probe-wizard.ts && tsx tests/probe-migrate.ts && tsx tests/probe-commands.ts && tsx tests/probe-manager-flow.ts",
     "probe:commands": "tsx tests/probe-commands.ts",
     "probe:api": "tsx tests/probe-api.ts",
     "probe:e2e": "npm i --no-save node-pty && tsx tests/probe-input.ts && tsx tests/probe-startup.ts && npm prune",
     "probe:tui": "tsx tests/probe-tui.ts",
-    "probe:manager": "tsx tests/probe-manager.ts"
+    "probe:manager": "tsx tests/probe-manager.ts",
+    "probe:manager-flow": "tsx tests/probe-manager-flow.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

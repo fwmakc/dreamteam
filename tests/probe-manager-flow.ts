@@ -1,0 +1,324 @@
+/**
+ * Менеджер переговорки как шлюз конфигурации — сквозной конвейер (по схеме
+ * «снимок → проектирование → выполнение/проверка/чистка»):
+ *  1. СНИМОК: что менеджер видит в момент решения — system = MANAGER_PROMPT,
+ *     пользовательская часть = состояние переговорки (ростер с тула­ми и
+ *     провайдерами, состав чата, разговоры с номерами, проекты, команды,
+ *     окно истории, просьба).
+ *  2. ПРОЕКТИРОВАНИЕ: промт объявляет все 11 операций и JSON-протокол
+ *     {say, actions}; сценарии с заготовленными ответами скриптового LLM.
+ *  3. ВЫПОЛНЕНИЕ: каждый op через настоящий managerTurn на герметичных слоях —
+ *     итог в файлах (agents.json/projects.json), отчёты ✓/✗ в истории
+ *     разговора, реплика менеджера сохраняется в СТАРЫЙ разговор до
+ *     переключения (pendingSwitches), мусорный ответ — без изменений конфига.
+ * Запуск: npm run probe:manager-flow
+ */
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { MANAGER_PROMPT } from '../src/manager.js';
+import type { LLMProvider, StreamRequest } from '../src/types.js';
+import { MANAGER_ID } from '../src/manager.js';
+import type { Presenter, SpeakerRef, TurnSink } from '../src/core/presenter.js';
+
+let fails = 0;
+function check(name: string, cond: boolean, detail?: string): void {
+  if (cond) console.log(`  ok  ${name}`);
+  else {
+    fails++;
+    console.log(`FAIL  ${name}${detail ? ` — ${detail}` : ''}`);
+  }
+}
+
+// ── герметичные слои: дом и проект во временных папках ──────────────────────
+const base = mkdtempSync(join(tmpdir(), 'dt-mflow-'));
+const home = join(base, 'home');
+const proj = join(base, 'proj');
+const agentsFile = join(proj, 'agents.json');
+const projectsFile = join(proj, 'projects.json');
+mkdirSync(home, { recursive: true });
+process.env.DT_HOME = home;
+process.env.DT_PROJECT = proj;
+process.chdir(base); // рабочая папка инструментов — песочница
+
+writeFileSync(
+  join(home, 'providers.json'),
+  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
+);
+
+const { bootstrapApp } = await import('../src/core/bootstrap.js');
+const { Engine } = await import('../src/core/engine.js');
+
+// ── скриптовый LLM: менеджерские ходы — из очереди, остальное — болтовня ────
+const managerReplies: string[] = [];
+const requests: { system?: string; user?: string }[] = [];
+const fakeProvider: LLMProvider = {
+  id: 'mock',
+  kind: 'mock',
+  model: 'scripted',
+  async *stream(req: StreamRequest) {
+    requests.push({
+      system: req.system,
+      user: req.messages.map((m) => m.content).join('\n---\n'),
+    });
+    // менеджеру — заготовленный ответ; остальным (агенты, конспекты) — болтовня,
+    // чтобы фон (вливания памяти) не съедал сценарную очередь
+    const reply = req.system === MANAGER_PROMPT ? (managerReplies.shift() ?? '') : 'Принято.';
+    if (req.signal?.aborted) return;
+    yield reply;
+  },
+};
+
+// ── заглушка Presenter: собирает всё, что ядро говорит оболочке ─────────────
+const says: string[] = [];
+const notices: string[] = [];
+const errors: string[] = [];
+const sink: TurnSink = { delta() {}, done() {} };
+const stub: Presenter = {
+  notice(text) { notices.push(text); },
+  error(text) { errors.push(text); },
+  turnHeader(_agent: SpeakerRef) {},
+  busy(_label: string) { return { stop() {} }; },
+  stream(_label: string) { return sink; },
+  turnEnd(_full: string) {},
+  say(text) { says.push(text); },
+  toolLines(_results: string[]) {},
+  attachment(_title: string, _digest: string) {},
+  async confirm() { return false; },
+  async chooseSession() { return null; },
+  sessionOpened(_session) {},
+};
+
+const { app } = await bootstrapApp();
+const engine = new Engine(app, stub);
+// провайдер менеджера из скаффолд-конфига — mock; подменяем на скриптовый
+app.providers.get('mock')!.provider = fakeProvider;
+const signal = () => new AbortController().signal;
+
+/** Ход менеджера: заготовленный ответ + просьба руководителя. */
+async function askManager(reply: string, request: string): Promise<void> {
+  managerReplies.push(reply);
+  await engine.handleMessage(`@менеджер ${request}`, signal());
+}
+
+/** Реплика менеджера в истории текущего разговора (последняя). */
+function lastManagerMessage(): string {
+  const mine = app.session.messages.filter((m) => m.authorId === 'manager');
+  return mine.at(-1)?.text ?? '';
+}
+
+// ═══ 1. СНИМОК: что менеджер видит в момент решения ══════════════════════════
+{
+  // пустая переговорка: скаффолд без команды, разговор один и пуст
+  await askManager('Слушаю.', 'докладывай');
+  const req = requests.at(-1)!;
+  check('снимок: system — это промт менеджера', req.system === MANAGER_PROMPT);
+  check('снимок: пустые участники — «вся команда»', req.user?.includes('В этом чате: вся команда') ?? false, req.user);
+  check('снимок: разговоры с номерами и текущим', (req.user?.includes('1. ') && req.user?.includes('(текущий)')) ?? false);
+  check('снимок: без проектов блока нет', !req.user?.includes('Проекты (реестр серверов для ssh)'), String(req.user?.slice(0, 80)));
+  check('снимок: руководитель из user.json', req.user?.includes('Руководитель: Пользователь') ?? false);
+  check('снимок: slash-команды со справкой', req.user?.includes('/new — новый разговор') ?? false, req.user);
+  check('снимок: история — сама просьба уже в ней', (req.user?.includes('Последние сообщения') && req.user?.includes('@менеджер докладывай')) ?? false, req.user);
+  check('снимок: просьба дословно', req.user?.includes('Просьба руководителя: «@менеджер докладывай»') ?? false, req.user);
+}
+
+{
+  // наполняем переговорку: команда с тула­ми и провайдерами, проект, история
+  writeFileSync(agentsFile, JSON.stringify([
+    { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'Ты — Катя.', provider: 'claude', temperature: 0.3, tools: { files: {}, look: {} } },
+    { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'Ты — Глеб.', projects: ['shop'] },
+  ], null, 2) + '\n');
+  writeFileSync(projectsFile, JSON.stringify({ shop: { hosts: { prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } } } }, null, 2) + '\n');
+  for (let i = 1; i <= 14; i++) {
+    app.session.messages.push({ authorId: 'user', authorName: 'Хозяин', text: `строка ${i}`, ts: i });
+  }
+  app.session.participants = [MANAGER_ID, 'katya'];
+  app.store.save(app.session);
+
+  await askManager('Принято к сведению.', 'что видишь?');
+  const req = requests.at(-1)!;
+  check('снимок: ростер — id, роль, провайдер, temp, тула',
+    req.user?.includes('- katya — Катя (дизайнер), провайдер: claude, temp 0.3; тула: files, look') ?? false, req.user);
+  check('снимок: агент без тула — пометка', req.user?.includes('- gleb — Глеб (разработчик), провайдер: основной; тула нет') ?? false, req.user);
+  check('снимок: состав чата — только позванные', req.user?.includes('В этом чате: katya') ?? false, req.user);
+  check('снимок: проект — серверы и назначенцы',
+    req.user?.includes('- shop: серверы prod, staging; агенты: gleb') ?? false, req.user);
+  const historyBlock = req.user?.slice(req.user.indexOf('Последние сообщения'), req.user.indexOf('Просьба руководителя')) ?? '';
+  const historyLines = historyBlock.split('\n').filter((l) => l.includes(': ')).length;
+  check('снимок: окно истории — ровно 12 сообщений', historyLines === 12, `${historyLines}: ${historyBlock.slice(0, 160)}`);
+  check('снимок: свежие строки ближе к просьбе', historyBlock.includes('строка 14') && !historyBlock.includes('строка 1\n'), historyBlock.slice(0, 160));
+}
+
+// ═══ 2. ПРОЕКТИРОВАНИЕ: промт объявляет протокол и все операции ══════════════
+{
+  for (const op of [
+    'team.add', 'team.update', 'chat.add', 'chat.remove',
+    'session.list', 'session.open', 'session.new', 'session.delete',
+    'tool.grant', 'project.add', 'project.host.add',
+  ]) {
+    check(`проектирование: промт объявляет ${op}`, MANAGER_PROMPT.includes(op));
+  }
+  check('проектирование: JSON-протокол {say, actions}', MANAGER_PROMPT.includes('"say"') && MANAGER_PROMPT.includes('"actions"'));
+  check('проектирование: дисциплина «только то, о чём попросили»', MANAGER_PROMPT.includes('Делай только те действия'));
+}
+
+// ═══ 3. ВЫПОЛНЕНИЕ, ПРОВЕРКА, ЧИСТКА ═════════════════════════════════════════
+
+// team.add: полная спецификация доходит до agents.json, отчёт — в историю
+{
+  const before = readFileSync(agentsFile, 'utf8');
+  await askManager(
+    'Готово, зову Пашу.\n{"say":"Зову Пашу.","actions":[{"op":"team.add","id":"pasha","name":"Паша","role":"тестировщик","provider":"claude","temperature":0.4,"tools":{"files":{},"shell":null}}]}',
+    'добавь Пашу тестировщиком',
+  );
+  const team = (await import('../src/agents.js')).loadTeam(agentsFile);
+  const pasha = team.find((a) => a.id === 'pasha');
+  check('team.add: участник в agents.json', !!pasha);
+  check('team.add: спецификация целиком', pasha?.name === 'Паша' && pasha?.role === 'тестировщик' && pasha?.provider === 'claude' && pasha?.temperature === 0.4, JSON.stringify(pasha));
+  check('team.add: дефолты эмодзи/цвета/промпта', pasha?.emoji === '🤖' && pasha?.color === 'white' && pasha?.prompt === 'Ты — Паша, тестировщик.', JSON.stringify(pasha));
+  check('team.add: карточки тула­ов записаны', JSON.stringify(pasha?.tools?.shell) === '{}', JSON.stringify(pasha?.tools));
+  const msg = lastManagerMessage();
+  check('team.add: say + ✓-отчёт в истории менеджера', msg.includes('Зову Пашу.') && msg.includes('✓ Паша (id «pasha», роль «тестировщик») добавлен'), msg.slice(0, 160));
+  check('team.add: конфиг до просьбы не менялся', !before.includes('pasha'));
+}
+
+// team.update: белые поля правятся, соседние целы
+{
+  await askManager(
+    'Правлю.\n{"say":"Правлю.","actions":[{"op":"team.update","id":"pasha","fields":{"role":"ведущий тестировщик","temperature":0.1}}]}',
+    'Пашу — ведущим',
+  );
+  const team = (await import('../src/agents.js')).loadTeam(agentsFile);
+  const pasha = team.find((a) => a.id === 'pasha');
+  check('team.update: роль и temp применились', pasha?.role === 'ведущий тестировщик' && pasha?.temperature === 0.1, JSON.stringify(pasha));
+  check('team.update: соседние поля целы', pasha?.provider === 'claude' && pasha?.emoji === '🤖');
+  check('team.update: отчёт в истории', lastManagerMessage().includes('role="ведущий тестировщик"'), lastManagerMessage().slice(0, 160));
+}
+
+// chat.add + chat.remove одной репликой: состав чата меняется
+{
+  app.session.participants = [MANAGER_ID, 'katya'];
+  app.store.save(app.session);
+  await askManager(
+    'Меняю состав.\n{"say":"Меняю состав.","actions":[{"op":"chat.add","who":"Глеб"},{"op":"chat.remove","who":"Катя"}]}',
+    'Глеба в чат, Катю выведи',
+  );
+  check('состав: Глеб позван', app.session.participants?.includes('gleb') ?? false, JSON.stringify(app.session.participants));
+  check('состав: Катя выведена', !app.session.participants?.includes('katya'), JSON.stringify(app.session.participants));
+  const msg = lastManagerMessage();
+  check('состав: два отчёта подряд (эмодзи агента, без ✓)', msg.includes('💾 Глеб присоединился к чату.') && msg.includes('Катя покинул(а) чат.'), msg.slice(-160));
+}
+
+// session.list + session.open: реплика менеджера остаётся в СТАРОМ разговоре
+{
+  const oldId = app.session.id;
+  const second = app.store.create();
+  second.title = 'Старый разговор';
+  second.messages.push({ authorId: 'user', authorName: 'Хозяин', text: 'это старый разговор', ts: 1 });
+  // цель строго свежее текущего: раунд сам сохранит сообщение пользователя и
+  // обновит updatedAt текущего разговора — цель должна остаться первой в списке
+  // save() штампует updatedAt = сейчас, поэтому «свежесть» цели пишем в файл напрямую
+  app.store.save(second);
+  second.updatedAt = Date.now() + 60_000;
+  writeFileSync(join(home, 'sessions', `${second.id}.json`), JSON.stringify(second, null, 2), 'utf8');
+
+  // номер цели берём по факту: раунд сам сохраняет сообщение пользователя и
+  // обновляет updatedAt текущего разговора — порядок списка не угадать заранее
+  const n = app.store.list().findIndex((s) => s.id === second.id) + 1;
+  await askManager(
+    `Показываю.\n{"say":"Показываю и открываю.","actions":[{"op":"session.list"},{"op":"session.open","n":${n}}]}`,
+    'покажи разговоры и открой свежий',
+  );
+  check('session.open: разговор переключился', app.session.id === second.id, `${oldId} -> ${app.session.id}`);
+  const oldSession = app.store.load(oldId)!;
+  const managerMsg = oldSession.messages.filter((m) => m.authorId === 'manager').at(-1)?.text ?? '';
+  check('session.open: реплика с отчётами — в СТАРОМ разговоре', managerMsg.includes('Показываю и открываю.') && managerMsg.includes('✓ Открываю разговор'), managerMsg.slice(-200));
+  check('session.open: в отчёте список разговоров', managerMsg.includes('1. Старый разговор') || managerMsg.includes('Разговоров пока нет'), managerMsg.slice(-200));
+  console.log('  [диагностика] says:', JSON.stringify(says.slice(-3)), 'notices:', JSON.stringify(notices.slice(-10)));
+  check('session.open: sessionOpened дошёл до оболочки', notices.some((t) => t.includes('Открыт разговор')));
+}
+
+// session.new с фильтром участников: неизвестные отбрасываются, пусто → менеджер
+{
+  const oldId = app.session.id;
+  await askManager(
+    'Создаю.\n{"say":"Создаю с Катей.","actions":[{"op":"session.new","title":"Проект","participants":["katya","ghost"]}]}',
+    'новый разговор с Катей',
+  );
+  check('session.new: разговор создан с заголовком', app.session.title === 'Проект', app.session.title);
+  check('session.new: неизвестный участник отфильтрован', JSON.stringify(app.session.participants) === JSON.stringify(['katya']), JSON.stringify(app.session.participants));
+  const oldSession = app.store.load(oldId)!;
+  check('session.new: реплика — в прежнем разговоре', oldSession.messages.some((m) => m.authorId === 'manager' && m.text.includes('Создаю с Катей.')));
+  check('session.new: ✓-отчёт в истории', oldSession.messages.some((m) => m.authorId === 'manager' && m.text.includes('✓ Создаю разговор')), '');
+}
+
+// session.delete текущего — отказ с отчётом, разговор цел
+{
+  const id = app.session.id;
+  await askManager(
+    'Не выйдет.\n{"say":"Не выйдет.","actions":[{"op":"session.delete","n":1}]}',
+    'удали этот разговор',
+  );
+  check('session.delete: текущий жив', app.session.id === id && app.store.list().some((s) => s.id === id));
+  check('session.delete: отказ — в истории менеджера', lastManagerMessage().includes('нельзя') && lastManagerMessage().includes('Не выйдет.'), lastManagerMessage().slice(-160));
+}
+
+// tool.grant: первый ✓, второй ✗ — раунд продолжается после неудачи
+{
+  await askManager(
+    'Включаю.\n{"say":"Включаю Паше files.","actions":[{"op":"tool.grant","agent":"pasha","tool":"files"},{"op":"tool.grant","agent":"pasha","tool":"ghost_tool"}]}',
+    'включи Паше files',
+  );
+  const team = (await import('../src/agents.js')).loadTeam(agentsFile);
+  const pasha = team.find((a) => a.id === 'pasha');
+  check('tool.grant: files включён', Boolean(pasha?.tools?.files), JSON.stringify(pasha?.tools));
+  check('tool.grant: призрака нет', !pasha?.tools?.ghost_tool, JSON.stringify(pasha?.tools));
+  const msg = lastManagerMessage();
+  check('tool.grant: ✓ и ✗ в одной реплике', msg.includes('✓') && msg.includes('✗') && msg.includes('не существует'), msg.slice(-200));
+}
+
+// project.add + project.host.add + дубликат: реестр серверов
+{
+  await askManager(
+    'Завожу.\n{"say":"Завожу проект.","actions":[{"op":"project.add","id":"infra","hosts":{"prod":{"host":"203.0.113.10"}}},{"op":"project.host.add","project":"infra","name":"staging","host":"stg.example.com","port":2222},{"op":"project.add","id":"infra","hosts":{"x":{"host":"y"}}}]}',
+    'заведи проект infra',
+  );
+  const raw = JSON.parse(readFileSync(projectsFile, 'utf8')) as { infra?: { hosts: Record<string, { host: string; port?: number }> } };
+  check('project: проект с сервером', raw.infra?.hosts.prod?.host === '203.0.113.10', JSON.stringify(raw));
+  check('project: сервер с портом добавлен', raw.infra?.hosts.staging?.port === 2222, JSON.stringify(raw));
+  const msg = lastManagerMessage();
+  check('project: ✓✓✗ в одной реплике', msg.includes('✓ проект «infra» добавлен') && msg.includes('✗') && msg.includes('уже есть'), msg.slice(-240));
+}
+
+// мусорный ответ: конфиг не тронут, реплика — чистый текст
+{
+  const agentsBefore = readFileSync(agentsFile, 'utf8');
+  const projectsBefore = readFileSync(projectsFile, 'utf8');
+  await askManager('Просто болтаю без изменений.', 'как дела?');
+  check('мусор: реплика менеджера — чистый текст', lastManagerMessage() === 'Просто болтаю без изменений.', lastManagerMessage());
+  check('мусор: agents.json не тронут', readFileSync(agentsFile, 'utf8') === agentsBefore);
+  check('мусор: projects.json не тронут', readFileSync(projectsFile, 'utf8') === projectsBefore);
+}
+
+// пустой ответ: менеджер молчит — заметка, без реплики в истории
+{
+  const before = app.session.messages.filter((m) => m.authorId === 'manager').length;
+  await askManager('', '…');
+  check('молчание: заметка оболочке', notices.some((t) => t.includes('менеджер молчит')), notices.slice(-3).join(' | '));
+  check('молчание: реплики менеджера в истории нет', app.session.messages.filter((m) => m.authorId === 'manager').length === before);
+}
+
+// роутинг: без @менеджер ход уходит участнику чата, а не менеджеру
+{
+  const managersBefore = app.session.messages.filter((m) => m.authorId === 'manager').length;
+  await engine.handleMessage('привет команде, как продвигается?', signal());
+  const last = app.session.messages.at(-1)!;
+  check('роутинг: без @менеджер отвечает участник', last.authorId === 'katya', JSON.stringify({ authorId: last.authorId }));
+  check('роутинг: менеджер молчал', app.session.messages.filter((m) => m.authorId === 'manager').length === managersBefore);
+}
+
+// ── чистка ───────────────────────────────────────────────────────────────────
+process.chdir(tmpdir()); // Windows не даёт удалить каталог процесса
+rmSync(base, { recursive: true, force: true });
+console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
+process.exit(fails === 0 ? 0 : 1);

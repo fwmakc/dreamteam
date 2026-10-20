@@ -902,7 +902,12 @@ const adapters = {
   на несколько строк, выделение мышью и Shift+клавишами, прокрутка
   (`probe-editor`: клавиши, курсор, история, ввод), менеджер переговорки
   (`probe-manager`: валидация конфига, парсер ответов, новые действия
-  `tool.grant`/`project.add`/`project.host.add` с откатом, стейт), мастер
+  `tool.grant`/`project.add`/`project.host.add` с откатом, стейт) и сквозной
+  конвейер менеджера как шлюза конфигурации (`probe-manager-flow`: снимок
+  состояния для LLM, JSON-протокол, все 11 операций до файлов с откатами,
+  отчёты ✓/✗ в истории, реплика остаётся в старом разговоре при смене),
+  канонические команды (`probe-commands`: все `/…` в ядре, перехват без
+  записи в историю, управление `/agent`/`/grant`/`/project`), мастер
   первого запуска и скаффолдинг (`probe-wizard`, включая сокрытие API-ключа),
   перенос старой схемы на слои (`probe-migrate`: переезд файлов, отсутствие
   перезаписи, защита пробников через `DT_HOME`/`DT_PROJECT`).
@@ -985,7 +990,8 @@ dreamteam/
 │       └── mock.ts
 ├── docker/                   # контейнеры моделей для look/image (самодостаточна) — см. docker/README.md
 ├── tests/                    # пробники: probe-screen, probe-editor, probe-manager,
-│   ├── …                     #   probe-tools, probe-wizard, probe-input, probe-startup,
-│   │                         #   probe-tui, probe-api + vt
+│   ├── …                     #   probe-manager-flow, probe-tools, probe-wizard,
+│   │                         #   probe-input, probe-startup, probe-tui, probe-api,
+│   │                         #   probe-commands + vt
 └── package.json
 ```
