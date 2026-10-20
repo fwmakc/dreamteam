@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { PassThrough } from 'node:stream';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 import { DT_HOME, DT_PROJECT, WORKSPACE } from './paths.js';
 
@@ -193,6 +194,19 @@ export function gitignoreNotice(projectDir: string = WORKSPACE): string | null {
     : `в .dreamteam бывают пароли серверов (projects.json), а git её не игнорирует — добавь в .gitignore строку «.dreamteam/»`;
 }
 
+/** Каталог скелетов конфигов рядом с src/ — как gui/, едет с пакетом. */
+export const SCAFFOLD_DIR = fileURLToPath(new URL('../scaffold/', import.meta.url));
+
+/** Шаблон из scaffold/ как объект: файл обязан существовать и быть валидным JSON. */
+function readScaffold(rel: string): Record<string, unknown> {
+  const file = join(SCAFFOLD_DIR, rel);
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(`скелет ${rel} повреждён (${err instanceof Error ? err.message : err}) — это файл пакета, лечится переустановкой`);
+  }
+}
+
 /** Дом: провайдеры (wizard, если нет) и настройки (дефолты, если нет). */
 export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promise<string[]> {
   const providersFile = join(homeDir, 'providers.json');
@@ -208,7 +222,7 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
   }
   if (!existsSync(settingsFile)) {
     mkdirSync(homeDir, { recursive: true });
-    writeFileSync(settingsFile, JSON.stringify({ width: 100, language: 'русский', margin: 2, screen: true }, null, 2) + '\n');
+    writeFileSync(settingsFile, JSON.stringify(readScaffold(join('home', 'settings.json')), null, 2) + '\n');
     notes.push(`создал ${settingsFile} (язык и экран по умолчанию)`);
   }
   return notes;
@@ -218,9 +232,12 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
 export function ensureProject(defaultProvider: string, projectDir: string = DT_PROJECT): string[] {
   if (existsSync(projectDir)) return [];
   mkdirSync(join(projectDir, 'tools'), { recursive: true });
-  writeFileSync(join(projectDir, 'agents.json'), '[]\n');
-  writeFileSync(join(projectDir, 'manager.json'), JSON.stringify({ provider: defaultProvider }, null, 2) + '\n');
-  writeFileSync(join(projectDir, 'projects.json'), '{}\n');
+  writeFileSync(join(projectDir, 'agents.json'), JSON.stringify(readScaffold(join('project', 'agents.json')), null, 2) + '\n');
+  // единственная динамика скелета: менеджер работает на основном провайдере дома
+  const manager = readScaffold(join('project', 'manager.json'));
+  manager.provider = defaultProvider;
+  writeFileSync(join(projectDir, 'manager.json'), JSON.stringify(manager, null, 2) + '\n');
+  writeFileSync(join(projectDir, 'projects.json'), JSON.stringify(readScaffold(join('project', 'projects.json')), null, 2) + '\n');
   const notes = [
     `создал ${projectDir} (пустая команда, менеджер на провайдере «${defaultProvider}») — дальше менеджер всё объяснит`,
   ];

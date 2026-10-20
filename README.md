@@ -968,6 +968,7 @@ const adapters = {
 dreamteam/
 ├── bin/dreamteam.js          # глобальная команда: tsx-загрузчик; serve → src/serve.ts
 ├── gui/                      # веб-оболочка для `dreamteam serve`: HTML+JS+CSS, без сборки
+├── scaffold/                 # скелеты конфигов первого запуска: home/, project/ — JSON, разворачиваются мастером
 ├── src/
 │   ├── index.ts              # терминальная оболочка: REPL-цикл, команды чата, экран и редактор
 │   ├── core/

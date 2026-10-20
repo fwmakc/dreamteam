@@ -71,10 +71,30 @@ const {
   check('wizard: заметка о providers.json', notes.some((n) => n.includes('providers.json')), notes.join(' | '));
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('настройки: созданы с дефолтами', settings.width === 100 && settings.screen === true, JSON.stringify(settings));
+  check('настройки: язык по умолчанию из скелета', settings.language === 'русский', JSON.stringify(settings));
   check('проект: пустая команда', readFileSync(join(proj, 'agents.json'), 'utf8').trim() === '[]');
   check('проект: менеджер на дефолтном провайдере', JSON.parse(readFileSync(join(proj, 'manager.json'), 'utf8')).provider === 'mock');
   check('проект: пустой реестр серверов', readFileSync(join(proj, 'projects.json'), 'utf8').trim() === '{}');
   check('проект: папка tools создана', existsSync(join(proj, 'tools')));
+
+  // --- скелеты конфигов: настоящие JSON-файлы в пакете, валидны по загрузчикам ---
+  {
+    const { SCAFFOLD_DIR } = await import('../src/wizard.js');
+    const { loadSettings } = await import('../src/settings.js');
+    const { loadTeam } = await import('../src/agents.js');
+    const { loadProjects } = await import('../src/actions.js');
+    check('скелет: home/settings.json валиден по loadSettings', (() => {
+      try { return loadSettings(join(SCAFFOLD_DIR, 'home', 'settings.json'), 0).language === 'русский'; } catch { return false; }
+    })());
+    check('скелет: project/agents.json валиден по loadTeam', (() => {
+      try { return loadTeam(join(SCAFFOLD_DIR, 'project', 'agents.json')).length === 0; } catch { return false; }
+    })());
+    check('скелет: project/projects.json валиден по loadProjects', (() => {
+      try { return loadProjects(join(SCAFFOLD_DIR, 'project', 'projects.json')).size === 0; } catch { return false; }
+    })());
+    const mgrTpl = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'project', 'manager.json'), 'utf8'));
+    check('скелет: manager.json — заглушка провайдера', typeof mgrTpl.provider === 'string' && mgrTpl.provider.length > 0, JSON.stringify(mgrTpl));
+  }
   check('wizard: в выводе меню и приветствие', out().includes('Тип провайдера') && out().includes('живой менеджер'), out().slice(-200));
   check('gitignore: без git — тишина', !notes.some((n) => n.includes('.gitignore')), notes.join(' | '));
 
