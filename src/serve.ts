@@ -32,7 +32,9 @@ import type { Agent, Session } from './types.js';
  * с `/…` внутри исполнится так же — на стороне сервера разницы нет.
  *
  * Вопрос человеку (confirm/choose_session), оставшийся без ответа, — отказ
- * по таймауту: раунд не висит вечно, human-in-the-loop честный.
+ * по таймауту: раунд не висит вечно, human-in-the-loop честный. Раунды
+ * выстраиваются в очередь (roundChain): команды и сообщения от быстрых
+ * клиентов никогда не «наезжают» друг на друга.
  */
 
 /** Таймаут живого вопроса: без ответа считается отказом (как runTimeoutMs у тулов) */
@@ -240,23 +242,26 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   const engine = new Engine(app, presenter);
 
   let activeAbort: (() => void) | null = null;
+  // раунды выстраиваются в очередь: команды и сообщения никогда не «наезжают»
+  // друг на друга, а отказ «подождите» не нужен ни скриптам, ни оболочке
+  let roundChain: Promise<void> = Promise.resolve();
 
   /** Раунд под одним AbortController; в конце — свежий state всем клиентам. */
-  const runRound = async (work: (signal: AbortSignal) => Promise<void>): Promise<void> => {
-    if (activeAbort) {
-      presenter.error('Предыдущий раунд ещё идёт — отмените его или подождите.');
-      return;
-    }
-    const ac = new AbortController();
-    activeAbort = () => ac.abort();
-    try {
-      await work(ac.signal);
-    } catch (err) {
-      presenter.error(`ошибка: ${err instanceof Error ? err.message : err}`);
-    } finally {
-      activeAbort = null;
-      broadcastState();
-    }
+  const runRound = (work: (signal: AbortSignal) => Promise<void>): Promise<void> => {
+    const run = roundChain.then(async () => {
+      const ac = new AbortController();
+      activeAbort = () => ac.abort();
+      try {
+        await work(ac.signal);
+      } catch (err) {
+        presenter.error(`ошибка: ${err instanceof Error ? err.message : err}`);
+      } finally {
+        activeAbort = null;
+        broadcastState();
+      }
+    });
+    roundChain = run.catch(() => {});
+    return run;
   };
 
   const broadcastState = (): void => {
@@ -278,14 +283,19 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     presenter.addClient(ws);
     ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app) }));
     ws.on('message', (raw: RawData) => {
-      let msg: Record<string, unknown>;
+      let msg: unknown;
       try {
-        msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        msg = JSON.parse(String(raw));
       } catch {
         presenter.error('кривое сообщение (не JSON) — проигнорировано');
         return;
       }
-      void handleClientMessage(ws, msg);
+      // null, массивы и прочее не-объектное: валидный JSON, но не сообщение
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+        presenter.error('кривое сообщение (не объект) — проигнорировано');
+        return;
+      }
+      void handleClientMessage(ws, msg as Record<string, unknown>);
     });
   });
 

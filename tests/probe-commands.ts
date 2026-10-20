@@ -209,6 +209,39 @@ function check(name: string, cond: boolean): void {
   check('project host: нет проекта — отказ', threw.includes('nope'));
 }
 
+// ── края: синтаксис, отказы, свой тул из tools/ ─────────────────────────────
+{
+  await runCommandText(engine, '/session abc');
+  check('session: не-номер — заметка через presenter', notices.some((t) => t.includes('Не нашёл разговор №abc')));
+  const d = await runCommandText(engine, '/delete abc');
+  check('delete: не-номер — отказ', d[0]?.includes('Не нашёл') ?? false);
+  const m = await runCommandText(engine, '/memory 1');
+  check('memory: номер не имя — внятный отказ', m[0]?.includes('Нет участника «1»') ?? false);
+  const o = await runCommandText(engine, '/out 99');
+  check('out: нет номера — отказ', o[0]?.includes('Нет участника «99»') ?? false);
+
+  // свой тул: достаточно файла tools/<id>.ts — включается командой
+  writeFileSync(
+    join(proj, 'tools', 'mytool.ts'),
+    'export default () => ({ desc: "Мой тул", check: () => "allow" as const, async run() { return "ок"; } });\n',
+  );
+  const g = await runCommandText(engine, '/grant test2 mytool');
+  check('grant: свой тул из tools/ — отчёт', g[0]?.startsWith('✓') ?? false);
+  const team = (await import('../src/agents.js')).loadTeam(join(proj, 'agents.json'));
+  check('grant: свой тул записан агенту', Boolean((team.find((a) => a.id === 'test2')?.tools as { mytool?: unknown })?.mytool));
+
+  let threw = '';
+  try {
+    await runCommandText(engine, '/agent set test2 foo=bar');
+  } catch (err) {
+    threw = err instanceof Error ? err.message : String(err);
+  }
+  check('agent set: только неизвестные поля — ошибка helper', threw.includes('не понятно, что менять'));
+
+  const p = await runCommandText(engine, '/project add lonely');
+  check('project add: без серверов — синтаксис', p[0]?.includes('Синтаксис') ?? false);
+}
+
 // ── неизвестная и терминальная ───────────────────────────────────────────────
 {
   const lines = await runCommandText(engine, '/foobar');
