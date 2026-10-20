@@ -73,12 +73,20 @@ export class MockProvider implements LLMProvider {
 
   async *stream(req: StreamRequest): AsyncGenerator<string> {
     let text = this.fixedReply ?? pickReply(req);
-    // демо менеджера переговорки: детерминированное JSON-действие (в команде появляется «Тест»)
+    // демо менеджера переговорки: приветствие нового разговора — без действий
     if (!this.fixedReply && (req.system ?? '').startsWith('Ты — менеджер переговорки')) {
-      const hasTest = (req.messages[0]?.content ?? '').includes('test_probe');
-      text = hasTest
-        ? '«Тест» уже в команде — второй раз не дублирую.'
-        : '{"say":"Позываю нового участника «Тест».","actions":[{"op":"team.add","id":"test_probe","name":"Тест","role":"гость","prompt":"Ты — Тест, гость переговорки. Отвечай коротко.","emoji":"🧪","color":"cyan"}]}';
+      const first = req.messages[0]?.content ?? '';
+      if (first.includes('Поприветствуй')) {
+        text =
+          'Добрый день! Я менеджер переговорки — начнём один на один. Скажите, что нужно, а я сделаю: ' +
+          'позову участников из команды в этот чат, включу кому-нибудь инструменты, заведу проект с серверами ' +
+          'или открою другой разговор. Например: «позови Марину и Дмитрия» или «включи Глебу shell».';
+      } else {
+        const hasTest = first.includes('test_probe');
+        text = hasTest
+          ? '«Тест» уже в команде — второй раз не дублирую.'
+          : '{"say":"Позываю нового участника «Тест».","actions":[{"op":"team.add","id":"test_probe","name":"Тест","role":"гость","prompt":"Ты — Тест, гость переговорки. Отвечай коротко.","emoji":"🧪","color":"cyan"}]}';
+      }
     } else if (!this.fixedReply && req.messages.some((m) => m.images?.length)) {
       // mock-зрение: запрос с картинкой — это инструмент look, отвечаем заготовленным разбором
       text =

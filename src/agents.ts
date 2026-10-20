@@ -16,7 +16,8 @@ export function loadTeam(file: string): Agent[] {
     );
   }
   const list = Array.isArray(raw) ? raw : (raw as { agents?: unknown })?.agents;
-  if (!Array.isArray(list) || list.length === 0) {
+  // пустая команда — легитимный старт: чат начинается один на один с менеджером
+  if (!Array.isArray(list)) {
     throw new Error(`в ${file} нет списка агентов (ожидался массив или поле "agents")`);
   }
   return list.map((item, i): Agent => {

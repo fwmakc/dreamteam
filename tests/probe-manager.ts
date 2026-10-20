@@ -11,7 +11,7 @@
  *    «проект:хост», права через проекты; loadSettings: лимиты.
  * Запуск: npm run probe:manager
  */
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findMentions, loadTeam } from '../src/agents.js';
@@ -19,7 +19,10 @@ import { checkPermission, loadProjects, resolveHost, type ToolsConfig } from '..
 import { loadSettings } from '../src/settings.js';
 import {
   MANAGER_PROMPT,
+  addProject,
+  addProjectHost,
   addTeamAgent,
+  grantTool,
   loadManagerConfig,
   managerAsAgent,
   managerMentioned,
@@ -117,7 +120,7 @@ const agentsFile = join(dir, 'agents.json');
   check('псевдо-агент: id/имя/роль/эмодзи/цвет',
     agent.id === 'manager' && agent.name === cfg.name && agent.role === 'менеджер переговорки' &&
     agent.emoji === cfg.emoji && agent.color === cfg.color);
-  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 1600 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
+  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 2200 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
 }
 
 // --- parseManagerReply ---
@@ -158,12 +161,23 @@ const agentsFile = join(dir, 'agents.json');
   const r = parseManagerReply('до {\"say\":\"s\",\"actions\":[{\"op\":\"team.update\",\"id\":\"x\",\"fields\":{\"role\":\"ведущий\"}}]} после');
   check('парсер: JSON в середине текста', r.say === 's' && r.actions.length === 1 && r.actions[0].op === 'team.update');
 }
+{
+  const r = parseManagerReply(
+    '{"say":"включаю","actions":[{"op":"tool.grant","agent":"gleb","tool":"shell"},{"op":"project.add","id":"shop","hosts":{"prod":{"host":"1.2.3.4"}}},{"op":"project.host.add","project":"shop","name":"staging","host":"stg.example.com","port":2222},{"op":"project.add","id":"shop"}]}',
+  );
+  check('парсер: новые действия прочитаны, project.add без hosts отсеян',
+    r.actions.length === 3 &&
+    r.actions[0].op === 'tool.grant' &&
+    (r.actions[1] as { id: string }).id === 'shop' &&
+    (r.actions[2] as { name: string }).name === 'staging',
+    JSON.stringify(r.actions));
+}
 
 // --- managerStateInput ---
 {
   const team: Agent[] = [
-    { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'p', provider: 'claude', temperature: 0.3 },
-    { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'p' },
+    { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'p', provider: 'claude', temperature: 0.3, tools: { files: {}, look: null } },
+    { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'p', projects: ['shop'] },
   ];
   const sessions: SessionMeta[] = [
     { id: 's1', title: 'Текущий', updatedAt: 1, count: 4 },
@@ -177,10 +191,15 @@ const agentsFile = join(dir, 'agents.json');
     userName: 'Хозяин',
     history: [{ authorId: 'user', authorName: 'Хозяин', text: 'привет', ts: 1 }],
     request: '@менеджер, позови Глеба',
+    projects: [{ id: 'shop', hosts: ['prod', 'staging'], agents: ['gleb'] }],
+    commands: [{ cmd: '/new', help: 'новый разговор' }, { cmd: '/session', args: '<номер>', help: 'открыть разговор' }],
   });
   check('стейт: ростер с провайдером и temp', input.includes('katya — Катя (дизайнер), провайдер: claude, temp 0.3'), input);
+  check('стейт: тула агента в ростере', input.includes('тула: files, look') && input.includes('тула нет'), input);
   check('стейт: состав чата', input.includes('В этом чате: katya'));
   check('стейт: список разговоров с номерами и текущим', input.includes('1. Текущий — 4 сообщ. (текущий)') && input.includes('2. Прошлый — 9 сообщ.'), input);
+  check('стейт: проект с серверами и назначенцами', input.includes('shop: серверы prod, staging; агенты: gleb'), input);
+  check('стейт: slash-команды с аргументами', input.includes('/session <номер> — открыть разговор'), input);
   check('стейт: просьба руководителя', input.includes('Просьба руководителя: «@менеджер, позови Глеба»'));
 }
 
@@ -245,6 +264,93 @@ const agentsFile = join(dir, 'agents.json');
   threw = '';
   try { updateTeamAgent(agentsFile, 'gleb', {}); } catch (e) { threw = (e as Error).message; }
   check('team.update: пустые fields — ошибка', threw.includes('не понятно'), threw);
+}
+
+// --- tool.grant: включение тула и карточки, свои тула — только существующие ---
+{
+  writeFileSync(agentsFile, JSON.stringify([{ id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'Ты — Глеб.' }], null, 2) + '\n');
+  const toolsDir = join(dir, 'tools');
+  mkdirSync(toolsDir, { recursive: true });
+  writeFileSync(join(toolsDir, 'reporter.ts'), 'export const make = () => ({ desc: "d", check: () => "allow" as const, run: async () => "ok" });\n');
+
+  const report = grantTool(agentsFile, 'gleb', 'files', { deny: ['rm -rf *'] });
+  check('tool.grant: отчёт о включении', report.includes('Глеб') && report.includes('files'), report);
+  const gleb = loadTeam(agentsFile).find((a) => a.id === 'gleb');
+  check('tool.grant: карточка записана', JSON.stringify(gleb?.tools?.files) === '{"deny":["rm -rf *"]}', JSON.stringify(gleb?.tools));
+
+  const report2 = grantTool(agentsFile, 'gleb', 'reporter', undefined, toolsDir);
+  const gleb2 = loadTeam(agentsFile).find((a) => a.id === 'gleb');
+  check('tool.grant: свой тул по файлу в tools/', report2.includes('reporter') && JSON.stringify(gleb2?.tools?.reporter) === '{}', report2);
+
+  const report3 = grantTool(agentsFile, 'gleb', 'reporter', { workdir: 'sub' }, toolsDir);
+  check('tool.grant: повтор — обновление карточки', report3.includes('обновил'), report3);
+
+  const before = readFileSync(agentsFile, 'utf8');
+  let threw = '';
+  try { grantTool(agentsFile, 'gleb', 'ghost_tool', {}, toolsDir); } catch (e) { threw = (e as Error).message; }
+  check('tool.grant: своего тула нет — отказ', threw.includes('ghost_tool') && threw.includes('не существует'), threw);
+  threw = '';
+  try { grantTool(agentsFile, 'gleb', 'reporter', {}, join(dir, 'пусто')); } catch (e) { threw = (e as Error).message; }
+  check('tool.grant: без папки tools свой тул не включить', threw.includes('reporter'), threw);
+  threw = '';
+  try { grantTool(agentsFile, 'gleb', 'Кривой id'); } catch (e) { threw = (e as Error).message; }
+  check('tool.grant: кривой id — отказ', threw.includes('Кривой id'), threw);
+  threw = '';
+  try { grantTool(agentsFile, 'gleb', 'shell', ['массив']); } catch (e) { threw = (e as Error).message; }
+  check('tool.grant: массив вместо карточки — отказ', threw.includes('объект'), threw);
+  threw = '';
+  try { grantTool(agentsFile, 'никого', 'files'); } catch (e) { threw = (e as Error).message; }
+  check('tool.grant: чужой агент — отказ', threw.includes('никого'), threw);
+  check('tool.grant: неудачные правки файл не меняли', readFileSync(agentsFile, 'utf8') === before);
+  check('tool.grant: loadTeam по-прежнему валиден', loadTeam(agentsFile).length === 1);
+}
+
+// --- project.add / project.host.add: реестр серверов с откатом ---
+{
+  const projFile = join(dir, 'projects.json');
+  writeFileSync(
+    projFile,
+    JSON.stringify({ shop: { hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 22 } }, note: 'пометка' } }, null, 2) + '\n',
+  );
+
+  const report = addProjectHost(projFile, 'shop', 'staging', { host: 'stg.example.com', dir: '/srv/app' });
+  check('project.host.add: отчёт', report.includes('shop') && report.includes('staging'), report);
+  const projects = loadProjects(projFile);
+  check('project.host.add: loadProjects валиден', projects.get('shop')?.hosts.get('staging')?.dir === '/srv/app');
+  check('project.host.add: чужие поля записи сохранены', (JSON.parse(readFileSync(projFile, 'utf8')) as { shop: { note: string } }).shop.note === 'пометка');
+
+  const report2 = addProject(projFile, 'infra', { prod: { host: '10.0.0.1' } });
+  check('project.add: отчёт с серверами', report2.includes('infra') && report2.includes('prod'), report2);
+  const after = loadProjects(projFile);
+  check('project.add: новый проект валиден, соседний цел', after.get('infra')?.hosts.get('prod')?.host === '10.0.0.1' && after.get('shop')?.hosts.get('prod')?.host === '203.0.113.10');
+
+  const before = readFileSync(projFile, 'utf8');
+  let threw = '';
+  try { addProject(projFile, 'shop', { prod: { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
+  check('project.add: дубликат — отказ', threw.includes('уже есть'), threw);
+  threw = '';
+  try { addProject(projFile, 'Bad!', { prod: { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
+  check('project.add: кривой id — отказ', threw.includes('Bad!'), threw);
+  threw = '';
+  try { addProject(projFile, 'empty', {}); } catch (e) { threw = (e as Error).message; }
+  check('project.add: без серверов — отказ', threw.includes('хоть один'), threw);
+  threw = '';
+  try { addProject(projFile, 'nohost', { prod: { user: 'x' } as never }); } catch (e) { threw = (e as Error).message; }
+  check('project.add: сервер без host — отказ', threw.includes('host'), threw);
+  threw = '';
+  try { addProjectHost(projFile, 'infra', 'prod', { host: 'x' }); } catch (e) { threw = (e as Error).message; }
+  check('project.host.add: у проекта уже есть «prod» — дубликат', threw.includes('уже есть'), threw);
+  threw = '';
+  try { addProjectHost(projFile, 'nope', 'prod', { host: 'x' }); } catch (e) { threw = (e as Error).message; }
+  check('project.host.add: чужого проекта нет — отказ', threw.includes('nope') && threw.includes('project.add'), threw);
+  threw = '';
+  try { addProjectHost(projFile, 'shop', 'two words', { host: 'x' }); } catch (e) { threw = (e as Error).message; }
+  check('project.host.add: пробелы в имени — отказ', threw.includes('пробел'), threw);
+  threw = '';
+  try { addProjectHost(projFile, 'shop', 'badport', { host: 'x', port: -1 }); } catch (e) { threw = (e as Error).message; }
+  check('project.host.add: кривой порт — отказ', threw.includes('port'), threw);
+  check('project.add/host.add: неудачные правки файл не меняли', readFileSync(projFile, 'utf8') === before);
+  check('project.add: tmp-файл убран за собой', !existsSync(projFile + '.tmp'));
 }
 
 // --- легаси-форма { agents: [...] } со своими полями корня всё ещё работает ---

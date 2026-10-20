@@ -11,7 +11,10 @@ import {
   MANAGER_ID,
   MANAGER_PROMPT,
   MANAGER_ROLE,
+  addProject,
+  addProjectHost,
   addTeamAgent,
+  grantTool,
   loadManagerConfig,
   managerAsAgent,
   managerMentioned,
@@ -411,63 +414,26 @@ function agentProvider(app: App, agent: Agent): LLMProvider {
 
 /** Состав чата: явно выбранные участники или вся команда (старые разговоры). */
 function chatTeam(session: Session, fullTeam: Agent[]): Agent[] {
-  if (!session.participants || session.participants.length === 0) return fullTeam;
+  const ids = session.participants;
+  if (!ids || ids.length === 0) return fullTeam;
   const byId = new Map(fullTeam.map((a) => [a.id, a] as const));
-  const picked = session.participants
-    .map((id) => byId.get(id))
-    .filter((a): a is Agent => Boolean(a));
-  return picked.length > 0 ? picked : fullTeam;
+  const picked = ids.map((id) => byId.get(id)).filter((a): a is Agent => Boolean(a));
+  // «только менеджер» — его id в участниках, но в команде его нет: чат без
+  // агентов, все реплики адресуются менеджеру (см. runRound)
+  return picked.length > 0 ? picked : ids.includes(MANAGER_ID) ? [] : fullTeam;
 }
 
 /** Имена участников чата для подписи (без чтения agents.json возвращает null). */
 function participantsLine(session: Session): string | null {
   if (!session.participants || session.participants.length === 0) return null;
+  if (session.participants.length === 1 && session.participants[0] === MANAGER_ID) {
+    return appRef ? `${appRef.mgr.emoji} ${appRef.mgr.name} — конфигурация через разговор` : null;
+  }
   try {
     const full = loadTeam(AGENTS_FILE);
     return chatTeam(session, full).map((a) => `${a.emoji} ${a.name}`).join(', ');
   } catch {
     return null;
-  }
-}
-
-/**
- * Выбор участников при создании чата: номера через запятую/пробел,
- * Enter или «все» — вся команда.
- */
-async function pickParticipants(app: App): Promise<void> {
-  let fullTeam: Agent[];
-  try {
-    fullTeam = loadTeam(AGENTS_FILE);
-  } catch {
-    return; // нет agents.json — чат без явного списка, живёт всей командой
-  }
-  console.log(pc.dim('  Кого зовём в чат? (Enter — вся команда)'));
-  fullTeam.forEach((a, i) => console.log(`    ${i + 1}. ${rosterLine(a)}`));
-  printDim('  Номера через запятую или пробел (можно сразу написать первое сообщение — позовём всех):');
-  const answer = (await stdinLines.next())?.trim() ?? '';
-  const ids = new Set<string>();
-  let firstMessage: string | null = null;
-  if (answer.startsWith('/')) {
-    stdinLines.queue.unshift(answer); // команду не съедаем — выполнится сразу после выбора
-  } else if (answer && !/^(все|всех|all)$/i.test(answer)) {
-    for (const token of answer.split(/[\s,;]+/)) {
-      const n = Number.parseInt(token, 10);
-      if (Number.isInteger(n) && n > 0 && n <= fullTeam.length) ids.add(fullTeam[n - 1].id);
-    }
-    if (ids.size === 0) firstMessage = answer; // это не номера, а текст первого сообщения
-  }
-  if (ids.size === 0 || ids.size === fullTeam.length) {
-    app.session.participants = undefined;
-    printDim('  Зовём всю команду.');
-  } else {
-    app.session.participants = [...ids];
-    printDim('  В чате: ' + fullTeam.filter((a) => ids.has(a.id)).map((a) => `${a.emoji} ${a.name}`).join(', '));
-  }
-  app.store.save(app.session);
-  if (firstMessage) {
-    stdinLines.queue.unshift(firstMessage);
-    stdinLines.wake?.();
-    stdinLines.wake = null;
   }
 }
 
@@ -715,7 +681,8 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
 
   // @менеджер — конфигурация переговорки через разговор: состав команды,
   // состав чата, разговоры. Другого пути менять agents.json в приложении нет.
-  if (managerMentioned(text, app.mgr)) {
+  // Чат «только менеджер» (новый разговор): все реплики — ему, без модератора.
+  if (team.length === 0 || managerMentioned(text, app.mgr)) {
     await managerTurn(app, text, fullTeam, profile, signal);
     return;
   }
@@ -830,6 +797,12 @@ async function runRound(app: App, text: string, fullTeam: Agent[], signal: Abort
  * в своей истории. Смена разговора (session.open/new) применяется строго
  * после сохранения реплики, иначе ответ ушёл бы в новый разговор.
  */
+/** Просьба-маркер приветствия: новый разговор один на один с менеджером (по ней mock узнаёт сценарий) */
+const WELCOME_REQUEST =
+  'Разговор только что создан, ты пока единственный его участник. Поприветствуй руководителя: ' +
+  'коротко представься и скажи, чем можешь помочь — позвать команду, включить тула, настроить проекты и серверы. ' +
+  'Никаких действий не делай — только поприветствуй.';
+
 async function managerTurn(
   app: App,
   text: string,
@@ -843,6 +816,9 @@ async function managerTurn(
   console.log('\n' + agentHeader(agent));
   const spinner = new Spinner(`${agent.emoji} ${agent.name} разбирается…`);
   spinner.start();
+  // реестр серверов для блока состояния; не читается только если файл битый —
+  // но тогда приложение не стартовало бы, так что здесь он всегда валиден
+  const cfg = loadToolsConfig(SETTINGS_FILE, PROJECTS_FILE, WORKSPACE);
   let full = '';
   let streamError: unknown = null;
   try {
@@ -859,6 +835,12 @@ async function managerTurn(
             userName: profile.name,
             history: session.messages.slice(-12),
             request: text,
+            projects: [...cfg.projects.entries()].map(([id, p]) => ({
+              id,
+              hosts: [...p.hosts.keys()],
+              agents: fullTeam.filter((a) => a.projects?.includes(id)).map((a) => a.id),
+            })),
+            commands: COMMANDS,
           }),
         },
       ],
@@ -929,6 +911,12 @@ async function execManagerAction(
       return addToChat(app, action.who, fullTeam);
     case 'chat.remove':
       return removeFromChat(app, action.who, fullTeam);
+    case 'tool.grant':
+      return grantTool(AGENTS_FILE, action.agent, action.tool, action.card, TOOLS_DIR);
+    case 'project.add':
+      return addProject(PROJECTS_FILE, action.id, action.hosts);
+    case 'project.host.add':
+      return addProjectHost(PROJECTS_FILE, action.project, action.name, action);
     case 'session.list':
       return sessionsListText(app);
     case 'session.open': {
@@ -949,7 +937,8 @@ async function execManagerAction(
         const old = app.session;
         app.session = app.store.create();
         app.session.title = title;
-        if (ids.length > 0) app.session.participants = ids;
+        // новый разговор без явных участников — один на один с менеджером
+        app.session.participants = ids.length > 0 ? ids : [MANAGER_ID];
         app.store.save(app.session);
         queueFlush(app, old);
         printDim(`  Новый разговор «${app.session.title}» (${app.session.id})`);
@@ -1003,12 +992,16 @@ function removeFromChat(app: App, arg: string, fullTeam: Agent[]): string {
   }
   // материализуем явный список, иначе выгон «вернул» бы всю команду
   app.session.participants ??= fullTeam.map((a) => a.id);
-  if (app.session.participants.length <= 1) {
-    return 'Это последний участник — совсем без команды нельзя. Создайте новый: /new';
-  }
-  app.session.participants = app.session.participants.filter((id) => id !== kicked.id);
+  const rest = app.session.participants.filter((id) => id !== kicked.id);
+  // без агентов чат не бросаем: остаётся консьерж — он позовёт кого нужно
+  const byId = new Set(fullTeam.map((a) => a.id));
+  app.session.participants = rest.some((id) => byId.has(id)) ? rest : [MANAGER_ID];
   app.store.save(app.session);
-  return `${kicked.emoji} ${kicked.name} покинул(а) чат. Реплики останутся в истории.`;
+  const alone = app.session.participants.length === 1 && app.session.participants[0] === MANAGER_ID;
+  return (
+    `${kicked.emoji} ${kicked.name} покинул(а) чат. Реплики останутся в истории.` +
+    (alone ? ' Кроме менеджера в чате никого — попросите его позвать кого-нибудь.' : '')
+  );
 }
 
 /** Переключение на другой разговор: общее для /session и действия менеджера session.open. */
@@ -1476,6 +1469,9 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
   try {
     const team = loadTeam(AGENTS_FILE);
     console.log(pc.dim('\n  Команда:'));
+    if (team.length === 0) {
+      console.log(pc.dim('  (пока пусто — новый разговор начнётся один на один с менеджером)'));
+    }
     for (const agent of team) console.log(rosterLine(agent));
   } catch (err) {
     printError(`проблема с config/agents.json: ${err instanceof Error ? err.message : err}`);
@@ -1641,12 +1637,29 @@ async function runCommand(app: App, line: string): Promise<boolean> {
       printHelp();
       break;
     case 'new': {
-      // чат создаём мгновенно; итоги предыдущего вольются в общую память в фоне
+      // чат создаём мгновенно; итоги предыдущего вольются в общую память в фоне.
+      // Новый разговор всегда начинается один на один с менеджером: он консьерж —
+      // позовёт команду, включит тула, настроит проекты — просто поговорите с ним.
       const old = app.session;
       app.session = app.store.create();
+      app.session.participants = [MANAGER_ID];
+      app.store.save(app.session);
       printDim(`  Новый разговор ${app.session.id}`);
-      await pickParticipants(app);
+      printDim(`  В чате: ${app.mgr.emoji} ${app.mgr.name} — попросите позвать кого-нибудь из команды (/team)`);
       queueFlush(app, old);
+      const ac = new AbortController();
+      abortActiveRound = () => ac.abort();
+      try {
+        let team: Agent[] = [];
+        try {
+          team = loadTeam(AGENTS_FILE);
+        } catch {
+          // нет agents.json — менеджер в приветствии сам объяснит, что дальше
+        }
+        await managerTurn(app, WELCOME_REQUEST, team, app.profile, ac.signal);
+      } finally {
+        abortActiveRound = null;
+      }
       break;
     }
     case 'sessions': {

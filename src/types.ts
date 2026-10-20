@@ -193,7 +193,28 @@ export type ManagerAction =
   | { op: 'session.list' }
   | { op: 'session.open'; n: number }
   | { op: 'session.new'; title?: string; participants?: string[] }
-  | { op: 'session.delete'; n: number };
+  | { op: 'session.delete'; n: number }
+  /** Включить тул агенту / обновить его карточку (tools в agents.json) */
+  | { op: 'tool.grant'; agent: string; tool: string; card?: unknown }
+  /** Новый проект в projects.json: хотя бы один сервер обязателен */
+  | { op: 'project.add'; id: string; hosts: Record<string, ManagerHostSpec> }
+  | { op: 'project.host.add'; project: string; name: string } & ManagerHostSpec;
+
+/** Сервер в действиях менеджера (project.add / project.host.add) */
+export interface ManagerHostSpec {
+  host: string;
+  user?: string;
+  password?: string;
+  port?: number;
+  dir?: string;
+}
+
+/** Проект для блока состояния менеджера: id, имена серверов, кто назначен */
+export interface ManagerProjectInfo {
+  id: string;
+  hosts: string[];
+  agents: string[];
+}
 
 /** Разобранный ответ менеджера: текст для человека + действия */
 export interface ManagerReply {

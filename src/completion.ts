@@ -12,7 +12,7 @@ export interface CommandSpec {
 }
 
 export const COMMANDS: CommandSpec[] = [
-  { cmd: '/new', help: 'новый разговор (выбор участников, Enter — вся команда)' },
+  { cmd: '/new', help: 'новый разговор — один на один с менеджером, он позовёт остальных' },
   { cmd: '/sessions', help: 'список сохранённых разговоров' },
   { cmd: '/session', args: '<номер>', help: 'открыть разговор из списка' },
   { cmd: '/delete', args: '<номер>', help: 'удалить разговор из списка' },
