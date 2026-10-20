@@ -72,7 +72,7 @@ export function stateSnapshot(app: App): unknown {
       provider: a.provider,
       inChat: inChat.has(a.id),
     })),
-    manager: { name: app.mgr.name, emoji: app.mgr.emoji, provider: app.mgr.provider },
+    manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, provider: app.mgr.provider },
     providers: [...app.providers].map(([id, s]) => ({
       id,
       kind: s.provider.kind,
@@ -330,6 +330,8 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
         const n = Number(args.n);
         if (!Number.isInteger(n) || n <= 0) throw new Error('session.open: жду номер из sessions.list');
         engine.openSessionByArg(String(n));
+        // состав чата зависит от разговора: после переключения всем нужен свежий state
+        broadcastState();
         return { ok: true };
       }
       case 'session.new':
@@ -338,7 +340,9 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
       case 'session.delete': {
         const n = Number(args.n);
         if (!Number.isInteger(n) || n <= 0) throw new Error('session.delete: жду номер из sessions.list');
-        return { text: engine.deleteSession(n) };
+        const text = engine.deleteSession(n);
+        broadcastState(); // список разговоров изменился — всем свежий state
+        return { text };
       }
       case 'chat.add':
       case 'chat.remove': {
@@ -405,8 +409,10 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   };
 }
 
-// запускаемся только когда нас позвал bin/dreamteam.js serve (не при импорте из проб)
-if (process.env.DT_SERVE === '1') {
+// запускаемся только как точка входа — bin serve (ставит DT_SERVE=1) или
+// npm run serve (argv[1] — этот файл); при импорте из проб не стартуем
+const entry = (process.argv[1] ?? '').replace(/\\/g, '/');
+if (process.env.DT_SERVE === '1' || entry.endsWith('/src/serve.ts')) {
   startServe()
     .then(({ port }) => {
       console.log(pc.dim(`\n  API поднято: http://127.0.0.1:${port} (WS — /ws) · только локально · Ctrl+C — останов`));

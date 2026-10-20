@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dream Team</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="topbar">
+  <span id="logo">🎬 Dream Team</span>
+  <span id="profile-badge" class="badge hidden"></span>
+  <span id="conn" class="conn off">подключение…</span>
+</header>
+
+<main id="layout">
+  <aside id="sidebar">
+    <section>
+      <div class="side-head">Разговоры
+        <button id="btn-new" title="Новый разговор">＋</button>
+      </div>
+      <ul id="sessions"></ul>
+    </section>
+    <section>
+      <div class="side-head">Команда</div>
+      <ul id="team"></ul>
+    </section>
+    <section>
+      <div class="side-head">Провайдеры</div>
+      <ul id="providers"></ul>
+    </section>
+  </aside>
+
+  <section id="chatwrap">
+    <div id="chat"></div>
+
+    <div id="confirm" class="panel hidden">
+      <div id="confirm-text"></div>
+      <div id="confirm-desc" class="dim"></div>
+      <div class="row">
+        <button id="confirm-yes" class="ok">✓ Разрешить</button>
+        <button id="confirm-no" class="bad">✗ Отказать</button>
+      </div>
+    </div>
+
+    <div id="choose" class="panel hidden">
+      <div class="side-head">Какой разговор приложить?</div>
+      <ul id="choose-list"></ul>
+      <div class="row"><button id="choose-cancel">Никакой</button></div>
+    </div>
+
+    <div id="statusbar" class="hidden">
+      <span id="busy-label"></span>
+      <button id="btn-abort" title="Прервать раунд (Esc в терминале)">⏹ Прервать</button>
+    </div>
+
+    <div id="inputrow">
+      <textarea id="input" rows="1"
+        placeholder="Напишите команде… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику)"></textarea>
+      <button id="btn-send" title="Отправить">➤</button>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

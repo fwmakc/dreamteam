@@ -98,8 +98,14 @@ const handle = await startServe({ port: 0 });
   check('http: /health отвечает ok', health.status === 200 && ((await health.json()) as { ok: boolean }).ok === true);
   const missing = await fetch(`http://127.0.0.1:${handle.port}/no-such-file.js`);
   check('http: нет файла — 404', missing.status === 404);
-  const noGui = await fetch(`http://127.0.0.1:${handle.port}/index.html`);
-  check('http: gui ещё нет — index.html тоже 404', noGui.status === 404);
+  const index = await fetch(`http://127.0.0.1:${handle.port}/`);
+  check('http: / отдаёт оболочку (text/html)', index.status === 200 && (index.headers.get('content-type') ?? '').includes('text/html'));
+  const appJs = await fetch(`http://127.0.0.1:${handle.port}/app.js`);
+  check('http: app.js отдаётся (text/javascript)', appJs.status === 200 && (appJs.headers.get('content-type') ?? '').includes('javascript'));
+  const style = await fetch(`http://127.0.0.1:${handle.port}/style.css`);
+  check('http: style.css отдаётся (text/css)', style.status === 200 && (style.headers.get('content-type') ?? '').includes('text/css'));
+  const escape = await fetch(`http://127.0.0.1:${handle.port}/../package.json`);
+  check('http: выход за gui/ не проходит', escape.status === 403 || escape.status === 404);
 }
 
 // --- WS: консьерж-сценарий на mock-провайдере ---
@@ -189,10 +195,19 @@ const client = await makeClient(handle.port);
   const err2 = await client.next((m) => m.type === 'rpc_error' && m.id === 'r6');
   check('rpc: неизвестный метод — rpc_error', String(err2.error).includes('совсем-неизвестное'));
 
-  // rpc: текущий разговор удалить нельзя
+  // rpc: текущий разговор удалить нельзя (но state после попытки всё равно уходит)
   client.send({ type: 'rpc', id: 'r7', method: 'session.delete', args: { n: 1 } });
   const del = await client.next((m) => m.type === 'rpc_result' && m.id === 'r7');
   check('rpc: текущий разговор не удаляется', String((del.result as { text: string }).text).includes('нельзя'));
+
+  // rpc: другой разговор удаляется — отчёт и свежий state (список короче)
+  client.send({ type: 'rpc', id: 'r8', method: 'session.delete', args: { n: 2 } });
+  const del2 = await client.next((m) => m.type === 'rpc_result' && m.id === 'r8');
+  check('rpc: другой разговор удаляется', !String((del2.result as { text: string }).text).includes('нельзя'));
+  const st4 = await client.next(
+    (m) => m.type === 'state' && (m.state as { sessions: unknown[] }).sessions.length === 1,
+  );
+  check('rpc: после удаления — свежий state (список короче)', Boolean(st4.state));
 
   // abort без активного раунда — просто не падает
   client.send({ type: 'abort' });
