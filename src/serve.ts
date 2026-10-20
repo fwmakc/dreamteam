@@ -14,7 +14,7 @@ import type { Agent, Session } from './types.js';
 
 /**
  * Локальный API поверх ядра: `dreamteam serve` поднимает HTTP+WS на
- * 127.0.0.1:8080 (DT_PORT/DT_HOST, можно в ~/.dreamteam/.env) и раздаёт
+ * 127.0.0.1:8080 (PORT/HOST, можно в ~/.dreamteam/.env) и раздаёт
  * веб-оболочку из gui/. Ядро общается с клиентами
  * только через ServerPresenter (тот же интерфейс Presenter, что и у
  * терминала) — никакого второго ядра нет.
@@ -407,10 +407,10 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     res.end(readFileSync(file));
   }
 
-  const port = opts.port ?? (Number(process.env.DT_PORT) || 8080);
-  // по умолчанию — только локально; DT_HOST=0.0.0.0 открывает сервер в сеть
+  const port = opts.port ?? (Number(process.env.PORT) || 8080);
+  // по умолчанию — только локально; HOST=0.0.0.0 открывает сервер в сеть
   // (авторизации в API нет — так делают, только если сеть своя)
-  const host = String(process.env.DT_HOST ?? '').trim() || '127.0.0.1';
+  const host = String(process.env.HOST ?? '').trim() || '127.0.0.1';
   await new Promise<void>((resolve, reject) => {
     httpServer.once('error', reject);
     httpServer.listen(port, host, resolve);

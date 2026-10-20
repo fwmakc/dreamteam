@@ -225,6 +225,14 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     writeFileSync(settingsFile, JSON.stringify(readScaffold(join('home', 'settings.json')), null, 2) + '\n');
     notes.push(`создал ${settingsFile} (язык и экран по умолчанию)`);
   }
+  const envFile = join(homeDir, '.env');
+  if (!existsSync(envFile)) {
+    // пример со всеми переменными (ключи закомментированы): мастер допишет
+    // настоящий ключ поверх, остальное разбирается руками
+    mkdirSync(homeDir, { recursive: true });
+    writeFileSync(envFile, readFileSync(join(SCAFFOLD_DIR, 'home', 'env.example'), 'utf8'), { mode: 0o600 });
+    notes.push(`создал ${envFile} из примера (env.example) — впиши ключи`);
+  }
   return notes;
 }
 

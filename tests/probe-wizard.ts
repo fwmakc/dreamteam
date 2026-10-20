@@ -77,6 +77,14 @@ const {
   check('проект: пустой реестр серверов', readFileSync(join(proj, 'projects.json'), 'utf8').trim() === '{}');
   check('проект: папка tools создана', existsSync(join(proj, 'tools')));
 
+  // --- .env создаётся из примера: закомментированные переменные, права 600 ---
+  const envFile = join(home, '.env');
+  const envMode = (await import('node:fs')).statSync(envFile).mode & 0o777;
+  check('env: создан из примера', existsSync(envFile));
+  check('env: ключи в примере закомментированы', !/^DREAMTEAM_API_KEY=/m.test(readFileSync(envFile, 'utf8')) && readFileSync(envFile, 'utf8').includes('# DREAMTEAM_API_KEY='));
+  check('env: порт и адрес примера на месте', readFileSync(envFile, 'utf8').includes('# PORT=8080') && readFileSync(envFile, 'utf8').includes('# HOST=127.0.0.1'));
+  check('env: права только у владельца (POSIX)', process.platform === 'win32' || envMode === 0o600, envMode.toString(8));
+
   // --- скелеты конфигов: настоящие JSON-файлы в пакете, валидны по загрузчикам ---
   {
     const { SCAFFOLD_DIR } = await import('../src/wizard.js');
