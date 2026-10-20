@@ -124,12 +124,23 @@ button.bad { border-color: var(--bad); color: var(--bad); }
   padding: 5px 8px;
   border-radius: 6px;
   cursor: pointer;
+  display: block;
+  overflow: hidden;
+}
+#sidebar li .sess-main {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  overflow: hidden;
+}
+#sidebar li .sub {
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
 }
 #sidebar li:hover { background: var(--panel2); }
 #sidebar li.active { background: var(--panel2); border-left: 2px solid var(--accent); }

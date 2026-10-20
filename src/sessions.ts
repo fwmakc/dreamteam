@@ -98,6 +98,7 @@ export class SessionStore {
         out.push({
           id: s.id,
           title: s.title,
+          createdAt: s.createdAt,
           updatedAt: s.updatedAt,
           count: s.messages.length,
         });

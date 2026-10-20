@@ -86,6 +86,11 @@ const DIGEST_SYSTEM = `Ты — помощник команды. Сделай к
 Сохрани: тему; что решили и договорились; ключевые аргументы с именами; важные названия, цифры и ограничения; что осталось незакрытым.
 Пиши сжато, до 150 слов, без воды. Это рабочий конспект, а не пересказ.`;
 
+/** Системный промт придумывания имени разговора (нужен только менеджеру) */
+const NAMING_SYSTEM =
+  'Ты придумываешь короткие имена для разговоров с командой ИИ. ' +
+  'Ответь ТОЛЬКО именем: 2–5 слов, без кавычек, точки и пояснений. Язык — как в сообщении.';
+
 /** Просьба-маркер приветствия: новый разговор один на один с менеджером (по ней mock узнаёт сценарий) */
 const WELCOME_REQUEST =
   'Разговор только что создан, ты пока единственный его участник. Поприветствуй руководителя: ' +
@@ -465,6 +470,12 @@ export class Engine {
     if (session.title === 'Новый разговор') {
       const flat = userText.replace(/\s+/g, ' ');
       session.title = flat.slice(0, 42) + (flat.length > 42 ? '…' : '');
+      // у живого менеджера спрашиваем имя по первому сообщению; в mock-режиме
+      // остаётся имя по первому сообщению (болтовня в имя не годится)
+      if (this.managerProvider().kind !== 'mock') {
+        const name = await this.generateSessionName(`Нужно дать имя сессии. Вот первое сообщение:\n${userText.slice(0, 800)}`);
+        if (name) session.title = name;
+      }
     }
     store.save(session);
 
@@ -605,6 +616,8 @@ export class Engine {
               participants: session.participants,
               sessions: store.list(),
               currentSessionId: session.id,
+              sessionTitle: session.title,
+              digest: session.digest,
               userName: profile.name,
               history: session.messages.slice(-12),
               request: text,
@@ -680,6 +693,8 @@ export class Engine {
         return this.addToChat(action.who, fullTeam);
       case 'chat.remove':
         return this.removeFromChat(action.who, fullTeam);
+      case 'session.rename':
+        return this.renameSession(String(action.title ?? ''));
       case 'tool.grant':
         return grantTool(AGENTS_FILE, action.agent, action.tool, action.card, TOOLS_DIR);
       case 'project.add':
@@ -741,6 +756,60 @@ export class Engine {
     if (meta.id === this.app.session.id) return 'Текущий разговор удалить нельзя — сначала откройте другой.';
     this.app.store.delete(meta.id);
     return `Разговор «${meta.title}» удалён.`;
+  }
+
+  /**
+   * Переименовать текущий разговор (/rename и действие менеджера session.rename).
+   * С именем — напрямую; без — менеджер придумывает по дайджесту, а если его
+   * ещё нет — по первому и последним сообщениям.
+   */
+  async renameSession(name?: string): Promise<string> {
+    const clean = (name ?? '').replace(/\s+/g, ' ').trim();
+    if (!clean) {
+      const context = this.app.session.digest
+        ? `Вот краткое содержание разговора:\n${this.app.session.digest}`
+        : this.namingContextFromMessages();
+      const invented = await this.generateSessionName(`Нужно дать имя сессии.\n${context}`);
+      if (!invented) return 'Не придумал имя — назовите сами: /rename <имя>';
+      return this.applySessionName(invented);
+    }
+    return this.applySessionName(clean.slice(0, 80) + (clean.length > 80 ? '…' : ''));
+  }
+
+  private applySessionName(title: string): string {
+    this.app.session.title = title;
+    this.app.store.save(this.app.session);
+    return `Разговор переименован: «${title}»`;
+  }
+
+  /** Первое и последние сообщения — запасной контекст, когда дайджеста ещё нет. */
+  private namingContextFromMessages(): string {
+    const msgs = this.app.session.messages.filter((m) => m.authorId !== 'tool');
+    const first = msgs[0]?.text ?? '(пусто)';
+    const last = msgs.slice(-3).map((m) => `${m.authorName}: ${m.text}`).join('\n');
+    return `Вот первое сообщение разговора:\n${first.slice(0, 600)}\n\nИ последние сообщения:\n${last.slice(0, 600)}`;
+  }
+
+  /** Просит менеджера придумать короткое имя; неудача — null (останется прежнее). */
+  private async generateSessionName(context: string): Promise<string | null> {
+    const busy = this.presenter.busy('Придумываю имя разговору…');
+    try {
+      let full = '';
+      for await (const chunk of this.managerProvider().stream({
+        system: NAMING_SYSTEM,
+        messages: [{ role: 'user', content: context }],
+        temperature: 0.4,
+      })) {
+        full += chunk;
+      }
+      const name = full.replace(/[«»"']/g, '').replace(/\s+/g, ' ').trim().replace(/[.…]+$/, '').trim();
+      if (!name) return null;
+      return name.slice(0, 60) + (name.length > 60 ? '…' : '');
+    } catch {
+      return null; // имя не критично: останется прежнее
+    } finally {
+      busy.stop();
+    }
   }
 
   /** /session <№>: открыть разговор из списка; нет такого — заметка. */

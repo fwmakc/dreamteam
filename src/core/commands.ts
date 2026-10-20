@@ -36,6 +36,7 @@ export const COMMANDS: CommandSpec[] = [
   { cmd: '/sessions', help: 'список сохранённых разговоров' },
   { cmd: '/session', args: '<номер>', help: 'открыть разговор из списка' },
   { cmd: '/delete', args: '<номер>', help: 'удалить разговор из списка' },
+  { cmd: '/rename', args: '<новое имя>', help: 'переименовать разговор; без имени менеджер придумает' },
   { cmd: '/history', args: '[N]', help: 'история текущего разговора (или последние N)' },
   { cmd: '/team', help: 'состав команды (· не в этом чате)' },
   { cmd: '/add', args: '<имя|номер>', help: 'позвать участника в текущий чат' },
@@ -75,6 +76,8 @@ export async function runCommandText(
       return [];
     case 'sessions':
       return sessionsText(app);
+    case 'rename':
+      return renameCommand(engine, arg);
     case 'session':
       engine.openSessionByArg(arg);
       return [];
@@ -271,14 +274,21 @@ function helpText(): string[] {
 function sessionsText(app: App): string[] {
   const list = app.store.list();
   if (list.length === 0) return ['Разговоров пока нет.'];
+  const fmt = (ts: number) => new Date(ts).toLocaleString('ru-RU');
   const lines = ['', 'Разговоры (свежие сверху):'];
   list.forEach((s, i) => {
-    const date = new Date(s.updatedAt).toLocaleString('ru-RU');
     const cur = s.id === app.session.id ? ' ← текущий' : '';
-    lines.push(`${i + 1}. ${s.title} — ${s.count} сообщ., ${date}${cur}`);
+    lines.push(`${i + 1}. ${s.title} — ${s.count} сообщ.${cur}`);
+    lines.push(`   создан ${fmt(s.createdAt)} · последнее сообщение ${fmt(s.updatedAt)} · id ${s.id}`);
   });
   lines.push('');
   return lines;
+}
+
+/** /rename [имя]: с именем — напрямую, без — менеджер придумывает по разговору. */
+async function renameCommand(engine: Engine, arg: string): Promise<string[]> {
+  if (!arg) return ['Синтаксис: /rename <новое имя>; без имени менеджер придумает сам'];
+  return [await engine.renameSession(arg)];
 }
 
 function teamText(app: App): string[] {

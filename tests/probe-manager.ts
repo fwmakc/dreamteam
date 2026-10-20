@@ -180,14 +180,16 @@ const agentsFile = join(dir, 'agents.json');
     { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'p', projects: ['shop'] },
   ];
   const sessions: SessionMeta[] = [
-    { id: 's1', title: 'Текущий', updatedAt: 1, count: 4 },
-    { id: 's2', title: 'Прошлый', updatedAt: 0, count: 9 },
+    { id: 's1', title: 'Текущий', createdAt: 0, updatedAt: 1, count: 4 },
+    { id: 's2', title: 'Прошлый', createdAt: 0, updatedAt: 0, count: 9 },
   ];
   const input = managerStateInput({
     team,
     participants: ['katya'],
     sessions,
     currentSessionId: 's1',
+    sessionTitle: 'Текущий',
+    digest: 'Краткое содержание для проверки.',
     userName: 'Хозяин',
     history: [{ authorId: 'user', authorName: 'Хозяин', text: 'привет', ts: 1 }],
     request: '@менеджер, позови Глеба',
@@ -201,6 +203,7 @@ const agentsFile = join(dir, 'agents.json');
   check('стейт: проект с серверами и назначенцами', input.includes('shop: серверы prod, staging; агенты: gleb'), input);
   check('стейт: slash-команды с аргументами', input.includes('/session <номер> — открыть разговор'), input);
   check('стейт: просьба руководителя', input.includes('Просьба руководителя: «@менеджер, позови Глеба»'));
+  check('стейт: имя и краткое содержание разговора', input.includes('имя: «Текущий»') && input.includes('Краткое содержание разговора:'), input.slice(-400));
 }
 
 // --- team.add / team.update на временном agents.json (канонично — голый массив) ---

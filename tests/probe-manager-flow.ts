@@ -296,6 +296,20 @@ function lastManagerMessage(): string {
   check('project: ✓✓✗ в одной реплике', msg.includes('✓ проект «infra» добавлен') && msg.includes('✗') && msg.includes('уже есть'), msg.slice(-240));
 }
 
+// session.rename: менеджер переименовывает текущий разговор
+{
+  await askManager(
+    'Переименовываю.\n{"say":"Переименовываю.","actions":[{"op":"session.rename","title":"Название от менеджера"}]}',
+    'переименуй разговор',
+  );
+  check('rename: разговор переименован менеджером', app.session.title === 'Название от менеджера', app.session.title);
+  check('rename: отчёт в истории', lastManagerMessage().includes('Разговор переименован: «Название от менеджера»'), lastManagerMessage().slice(-160));
+  const stateInput = requests.filter((r) => r.system?.startsWith(MANAGER_PROMPT)).at(-1)!;
+  // снимок собирается ДО исполнения действий: в нём ещё старое имя — но ярлык
+  // «имя: «…»» и дайджест (когда появится) менеджер видит
+  check('rename: снимок показывает имя разговора', stateInput.user?.includes('имя: «') ?? false, stateInput.user?.slice(-160));
+}
+
 // мусорный ответ: конфиг не тронут, реплика — чистый текст
 {
   const agentsBefore = readFileSync(agentsFile, 'utf8');
@@ -323,6 +337,12 @@ function lastManagerMessage(): string {
   const last = app.session.messages.at(-1)!;
   check('роутинг: без @менеджер отвечает участник', last.authorId === 'katya', JSON.stringify({ authorId: last.authorId }));
   check('роутинг: менеджер молчал', app.session.messages.filter((m) => m.authorId === 'manager').length === managersBefore);
+}
+
+// авто-имя: в mock-режиме менеджер не переименовывает — остаётся имя по первому сообщению
+{
+  const title = app.session.title;
+  check('авто-имя: mock не придумывает имена', title !== 'Новый разговор' && title.length > 0, title);
 }
 
 // ── чистка ───────────────────────────────────────────────────────────────────

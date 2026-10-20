@@ -99,10 +99,21 @@ function check(name: string, cond: boolean): void {
   check('add: неизвестный — внятный отказ', lines[0]?.includes('Нет участника «Никто»') ?? false);
 }
 
+// ── /rename ──────────────────────────────────────────────────────────────────
+{
+  const lines = await runCommandText(engine, '/rename');
+  check('rename: без имени — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+  const r = await runCommandText(engine, '/rename Пристрелочный разговор');
+  check('rename: отчёт', r[0]?.includes('Пристрелочный разговор') ?? false);
+  check('rename: заголовок изменился', (await runCommandText(engine, '/sessions')).some((l) => l.includes('Пристрелочный разговор')));
+}
+
 // ── /sessions, /session, /delete ─────────────────────────────────────────────
 {
   const lines = await runCommandText(engine, '/sessions');
   check('sessions: текущий помечен', lines.some((l) => l.includes('← текущий')));
+  check('sessions: создан и последнее сообщение', lines.some((l) => l.includes('создан ') && l.includes('последнее сообщение')) ?? false);
+  check('sessions: id показан', lines.some((l) => l.includes(' · id ')) ?? false);
   let d = await runCommandText(engine, '/delete 99');
   check('delete: нет номера — отказ', d[0]?.includes('Не нашёл') ?? false);
   d = await runCommandText(engine, '/delete 1');

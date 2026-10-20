@@ -361,9 +361,16 @@
       const li = document.createElement('li');
       const active = state.session && s.id === state.session.id;
       if (active) li.className = 'active';
+      const created = new Date(s.createdAt).toLocaleString('ru-RU');
+      const updated = new Date(s.updatedAt).toLocaleString('ru-RU');
+      li.title = `${s.title}
+id: ${s.id}
+создан: ${created}
+последнее сообщение: ${updated}`;
       li.innerHTML =
-        `<span class="meta">№${i + 1}</span><span>${esc(s.title)}</span>` +
-        `<span class="meta">${s.count}</span>` +
+        `<div class="sess-main"><span>${esc(s.title)}</span>` +
+        `<span class="meta">${s.count} сообщ.</span></div>` +
+        `<div class="sub">№${i + 1} · ${esc(updated)}</div>` +
         (active ? '' : '<span class="del" title="Удалить разговор">✕</span>');
       li.onclick = (e) => {
         if (e.target.classList.contains('del')) {

@@ -123,6 +123,7 @@ export interface Session {
 export interface SessionMeta {
   id: string;
   title: string;
+  createdAt: number;
   updatedAt: number;
   count: number;
 }
@@ -194,6 +195,8 @@ export type ManagerAction =
   | { op: 'session.open'; n: number }
   | { op: 'session.new'; title?: string; participants?: string[] }
   | { op: 'session.delete'; n: number }
+  /** Переименовать текущий разговор (имя придумывает менеджер или руководитель) */
+  | { op: 'session.rename'; title: string }
   /** Включить тул агенту / обновить его карточку (tools в agents.json) */
   | { op: 'tool.grant'; agent: string; tool: string; card?: unknown }
   /** Новый проект в projects.json: хотя бы один сервер обязателен */

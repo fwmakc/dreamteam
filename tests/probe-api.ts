@@ -328,7 +328,7 @@ const client = await makeClient(handle.port);
     const msg = (sess.messages as { authorId: string; text: string; ts: number }[])[0];
     check('state: поля сообщения', Boolean(msg) && typeof msg.ts === 'number' && typeof msg.text === 'string');
     const meta = (st.sessions as Record<string, unknown>[])[0];
-    check('state: разговор в списке — id/title/updatedAt/count', Boolean(meta) && ['count', 'id', 'title', 'updatedAt'].every((k) => k in meta!));
+    check('state: разговор в списке — id/title/createdAt/updatedAt/count', Boolean(meta) && ['count', 'createdAt', 'id', 'title', 'updatedAt'].every((k) => k in meta!));
     const team = st.team as Record<string, unknown>[];
     check('state: участник — id/name/role/emoji/color/inChat', team.length > 0 && ['color', 'emoji', 'id', 'inChat', 'name', 'role'].every((k) => k in team[0]));
     const mgr = st.manager as Record<string, unknown>;
