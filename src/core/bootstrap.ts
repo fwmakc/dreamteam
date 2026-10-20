@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import dotenv from 'dotenv';
 import { join } from 'node:path';
 import pc from 'picocolors';
@@ -31,8 +30,8 @@ import type { App } from './engine.js';
  * заметки печатаются в обычный терминал — оболочка стартует после.
  */
 export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> {
-  // ключи провайдеров могут лежать в ~/.dreamteam/.env — читаем до конфигов
-  // (проектный .env dotenv уже загрузил; он главнее при совпадении имён)
+  // ключи провайдеров — ровно один .env, в доме: ни корень проекта, ни папка
+  // установки не читаются (не надо гадать, откуда взялась переменная)
   dotenv.config({ path: join(DT_HOME, '.env') });
   // однократная миграция старой схемы (config/ и data/ в корне пакета) на слои
   for (const note of migrateLegacy()) console.log(pc.dim(`  миграция: ${note}`));
