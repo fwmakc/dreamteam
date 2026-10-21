@@ -1062,15 +1062,32 @@ id: ${s.id}
   inputEl.addEventListener('click', updateHints);
   btnAbort.onclick = () => send({ type: 'abort' });
 
-  // ── секции: ＋ кнопки и сворачивание ──────────────────────────
+  // ── секции: ＋ кнопки, сворачивание (localStorage) ────────────
   function secAdd(sec) {
     return document.querySelector(`.side-sec[data-sec='${sec}'] .sec-add`);
   }
   function secBtn(sec, title) {
     return document.querySelector(`.side-sec[data-sec='${sec}'] .sec-btns button[title*='${title}']`);
   }
-  document.querySelectorAll('.side-sec .sec-toggle').forEach((t) => {
-    t.onclick = () => t.closest('.side-sec').classList.toggle('collapsed');
+
+  // клик по .side-head (кроме .sec-add) — свернуть/развернуть + localStorage
+  const LS_KEY = 'dt-collapsed';
+  const saved = localStorage.getItem(LS_KEY);
+  if (saved !== null) {
+    // есть сохранённое — применяем (иначе HTML-дефолты)
+    const collapsed = new Set(JSON.parse(saved));
+    document.querySelectorAll('.side-sec').forEach((sec) => {
+      sec.classList.toggle('collapsed', collapsed.has(sec.dataset.sec));
+    });
+  }
+  document.querySelectorAll('.side-sec .side-head').forEach((head) => {
+    head.addEventListener('click', (e) => {
+      if (e.target.closest('.sec-add')) return;
+      const sec = head.closest('.side-sec');
+      sec.classList.toggle('collapsed');
+      const collapsed = [...document.querySelectorAll('.side-sec.collapsed')].map((s) => s.dataset.sec);
+      localStorage.setItem(LS_KEY, JSON.stringify(collapsed));
+    });
   });
 
   secAdd('sessions').onclick = () => {

@@ -80,6 +80,14 @@
 }
 .modal-box .row { display: flex; gap: 8px; margin-top: 14px; }
 #sidebar .sub2 { font-size: 11px; color: var(--dim); }
+.side-head { cursor: pointer; }
+.side-head .sec-toggle {
+  font-size: 10px;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+.side-sec.collapsed .sec-toggle { transform: rotate(-90deg); }
+.side-sec.collapsed ul, .side-sec.collapsed .sec-btns { display: none; }
 
 html, body {
   margin: 0;
