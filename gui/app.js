@@ -745,10 +745,6 @@ id: ${s.id}
 
   function renderProjects(projects) {
     projectsEl.innerHTML = '';
-    const addLi = document.createElement('li');
-    addLi.innerHTML = '<span class="tag">＋ новый проект</span>';
-    addLi.onclick = () => { if (!roundActive) projectAdd(); };
-    projectsEl.appendChild(addLi);
 
     for (const p of projects ?? []) {
       for (const h of p.hosts ?? []) {
