@@ -32,6 +32,11 @@ const STATIC_HINTS = [
   pc.dim('  @имя или №имя — участнику · Esc — прервать раунд · /exit — выход'),
 ];
 
+/** Веб-оболочка — отдельный запуск; адрес из тех же PORT/HOST, что читает serve
+ *  (лениво: .env дома грузится уже после импорта модуля). */
+const serveHint = (): string =>
+  pc.dim(`  веб-оболочка: dreamteam serve → http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`);
+
 /** Таймер «Скопировано» в строке статуса, чтобы не висел вечно */
 let statusTimer: NodeJS.Timeout | null = null;
 
@@ -689,7 +694,7 @@ async function main(): Promise<void> {
           else {
             screen?.setOverlay(null);
             // без контекстных подсказок (пустой ввод) — постоянная шпаргалка
-            screen?.setHints(hintRowsFor(buf, ctx) ?? STATIC_HINTS);
+            screen?.setHints(hintRowsFor(buf, ctx) ?? [...STATIC_HINTS, serveHint()]);
           }
         },
         onScroll: (dir, lines) => {
