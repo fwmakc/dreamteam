@@ -7,3 +7,4 @@ migration-backup/
 *.log
 workspace/
 .dreamteam/
+gui-dist/
