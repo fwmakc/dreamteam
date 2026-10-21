@@ -166,6 +166,8 @@ export class Engine {
   }
   /** Автоответ на текстовые вопросы агентов (из settings.json). */
   private autoMessage = 'Решите вопрос на своё усмотрение.';
+  /** Максимальное число отвечающих за раунд (0 — без ограничения; из settings.json). */
+  private maxTurns = 3;
 
   constructor(
     public app: App,
@@ -458,10 +460,11 @@ export class Engine {
     // профиль читаем каждый раунд: правки config/user.json подхватываются на лету
     const profile = loadUserProfile(USER_FILE);
     this.app.profile = profile;
-    // язык общения и автоответ — из settings.json, тоже на лету
+    // язык общения, автоответ, лимит отвечающих — из settings.json, на лету
     const ui = loadSettings(SETTINGS_FILE, 0);
     this.language = ui.language;
     this.autoMessage = ui.autoMessage;
+    this.maxTurns = ui.maxTurns;
     // тула тоже: переимпорт tools/*.ts и свежие карточки — без перезапуска
     await this.refreshUserTools();
     // в чате отвечают только позванные (старые чаты без списка — вся команда)
@@ -554,6 +557,7 @@ export class Engine {
         mentioned: findMentions(text, team),
         signal,
         userName: profile.name,
+        maxTurns: this.maxTurns,
       });
     } finally {
       planning.stop();

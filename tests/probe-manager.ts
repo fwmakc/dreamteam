@@ -429,6 +429,13 @@ const agentsFile = join(dir, 'agents.json');
   writeFileSync(sf, JSON.stringify({ width: 100 }));
   const s = loadSettings(sf, 0);
   check('settings: дефолты лимитов', s.margin === 2 && s.screen === true && s.runTimeoutMs === 180000 && s.maxOutputChars === 4000, JSON.stringify(s));
+  check('settings: дефолт maxTurns — 3', s.maxTurns === 3, JSON.stringify(s));
+  writeFileSync(sf, JSON.stringify({ width: 100, maxTurns: 0 }));
+  check('settings: maxTurns 0 — без ограничения', loadSettings(sf, 0).maxTurns === 0);
+  writeFileSync(sf, JSON.stringify({ width: 100, maxTurns: -1 }));
+  let maxTurnsErr = '';
+  try { loadSettings(sf, 0); } catch (e) { maxTurnsErr = (e as Error).message; }
+  check('settings: maxTurns отрицательный — ошибка', maxTurnsErr.includes('maxTurns'), maxTurnsErr);
   writeFileSync(sf, JSON.stringify({ width: 100, workspace: 'ws' }));
   threw = '';
   try { loadSettings(sf, 0); } catch (e) { threw = (e as Error).message; }

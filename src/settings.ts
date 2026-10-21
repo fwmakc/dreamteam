@@ -15,6 +15,8 @@ export interface SettingsConfig {
   language: string;
   /** Автоответ в автономном режиме: отправляется вместо ожидания человека */
   autoMessage: string;
+  /** Максимальное число отвечающих за раунд (0 — без ограничения) */
+  maxTurns: number;
   /** Отступы по краям экрана в колонках/строках (0–10) */
   margin: number;
   /** false — прежний readline-интерфейс без альтернативного экрана */
@@ -66,10 +68,15 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   if (autoMessage !== undefined && (typeof autoMessage !== 'string' || autoMessage.trim() === '')) {
     throw new Error(`${file}: поле "autoMessage" — непустая строка`);
   }
+  const maxTurns = raw.maxTurns;
+  if (maxTurns !== undefined && (typeof maxTurns !== 'number' || !Number.isInteger(maxTurns) || maxTurns < 0)) {
+    throw new Error(`${file}: поле "maxTurns" — целое число ≥ 0 (0 — без ограничения)`);
+  }
   return {
     width: termCols > 0 ? Math.min(width, termCols) : width,
     language: typeof language === 'string' ? language.trim() : 'русский',
     autoMessage: typeof autoMessage === 'string' ? autoMessage.trim() : 'Решите вопрос на своё усмотрение.',
+    maxTurns: typeof maxTurns === 'number' ? maxTurns : 3,
     margin: typeof margin === 'number' ? margin : 2,
     screen: screen !== false,
     runTimeoutMs: typeof runTimeoutMs === 'number' ? runTimeoutMs : 180000,

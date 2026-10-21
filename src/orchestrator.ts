@@ -24,15 +24,17 @@ export interface PlanInput {
   signal?: AbortSignal;
   /** Имя собеседника для подписей в истории (профиль /me) */
   userName?: string;
+  /** Максимальное число отвечающих (0 — без ограничения); по умолчанию 3 */
+  maxTurns?: number;
 }
 
 const MAX_TURNS = 3;
 const HISTORY_LIMIT = 12;
 
-const MODERATOR_PROMPT = `Ты — модератор совещания команды. По сообщению пользователя решаешь, кто из участников должен ответить.
+const moderatorPrompt = (maxTurns: number) => `Ты — модератор совещания команды. По сообщению пользователя решаешь, кто из участников должен ответить.
 
 Правила:
-- Выбирай от 1 до 3 самых релевантных теме участников, не всех подряд.
+- Выбирай от 1 до ${maxTurns} самых релевантных теме участников, не всех подряд.
 - На светское или короткое сообщение хватает одного-двух.
 - Первый в списке — основной ответчик; остальные развивают или возражают.
 - Адвоката дьявола бери, когда полезна критическая оценка идеи, а не в бытовых разговорах.
@@ -46,9 +48,10 @@ const MODERATOR_PROMPT = `Ты — модератор совещания ком�
  * Ничего не печатает: вывод делает вызывающий код (чтобы не мешать спиннеру).
  */
 export async function planTurns(input: PlanInput): Promise<PlanResult> {
-  if (input.mentioned.length > 0) return { turns: input.mentioned.map((agent) => ({ agent })) };
+  const cap = input.maxTurns === 0 ? input.team.length : (input.maxTurns ?? MAX_TURNS);
+  if (input.mentioned.length > 0) return { turns: input.mentioned.slice(0, cap || input.team.length).map((agent) => ({ agent })) };
   // mock-модератор не умеет планировать — работаем по эвристике
-  if (input.moderator.kind === 'mock') return { turns: mockPlan(input) };
+  if (input.moderator.kind === 'mock') return { turns: mockPlan(input, cap) };
   try {
     return { turns: await llmPlan(input) };
   } catch (err) {
@@ -61,9 +64,9 @@ export async function planTurns(input: PlanInput): Promise<PlanResult> {
 }
 
 /** Эвристика для mock-режима: первые двое, на вопрос добавляется критик. */
-function mockPlan(input: PlanInput): Turn[] {
-  const turns = input.team.slice(0, 2).map((agent) => ({ agent }));
-  if (/\?\s*$/.test(input.text) && input.team.length > turns.length) {
+function mockPlan(input: PlanInput, cap = 2): Turn[] {
+  const turns = input.team.slice(0, Math.min(2, cap || 2)).map((agent) => ({ agent }));
+  if (/\?\s*$/.test(input.text) && input.team.length > turns.length && turns.length < cap) {
     turns.push({ agent: input.team[input.team.length - 1] });
   }
   return turns;
@@ -84,8 +87,9 @@ async function llmPlan(input: PlanInput): Promise<Turn[]> {
     `Кто должен ответить и на чём каждому сфокусироваться? Ответь строго JSON-массивом по формату.`;
 
   let out = '';
+  const cap = input.maxTurns === 0 ? 99 : (input.maxTurns ?? 3);
   for await (const chunk of input.moderator.stream({
-    system: MODERATOR_PROMPT,
+    system: moderatorPrompt(cap),
     messages: [{ role: 'user', content: user }],
     temperature: 0.2,
     signal: input.signal,
@@ -104,7 +108,7 @@ async function llmPlan(input: PlanInput): Promise<Turn[]> {
       agent,
       focus: typeof focus === 'string' && focus.trim() ? focus.trim() : undefined,
     });
-    if (turns.length >= MAX_TURNS) break;
+    if (turns.length >= (input.maxTurns === 0 ? Infinity : (input.maxTurns ?? MAX_TURNS))) break;
   }
   if (turns.length === 0) throw new Error('пустой или нераспознанный план');
   return turns;
