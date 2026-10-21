@@ -135,8 +135,8 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 }
 
 #sidebar {
-  width: 250px;
-  min-width: 250px;
+  width: 280px;
+  min-width: 280px;
   overflow-y: auto;
   background: var(--panel);
   border-right: 1px solid var(--border);
