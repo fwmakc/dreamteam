@@ -8,3 +8,4 @@ migration-backup/
 workspace/
 .dreamteam/
 gui-dist/
+*.tgz
