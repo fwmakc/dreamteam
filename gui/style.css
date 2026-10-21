@@ -199,24 +199,35 @@ button.bad { border-color: var(--bad); color: var(--bad); }
   padding: 5px 8px;
   border-radius: 6px;
   cursor: pointer;
-  display: block;
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 #sidebar li .sess-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: baseline;
   gap: 6px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   overflow: hidden;
 }
 #sidebar li .sub {
+  flex: 1;
   font-size: 11px;
   color: var(--dim);
   white-space: nowrap;
-  text-overflow: ellipsis;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
+#sidebar li .del {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--dim);
+  cursor: pointer;
+  visibility: hidden;
+}
+#sidebar li:hover .del { visibility: visible; }
+#sidebar li .del:hover { color: var(--bad); }
 #sidebar li:hover { background: var(--panel2); }
 #sidebar li.active { background: var(--panel2); border-left: 2px solid var(--accent); }
 #sidebar li .meta { color: var(--dim); font-size: 12px; }
