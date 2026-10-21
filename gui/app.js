@@ -671,13 +671,6 @@
 
   function renderTeam() {
     teamEl.innerHTML = '';
-    const mgr = state.manager;
-    const mgrLi = document.createElement('li');
-    mgrLi.className = 'static';
-    mgrLi.innerHTML =
-      `<span>${esc(mgr.emoji)} ${esc(mgr.name)}</span>` +
-      `<span class="tag">консьерж</span><span class="meta">${esc(mgr.provider)}</span>`;
-    teamEl.appendChild(mgrLi);
 
     for (const a of state.team ?? []) {
       const li = document.createElement('li');
