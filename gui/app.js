@@ -304,6 +304,21 @@
     });
   }
 
+  // ── пользователь: форма правки ────────────────────────────────
+  function openUserProfileForm() {
+    const p = state.profile;
+    if (!p) return;
+    openForm('Пользователь', [
+      { key: 'name', label: 'Имя', value: p.name ?? '' },
+      { key: 'role', label: 'Роль', value: p.role ?? '' },
+      { key: 'about', label: 'О себе', value: p.about ?? '' },
+    ], (v) => {
+      rpc('user_set', v)
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    });
+  }
+
   // ── менеджер: форма правки ───────────────────────────────────
   function openManagerForm() {
     const mgr = state.manager;
@@ -761,8 +776,10 @@
     }
     const li = document.createElement('li');
     li.className = 'static';
+    li.title = 'Двойной клик — настройки пользователя';
     li.innerHTML = `<span>👤 ${esc(state.profile?.name ?? '—')}</span>` +
       `<span class="meta">${esc(state.profile?.role ?? '')}</span>`;
+    onCliDbl(li, () => {}, () => openUserProfileForm());
     settingsListEl.appendChild(li);
     const li2 = document.createElement('li');
     li2.className = 'static';
