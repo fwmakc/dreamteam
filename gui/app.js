@@ -637,9 +637,10 @@ id: ${s.id}
 создан: ${created}
 последнее сообщение: ${updated}`;
       li.innerHTML =
-        `<div class="sess-main"><span>${esc(s.title)}</span>` +
-        `<span class="meta">${s.count} сообщ.</span></div>` +
-        `<div class="sub">№${i + 1} · ${esc(updated)}</div>` +
+        `<div class="content">` +
+        `<div class="sess-main"><span>${esc(s.title)}</span><span class="meta">${s.count} сообщ.</span></div>` +
+        `<div class="sub">создан ${esc(created)} · последнее ${esc(updated)} · id ${esc(s.id)}</div>` +
+        `</div>` +
         (active ? '' : '<span class="del" title="Удалить разговор">✕</span>');
       li.onclick = (e) => {
         if (e.target.classList.contains('del')) {
