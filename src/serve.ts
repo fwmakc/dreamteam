@@ -20,7 +20,7 @@ import {
   removeTeamAgent,
   updateManagerConfig,
 } from './manager.js';
-import { addProviderConfig, loadProviders, removeProviderConfig } from './providers/registry.js';
+import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from './providers/registry.js';
 import { loadSettings } from './settings.js';
 import { AGENTS_FILE, MANAGER_FILE, PROJECTS_FILE, PROVIDERS_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
 import { agentToolIds } from './tools-api.js';
@@ -108,6 +108,8 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       id,
       kind: s.provider.kind,
       model: s.provider.model,
+      baseUrl: s.config?.baseUrl ? String(s.config.baseUrl) : undefined,
+      apiKeyEnv: s.config?.apiKeyEnv ? String(s.config.apiKeyEnv) : undefined,
       ok: s.ok,
       note: s.note,
       vision: s.vision,
@@ -115,6 +117,7 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       isManager: id === app.mgr.provider,
     })),
     images: [...app.images].map(([id, s]) => ({ id, ok: s.ok, note: s.note })),
+    memory: { shared: app.memory.shared ?? '', agents: app.memory.agents },
     profile: { name: app.profile.name, role: app.profile.role },
     settings: loadSettings(SETTINGS_FILE, 0),
     projects: projects ?? [],
@@ -585,6 +588,15 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       }
       case 'provider.add': {
         const report = addProviderConfig(PROVIDERS_FILE, String(args.id ?? ''), (args.config ?? {}) as Record<string, unknown>);
+        const loaded = loadProviders(PROVIDERS_FILE);
+        for (const [k, v] of loaded.providers) app.providers.set(k, v);
+        for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
+        presenter.notice('  ' + report);
+        broadcastState();
+        return { text: report };
+      }
+      case 'provider.update': {
+        const report = updateProviderConfig(PROVIDERS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>);
         const loaded = loadProviders(PROVIDERS_FILE);
         for (const [k, v] of loaded.providers) app.providers.set(k, v);
         for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);

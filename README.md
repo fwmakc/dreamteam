@@ -205,7 +205,7 @@ ANTHROPIC_API_KEY=ваш_ключ
 | `provider.list` | `/provider` | провайдеры и их статус |
 | `provider.set <id>` | `/provider set glm` | сменить основного провайдера |
 | `provider.add <id> поле=знач…` | `/provider add glm adapter=openai-compatible …` | новый провайдер (adapter обязателен) |
-| `provider.delete <id>` | `/provider delete glm` | удалить провайдера |
+| `provider.update <id> поле=знач…` | `/provider update glm model=glm-4.6` | править карточку существующего (adapter, model, baseUrl, apiKeyEnv, maxTokens, temperature) |
 | `profile.show` / `profile.set` | `/profile set Имя; роль; о себе` | как вас видит команда (user.json) |
 | `memory.show [кого\|shared]` | `/memory show Юрист` | что помнит участник; `shared` — общая память |
 | `project.list` | `/project` | реестр серверов (projects.json) |

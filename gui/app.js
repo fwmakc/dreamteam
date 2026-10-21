@@ -748,7 +748,7 @@
           rpc('provider.set', { id: p.id })
             .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
         },
-        () => { if (!p.isDefault) openProviderSettings(p); },
+        () => openProviderSettings(p),
       );
       const del = li.querySelector('.del');
       if (del) del.onclick = (e) => {
@@ -761,11 +761,16 @@
 
   function openProviderSettings(p) {
     openForm(`Провайдер ${p.id}`, [
-      { key: 'baseUrl', label: 'baseUrl', value: '' },
+      { key: 'adapter', label: 'Адаптер (openai-compatible / anthropic / gigachat / mock)', value: p.kind },
       { key: 'model', label: 'Модель', value: p.model ?? '' },
-      { key: 'apiKeyEnv', label: 'Имя переменной с ключом' },
+      { key: 'baseUrl', label: 'baseUrl (пусто — не менять)', value: p.baseUrl ?? '' },
+      { key: 'apiKeyEnv', label: 'Имя переменной с ключом (пусто — не менять)', value: p.apiKeyEnv ?? '' },
     ], (v) => {
-      addFeed(`<div class="notice">· правка провайдеров пока через ~/.dreamteam/providers.json</div>`);
+      const fields = {};
+      for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = val;
+      rpc('provider.update', { id: p.id, fields })
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
   }
 

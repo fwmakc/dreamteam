@@ -27,7 +27,7 @@ import {
   updateManagerConfig,
   updateTeamAgent,
 } from '../manager.js';
-import { addProviderConfig, loadProviders, removeProviderConfig } from '../providers/registry.js';
+import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from '../providers/registry.js';
 import { agentToolIds } from '../tools-api.js';
 import { AGENTS_FILE, MANAGER_FILE, PROJECTS_FILE, PROVIDERS_FILE, SETTINGS_FILE, TOOLS_DIR } from '../paths.js';
 import { loadSettings } from '../settings.js';
@@ -506,6 +506,33 @@ export const OPERATIONS: OpSpec[] = [
       const config = parsePairs(pairs);
       if (Array.isArray(config)) return config;
       const report = addProviderConfig(PROVIDERS_FILE, id, config);
+      const loaded = loadProviders(PROVIDERS_FILE);
+      for (const [k, v] of loaded.providers) engine.app.providers.set(k, v);
+      for (const k of [...engine.app.providers.keys()]) if (!loaded.providers.has(k)) engine.app.providers.delete(k);
+      return [report];
+    },
+  },
+  {
+    name: 'provider.update',
+    args: [
+      { name: 'id', required: true, hint: 'providers' },
+      { name: 'поле=значение…', required: true },
+    ],
+    title: 'править провайдера',
+    help: 'adapter, model, baseUrl, apiKeyEnv, maxTokens, temperature; пустое значение убирает поле',
+    run: async (engine, rest) => {
+      const [id, ...pairs] = rest;
+      if (!id || pairs.length === 0) {
+        return ['Синтаксис: /provider update <id> модель=… baseUrl=… apiKeyEnv=… adapter=…'];
+      }
+      const parsed = parsePairs(pairs);
+      if (Array.isArray(parsed)) return parsed;
+      const fields: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (k === 'temperature' || k === 'maxTokens') fields[k] = Number(v);
+        else fields[k] = v;
+      }
+      const report = updateProviderConfig(PROVIDERS_FILE, id, fields);
       const loaded = loadProviders(PROVIDERS_FILE);
       for (const [k, v] of loaded.providers) engine.app.providers.set(k, v);
       for (const k of [...engine.app.providers.keys()]) if (!loaded.providers.has(k)) engine.app.providers.delete(k);

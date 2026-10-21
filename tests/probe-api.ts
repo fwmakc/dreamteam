@@ -306,6 +306,16 @@ const client = await makeClient(handle.port);
   const sch = await client.next((m) => m.type === 'rpc_result' && m.id === 'r13');
   check('rpc: schedule.list — задачи расписания', Array.isArray((sch.result as { tasks?: unknown[] }).tasks));
 
+  // rpc: provider.update — правка карточки существующего провайдера
+  client.send({ type: 'rpc', id: 'r14', method: 'provider.update', args: { id: 'mock', fields: { model: 'mock-2' } } });
+  const pu = await client.next((m) => m.type === 'rpc_result' && m.id === 'r14');
+  check('rpc: provider.update — карточка правится', String((pu.result as { text: string }).text).includes('mock-2'));
+  client.send({ type: 'rpc', id: 'r15', method: 'provider.update', args: { id: 'mock', fields: { adapter: 'неттакого' } } });
+  const puErr = await client.next((m) => m.type === 'rpc_error' && m.id === 'r15');
+  check('rpc: provider.update — неизвестный адаптер — rpc_error', String(puErr.error).includes('неттакого'));
+  client.send({ type: 'rpc', id: 'r16', method: 'provider.update', args: { id: 'mock', fields: { model: 'mock' } } });
+  await client.next((m) => m.type === 'rpc_result' && m.id === 'r16');
+
   // rpc: расписание — полный цикл записи в schedule.json проекта
   client.send({ type: 'rpc', id: 'r10', method: 'schedule.add', args: { message: 'Напоминание', intervalMinutes: 30 } });
   const sa = await client.next((m) => m.type === 'rpc_result' && m.id === 'r10');
@@ -354,7 +364,7 @@ const client = await makeClient(handle.port);
     check(
       'state: ключи верхнего уровня',
       JSON.stringify(Object.keys(st).sort()) ===
-        JSON.stringify(['auto', 'completion', 'images', 'manager', 'profile', 'projects', 'providers', 'session', 'sessions', 'settings', 'team']),
+        JSON.stringify(['auto', 'completion', 'images', 'manager', 'memory', 'profile', 'projects', 'providers', 'session', 'sessions', 'settings', 'team']),
     );
     const sess = st.session as Record<string, unknown>;
     check('state: session = id+title+messages', JSON.stringify(Object.keys(sess).sort()) === JSON.stringify(['id', 'messages', 'title']));

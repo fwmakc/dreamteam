@@ -159,6 +159,18 @@ function check(name: string, cond: boolean): void {
   check('provider set: смена на тот же', lines[0]?.includes('Основной провайдер: mock') ?? false);
   lines = await run(engine, '/provider set nope');
   check('provider set: неизвестный id — отказ', lines[0]?.includes('Нет провайдера «nope»') ?? false);
+
+  lines = await run(engine, '/provider update mock model=mock-9');
+  check('provider update: отчёт', lines[0]?.includes('mock-9') ?? false);
+  const provs = JSON.parse(readFileSync(join(home, 'providers.json'), 'utf8')) as { providers: Record<string, { model?: string }> };
+  check('provider update: модель на диске', provs.providers.mock?.model === 'mock-9');
+  let threw = '';
+  try {
+    await run(engine, '/provider update nope model=x');
+  } catch (err) {
+    threw = err instanceof Error ? err.message : String(err);
+  }
+  check('provider update: нет провайдера — отказ', threw.includes('«nope» нет'));
 }
 
 // ── команда: team add/update/delete/grant ────────────────────────────────────

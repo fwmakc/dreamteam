@@ -180,10 +180,15 @@ function delProvider(p: ProviderInfo): void {
 }
 function openProviderSettings(p: ProviderInfo): void {
   openForm(`Провайдер ${p.id}`, [
-    { key: 'baseUrl', label: 'baseUrl', value: '' },
+    { key: 'adapter', label: 'Адаптер (openai-compatible / anthropic / gigachat / mock)', value: p.kind },
     { key: 'model', label: 'Модель', value: p.model ?? '' },
-    { key: 'apiKeyEnv', label: 'Имя переменной с ключом' },
-  ], () => addFeed('notice', '· правка провайдеров пока через ~/.dreamteam/providers.json'));
+    { key: 'baseUrl', label: 'baseUrl (пусто — не менять)', value: p.baseUrl ?? '' },
+    { key: 'apiKeyEnv', label: 'Имя переменной с ключом (пусто — не менять)', value: p.apiKeyEnv ?? '' },
+  ], (v) => {
+    const fields: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = val;
+    rpcReport(rpc('provider.update', { id: p.id, fields }));
+  });
 }
 
 // ── настройки / пользователь / менеджер ──────────────────────────────────────
@@ -727,9 +732,9 @@ onMounted(connectWs);
             v-for="p in providers"
             :key="p.id"
             :title="(p.isDefault ? 'Провайдер по умолчанию' : 'Сделать основным (для агентов)')
-              + (p.isDefault ? '' : ' · двойной клик — настройки')
+              + (p.isDefault ? '' : ' · клик — сделать основным')
               + (p.ok ? '' : ` · проблема: ${p.note ?? ''}`)"
-            @click="onCliDbl('provider:' + p.id, () => setProvider(p), () => { if (!p.isDefault) openProviderSettings(p) })"
+            @click="onCliDbl('provider:' + p.id, () => setProvider(p), () => openProviderSettings(p))"
           >
             <div class="content">
               <div class="sess-main">

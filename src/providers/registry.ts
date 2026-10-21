@@ -29,6 +29,8 @@ export interface ProviderStatus {
   note?: string;
   /** true = провайдеру можно слать картинки (инструмент look) */
   vision?: boolean;
+  /** Исходная карточка из providers.json — для правки (provider.update) и подсказок GUI */
+  config?: ProviderConfig;
 }
 
 export interface LoadedProviders {
@@ -64,6 +66,7 @@ export function loadProviders(file: string): LoadedProviders {
         provider: unconfiguredProvider(pid, reason),
         ok: false,
         note: reason,
+        config: cfg,
       });
       continue;
     }
@@ -73,6 +76,7 @@ export function loadProviders(file: string): LoadedProviders {
         ok: true,
         // mock «видит» картинки по-своему (заготовка) — demо look работает без моделей
         vision: cfg.vision === true || adapterName === 'mock',
+        config: cfg,
       });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -161,6 +165,38 @@ export function removeProviderConfig(file: string, id: string, protectedIds: str
   delete raw.providers[id];
   writeFileProviders(file, raw);
   return `✓ провайдер «${id}» удалён`;
+}
+
+/** Правка карточки существующего провайдера по белому списку полей; валидация+откат общие. */
+export function updateProviderConfig(
+  file: string,
+  id: string,
+  fields: Record<string, unknown>,
+): string {
+  const pid = String(id ?? '').trim();
+  const raw = readProvidersFile(file);
+  if (raw.providers[pid] === undefined) throw new Error(`провайдера «${pid}» нет`);
+  const changes: string[] = [];
+  const merged: Record<string, unknown> = { ...raw.providers[pid] };
+  for (const [key, value] of Object.entries(fields ?? {})) {
+    if (!['adapter', 'model', 'baseUrl', 'apiKeyEnv', 'maxTokens', 'temperature', 'vision', 'note'].includes(key)) continue;
+    if (key === 'adapter') {
+      const adapter = String(value ?? '').trim();
+      if (!(adapter in adapters)) {
+        throw new Error(`адаптер «${adapter}» неизвестен — доступны: ${Object.keys(adapters).join(', ')}`);
+      }
+      merged.adapter = adapter;
+    } else if (value === '' || value === undefined) {
+      delete merged[key]; // пустое значение — убрать поле (например, baseUrl)
+    } else {
+      merged[key] = value;
+    }
+    changes.push(`${key}="${String(merged[key] ?? '')}"`);
+  }
+  if (changes.length === 0) throw new Error('не понятно, что менять — в полях нет узнаваемых имён');
+  raw.providers[pid] = merged as ProviderConfig;
+  writeFileProviders(file, raw);
+  return `✓ провайдер «${pid}»: ${changes.join(', ')}`;
 }
 
 /** Запись providers.json: tmp → валидация loadProviders → rename (откат при ошибке). */

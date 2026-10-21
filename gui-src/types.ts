@@ -33,6 +33,8 @@ export interface ProviderInfo {
   id: string;
   kind: string;
   model?: string;
+  baseUrl?: string;
+  apiKeyEnv?: string;
   ok: boolean;
   note?: string;
   vision?: boolean;
@@ -79,6 +81,8 @@ export interface StateSnapshot {
   completion: { operations: OpHint[] };
   /** кэш последнего события schedule (в снапшот state не входит) */
   scheduleTasks?: ScheduleTaskInfo[];
+  /** память команды: общая и «из других разговоров» по участникам */
+  memory?: { shared: string; agents: Record<string, { otherChats?: string }> };
 }
 
 // ── входящие WS-события ──────────────────────────────────────────────────────
