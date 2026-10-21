@@ -143,6 +143,16 @@ button.bad { border-color: var(--bad); color: var(--bad); }
   padding: 10px;
 }
 #sidebar section { margin-bottom: 18px; }
+.side-sec { margin-bottom: 14px; }
+.side-sec.collapsed ul, .side-sec.collapsed .sec-btns { display: none; }
+.side-sec.collapsed .sec-toggle { transform: rotate(-90deg); }
+.sec-toggle {
+  cursor: pointer;
+  user-select: none;
+  color: var(--dim);
+  display: inline-block;
+  transition: transform 0.15s;
+}
 .side-head {
   font-size: 11px;
   text-transform: uppercase;
@@ -151,8 +161,29 @@ button.bad { border-color: var(--bad); color: var(--bad); }
   margin-bottom: 6px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
 }
+.side-head .sec-name { flex: 1; }
+.side-head button {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+}
+.side-head button:hover { color: var(--accent); }
+.sec-btns { display: flex; gap: 4px; margin-bottom: 6px; flex-wrap: wrap; }
+.sec-btns button {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--panel2);
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sec-btns button:hover { color: var(--accent); border-color: var(--accent); }
 #btn-new { padding: 0 8px; font-size: 14px; line-height: 20px; }
 
 #sidebar ul { list-style: none; margin: 0; padding: 0; }

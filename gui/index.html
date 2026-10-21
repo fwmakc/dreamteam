@@ -26,45 +26,58 @@
 </div>
 <main id="layout">
   <aside id="sidebar">
-    <section>
-      <div class="side-head">Разговоры
-        <button id="btn-export-session" title="Экспорт текущего разговора в zip">⬇</button>
-        <button id="btn-import-session" title="Импорт разговора из zip">⬆</button>
-        <button id="btn-export-home" title="Экспорт всех настроек и истории (дом, без .env)">⬇🏠</button>
-        <button id="btn-import-home" title="Импорт настроек и истории из zip">⬆🏠</button>
-        <button id="btn-new" title="Новый разговор">＋</button>
+    <section class="side-sec" data-sec="sessions">
+      <div class="side-head">
+        <span class="sec-toggle" title="Свернуть/развернуть">˅</span>
+        <span class="sec-name">Сессии</span>
+        <button class="sec-add" title="Новый разговор">＋</button>
+      </div>
+      <div class="sec-btns">
+        <button id="btn-export-session" title="Экспорт текущего разговора в zip">⬇ сессия</button>
+        <button id="btn-import-session" title="Импорт разговора из zip">⬆ импорт</button>
+        <button id="btn-export-home" title="Экспорт всех настроек и истории (дом, без .env)">⬇ дом</button>
+        <button id="btn-import-home" title="Импорт настроек и истории из zip">⬆ дом</button>
       </div>
       <input type="file" id="import-file" accept=".zip" class="hidden">
       <ul id="sessions"></ul>
     </section>
-    <section>
-      <div class="side-head">Команда
-        <button id="btn-agent-add" title="Новый агент">＋</button>
+    <section class="side-sec collapsed" data-sec="team">
+      <div class="side-head">
+        <span class="sec-toggle" title="Свернуть/развернуть">˅</span>
+        <span class="sec-name">Команда</span>
+        <button class="sec-add" title="Новый агент">＋</button>
       </div>
       <ul id="team"></ul>
     </section>
-    <section>
-      <div class="side-head">Провайдеры
-        <button id="btn-provider-add" title="Новый провайдер">＋</button>
+    <section class="side-sec collapsed" data-sec="providers">
+      <div class="side-head">
+        <span class="sec-toggle" title="Свернуть/развернуть">˅</span>
+        <span class="sec-name">Провайдеры</span>
+        <button class="sec-add" title="Новый провайдер">＋</button>
       </div>
       <ul id="providers"></ul>
     </section>
-    <section>
-      <div class="side-head">Настройки
-        <button id="btn-settings-edit" title="Правка настроек">✎</button>
-        <button id="btn-manager-edit" title="Настройки менеджера">🛎</button>
+    <section class="side-sec collapsed" data-sec="settings">
+      <div class="side-head">
+        <span class="sec-toggle" title="Свернуть/развернуть">˅</span>
+        <span class="sec-name">Настройки</span>
+        <button class="sec-add" title="Правка настроек">＋</button>
       </div>
       <ul id="settings-list"></ul>
     </section>
-    <section>
-      <div class="side-head">Расписание
-        <button id="btn-schedule-add" title="Новая задача">＋</button>
+    <section class="side-sec collapsed" data-sec="schedule">
+      <div class="side-head">
+        <span class="sec-toggle" title="Свернуть/развернуть">˅</span>
+        <span class="sec-name">Расписание</span>
+        <button class="sec-add" title="Новая задача">＋</button>
       </div>
       <ul id="schedule-list"></ul>
     </section>
-    <section>
-      <div class="side-head">Проекты
-        <button id="btn-project-add" title="Новый проект">＋</button>
+    <section class="side-sec collapsed" data-sec="projects">
+      <div class="side-head">
+        <span class="sec-toggle" title="Свернуть/развернуть">˅</span>
+        <span class="sec-name">Проекты</span>
+        <button class="sec-add" title="Новый проект">＋</button>
       </div>
       <ul id="projects"></ul>
     </section>

@@ -657,6 +657,19 @@ id: ${s.id}
     });
   }
 
+  /** Разделяет одиночный и двойной клик: одиночный срабатывает через 250 мс. */
+  function onCliDbl(el, singleFn, dblFn) {
+    let timer = null;
+    el.addEventListener('click', () => {
+      if (timer) { clearTimeout(timer); timer = null; return; }
+      timer = setTimeout(() => { timer = null; singleFn(); }, 250);
+    });
+    el.addEventListener('dblclick', () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      dblFn();
+    });
+  }
+
   function renderTeam() {
     teamEl.innerHTML = '';
     const mgr = state.manager;
@@ -686,7 +699,16 @@ id: ${s.id}
         e.stopPropagation();
         if (!roundActive) agentDelete(a);
       };
-      li.ondblclick = () => openAgentSettings(a);
+      onCliDbl(li,
+        () => {
+          if (roundActive) return;
+          const method = a.inChat ? 'chat.remove' : 'chat.add';
+          rpc(method, { name: a.name })
+            .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+            .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+        },
+        () => openAgentSettings(a),
+      );
       teamEl.appendChild(li);
     }
   }
@@ -696,7 +718,7 @@ id: ${s.id}
     for (const p of state.providers ?? []) {
       const li = document.createElement('li');
       li.title = (p.isDefault ? 'Провайдер по умолчанию' : 'Сделать основным (для агентов)')
-        + ' · двойной клик — удалить провайдера';
+        + (p.isDefault ? '' : ' · двойной клик — настройки');
       li.innerHTML =
         `<span>${p.ok ? '●' : '○'}</span><span>${esc(p.id)}</span>` +
         `<span class="meta">${esc(p.model ?? p.kind ?? '')}</span>` +
@@ -704,19 +726,31 @@ id: ${s.id}
         (p.isDefault ? '<span class="tag in">основной</span>' : '') +
         (p.isDefault ? '' : '<span class="del" title="Удалить провайдера">✕</span>');
       if (!p.ok) li.title += ` · проблема: ${p.note ?? ''}`;
-      li.onclick = () => {
-        if (roundActive || p.isDefault) return;
-        rpc('provider.set', { id: p.id })
-          .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
-      };
+      onCliDbl(li,
+        () => {
+          if (roundActive || p.isDefault) return;
+          rpc('provider.set', { id: p.id })
+            .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+        },
+        () => { if (!p.isDefault) openProviderSettings(p); },
+      );
       const del = li.querySelector('.del');
       if (del) del.onclick = (e) => {
         e.stopPropagation();
         if (!roundActive) providerDelete(p);
       };
-      li.ondblclick = () => { if (!p.isDefault && !roundActive) providerDelete(p); };
       providersEl.appendChild(li);
     }
+  }
+
+  function openProviderSettings(p) {
+    openForm(`Провайдер ${p.id}`, [
+      { key: 'baseUrl', label: 'baseUrl', value: '' },
+      { key: 'model', label: 'Модель', value: p.model ?? '' },
+      { key: 'apiKeyEnv', label: 'Имя переменной с ключом' },
+    ], (v) => {
+      addFeed(`<div class="notice">· правка провайдеров пока через ~/.dreamteam/providers.json</div>`);
+    });
   }
 
   function renderSettingsList() {
@@ -1027,13 +1061,37 @@ id: ${s.id}
   });
   inputEl.addEventListener('click', updateHints);
   btnAbort.onclick = () => send({ type: 'abort' });
-  $('btn-new').onclick = () => {
+
+  // ── секции: ＋ кнопки и сворачивание ──────────────────────────
+  function secAdd(sec) {
+    return document.querySelector(`.side-sec[data-sec='${sec}'] .sec-add`);
+  }
+  function secBtn(sec, title) {
+    return document.querySelector(`.side-sec[data-sec='${sec}'] .sec-btns button[title*='${title}']`);
+  }
+  document.querySelectorAll('.side-sec .sec-toggle').forEach((t) => {
+    t.onclick = () => t.closest('.side-sec').classList.toggle('collapsed');
+  });
+
+  secAdd('sessions').onclick = () => {
     if (roundActive) return;
     roundActive = true;
     renderStatus();
     rpc('session.new', {}).catch((err) =>
       addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   };
+  secAdd('team').onclick = () => { if (!roundActive) openAgentCreate(); };
+  secAdd('providers').onclick = () => { if (!roundActive) providerCreate(); };
+  secAdd('schedule').onclick = () => { if (!roundActive) { send({ type: 'schedule_get' }); openForm('Задача по расписанию', [
+    { key: 'message', label: 'Задание (уйдёт в чат)' },
+    { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
+  ], (v) => {
+    rpc('schedule_add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
+      .then(() => send({ type: 'schedule_get' }))
+      .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+  }); } };
+  secAdd('projects').onclick = () => { if (!roundActive) projectAdd(); };
+  secAdd('settings').onclick = () => { if (!roundActive) openSettingsForm(); };
 
   const pickImportFile = (home) => {
     importFile.onchange = () => {
@@ -1054,17 +1112,7 @@ id: ${s.id}
     };
     importFile.click();
   };
-  $('btn-agent-add').onclick = () => { if (!roundActive) openAgentCreate(); };
-  $('btn-manager-edit').onclick = () => { if (!roundActive) openManagerForm(); };
   btnExportHome.onclick = () => { if (!roundActive) send({ type: 'export_home' }); };
-  $('btn-schedule-add').onclick = () => { if (!roundActive) { send({ type: 'schedule_get' }); openForm('Задача по расписанию', [
-    { key: 'message', label: 'Задание (уйдёт в чат)' },
-    { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
-  ], (v) => {
-    rpc('schedule_add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
-      .then(() => send({ type: 'schedule_get' }))
-      .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
-  }); } };
   btnExportSession.onclick = () => {
     const cur = (state?.sessions ?? []).findIndex((s) => state.session && s.id === state.session.id) + 1;
     if (cur > 0 && !roundActive) send({ type: 'export_session', n: cur });
@@ -1092,9 +1140,6 @@ id: ${s.id}
     reader.readAsArrayBuffer(f);
     attachFile.value = '';
   };
-  $('btn-provider-add').onclick = () => { if (!roundActive) providerCreate(); };
-  $('btn-project-add').onclick = () => { if (!roundActive) projectAdd(); };
-  $('btn-settings-edit').onclick = () => { if (!roundActive) openSettingsForm(); };
   btnLogout.onclick = () => {
     localStorage.removeItem('dt-token');
     location.reload();
