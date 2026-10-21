@@ -287,6 +287,41 @@
       : 'Автономный режим: агенты решают вопросы сами. Клик — включить.';
   }
 
+  // ── настройки: форма правки ──────────────────────────────────
+  function openSettingsForm() {
+    const st = state.settings;
+    if (!st) return;
+    openForm('Настройки', [
+      { key: 'language', label: 'Язык общения (russian / ru-RU / english…)', value: st.language ?? '' },
+      { key: 'autoMessage', label: 'Автоответ в автономном режиме', value: st.autoMessage ?? '' },
+      { key: 'width', label: 'Ширина экрана (40–500)', value: st.width ?? '' },
+    ], (v) => {
+      const patch = {};
+      for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' ? Number(val) : val;
+      rpc('settings_set', { patch })
+        .then(() => addFeed('<div class="notice">· настройки сохранены</div>'))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    });
+  }
+
+  // ── менеджер: форма правки ───────────────────────────────────
+  function openManagerForm() {
+    const mgr = state.manager;
+    if (!mgr) return;
+    openForm('Менеджер переговорки', [
+      { key: 'name', label: 'Имя', value: mgr.name ?? '' },
+      { key: 'emoji', label: 'Эмодзи', value: mgr.emoji ?? '' },
+      { key: 'color', label: 'Цвет (yellow/cyan/…)', value: mgr.color ?? '' },
+      { key: 'temperature', label: 'Температура (0–2)', value: mgr.temperature ?? '' },
+    ], (v) => {
+      const fields = {};
+      for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
+      rpc('manager_set', { fields })
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    });
+  }
+
   // ── проекты: добавить сервер/удалить ──────────────────────────
   function projectAdd() {
     openForm('Новый проект', [
@@ -654,11 +689,6 @@ id: ${s.id}
       li.ondblclick = () => openAgentSettings(a);
       teamEl.appendChild(li);
     }
-
-    const addLi = document.createElement('li');
-    addLi.innerHTML = '<span class="tag">＋ создать агента</span>';
-    addLi.onclick = () => { if (!roundActive) openAgentCreate(); };
-    teamEl.appendChild(addLi);
   }
 
   function renderProviders() {
@@ -708,6 +738,8 @@ id: ${s.id}
     li2.className = 'static';
     li2.innerHTML = `<span>${esc(state.manager?.emoji ?? '🛎')} ${esc(state.manager?.name ?? '')}</span>` +
       `<span class="meta">менеджер</span>`;
+    li2.title = 'Двойной клик — настройки менеджера';
+    li2.ondblclick = () => openManagerForm();
     settingsListEl.appendChild(li2);
   }
 
@@ -1026,6 +1058,8 @@ id: ${s.id}
     };
     importFile.click();
   };
+  $('btn-agent-add').onclick = () => { if (!roundActive) openAgentCreate(); };
+  $('btn-manager-edit').onclick = () => { if (!roundActive) openManagerForm(); };
   btnExportHome.onclick = () => { if (!roundActive) send({ type: 'export_home' }); };
   $('btn-schedule-add').onclick = () => { if (!roundActive) { send({ type: 'schedule_get' }); openForm('Задача по расписанию', [
     { key: 'message', label: 'Задание (уйдёт в чат)' },

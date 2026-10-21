@@ -17,7 +17,7 @@ import {
   removeTeamAgent,
   updateManagerConfig,
 } from './manager.js';
-import { addProviderConfig, removeProviderConfig } from './providers/registry.js';
+import { addProviderConfig, loadProviders, removeProviderConfig } from './providers/registry.js';
 import { loadSettings } from './settings.js';
 import { AGENTS_FILE, MANAGER_FILE, PROJECTS_FILE, PROVIDERS_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
 import { loadProjects, safePath } from './actions.js';
@@ -579,15 +579,20 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       }
       case 'provider_create': {
         const report = addProviderConfig(PROVIDERS_FILE, String(args.id ?? ''), (args.config ?? {}) as Record<string, unknown>);
+        const loaded = loadProviders(PROVIDERS_FILE);
+        for (const [k, v] of loaded.providers) app.providers.set(k, v);
+        for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
+        presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
       case 'provider_delete': {
         const pid = String(args.id ?? '');
-        if (pid === app.defaultProviderId || pid === app.mgr.provider) {
-          throw new Error(`«${pid}» — основной или менеджерский провайдер: сначала назначьте другой`);
-        }
         const report = removeProviderConfig(PROVIDERS_FILE, pid, []);
+        const loaded = loadProviders(PROVIDERS_FILE);
+        for (const [k, v] of loaded.providers) app.providers.set(k, v);
+        for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
+        presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
