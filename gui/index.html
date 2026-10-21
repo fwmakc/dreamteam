@@ -35,8 +35,6 @@
       <div class="sec-btns">
         <button id="btn-export-session" title="Экспорт текущего разговора в zip">⬇ сессия</button>
         <button id="btn-import-session" title="Импорт разговора из zip">⬆ импорт</button>
-        <button id="btn-export-home" title="Экспорт всех настроек и истории (дом, без .env)">⬇ дом</button>
-        <button id="btn-import-home" title="Импорт настроек и истории из zip">⬆ дом</button>
       </div>
       <input type="file" id="import-file" accept=".zip" class="hidden">
       <ul id="sessions"></ul>
@@ -62,6 +60,10 @@
         <span class="sec-toggle" title="Свернуть/развернуть">▾</span>
         <span class="sec-name">Настройки</span>
         <button class="sec-add" title="Правка настроек">＋</button>
+      </div>
+      <div class="sec-btns">
+        <button id="btn-export-home" title="Экспорт всех настроек и истории (дом, без .env)">⬇ экспорт</button>
+        <button id="btn-import-home" title="Импорт настроек и истории из zip">⬆ импорт</button>
       </div>
       <ul id="settings-list"></ul>
     </section>
