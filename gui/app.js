@@ -632,14 +632,13 @@
       if (active) li.className = 'active';
       const created = new Date(s.createdAt).toLocaleString('ru-RU');
       const updated = new Date(s.updatedAt).toLocaleString('ru-RU');
-      li.title = `${s.title}
-id: ${s.id}
-создан: ${created}
-последнее сообщение: ${updated}`;
+      li.title = `${s.title}\nid: ${s.id}\nсоздан: ${created}\nпоследнее сообщение: ${updated}`;
       li.innerHTML =
         `<div class="content">` +
-        `<div class="sess-main"><span>${esc(s.title)}</span><span class="meta">${s.count} сообщ.</span></div>` +
-        `<div class="sub">создан ${esc(created)} · последнее ${esc(updated)} · id ${esc(s.id)}</div>` +
+        `<div class="sess-main"><span>${esc(s.title)}</span></div>` +
+        `<div class="sub">${s.count} сообщ.</div>` +
+        `<div class="sub">создан ${esc(created)}</div>` +
+        `<div class="sub">последнее ${esc(updated)}</div>` +
         `</div>` +
         (active ? '' : '<span class="del" title="Удалить разговор">✕</span>');
       li.onclick = (e) => {
