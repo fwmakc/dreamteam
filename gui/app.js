@@ -37,7 +37,6 @@
   const modalTitle = $('modal-title');
   const modalFields = $('modal-fields');
   const modalError = $('modal-error');
-  const settingsListEl = $('settings-list');
   const projectsEl = $('projects');
   const scheduleListEl = $('schedule-list');
   const importFile = $('import-file');
@@ -506,25 +505,11 @@
       case 'settings':
         state = state ?? {};
         state.settings = msg.settings;
-        renderSettingsList();
         break;
       case 'manager':
         state = state ?? {};
         state.manager = msg.manager;
-        renderSettingsList();
-        break;
-      case 'schedule':
-        renderSchedule(msg.tasks);
-        break;
-      case 'confirm':
-        state = state ?? {};
-        state.settings = msg.settings;
-        renderSettingsList();
-        break;
-      case 'manager':
-        state = state ?? {};
-        state.manager = msg.manager;
-        renderSettingsList();
+        renderTopbar();
         break;
       case 'schedule':
         renderSchedule(msg.tasks);
@@ -618,7 +603,6 @@
     renderSidebar();
     renderTeam();
     renderProviders();
-    renderSettingsList();
     renderProjects(state.projects);
     renderAuto();
     renderTopbar();
@@ -628,11 +612,16 @@
 
   function renderTopbar() {
     const def = state.providers.find((p) => p.isDefault);
-    const badge = $('profile-badge');
+    const badgeUser = $('badge-user');
+    const badgeMgr = $('badge-manager');
     const who = state.profile?.name;
     if (who) {
-      badge.textContent = `👤 ${who}${state.profile.role ? ` · ${state.profile.role}` : ''}`;
-      badge.classList.remove('hidden');
+      badgeUser.innerHTML = `👤 ${esc(who)}`;
+      badgeUser.title = `${who}${state.profile?.role ? ` · ${state.profile.role}` : ''} — клик: настройки`;
+    }
+    if (state.manager?.name) {
+      badgeMgr.innerHTML = `${esc(state.manager.emoji ?? '🛎')} ${esc(state.manager.name)}`;
+      badgeMgr.title = `${state.manager.name} (${state.manager.provider}) — клик: настройки менеджера`;
     }
     if (def) {
       document.title = `Dream Team — ${def.id}`;
@@ -762,32 +751,6 @@
     ], (v) => {
       addFeed(`<div class="notice">· правка провайдеров пока через ~/.dreamteam/providers.json</div>`);
     });
-  }
-
-  function renderSettingsList() {
-    settingsListEl.innerHTML = '';
-    const st = state.settings;
-    if (!st) return;
-    for (const [k, v] of [['Язык', st.language], ['Ширина', st.width], ['Автоответ', st.autoMessage]]) {
-      const li = document.createElement('li');
-      li.className = 'static';
-      li.innerHTML = `<span class="meta">${k}:</span> <span>${esc(String(v ?? '—'))}</span>`;
-      settingsListEl.appendChild(li);
-    }
-    const li = document.createElement('li');
-    li.className = 'static';
-    li.title = 'Двойной клик — настройки пользователя';
-    li.innerHTML = `<span>👤 ${esc(state.profile?.name ?? '—')}</span>` +
-      `<span class="meta">${esc(state.profile?.role ?? '')}</span>`;
-    onCliDbl(li, () => {}, () => openUserProfileForm());
-    settingsListEl.appendChild(li);
-    const li2 = document.createElement('li');
-    li2.className = 'static';
-    li2.innerHTML = `<span>${esc(state.manager?.emoji ?? '🛎')} ${esc(state.manager?.name ?? '')}</span>` +
-      `<span class="meta">менеджер</span>`;
-    li2.title = 'Двойной клик — настройки менеджера';
-    li2.ondblclick = () => openManagerForm();
-    settingsListEl.appendChild(li2);
   }
 
   function renderProjects(projects) {
@@ -1121,7 +1084,6 @@
       .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   }); } };
   secAdd('projects').onclick = () => { if (!roundActive) projectAdd(); };
-  secAdd('settings').onclick = () => { if (!roundActive) openSettingsForm(); };
 
   const pickImportFile = (home) => {
     importFile.onchange = () => {
@@ -1142,7 +1104,11 @@
     };
     importFile.click();
   };
+  $('badge-user').onclick = () => { if (!roundActive) openUserProfileForm(); };
+  $('badge-manager').onclick = () => { if (!roundActive) openManagerForm(); };
+  $('btn-settings-top').onclick = () => { if (!roundActive) openSettingsForm(); };
   btnExportHome.onclick = () => { if (!roundActive) send({ type: 'export_home' }); };
+  $('btn-import-home').onclick = () => pickImportFile(true);
   btnExportSession.onclick = () => {
     const cur = (state?.sessions ?? []).findIndex((s) => state.session && s.id === state.session.id) + 1;
     if (cur > 0 && !roundActive) send({ type: 'export_session', n: cur });

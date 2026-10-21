@@ -10,7 +10,12 @@
 <body>
 <header id="topbar">
   <span id="logo">🎬 Dream Team</span>
-  <span id="profile-badge" class="badge hidden"></span>
+  <span id="badge-user" class="badge clickable" title="Настройки пользователя">👤</span>
+  <span id="badge-manager" class="badge clickable" title="Настройки менеджера">🛎</span>
+  <button id="btn-settings-top" class="tb-btn" title="Настройки">⚙</button>
+  <button id="btn-export-home" class="tb-btn" title="Экспорт дома (настройки + история, без .env)">⬇</button>
+  <button id="btn-import-home" class="tb-btn" title="Импорт дома из zip">⬆</button>
+  <span class="spacer"></span>
   <span id="conn" class="conn off">подключение…</span>
   <button id="btn-logout" class="hidden" title="Забыть токен доступа на этом устройстве">Выйти</button>
 </header>
@@ -54,18 +59,6 @@
         <button class="sec-add" title="Новый провайдер">＋</button>
       </div>
       <ul id="providers"></ul>
-    </section>
-    <section class="side-sec collapsed" data-sec="settings">
-      <div class="side-head" data-toggle>
-        <span class="sec-toggle" title="Свернуть/развернуть">▾</span>
-        <span class="sec-name">Настройки</span>
-        <button class="sec-add" title="Правка настроек">⚙</button>
-      </div>
-      <div class="sec-btns">
-        <button id="btn-export-home" title="Экспорт всех настроек и истории (дом, без .env)">⬇ экспорт</button>
-        <button id="btn-import-home" title="Импорт настроек и истории из zip">⬆ импорт</button>
-      </div>
-      <ul id="settings-list"></ul>
     </section>
     <section class="side-sec collapsed" data-sec="schedule">
       <div class="side-head" data-toggle>
