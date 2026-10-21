@@ -253,8 +253,14 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
-/** Каталог веб-оболочки рядом с src/ — и в репозитории, и в установленном пакете. */
-const GUI_DIR = fileURLToPath(new URL('../gui/', import.meta.url));
+/**
+ * Каталог веб-оболочки рядом с src/ — и в репозитории, и в установленном пакете.
+ * Предпочитаем собранную Vue-оболочку (gui-dist/); если сборки нет
+ * (установка из npm без этапа build) — vanilla-оболочка из gui/.
+ */
+const GUI_DIST = fileURLToPath(new URL('../gui-dist/', import.meta.url));
+const GUI_VANILLA = fileURLToPath(new URL('../gui/', import.meta.url));
+const GUI_DIR = existsSync(join(GUI_DIST, 'index.html')) ? GUI_DIST : GUI_VANILLA;
 
 export interface ServeHandle {
   port: number;
@@ -665,14 +671,14 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   function serveStatic(pathname: string, res: ServerResponse): void {
     const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
     const file = normalize(join(GUI_DIR, rel));
-    // только внутрь gui/: без выходов по «..»
+    // только внутрь каталога оболочки: без выходов по «..»
     if (!file.startsWith(normalize(GUI_DIR))) {
       res.writeHead(403).end();
       return;
     }
     if (!existsSync(file) || !statSync(file).isFile()) {
       res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: 'нет такого файла (оболочка живёт в gui/ пакета)' }));
+      res.end(JSON.stringify({ error: 'нет такого файла (оболочка живёт в gui-dist/ или gui/ пакета)' }));
       return;
     }
     res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });

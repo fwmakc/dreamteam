@@ -32,7 +32,8 @@
     "probe:consistency": "tsx tests/probe-consistency.ts && tsx tests/probe-transfer.ts && tsx tests/probe-scenario.ts",
     "probe:transfer": "tsx tests/probe-transfer.ts && tsx tests/probe-scenario.ts",
     "probe:scenario": "tsx tests/probe-scenario.ts",
-    "build:gui": "vite build gui-src"
+    "build:gui": "vite build gui-src",
+    "typecheck:gui": "vue-tsc --noEmit -p gui-src"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",

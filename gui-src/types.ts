@@ -68,7 +68,7 @@ export interface StateSnapshot {
   session: { id: string; title: string; messages: ChatMessage[] };
   sessions: SessionMeta[];
   team: AgentInfo[];
-  manager: { name: string; emoji: string; color: string; provider: string };
+  manager: { name: string; emoji: string; color: string; provider: string; temperature?: number };
   providers: ProviderInfo[];
   images: { id: string; ok: boolean; note?: string }[];
   profile: { name: string; role?: string; about?: string };
@@ -76,12 +76,15 @@ export interface StateSnapshot {
   auto: { mode: boolean; left: number };
   settings: { width: number; language: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string };
   completion: { commands: CommandSpec[] };
+  /** кэш последнего события schedule (в снапшот state не входит) */
+  scheduleTasks?: ScheduleTaskInfo[];
 }
 
 // ── входящие WS-события ──────────────────────────────────────────────────────
 
 export type WsEvent =
   | { type: 'state'; state: StateSnapshot }
+  | { type: 'session_opened'; session: StateSnapshot['session'] }
   | { type: 'auth_required' }
   | { type: 'auth_ok' }
   | { type: 'auth_failed' }
@@ -119,5 +122,6 @@ export type WsMessage =
   | { type: 'export_session'; n: number }
   | { type: 'import_home'; dataB64: string }
   | { type: 'import_session'; dataB64: string }
+  | { type: 'schedule_get' }
   | { type: 'file'; name: string; dataB64: string; text?: string }
   | { type: 'rpc'; id: string; method: string; args?: Record<string, unknown> };
