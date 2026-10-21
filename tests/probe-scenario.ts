@@ -104,7 +104,7 @@ await gui.next((m) => m.type === 'state');
 
 // ── Шаг 1: создать новую сессию ──────────────────────────────────────────────
 {
-  gui.send({ type: 'command', text: '/new' });
+  gui.send({ type: 'command', text: '/session new' });
   // /new → менеджер здоровается (say) и state приходит в конце раунда
   await gui.next((m) => m.type === 'say');
   const st = await gui.next((m) => m.type === 'state' && (m.state as { sessions: unknown[] }).sessions.length === 2);
@@ -114,7 +114,7 @@ await gui.next((m) => m.type === 'state');
 
 // ── Шаг 2: создать агента-юриста ─────────────────────────────────────────────
 {
-  gui.send({ type: 'rpc', id: 'r2a', method: 'agent_create', args: { id: 'lawyer', name: 'Юрист', role: 'право' } });
+  gui.send({ type: 'rpc', id: 'r2a', method: 'team.add', args: { id: 'lawyer', name: 'Юрист', role: 'право' } });
   const st = await gui.next(
     (m) => m.type === 'state' && (m.state as { team: { id: string }[] }).team.some((a) => a.id === 'lawyer'),
   );
@@ -132,7 +132,7 @@ await gui.next((m) => m.type === 'state');
 
 // ── Шаг 4: переименовать сессию ──────────────────────────────────────────────
 {
-  gui.send({ type: 'command', text: '/rename Юридическая экспертиза' });
+  gui.send({ type: 'command', text: '/session rename Юридическая экспертиза' });
   const st = await gui.next(
     (m) => m.type === 'state' && (m.state as { session: { title: string } }).session.title === 'Юридическая экспертиза',
   );
@@ -156,7 +156,7 @@ await gui.next((m) => m.type === 'state');
 
 // ── Шаг 6: экспорт сессии ────────────────────────────────────────────────────
 {
-  gui.send({ type: 'command', text: '/export 1' });
+  gui.send({ type: 'command', text: '/session export 1' });
   await gui.next((m) => m.type === 'notice' && String(m.text).includes('Экспорт'));
   await wait(500);
   const list = (await import('node:fs')).readdirSync(base).filter((f: string) => f.startsWith('dt-'));
@@ -165,15 +165,15 @@ await gui.next((m) => m.type === 'state');
 
 // ── Шаг 7: удалить агента и сессию ───────────────────────────────────────────
 {
-  gui.send({ type: 'rpc', id: 'r7a', method: 'agent_delete', args: { id: 'lawyer' } });
+  gui.send({ type: 'rpc', id: 'r7a', method: 'team.delete', args: { id: 'lawyer' } });
   await gui.next(
     (m) => m.type === 'state' && !(m.state as { team: { id: string }[] }).team.some((a) => a.id === 'lawyer'),
   );
   check('GUI/TUI 7: агент удалён из команды', true);
   // создаём временную сессию: текущую удалить нельзя
-  gui.send({ type: 'command', text: '/new' });
+  gui.send({ type: 'command', text: '/session new' });
   await gui.next((m) => m.type === 'say');
-  gui.send({ type: 'command', text: '/delete 2' });
+  gui.send({ type: 'command', text: '/session delete 2' });
   const del = await gui.next((m) => m.type === 'notice' && String(m.text).includes('удалён'));
   check('GUI/TUI 7: разговор удалён', Boolean(del));
 }

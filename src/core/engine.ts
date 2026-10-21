@@ -34,7 +34,7 @@ import {
   type ToolRunContext,
 } from '../tools-api.js';
 import { buildToolset, loadUserTools } from '../tools-registry.js';
-import { COMMANDS, runCommandText } from './commands.js';
+import { operationHints, runOperationText } from './operations.js';
 import { writeFileSync } from 'node:fs';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
 import {
@@ -159,7 +159,7 @@ export class Engine {
   autoMode = false;
   /** Сколько автоматических ходов осталось до остановки (лимит безопасности). */
   autoLeft = 0;
-  /** Включить/выключить автономный режим с лимитом ходов (/auto). */
+  /** Включить/выключить автономный режим с лимитом ходов (/auto on, /auto off). */
   setAutoMode(on: boolean, turns: number): void {
     this.autoMode = on;
     this.autoLeft = on ? turns : 0;
@@ -424,7 +424,7 @@ export class Engine {
     // команды исполняет ядро: один набор для терминала, сети и менеджера;
     // текст команды в историю разговора не пишется
     if (text.startsWith('/')) {
-      for (const line of await runCommandText(this, text, signal)) {
+      for (const line of await runOperationText(this, text, signal)) {
         this.presenter.notice('  ' + line);
       }
       return;
@@ -446,7 +446,7 @@ export class Engine {
       if (!this.autoMode || this.autoLeft <= 0 || signal.aborted) {
         if (this.autoMode && this.autoLeft <= 0 && this.autoMode) {
           this.autoMode = false;
-          this.presenter.notice('  🤖 автономный режим завершён: лимит ходов исчерпан (/auto — включить снова)');
+          this.presenter.notice('  🤖 автономный режим завершён: лимит ходов исчерпан (/auto on — включить снова)');
         }
         break;
       }
@@ -537,7 +537,7 @@ export class Engine {
     }
     if (compressed) {
       store.save(session);
-      this.presenter.notice('  … разговор длинный: старые сообщения свёрнуты в конспект (полная история — /history и data/transcripts)');
+      this.presenter.notice('  … разговор длинный: старые сообщения свёрнуты в конспект (полная история — /session history и data/transcripts)');
     }
 
     const planning = this.presenter.busy('Модератор решает, кто из команды ответит…');
@@ -662,7 +662,7 @@ export class Engine {
                 hosts: [...p.hosts.keys()],
                 agents: fullTeam.filter((a) => a.projects?.includes(id)).map((a) => a.id),
               })),
-              commands: COMMANDS,
+              operations: operationHints(),
             }),
           },
         ],
@@ -812,7 +812,7 @@ export class Engine {
         ? `Вот краткое содержание разговора:\n${this.app.session.digest}`
         : this.namingContextFromMessages();
       const invented = await this.generateSessionName(`Нужно дать имя сессии.\n${context}`);
-      if (!invented) return 'Не придумал имя — назовите сами: /rename <имя>';
+      if (!invented) return 'Не придумал имя — назовите сами: /session rename <имя>';
       return this.applySessionName(invented);
     }
     return this.applySessionName(clean.slice(0, 80) + (clean.length > 80 ? '…' : ''));
@@ -920,7 +920,7 @@ export class Engine {
     return true;
   }
 
-  /** /me Имя; роль; о себе — сохранить профиль (config/user.json). */
+  /** /profile set Имя; роль; о себе — сохранить профиль (config/user.json). */
   setProfile(name: string, role?: string, about?: string): string {
     this.app.profile = { name, role, about };
     try {
@@ -962,7 +962,7 @@ export class Engine {
     await this.managerTurn(WELCOME_REQUEST, team, this.app.profile, signal);
   }
 
-  /** /new: мгновенно новый разговор один на один с менеджером + приветствие. */
+  /** /session new: мгновенно новый разговор один на один с менеджером + приветствие. */
   async newSession(signal: AbortSignal): Promise<void> {
     const old = this.app.session;
     this.app.session = this.app.store.create();

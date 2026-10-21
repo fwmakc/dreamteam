@@ -1,10 +1,9 @@
 import pc from 'picocolors';
-import { COMMANDS, type CommandSpec } from './core/commands.js';
+import { OPERATIONS, findOperation, operationCommand, operationArgs, type OpSpec } from './core/operations.js';
 
-// канонический список команд живёт в ядре (src/core/commands.ts) — отсюда им
-// пользуются терминальные подсказки; /help и сервер отдают его же
-export { COMMANDS };
-export type { CommandSpec };
+// канонический список операций живёт в ядре (src/core/operations.ts) — отсюда
+// им пользуются терминальные подсказки; /help и сервер отдают тот же список
+export { operationHints as commandHints } from './core/operations.js';
 
 /** Живые данные для дополнения: список разговоров, команда, провайдеры. */
 export interface CompletionContext {
@@ -20,9 +19,7 @@ export interface CompletionContext {
 
 function commonPrefix(items: string[]): string {
   let prefix = items[0] ?? '';
-  for (const s of items) {
-    while (prefix.length > 0 && !s.startsWith(prefix)) prefix = prefix.slice(0, -1);
-  }
+  while (prefix.length > 0 && !items.every((s) => s.startsWith(prefix))) prefix = prefix.slice(0, -1);
   return prefix;
 }
 
@@ -30,11 +27,10 @@ function commonPrefix(items: string[]): string {
  * Что Tab вставит: единственный вариант или общий префикс — и только если он
  * удлиняет ввод. При неоднозначности возвращаем пусто: варианты и так видны
  * в панели подсказок, а readline не печатает свои списки (не ломая панель).
- * skipExactPlusSpace — для цепочки слэш-команд (/session → Tab → /sessions ):
- * вариант «то, что набрано, плюс пробел» не считается попаданием.
+ * skipExactPlusSpace — «то, что набрано, плюс пробел» не считается попаданием.
  */
 function tabInsert(options: string[], fragment: string, skipExactPlusSpace = false): string[] {
-  // как в findMentions: регистр и «ё» не важны; вставляем вариант в его исходном виде
+  // регистр и «ё» не важны; вставляем вариант в его исходном виде
   const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
   const nf = norm(fragment);
   const hits = options.filter((o) => {
@@ -47,11 +43,11 @@ function tabInsert(options: string[], fragment: string, skipExactPlusSpace = fal
   return norm(prefix).length > nf.length ? [prefix] : [];
 }
 
+/** Кандидаты первого слова: полные канонические команды операций. */
 function commandOptions(fragment: string): string[] {
-  // фрагмент без слэша, варианты — со слэшем: сравниваем в одном виде
   const want = ('/' + fragment).toLowerCase();
   return tabInsert(
-    COMMANDS.map((c) => c.cmd + ' ').filter((o) => o.toLowerCase().startsWith(want)),
+    OPERATIONS.map((o) => operationCommand(o) + ' ').filter((o) => o.toLowerCase().startsWith(want)),
     want,
     true,
   );
@@ -59,48 +55,64 @@ function commandOptions(fragment: string): string[] {
 
 const lastToken = (rest: string): string => (/(\S*)$/.exec(rest))![1];
 
-/** Варианты аргументов для Tab; null — команда неизвестна. */
-function argOptions(cmd: string, ctx: CompletionContext): string[] | null {
-  switch (cmd) {
-    case '/session':
-    case '/delete':
+const verbsOf = (group: string): string[] =>
+  [...new Set(OPERATIONS.filter((o) => o.name.startsWith(group + '.') && !o.implicit).map((o) => o.name.split('.')[1]))];
+
+/** Значения аргумента по подсказке манифеста; [] — подсказывать нечего, null — операция неизвестна. */
+function argValues(op: OpSpec, argPos: number, ctx: CompletionContext): string[] | null {
+  const arg = op.args?.[Math.min(argPos, (op.args?.length ?? 1) - 1)];
+  if (!arg) return [];
+  switch (arg.hint) {
+    case 'sessions':
       return ctx.sessions().map((_, i) => String(i + 1));
-    case '/add':
-    case '/out':
+    case 'team':
       return [...ctx.teamNames().map((_, i) => String(i + 1)), ...ctx.teamNames()];
-    case '/memory':
-      return [...ctx.teamNames(), 'shared'];
-    case '/provider':
+    case 'chat':
+      return [...ctx.chatAgents().map((_, i) => String(i + 1)), ...ctx.chatAgents().map((a) => a.name)];
+    case 'providers':
       return ctx.providerIds();
-    case '/grant':
-      return ctx.teamNames();
-    case '/agent':
-      return ['add', 'set'];
-    case '/project':
-      return ['add', 'host'];
-    case '/new':
-    case '/sessions':
-    case '/history':
-    case '/me':
-    case '/help':
-    case '/exit':
-      return [];
     default:
-      return null;
+      return [];
   }
 }
 
-/** Completer для readline: команды, @упоминания, номера разговоров. */
+/** Варианты для Tab после первого слова; null — группа неизвестна. */
+function argOptions(body: string, ctx: CompletionContext): string[] | null {
+  const parts = body.trim().split(/\s+/).filter(Boolean);
+  const trailing = /\s$/.test(body);
+  const group = (parts[0] ?? '').toLowerCase();
+  const verbs = verbsOf(group);
+  const implicitOp = OPERATIONS.find((o) => o.name.startsWith(group + '.') && o.implicit);
+
+  // '/group ' — глаголы явных операций; у обзорных групп сразу их аргумент
+  if (parts.length === 1 && trailing) {
+    if (implicitOp && verbs.length === 0) return argValues(implicitOp, 0, ctx) ?? [];
+    return verbs.map((v) => v + ' ');
+  }
+  // '/group ве' — завершаем глагол
+  if (parts.length === 2 && !trailing) {
+    return tabInsert(verbs.map((v) => v + ' '), parts[1].toLowerCase());
+  }
+
+  const explicit = parts[1] ? findOperation(`${group}.${parts[1].toLowerCase()}`) : undefined;
+  const op = explicit ?? implicitOp;
+  if (!op) return null;
+  const hasVerb = Boolean(explicit);
+  const typed = parts.length - (hasVerb ? 2 : 1) + (trailing ? 1 : 0);
+  return argValues(op, Math.max(0, typed), ctx);
+}
+
+/** Completer для readline: операции, их аргументы, @упоминания, номера разговоров. */
 export function makeCompleter(ctx: CompletionContext) {
   return (line: string): [string[], string] => {
     if (line.startsWith('/')) {
       const body = line.slice(1);
-      const sp = body.indexOf(' ');
-      if (sp === -1) return [commandOptions(body), line];
-      const rest = body.slice(sp + 1);
-      const fragment = lastToken(rest);
-      const options = argOptions('/' + body.slice(0, sp).toLowerCase(), ctx);
-      const hits = options ? tabInsert(options, fragment) : [];
+      const parts = body.trim().split(/\s+/).filter(Boolean);
+      if (parts.length === 1 && !/\s$/.test(body)) return [commandOptions(body), line];
+      const options = argOptions(body, ctx);
+      if (!options || options.length === 0) return [[], line];
+      const fragment = /\s$/.test(body) ? '' : lastToken(body);
+      const hits = tabInsert(options, fragment);
       return hits.length > 0 ? [hits, line.slice(line.length - fragment.length)] : [[], line];
     }
     const ses = /[@№]session[ \t]+(\S*)$/.exec(line);
@@ -133,7 +145,7 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
-/** Строки «номер — название» для панели: /session, /delete и @session N. */
+/** Строки «номер — название» для панели: /session open и @session N. */
 function sessionRows(ctx: CompletionContext, fragment: string): string[] {
   const hits = ctx
     .sessions()
@@ -162,57 +174,74 @@ export function hintRowsFor(line: string, ctx: CompletionContext): string[] | nu
   return null;
 }
 
+function usageRow(op: OpSpec): string {
+  const args = operationArgs(op);
+  return `  ${operationCommand(op)}${args ? ' ' + pc.dim(args) : ''}  ${pc.dim('— ' + op.help)}`;
+}
+
 function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | null {
   if (!line.startsWith('/')) return null;
   const body = line.slice(1);
-  const sp = body.indexOf(' ');
+  const parts = body.trim().split(/\s+/).filter(Boolean);
+  const trailing = /\s$/.test(body);
 
-  if (sp === -1) {
+  // первая лексема: показываем подходящие операции целиком
+  if (parts.length === 1 && !trailing) {
     const prefix = body.toLowerCase();
-    const matches = COMMANDS.filter((c) => c.cmd.slice(1).startsWith(prefix));
+    const matches = OPERATIONS.filter((o) => operationCommand(o).slice(1).startsWith(prefix));
     if (matches.length === 0) return [pc.dim('  нет такой команды — см. /help')];
-    const rows = matches
-      .slice(0, PANEL_MAX)
-      .map((c) => `  ${c.cmd}${c.args ? ' ' + pc.dim(c.args) : ''}  ${pc.dim('— ' + c.help)}`);
-    if (matches.length > PANEL_MAX) {
-      rows.push(pc.dim(`  … ещё ${matches.length - PANEL_MAX} — уточните ввод`));
-    }
+    const rows = matches.slice(0, PANEL_MAX).map(usageRow);
+    if (matches.length > PANEL_MAX) rows.push(pc.dim(`  … ещё ${matches.length - PANEL_MAX} — уточните ввод`));
     return rows;
   }
 
-  const name = '/' + body.slice(0, sp).toLowerCase();
-  const rest = body.slice(sp + 1);
-  const spec = COMMANDS.find((c) => c.cmd === name);
-  const usageRow = spec
-    ? [`  ${spec.cmd}${spec.args ? ' ' + pc.dim(spec.args) : ''}  ${pc.dim('— ' + spec.help)}`]
-    : null;
-  // после полного аргумента и пробела панель значений больше не нужна
-  if (rest !== '' && rest.endsWith(' ')) return usageRow;
-  const fragment = lastToken(rest);
+  const group = (parts[0] ?? '').toLowerCase();
+  const groupExists = OPERATIONS.some((o) => o.name.startsWith(group + '.'));
+  if (!groupExists) return [pc.dim('  нет такой группы — см. /help')];
+  const verbs = verbsOf(group);
+  const implicitOp = OPERATIONS.find((o) => o.name.startsWith(group + '.') && o.implicit);
+
+  // после группы: глаголы или аргументы обзорной операции
+  if (parts.length === 1 && trailing) {
+    if (implicitOp && verbs.length === 0) return [usageRow(implicitOp), ...valueRows(implicitOp, 0, ctx)];
+    return [
+      pc.dim(`  /${group} <глагол>:`),
+      pc.dim('    ' + verbs.slice(0, PANEL_MAX).join('   ')),
+    ];
+  }
+  // завершаем глагол
+  if (parts.length === 2 && !trailing) {
+    const hits = verbs.filter((v) => v.startsWith(parts[1].toLowerCase()) && v !== parts[1].toLowerCase());
+    if (hits.length === 0) return [pc.dim('  нет такого глагола — см. /help')];
+    return [
+      pc.dim(`  /${group} <глагол>:`),
+      pc.dim('    ' + hits.slice(0, PANEL_MAX).join('   ')),
+    ];
+  }
+
+  const explicit = parts[1] ? findOperation(`${group}.${parts[1].toLowerCase()}`) : undefined;
+  const op = explicit ?? implicitOp;
+  if (!op) return [pc.dim('  нет такой команды — см. /help')];
+  const hasVerb = Boolean(explicit);
+  const argPos = Math.max(0, parts.length - (hasVerb ? 2 : 1) + (trailing ? 1 : 0) - 1);
+  return [usageRow(op), ...valueRows(op, argPos, ctx)];
+}
+
+/** Живые значения аргумента (номера, имена, id) — для панели. */
+function valueRows(op: OpSpec, argPos: number, ctx: CompletionContext): string[] {
+  const arg = op.args?.[Math.min(argPos, (op.args?.length ?? 1) - 1)];
+  if (!arg) return [];
   const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
-
-  if (name === '/session' || name === '/delete') {
-    return sessionRows(ctx, fragment);
-  }
-
-  if (name === '/add' || name === '/out' || name === '/memory' || name === '/provider') {
-    const values =
-      name === '/provider'
-        ? ctx.providerIds()
-        : name === '/memory'
-          ? [...ctx.teamNames(), 'shared']
-          : ctx.teamNames();
-    const hits = values.filter((v) => norm(v).startsWith(norm(fragment)) && norm(v) !== norm(fragment));
-    if (hits.length > 0) {
-      return [
-        `  ${name} ${pc.dim(spec?.args ?? '')}:`,
-        pc.dim('    ' + hits.slice(0, PANEL_MAX).join('   ')),
-      ];
-    }
-    return usageRow;
-  }
-
-  return usageRow;
+  if (arg.hint === 'sessions') return sessionRows(ctx, '');
+  let values: string[] | null = null;
+  if (arg.hint === 'team') values = [...ctx.teamNames(), 'shared'];
+  else if (arg.hint === 'chat') values = ctx.chatAgents().map((a) => a.name);
+  else if (arg.hint === 'providers') values = ctx.providerIds();
+  if (values === null) return [];
+  return [
+    `  ${operationCommand(op)} ${pc.dim(operationArgs(op))}:`,
+    pc.dim('    ' + values.slice(0, PANEL_MAX).join('   ')),
+  ];
 }
 
 /**
@@ -351,7 +380,7 @@ export class MentionPicker {
         this.sel = (this.sel - 1 + n) % n;
         return 'handled';
       case 'down':
-        this.sel = (this.sel + 1) % n;
+        this.sel = (this.sel + 1 + n) % n;
         return 'handled';
       case 'escape':
         this.dismissed = normName(this.line.slice(this.at + 1, this.cursor));
@@ -382,7 +411,7 @@ export class MentionPicker {
     off = Math.max(0, Math.min(off, n - visible));
     const scroll = n > visible;
     const thumbSize = Math.max(1, Math.round((visible * visible) / n));
-    const thumbAt = Math.round((this.sel / (n - 1)) * (visible - thumbSize));
+    const thumbAt = Math.round((this.sel / Math.max(1, n - 1)) * (visible - thumbSize));
 
     const plain: string[] = [];
     const colored: string[] = [];

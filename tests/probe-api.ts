@@ -221,16 +221,16 @@ const client = await makeClient(handle.port);
   // --- WS: команды через протокол (тот же набор, что и в терминале) ---
   {
     const stateCmd = await client.next(
-      (m) => m.type === 'state' && Boolean((m.state as { completion?: { commands?: unknown[] } }).completion),
+      (m) => m.type === 'state' && Boolean((m.state as { completion?: { operations?: unknown[] } }).completion),
     );
-    const commands = (stateCmd.state as { completion: { commands: { cmd: string }[] } }).completion.commands;
-    check('ws: state несёт словарь команд', commands.length > 0 && commands.some((c) => c.cmd === '/help'));
+    const commands = (stateCmd.state as { completion: { operations: { cmd: string }[] } }).completion.operations;
+    check('ws: state несёт манифест операций', commands.length > 0 && commands.some((c) => c.cmd === '/session open'));
 
     client.send({ type: 'rpc', id: 'rc0', method: 'state' });
     const snap = await client.next((m) => m.type === 'rpc_result' && m.id === 'rc0');
     const beforeCmd = (snap.result as { session: { messages: unknown[] } }).session.messages.length;
     client.send({ type: 'command', text: '/help' });
-    const help = await client.next((m) => m.type === 'notice' && String(m.text).includes('/new'));
+    const help = await client.next((m) => m.type === 'notice' && String(m.text).includes('/session new'));
     check('ws: /help — справка notice-событием', Boolean(help));
     const stHelp = await client.next((m) => m.type === 'state');
     check(
@@ -238,7 +238,7 @@ const client = await makeClient(handle.port);
       (stHelp.state as { session: { messages: unknown[] } }).session.messages.length === beforeCmd,
     );
 
-    client.send({ type: 'command', text: '/add Тест' });
+    client.send({ type: 'command', text: '/chat add Тест' });
     const again = await client.next((m) => m.type === 'notice' && String(m.text).includes('уже в чате'));
     check('ws: /add — отчёт о составе чата', Boolean(again));
     const sAdd = client.stateCount();
@@ -252,14 +252,14 @@ const client = await makeClient(handle.port);
     check('ws: /exit — только терминал', Boolean(tui));
     await client.waitState(sExit + 1);
 
-    client.send({ type: 'command', text: '/me Иванов; инженер' });
+    client.send({ type: 'command', text: '/profile set Иванов; инженер' });
     const stMe = await client.next(
       (m) => m.type === 'state' && (m.state as { profile: { name: string } }).profile.name === 'Иванов',
     );
     check('ws: /me меняет профиль в state', ((stMe.state as { profile: { role?: string } }).profile.role) === 'инженер');
 
     // user_message с `/…` исполняется так же (перехват в ядре)
-    client.send({ type: 'user_message', text: '/providers' });
+    client.send({ type: 'user_message', text: '/provider' });
     const prov = await client.next((m) => m.type === 'notice' && String(m.text).includes('• mock'));
     check('ws: /… в user_message тоже команда', Boolean(prov));
     await client.next((m) => m.type === 'state');
@@ -294,28 +294,28 @@ const client = await makeClient(handle.port);
   check('rpc: chat.remove — текст отчёта', String((rem.result as { text: string }).text).includes('покинул'));
 
   // rpc: user_set — профиль через форму настроек (обе оболочки ходят rpc-методом)
-  client.send({ type: 'rpc', id: 'r9', method: 'user_set', args: { name: 'Профиль', role: 'тест' } });
+  client.send({ type: 'rpc', id: 'r9', method: 'profile.set', args: { name: 'Профиль', role: 'тест' } });
   const us = await client.next((m) => m.type === 'rpc_result' && m.id === 'r9');
-  check('rpc: user_set — профиль обновлён', String((us.result as { text: string }).text).includes('Профиль'));
+  check('rpc: profile.set — профиль обновлён', String((us.result as { text: string }).text).includes('Профиль'));
   // то же клиентским сообщением (канал без rpc) — и вернуть профиль как был
-  client.send({ type: 'user_set', name: 'Пользователь', role: '' });
-  await client.next((m) => m.type === 'notice' && String(m.text).includes('Пользователь'));
+  client.send({ type: 'rpc', id: 'r9b', method: 'profile.set', args: { name: 'Пользователь' } });
+  await client.next((m) => m.type === 'rpc_result' && m.id === 'r9b');
 
-  // ws: schedule_get сообщением — событие schedule (секция «Расписание» в GUI)
-  client.send({ type: 'schedule_get' });
-  const sch = await client.next((m) => m.type === 'schedule');
-  check('ws: schedule_get — событие schedule с задачами', Array.isArray((sch as { tasks?: unknown[] }).tasks));
+  // rpc: schedule.list — задачи расписания (секция «Расписание» в GUI)
+  client.send({ type: 'rpc', id: 'r13', method: 'schedule.list' });
+  const sch = await client.next((m) => m.type === 'rpc_result' && m.id === 'r13');
+  check('rpc: schedule.list — задачи расписания', Array.isArray((sch.result as { tasks?: unknown[] }).tasks));
 
   // rpc: расписание — полный цикл записи в schedule.json проекта
-  client.send({ type: 'rpc', id: 'r10', method: 'schedule_add', args: { message: 'Напоминание', intervalMinutes: 30 } });
+  client.send({ type: 'rpc', id: 'r10', method: 'schedule.add', args: { message: 'Напоминание', intervalMinutes: 30 } });
   const sa = await client.next((m) => m.type === 'rpc_result' && m.id === 'r10');
   const added = (sa.result as { tasks: { id: string; message: string; enabled: boolean }[] }).tasks;
   check('rpc: schedule_add — задача записана', added.length === 1 && added[0].message === 'Напоминание' && added[0].enabled === true);
   const taskId = added[0].id;
-  client.send({ type: 'rpc', id: 'r11', method: 'schedule_toggle', args: { id: taskId } });
+  client.send({ type: 'rpc', id: 'r11', method: 'schedule.toggle', args: { id: taskId } });
   const stg = await client.next((m) => m.type === 'rpc_result' && m.id === 'r11');
   check('rpc: schedule_toggle — выключена', (stg.result as { tasks: { enabled: boolean }[] }).tasks[0].enabled === false);
-  client.send({ type: 'rpc', id: 'r12', method: 'schedule_delete', args: { id: taskId } });
+  client.send({ type: 'rpc', id: 'r12', method: 'schedule.delete', args: { id: taskId } });
   const sd = await client.next((m) => m.type === 'rpc_result' && m.id === 'r12');
   check('rpc: schedule_delete — задача удалена', (sd.result as { tasks: unknown[] }).tasks.length === 0);
 
@@ -372,8 +372,8 @@ const client = await makeClient(handle.port);
       Boolean(prov) && ['id', 'isDefault', 'isManager', 'kind', 'model', 'ok'].every((k) => k in prov!),
     );
     check('state: images — массив', Array.isArray(st.images));
-    const cmds = (st.completion as { commands: { cmd: string; help: string; tuiOnly?: boolean }[] }).commands;
-    check('state: completion.commands — словарь с /help и /exit(tuiOnly)', cmds.length >= 14 && cmds.some((c) => c.cmd === '/help') && cmds.some((c) => c.cmd === '/exit' && c.tuiOnly === true));
+    const ops = (st.completion as { operations: { cmd: string; help: string }[] }).operations;
+    check('state: completion.operations — манифест без алиасов', ops.length >= 30 && ops.some((c) => c.cmd === '/session open') && ops.every((c) => !c.cmd.includes('_aliases')));
     check('state: profile — имя', typeof (st.profile as { name: string }).name === 'string');
   }
 
@@ -435,7 +435,7 @@ const client = await makeClient(handle.port);
 
     b.close();
     await wait(100);
-    client.send({ type: 'command', text: '/providers' });
+    client.send({ type: 'command', text: '/provider' });
     const provN = await client.next((m) => m.type === 'notice' && String(m.text).includes('★ основной'));
     check('multi: после отключения B сервер работает с A', Boolean(provN));
     await client.next((m) => m.type === 'state');
@@ -518,7 +518,7 @@ const client = await makeClient(handle.port);
   // --- УПРАВЛЕНИЕ ЧЕРЕЗ КОМАНДЫ WS: /agent, /grant, /project ---
   {
     const sAg = client.stateCount();
-    client.send({ type: 'command', text: '/agent add api_guy Аписька тестировщик' });
+    client.send({ type: 'command', text: '/team add api_guy Аписька тестировщик' });
     const addA = await client.next((m) => m.type === 'notice' && String(m.text).includes('api_guy'));
     check('ws: /agent add — отчёт', Boolean(addA));
     await client.waitState(sAg + 1);
@@ -527,7 +527,7 @@ const client = await makeClient(handle.port);
     check('ws: /agent add — появился в state.team', ((stA.result as { team: { id: string }[] }).team).some((a) => a.id === 'api_guy'));
 
     const sGrant = client.stateCount();
-    client.send({ type: 'command', text: '/grant api_guy files' });
+    client.send({ type: 'command', text: '/team grant api_guy files' });
     const g = await client.next((m) => m.type === 'notice' && String(m.text).includes('files'));
     check('ws: /grant — отчёт', Boolean(g));
     await client.waitState(sGrant + 1);
@@ -540,13 +540,13 @@ const client = await makeClient(handle.port);
     await client.waitState(sProj + 1);
 
     const sHost = client.stateCount();
-    client.send({ type: 'command', text: '/project host infra reserve=127.0.0.2' });
+    client.send({ type: 'command', text: '/project host add infra reserve=127.0.0.2' });
     const ph = await client.next((m) => m.type === 'notice' && String(m.text).includes('reserve'));
     check('ws: /project host — отчёт', Boolean(ph));
     await client.waitState(sHost + 1);
 
     const sBad = client.stateCount();
-    client.send({ type: 'command', text: '/agent set api_guy foo=bar' });
+    client.send({ type: 'command', text: '/team update api_guy foo=bar' });
     const badSet = await client.next((m) => m.type === 'error' && String(m.text).includes('не понятно, что менять'));
     check('ws: /agent set с мусорным полем — честная ошибка', Boolean(badSet));
     await client.waitState(sBad + 1);

@@ -25,6 +25,7 @@ export interface AgentInfo {
   provider?: string;
   temperature?: number;
   prompt?: string;
+  tools?: string[];
   inChat: boolean;
 }
 
@@ -56,12 +57,12 @@ export interface ScheduleTaskInfo {
   enabled: boolean;
 }
 
-export interface CommandSpec {
+/** Подсказка операции из манифеста (operations.ts) — для панели команд GUI */
+export interface OpHint {
+  /** Каноническая команда: '/session open' или обзорная '/sessions' */
   cmd: string;
   args?: string;
   help: string;
-  aliases?: string[];
-  tuiOnly?: boolean;
 }
 
 export interface StateSnapshot {
@@ -75,7 +76,7 @@ export interface StateSnapshot {
   projects: ProjectInfo[];
   auto: { mode: boolean; left: number };
   settings: { width: number; language: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string };
-  completion: { commands: CommandSpec[] };
+  completion: { operations: OpHint[] };
   /** кэш последнего события schedule (в снапшот state не входит) */
   scheduleTasks?: ScheduleTaskInfo[];
 }
@@ -122,6 +123,5 @@ export type WsMessage =
   | { type: 'export_session'; n: number }
   | { type: 'import_home'; dataB64: string }
   | { type: 'import_session'; dataB64: string }
-  | { type: 'schedule_get' }
   | { type: 'file'; name: string; dataB64: string; text?: string }
   | { type: 'rpc'; id: string; method: string; args?: Record<string, unknown> };

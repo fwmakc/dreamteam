@@ -93,6 +93,20 @@ check('оболочка использует все исходящие типы 
 
 // --- 4. rpc-методы оболочки существуют в handleRpc ---
 const rpcCases = caseLabels(slice(serveSrc, 'async function handleRpc', 'function serveStatic'));
+
+// манифест операций — единственный источник имён rpc (имена операций — с отступом 4)
+const operationsSrc = read('src/core/operations.ts');
+const manifestOps = new Set([...operationsSrc.matchAll(/\n    name: '([a-z.]+)'/g)].map((m) => m[1]));
+check('манифест: имена — группа.глагол без подчёркиваний', [...manifestOps].every((m) => /^[a-z]+(\.[a-z]+){1,2}$/.test(m)));
+const rpcWithoutManifest = [...rpcCases].filter((m) => m !== 'state' && !manifestOps.has(m));
+check('сервер: rpc не бывает вне манифеста (кроме state)', rpcWithoutManifest.length === 0,
+  `вне манифеста: ${rpcWithoutManifest.join(', ')}`);
+// мутации обязаны быть доступны rpc-методом (скриптовый API); просмотры и
+// транспорт (export/import) имеют право жить только командой или WS-сообщением
+const mutations = [...manifestOps].filter((m) => /\.(new|open|delete|rename|add|update|grant|set|toggle|on|off)$/.test(m));
+const mutantWithoutRpc = mutations.filter((m) => !rpcCases.has(m));
+check('манифест: каждая мутация доступна rpc', mutantWithoutRpc.length === 0,
+  `нет rpc: ${mutantWithoutRpc.join(', ')}`);
 const guiRpc = new Set<string>();
 for (const src of [wsSrc, appSrc]) {
   for (const m of src.matchAll(/\brpc\('([a-z_.]+)'/g)) guiRpc.add(m[1]);

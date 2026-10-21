@@ -7,11 +7,14 @@ import pc from 'picocolors';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { loadTeam } from './agents.js';
 import {
-  addProject,
   addTeamAgent,
   managerAsAgent,
   updateTeamAgent,
+  grantTool,
+  loadManagerConfig,
+  addProject,
   mergeTeamAgents,
+  addProjectHost,
   removeProject,
   removeProjectHost,
   removeTeamAgent,
@@ -19,11 +22,12 @@ import {
 } from './manager.js';
 import { addProviderConfig, loadProviders, removeProviderConfig } from './providers/registry.js';
 import { loadSettings } from './settings.js';
-import { AGENTS_FILE, MANAGER_FILE, PROJECTS_FILE, PROVIDERS_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
+import { AGENTS_FILE, MANAGER_FILE, PROJECTS_FILE, PROVIDERS_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
+import { agentToolIds } from './tools-api.js';
 import { loadProjects, safePath } from './actions.js';
 import { Engine, chatTeam, type App } from './core/engine.js';
 import { bootstrapApp } from './core/bootstrap.js';
-import { COMMANDS } from './core/commands.js';
+import { operationHints } from './core/operations.js';
 import { homeEntries, packEntriesZip, readZipEntries, sessionEntries, applyHomeImport, applySessionImport } from './core/transfer.js';
 import { loadSchedule, saveSchedule, type ScheduleTask } from './core/schedule.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
@@ -96,6 +100,7 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       emoji: a.emoji,
       color: a.color,
       provider: a.provider,
+      tools: agentToolIds(a),
       inChat: inChat.has(a.id),
     })),
     manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, provider: app.mgr.provider },
@@ -117,7 +122,7 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
     // словарь автодополнения: имена команд — из ядра; остальные данные
     // (разговоры, команда, состав чата, провайдеры, имя менеджера) выводятся
     // клиентом из остальных полей этого же снапшота
-    completion: { commands: COMMANDS },
+    completion: { operations: operationHints() },
   };
 }
 
@@ -470,48 +475,6 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         void runRound((signal) => engine.handleMessage(text, signal));
         return;
       }
-      case 'settings_get': {
-        ws.send(JSON.stringify({ type: 'settings', settings: loadSettings(SETTINGS_FILE, 0) }));
-        return;
-      }
-      case 'settings_set': {
-        const patch = (msg.patch ?? {}) as Record<string, unknown>;
-        const raw = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
-        const merged = { ...raw, ...patch };
-        const tmp = SETTINGS_FILE + '.tmp';
-        writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
-        loadSettings(tmp, 0); // валидация
-        renameSync(tmp, SETTINGS_FILE);
-        presenter.notice('  ✓ настройки обновлены (язык и лимиты — со следующего раунда)');
-        broadcastState();
-        return;
-      }
-      case 'user_set': {
-        const report = engine.setProfile(String(msg.name ?? ''), msg.role ? String(msg.role) : undefined, msg.about ? String(msg.about) : undefined);
-        presenter.notice('  ' + report);
-        broadcastState();
-        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
-        return;
-      }
-      case 'manager_get': {
-        ws.send(JSON.stringify({ type: 'manager', manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, temperature: app.mgr.temperature, provider: app.mgr.provider } }));
-        return;
-      }
-      case 'schedule_get': {
-        // оболочки просят расписание сообщением (не rpc) и ждут событие 'schedule'
-        ws.send(JSON.stringify({ type: 'schedule', tasks: loadSchedule(dirname(PROJECTS_FILE)) }));
-        return;
-      }
-      case 'manager_set': {
-        const fields = (msg.fields ?? {}) as Record<string, unknown>;
-        const known = [...app.providers.keys()];
-        const report = updateManagerConfig(MANAGER_FILE, fields, known);
-        app.mgr = (await import('./manager.js')).loadManagerConfig(MANAGER_FILE, known);
-        presenter.notice('  ' + report);
-        broadcastState();
-        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
-        return;
-      }
       case 'confirm_response': {
         presenter.resolve(String(msg.id ?? ''), msg.approved === true);
         return;
@@ -571,6 +534,48 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { text };
       }
+      case 'team.add': {
+        const report = addTeamAgent(AGENTS_FILE, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined });
+        broadcastState();
+        return { text: report };
+      }
+      case 'team.delete': {
+        const report = removeTeamAgent(AGENTS_FILE, String(args.id ?? ''));
+        broadcastState();
+        return { text: report };
+      }
+      case 'team.update': {
+        const report = updateTeamAgent(AGENTS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>);
+        broadcastState();
+        return { text: report };
+      }
+      case 'team.grant': {
+        const report = grantTool(AGENTS_FILE, String(args.agent ?? ''), String(args.tool ?? ''), args.card, TOOLS_DIR);
+        broadcastState();
+        return { text: report };
+      }
+      case 'auto.on': {
+        const turns = Math.min(Math.max(Number(args.n ?? 10) || 10, 1), 50);
+        engine.setAutoMode(true, turns);
+        broadcastState();
+        return { ok: true };
+      }
+      case 'auto.off': {
+        engine.setAutoMode(false, 0);
+        broadcastState();
+        return { ok: true };
+      }
+      case 'session.rename': {
+        const report = await engine.renameSession(String(args.name ?? ''));
+        broadcastState();
+        return { text: report };
+      }
+      case 'session.history': {
+        const n = Number(args.n);
+        const all = app.session.messages;
+        const messages = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
+        return { messages };
+      }
       case 'provider.set': {
         const pid = String(args.id ?? '').trim();
         const ok = engine.setProvider(pid);
@@ -578,22 +583,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { ok: true };
       }
-      case 'agent_create': {
-        const report = addTeamAgent(AGENTS_FILE, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined });
-        broadcastState();
-        return { text: report };
-      }
-      case 'agent_delete': {
-        const report = removeTeamAgent(AGENTS_FILE, String(args.id ?? ''));
-        broadcastState();
-        return { text: report };
-      }
-      case 'agent_update': {
-        const report = updateTeamAgent(AGENTS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>);
-        broadcastState();
-        return { text: report };
-      }
-      case 'provider_create': {
+      case 'provider.add': {
         const report = addProviderConfig(PROVIDERS_FILE, String(args.id ?? ''), (args.config ?? {}) as Record<string, unknown>);
         const loaded = loadProviders(PROVIDERS_FILE);
         for (const [k, v] of loaded.providers) app.providers.set(k, v);
@@ -602,7 +592,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { text: report };
       }
-      case 'provider_delete': {
+      case 'provider.delete': {
         const pid = String(args.id ?? '');
         const report = removeProviderConfig(PROVIDERS_FILE, pid, []);
         const loaded = loadProviders(PROVIDERS_FILE);
@@ -612,9 +602,22 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { text: report };
       }
-      case 'projects.get':
+      case 'project.list':
         return { projects: readProjects() };
-      case 'project_add': {
+      case 'project.host.add': {
+        const report = addProjectHost(PROJECTS_FILE, String(args.id ?? ''), String(args.hostName ?? ''), {
+          host: String(args.host ?? ''),
+          user: args.user ? String(args.user) : undefined,
+          port: args.port ? Number(args.port) : undefined,
+        });
+        broadcastState();
+        return { text: report };
+      }
+      case 'manager.show':
+        return { manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, temperature: app.mgr.temperature, provider: app.mgr.provider } };
+      case 'settings.show':
+        return { settings: loadSettings(SETTINGS_FILE, 0) };
+      case 'project.add': {
         const report = addProject(PROJECTS_FILE, String(args.id ?? ''), {
           [String(args.hostName ?? 'main')]: {
             host: String(args.host ?? ''),
@@ -625,24 +628,24 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { text: report };
       }
-      case 'project_delete': {
+      case 'project.delete': {
         const report = removeProject(PROJECTS_FILE, String(args.id ?? ''));
         broadcastState();
         return { text: report };
       }
-      case 'project_host_delete': {
+      case 'project.host.delete': {
         const report = removeProjectHost(PROJECTS_FILE, String(args.id ?? ''), String(args.name ?? ''));
         broadcastState();
         return { text: report };
       }
-      case 'user_set': {
+      case 'profile.set': {
         // профиль владельца: форма настроек в обеих оболочках идёт через rpc
         const report = engine.setProfile(String(args.name ?? ''), args.role ? String(args.role) : undefined, args.about ? String(args.about) : undefined);
         presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
-      case 'settings_set': {
+      case 'settings.set': {
         const patch = (args.patch ?? {}) as Record<string, unknown>;
         const rawSettings = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
         const merged = { ...rawSettings, ...patch };
@@ -653,16 +656,16 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { ok: true };
       }
-      case 'manager_set': {
+      case 'manager.set': {
         const fields = (args.fields ?? {}) as Record<string, unknown>;
         const known = [...app.providers.keys()];
         const report = updateManagerConfig(MANAGER_FILE, fields, known);
         broadcastState();
         return { text: report };
       }
-      case 'schedule_get':
+      case 'schedule.list':
         return { tasks: loadSchedule(dirname(PROJECTS_FILE)) };
-      case 'schedule_add': {
+      case 'schedule.add': {
         const tasks = loadSchedule(dirname(PROJECTS_FILE));
         const id = `task-${Date.now().toString(36)}`;
         tasks.push({ id, message: String(args.message ?? ''), intervalMinutes: Number(args.intervalMinutes ?? 10), enabled: true });
@@ -670,13 +673,13 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastSchedule();
         return { tasks };
       }
-      case 'schedule_delete': {
+      case 'schedule.delete': {
         const tasks = loadSchedule(dirname(PROJECTS_FILE)).filter((t) => t.id !== String(args.id ?? ''));
         saveSchedule(dirname(PROJECTS_FILE), tasks);
         broadcastSchedule();
         return { tasks };
       }
-      case 'schedule_toggle': {
+      case 'schedule.toggle': {
         const tasks = loadSchedule(dirname(PROJECTS_FILE));
         const task = tasks.find((t) => t.id === String(args.id ?? ''));
         if (task) { task.enabled = !task.enabled; saveSchedule(dirname(PROJECTS_FILE), tasks); }

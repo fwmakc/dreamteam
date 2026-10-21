@@ -3,7 +3,7 @@
  * Клиент протокола serve.ts: один WS на /ws, события рисуются в чат,
  * состояние приходит снапшотами (state) и перерисовывает всё целиком.
  * Команды `/…` уходят типом command (ядро исполняет их так же, как терминал),
- * автодополнение — по словарю из state (completion.commands + панели).
+ * автодополнение — по словарю из state (completion.operations + панели).
  */
 'use strict';
 
@@ -193,7 +193,7 @@
       { key: 'name', label: 'Имя' },
       { key: 'role', label: 'Роль (можно пропустить)' },
     ], (v) => {
-      rpc('agent_create', v)
+      rpc('team.add', v)
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
@@ -204,17 +204,23 @@
       { key: 'provider', label: 'Провайдер', value: a.provider ?? '' },
       { key: 'temperature', label: 'Температура (0–2)', value: a.temperature ?? '' },
       { key: 'prompt', label: 'Промпт', value: a.prompt ?? '' },
+      { key: 'tools', label: `Тулы через запятую (есть: ${(a.tools ?? []).join(', ') || 'нет'})` },
     ], (v) => {
       const fields = {};
-      for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
-      rpc('agent_update', { id: a.id, fields })
-        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
-        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+      for (const [k, val] of Object.entries(v)) if (val !== '' && k !== 'tools') fields[k] = k === 'temperature' ? Number(val) : val;
+      const report = (r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`);
+      const fail = (err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`);
+      const chain = Object.keys(fields).length > 0 ? rpc('team.update', { id: a.id, fields }).then(report).catch(fail) : Promise.resolve();
+      const have = new Set(a.tools ?? []);
+      for (const tool of (v.tools || '').split(',').map((t) => t.trim()).filter(Boolean)) {
+        if (have.has(tool.toLowerCase())) continue;
+        chain.then(() => rpc('team.grant', { agent: a.id, tool }).then(report).catch(fail));
+      }
     });
   }
   function agentDelete(a) {
     if (confirm(`Удалить агента ${a.name}? История останется, но он исчезнет из команды.`)) {
-      rpc('agent_delete', { id: a.id })
+      rpc('team.delete', { id: a.id })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     }
@@ -229,7 +235,7 @@
       { key: 'model', label: 'Модель' },
       { key: 'apiKeyEnv', label: 'Имя переменной с ключом' },
     ], (v) => {
-      rpc('provider_create', { id: v.id, config: v })
+      rpc('provider.add', { id: v.id, config: v })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
@@ -237,7 +243,7 @@
   function providerDelete(p) {
     if (p.isDefault) return;
     if (confirm(`Удалить провайдера ${p.id}?`)) {
-      rpc('provider_delete', { id: p.id })
+      rpc('provider.delete', { id: p.id })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     }
@@ -252,7 +258,7 @@
       { key: 'message', label: 'Задание (уйдёт в чат как сообщение)' },
       { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
     ], (v) => {
-      rpc('schedule_add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
+      rpc('schedule.add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
     scheduleListEl.appendChild(addLi);
@@ -267,10 +273,10 @@
       li.title = `${t.message} — каждые ${t.intervalMinutes} мин`;
       li.querySelector('.del').onclick = (e) => {
         e.stopPropagation();
-        rpc('schedule_delete', { id: t.id })
+        rpc('schedule.delete', { id: t.id })
           .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
       };
-      li.onclick = () => rpc('schedule_toggle', { id: t.id });
+      li.onclick = () => rpc('schedule.toggle', { id: t.id });
       scheduleListEl.appendChild(li);
     }
   }
@@ -297,7 +303,7 @@
     ], (v) => {
       const patch = {};
       for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' ? Number(val) : val;
-      rpc('settings_set', { patch })
+      rpc('settings.set', { patch })
         .then(() => addFeed('<div class="notice">· настройки сохранены</div>'))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
@@ -312,7 +318,7 @@
       { key: 'role', label: 'Роль', value: p.role ?? '' },
       { key: 'about', label: 'О себе', value: p.about ?? '' },
     ], (v) => {
-      rpc('user_set', v)
+      rpc('profile.set', v)
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
@@ -330,7 +336,7 @@
     ], (v) => {
       const fields = {};
       for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
-      rpc('manager_set', { fields })
+      rpc('manager.set', { fields })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
@@ -345,13 +351,13 @@
       { key: 'user', label: 'Пользователь (можно пропустить)' },
       { key: 'port', label: 'Порт (можно пропустить)' },
     ], (v) => {
-      rpc('project_add', v)
+      rpc('project.add', v)
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
   }
   function projectHostDelete(p, h) {
-    rpc('project_host_delete', { id: p.id, name: h.name })
+    rpc('project.host.delete', { id: p.id, name: h.name })
       .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
       .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   }
@@ -656,6 +662,17 @@
         }
         if (!roundActive) rpc('session.open', { n: i + 1 }).catch(() => {});
       };
+      li.ondblclick = () => {
+        if (roundActive) return;
+        openForm(`Переименовать «${esc(s.title)}»`, [
+          { key: 'name', label: 'Новое имя (пусто — менеджер придумает)', value: s.title },
+        ], (v) => {
+          rpc('session.open', { n: i + 1 })
+            .then(() => rpc('session.rename', { name: v.name }))
+            .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+            .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+        });
+      };
       sessionsEl.appendChild(li);
     });
   }
@@ -761,12 +778,26 @@
         li.title = 'Двойной клик — удалить проект целиком · ✕ — удалить сервер';
         li.innerHTML =
           `<span>${esc(p.id)}</span><span class="meta">${esc(h.name)}: ${esc(h.host)}</span>` +
+          '<span class="del" title="Добавить сервер в проект">＋</span>' +
           '<span class="del" title="Удалить сервер">✕</span>';
-        li.querySelector('.del').onclick = (e) => {
+        const btns = li.querySelectorAll('.del');
+        btns[0].onclick = (e) => {
+          e.stopPropagation();
+          if (roundActive) return;
+          openForm(`Сервер проекта «${esc(p.id)}»`, [
+            { key: 'hostName', label: 'Имя сервера (напр. prod)' },
+            { key: 'host', label: 'Хост (адрес)' },
+            { key: 'user', label: 'Пользователь (можно пропустить)' },
+            { key: 'port', label: 'Порт (можно пропустить)' },
+          ], (v) => rpc('project.host.add', { id: p.id, ...v })
+            .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+            .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`)));
+        };
+        btns[1].onclick = (e) => {
           e.stopPropagation();
           if (!roundActive) projectHostDelete(p, h);
         };
-        li.ondblclick = () => { if (!roundActive) rpc('project_delete', { id: p.id }); };
+        li.ondblclick = () => { if (!roundActive) rpc('project.delete', { id: p.id }); };
         projectsEl.appendChild(li);
       }
     }
@@ -804,7 +835,7 @@
   function completionData() {
     if (!state) return null;
     return {
-      commands: state.completion?.commands ?? [],
+      operations: state.completion?.operations ?? [],
       sessions: state.sessions ?? [],
       team: state.team ?? [],
       providerIds: (state.providers ?? []).map((p) => p.id),
@@ -825,38 +856,49 @@
 
   /** Варианты аргументов после `/команда `; null — команда без подсказок. */
   function argItems(cmdName, d) {
-    switch (norm(cmdName)) {
-      case '/session':
-      case '/delete':
-        return d.sessions.map((s, i) => ({ label: String(i + 1), hint: s.title, insert: (i + 1) + ' ' }));
-      case '/add':
-      case '/out':
-        return [
-          ...d.team.map((a, i) => ({ label: String(i + 1), hint: a.name, insert: (i + 1) + ' ' })),
-          ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
-        ];
-      case '/memory':
-        return [
-          ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
-          { label: 'shared', hint: 'общая память', insert: 'shared ' },
-        ];
-      case '/provider':
-        return d.providerIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
-      case '/grant':
-        return d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' }));
-      case '/agent':
-        return [
-          { label: 'add', hint: '<id> <Имя> [роль]', insert: 'add ' },
-          { label: 'set', hint: '<id> поле=значение', insert: 'set ' },
-        ];
-      case '/project':
-        return [
-          { label: 'add', hint: '<id>; <имя>: хост', insert: 'add ' },
-          { label: 'host', hint: '<проект> <имя>=<хост>', insert: 'host ' },
-        ];
-      default:
-        return null;
+    const parts = cmdName.slice(1).toLowerCase().split(/\s+/).filter(Boolean);
+    const group = parts[0] || '';
+    const ops = d.operations || [];
+    const verbs = [...new Set(ops.filter((o) => o.cmd.startsWith('/' + group + ' ')).map((o) => o.cmd.split(' ')[1]).filter(Boolean))];
+    const implicit = ops.find((o) => o.cmd === '/' + group);
+    if (parts.length === 1) {
+      if (implicit && verbs.length === 0) return argHintItems(implicit, 0, d);
+      return verbs.map((v) => ({ label: v, hint: '', insert: v + ' ' }));
     }
+    const verb = parts[1] || '';
+    const op = ops.find((o) => o.cmd === '/' + group + ' ' + verb) || implicit;
+    if (!op) return null;
+    const typed = Math.max(0, parts.length - 1 - (verb && !implicit ? 1 : 0));
+    return argHintItems(op, typed, d);
+  }
+
+  /** Значения аргумента по подсказке манифеста: номера, имена, id, shared. */
+  function argHintItems(op, argPos, d) {
+    const argTokens = (op.args || '').split(' ');
+    const m = /\[([^\]]+)\]/.exec(argTokens[Math.min(argPos, argTokens.length - 1)] || '');
+    const argName = m ? m[1] : '';
+    if (argName === 'номер' && op.cmd.includes('session')) {
+      return d.sessions.map((s, i) => ({ label: String(i + 1), hint: s.title, insert: (i + 1) + ' ' }));
+    }
+    if (argName === 'номер' || argName === 'имя|номер') {
+      return [
+        ...d.team.map((a, i) => ({ label: String(i + 1), hint: a.name, insert: (i + 1) + ' ' })),
+        ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
+      ];
+    }
+    if (argName === 'кого|shared') {
+      return [
+        ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
+        { label: 'shared', hint: 'общая память', insert: 'shared ' },
+      ];
+    }
+    if (argName === 'id' && op.cmd.startsWith('/provider')) {
+      return d.providerIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
+    }
+    if (argName === 'тул') {
+      return ['files', 'shell', 'ssh', 'look', 'image'].map((t) => ({ label: t, hint: '', insert: t + ' ' }));
+    }
+    return null;
   }
 
   function updateHints() {
@@ -1074,12 +1116,15 @@
   };
   secAdd('team').onclick = () => { if (!roundActive) openAgentCreate(); };
   secAdd('providers').onclick = () => { if (!roundActive) providerCreate(); };
-  secAdd('schedule').onclick = () => { if (!roundActive) { send({ type: 'schedule_get' }); openForm('Задача по расписанию', [
+  function refreshSchedule() {
+    rpc('schedule.list').then((r) => { state.scheduleTasks = r.tasks; renderSchedule(); }).catch(() => {});
+  }
+  secAdd('schedule').onclick = () => { if (!roundActive) { refreshSchedule(); openForm('Задача по расписанию', [
     { key: 'message', label: 'Задание (уйдёт в чат)' },
     { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
   ], (v) => {
-    rpc('schedule_add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
-      .then(() => send({ type: 'schedule_get' }))
+    rpc('schedule.add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
+      .then(() => refreshSchedule())
       .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   }); } };
   secAdd('projects').onclick = () => { if (!roundActive) projectAdd(); };
@@ -1115,7 +1160,7 @@
   btnImportHome.onclick = () => pickImportFile(true);
   btnImportSession.onclick = () => pickImportFile(false);
   btnAuto.onclick = () => { if (!roundActive) send({ type: 'command', text: engine_autoToggle() }); };
-  function engine_autoToggle() { return state?.auto?.mode ? '/auto off' : '/auto'; }
+  function engine_autoToggle() { return state?.auto?.mode ? '/auto off' : '/auto on'; }
   btnAttach.onclick = () => attachFile.click();
   attachFile.onchange = () => {
     const f = attachFile.files[0];

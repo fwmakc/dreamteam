@@ -106,7 +106,7 @@ async function waitFor(what: string, probe: (s: string) => boolean, ms: number):
 }
 
 // ждём готовый экран: подсказки (статичная зона) и промпт
-await waitFor('экран готов', (s) => s.includes('/help — команды') && s.includes('Ты >'), 30000);
+await waitFor('экран готов', (s) => s.includes('/help — операции') && s.includes('Ты >'), 30000);
 check('tui: альтернативный буфер включён', out.includes('\x1b[?1049h'), out.slice(0, 120));
 check('tui: bracketed paste включён', out.includes('\x1b[?2004h'));
 // Мышиные режимы (\x1b[?1000h/1006h) ConPTY перехватывает и в поток не пропускает —
@@ -120,7 +120,7 @@ await write('\x1b[6~');
 // передать его в поток до первого flush. Надёжны только статичные зоны.
 // Scroll-region (\x1b[top;bot r) ConPTY тоже перехватывает — см. tmp-probe-screen.ts.
 check('tui: промпт редактора', out.includes('Ты >'), out.slice(-200));
-check('tui: подсказки команд', out.includes('/help — команды'), out.slice(-400));
+check('tui: подсказки операций', out.includes('/help — операции'), out.slice(-400));
 
 // Пустой разговор на старте: менеджер-консьерж здоровается сам (без действий).
 check(

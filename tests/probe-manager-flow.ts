@@ -123,7 +123,7 @@ function lastManagerMessage(): string {
   check('снимок: разговоры с номерами и текущим', (req.user?.includes('1. ') && req.user?.includes('(текущий)')) ?? false);
   check('снимок: без проектов блока нет', !req.user?.includes('Проекты (реестр серверов для ssh)'), String(req.user?.slice(0, 80)));
   check('снимок: руководитель из user.json', req.user?.includes('Руководитель: Пользователь') ?? false);
-  check('снимок: slash-команды со справкой', req.user?.includes('/new — новый разговор') ?? false, req.user);
+  check('снимок: операции манифеста со справкой', req.user?.includes('/session new — новый разговор') ?? false, req.user);
   check('снимок: история — сама просьба уже в ней', (req.user?.includes('Последние сообщения') && req.user?.includes('@менеджер докладывай')) ?? false, req.user);
   check('снимок: просьба дословно', req.user?.includes('Просьба руководителя: «@менеджер докладывай»') ?? false, req.user);
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue';
 import type {
-  AgentInfo, ChatMessage, CommandSpec, ProjectHost, ProjectInfo,
+  AgentInfo, ChatMessage, OpHint, ProjectHost, ProjectInfo,
   ProviderInfo, ScheduleTaskInfo, SessionMeta,
 } from './types';
 import {
@@ -19,7 +19,7 @@ const providers = computed(() => (snapshot.providers ?? []) as ProviderInfo[]);
 const projects = computed(() => (snapshot.projects ?? []) as ProjectInfo[]);
 const scheduleTasks = computed(() => (snapshot.scheduleTasks ?? []) as ScheduleTaskInfo[]);
 const manager = computed(() => snapshot.manager);
-const commands = computed(() => (snapshot.completion?.commands ?? []) as CommandSpec[]);
+const commands = computed(() => (snapshot.completion?.operations ?? []) as OpHint[]);
 const autoMode = computed(() => Boolean(snapshot.auto?.mode));
 const autoLeft = computed(() => snapshot.auto?.left ?? 0);
 const statusVisible = computed(() => roundActive.value || busyCount.value > 0);
@@ -123,7 +123,7 @@ function openAgentCreate(): void {
     { key: 'id', label: 'id (латиница, цифры, -/_)' },
     { key: 'name', label: 'Имя' },
     { key: 'role', label: 'Роль (можно пропустить)' },
-  ], (v) => rpcReport(rpc('agent_create', v)));
+  ], (v) => rpcReport(rpc('team.add', v)));
 }
 function openAgentSettings(a: AgentInfo): void {
   openForm(`Настройки агента ${a.name}`, [
@@ -131,15 +131,22 @@ function openAgentSettings(a: AgentInfo): void {
     { key: 'provider', label: 'Провайдер', value: a.provider ?? '' },
     { key: 'temperature', label: 'Температура (0–2)', value: a.temperature != null ? String(a.temperature) : '' },
     { key: 'prompt', label: 'Промпт', value: a.prompt ?? '' },
+    { key: 'tools', label: `Тулы через запятую (есть: ${(a.tools ?? []).join(', ') || 'нет'})` },
   ], (v) => {
     const fields: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
-    rpcReport(rpc('agent_update', { id: a.id, fields }));
+    for (const [k, val] of Object.entries(v)) if (val !== '' && k !== 'tools') fields[k] = k === 'temperature' ? Number(val) : val;
+    if (Object.keys(fields).length > 0) rpcReport(rpc('team.update', { id: a.id, fields }));
+    // новые тула выдаём по одному (отзыв — руками в agents.json или словом менеджеру)
+    const have = new Set(a.tools ?? []);
+    for (const tool of (v.tools ?? '').split(',').map((t) => t.trim()).filter(Boolean)) {
+      if (have.has(tool.toLowerCase())) continue;
+      rpcReport(rpc('team.grant', { agent: a.id, tool }));
+    }
   });
 }
 function agentDelete(a: AgentInfo): void {
   if (!window.confirm(`Удалить агента ${a.name}? История останется, но он исчезнет из команды.`)) return;
-  rpcReport(rpc('agent_delete', { id: a.id }));
+  rpcReport(rpc('team.delete', { id: a.id }));
 }
 function toggleChat(a: AgentInfo): void {
   if (roundActive.value) return;
@@ -157,12 +164,12 @@ function providerCreate(): void {
     { key: 'baseUrl', label: 'baseUrl' },
     { key: 'model', label: 'Модель' },
     { key: 'apiKeyEnv', label: 'Имя переменной с ключом' },
-  ], (v) => rpcReport(rpc('provider_create', { id: v.id, config: v })));
+  ], (v) => rpcReport(rpc('provider.add', { id: v.id, config: v })));
 }
 function providerDelete(p: ProviderInfo): void {
   if (p.isDefault) return;
   if (!window.confirm(`Удалить провайдера ${p.id}?`)) return;
-  rpcReport(rpc('provider_delete', { id: p.id }));
+  rpcReport(rpc('provider.delete', { id: p.id }));
 }
 function setProvider(p: ProviderInfo): void {
   if (roundActive.value || p.isDefault) return;
@@ -190,7 +197,7 @@ function openSettingsForm(): void {
   ], (v) => {
     const patch: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' ? Number(val) : val;
-    rpc('settings_set', { patch })
+    rpc('settings.set', { patch })
       .then(() => addFeed('notice', '· настройки сохранены'))
       .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
   });
@@ -202,7 +209,7 @@ function openUserProfileForm(): void {
     { key: 'name', label: 'Имя', value: p.name ?? '' },
     { key: 'role', label: 'Роль', value: p.role ?? '' },
     { key: 'about', label: 'О себе', value: p.about ?? '' },
-  ], (v) => rpcReport(rpc('user_set', v)));
+  ], (v) => rpcReport(rpc('profile.set', v)));
 }
 function openManagerForm(): void {
   const mgr = manager.value;
@@ -215,7 +222,7 @@ function openManagerForm(): void {
   ], (v) => {
     const fields: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
-    rpcReport(rpc('manager_set', { fields }));
+    rpcReport(rpc('manager.set', { fields }));
   });
 }
 
@@ -227,38 +234,63 @@ function projectAdd(): void {
     { key: 'host', label: 'Хост (адрес)' },
     { key: 'user', label: 'Пользователь (можно пропустить)' },
     { key: 'port', label: 'Порт (можно пропустить)' },
-  ], (v) => rpcReport(rpc('project_add', v)));
+  ], (v) => rpcReport(rpc('project.add', v)));
+}
+function projectHostAdd(p: ProjectInfo): void {
+  if (roundActive.value) return;
+  openForm(`Сервер проекта «${p.id}»`, [
+    { key: 'hostName', label: 'Имя сервера (напр. prod)' },
+    { key: 'host', label: 'Хост (адрес)' },
+    { key: 'user', label: 'Пользователь (можно пропустить)' },
+    { key: 'port', label: 'Порт (можно пропустить)' },
+  ], (v) => rpcReport(rpc('project.host.add', { id: p.id, ...v })));
 }
 function projectHostDelete(p: ProjectInfo, h: ProjectHost): void {
   if (roundActive.value) return;
-  rpcReport(rpc('project_host_delete', { id: p.id, name: h.name }));
+  rpcReport(rpc('project.host.delete', { id: p.id, name: h.name }));
 }
 function projectDelete(p: ProjectInfo): void {
   if (roundActive.value) return;
-  rpc('project_delete', { id: p.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
+  rpc('project.delete', { id: p.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 
 // ── расписание ───────────────────────────────────────────────────────────────
+function refreshSchedule(): Promise<void> {
+  return rpc<{ tasks: ScheduleTaskInfo[] }>('schedule.list')
+    .then((r) => { snapshot.scheduleTasks = r.tasks; })
+    .catch(() => {});
+}
 function openScheduleForm(fromSection: boolean): void {
   if (roundActive.value) return;
-  if (fromSection) send({ type: 'schedule_get' });
+  if (fromSection) void refreshSchedule();
   openForm('Задача по расписанию', [
     { key: 'message', label: 'Задание (уйдёт в чат как сообщение)' },
     { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
   ], (v) => {
-    rpc('schedule_add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
-      .then(() => { if (fromSection) send({ type: 'schedule_get' }); })
+    rpc('schedule.add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
+      .then(() => { if (fromSection) void refreshSchedule(); })
       .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
   });
 }
 function scheduleToggle(t: ScheduleTaskInfo): void {
-  rpc('schedule_toggle', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
+  rpc('schedule.toggle', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 function scheduleDelete(t: ScheduleTaskInfo): void {
-  rpc('schedule_delete', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
+  rpc('schedule.delete', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 
 // ── сессии ───────────────────────────────────────────────────────────────────
+function openSessionRename(i: number): void {
+  if (roundActive.value) return;
+  const meta = sessions.value[i - 1];
+  if (!meta) return;
+  openForm(`Переименовать «${meta.title}»`, [
+    { key: 'name', label: 'Новое имя (пусто — менеджер придумает)', value: meta.title },
+  ], (v) => {
+    // session.rename правит ТЕКУЩИЙ разговор — сначала открываем выбранный
+    rpcReport(rpc('session.open', { n: i }).then(() => rpc('session.rename', { name: v.name })));
+  });
+}
 function newSession(): void {
   if (roundActive.value) return;
   roundActive.value = true;
@@ -340,7 +372,7 @@ async function onAttachFile(e: Event): Promise<void> {
 // ── авто-режим и статус ──────────────────────────────────────────────────────
 function toggleAuto(): void {
   if (roundActive.value) return;
-  send({ type: 'command', text: autoMode.value ? '/auto off' : '/auto' });
+  send({ type: 'command', text: autoMode.value ? '/auto off' : '/auto on' });
 }
 function abortRound(): void {
   send({ type: 'abort' });
@@ -390,7 +422,7 @@ const hintActive = computed(() => hint.items.length > 0);
 const completionData = computed(() => {
   if (!snapshot.completion) return null;
   return {
-    commands: commands.value,
+    operations: commands.value,
     sessions: sessions.value,
     team: team.value,
     providerIds: providers.value.map((p) => p.id),
@@ -407,42 +439,6 @@ function mentionItems(d: CompletionData): HintItem[] {
       .map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
     { label: 'session', hint: 'конспект другого разговора', insert: 'session ' },
   ];
-}
-
-/** Варианты аргументов после `/команда `; null — команда без подсказок. */
-function argItems(cmdName: string, d: CompletionData): HintItem[] | null {
-  switch (norm(cmdName)) {
-    case '/session':
-    case '/delete':
-      return d.sessions.map((s, i) => ({ label: String(i + 1), hint: s.title, insert: (i + 1) + ' ' }));
-    case '/add':
-    case '/out':
-      return [
-        ...d.team.map((a, i) => ({ label: String(i + 1), hint: a.name, insert: (i + 1) + ' ' })),
-        ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
-      ];
-    case '/memory':
-      return [
-        ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
-        { label: 'shared', hint: 'общая память', insert: 'shared ' },
-      ];
-    case '/provider':
-      return d.providerIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
-    case '/grant':
-      return d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' }));
-    case '/agent':
-      return [
-        { label: 'add', hint: '<id> <Имя> [роль]', insert: 'add ' },
-        { label: 'set', hint: '<id> поле=значение', insert: 'set ' },
-      ];
-    case '/project':
-      return [
-        { label: 'add', hint: '<id>; <имя>: хост', insert: 'add ' },
-        { label: 'host', hint: '<проект> <имя>=<хост>', insert: 'host ' },
-      ];
-    default:
-      return null;
-  }
 }
 
 function updateHints(): void {
@@ -469,12 +465,12 @@ function updateHints(): void {
     return;
   }
 
-  // /… — команды и их аргументы
+  // /… — операции и их аргументы
   if (before.startsWith('/')) {
     const sp = before.indexOf(' ');
     if (sp === -1) {
       const frag = before.slice(1);
-      const items = d.commands
+      const items = d.operations
         .filter((c) => norm(c.cmd).startsWith(norm('/' + frag)))
         .map((c) => ({
           label: c.cmd + (c.args ? ' ' + c.args : ''),
@@ -509,6 +505,54 @@ function hideHints(): void {
   hint.kind = '';
   hint.items = [];
   hint.sel = 0;
+}
+
+/** Варианты после группы: глаголы операций или значения аргумента (hint манифеста). */
+function argItems(cmdName: string, d: CompletionData): HintItem[] | null {
+  const parts = cmdName.slice(1).toLowerCase().split(/\s+/).filter(Boolean);
+  const group = parts[0] ?? '';
+  const verbs = [...new Set(d.operations
+    .filter((o) => o.cmd.startsWith('/' + group + ' '))
+    .map((o) => o.cmd.split(' ')[1] ?? ''))].filter(Boolean);
+  const implicit = d.operations.find((o) => o.cmd === '/' + group);
+  if (parts.length === 1) {
+    if (implicit && verbs.length === 0) return argHintItems(implicit, 0, d);
+    return verbs.map((v) => ({ label: v, hint: '', insert: v + ' ' }));
+  }
+  const verb = parts[1] ?? '';
+  const op = d.operations.find((o) => o.cmd === `/${group} ${verb}`) ?? implicit;
+  if (!op) return null;
+  const typed = parts.length - (verb && !implicit || op.cmd !== '/' + group ? 1 : 0) - 1;
+  return argHintItems(op, Math.max(0, typed), d);
+}
+
+/** Значения аргумента по подсказке из манифеста: номера, имена, id, shared. */
+function argHintItems(op: OpHint, argPos: number, d: CompletionData): HintItem[] | null {
+  const m = /\[([^\]]+)\]/.exec((op.args ?? '').split(' ')[Math.min(argPos, (op.args ?? '').split(' ').length - 1)] ?? '');
+  const argName = m?.[1] ?? '';
+  if (argName === 'номер' && op.cmd.includes('session')) {
+    return d.sessions.map((s, i) => ({ label: String(i + 1), hint: s.title, insert: (i + 1) + ' ' }));
+  }
+  if (argName === 'номер' || argName === 'имя|номер') {
+    return [
+      ...d.team.map((a, i) => ({ label: String(i + 1), hint: a.name, insert: (i + 1) + ' ' })),
+      ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
+      ...(argName === 'имя|номер' ? [] : []),
+    ];
+  }
+  if (argName === 'кого|shared') {
+    return [
+      ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
+      { label: 'shared', hint: 'общая память', insert: 'shared ' },
+    ];
+  }
+  if (argName === 'id' && op.cmd.startsWith('/provider')) {
+    return d.providerIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
+  }
+  if (argName === 'тул') {
+    return ['files', 'shell', 'ssh', 'look', 'image'].map((t) => ({ label: t, hint: '', insert: t + ' ' }));
+  }
+  return null;
 }
 
 /** Подсказка команды: голова до первого пробела выделяется .cmd, хвост — обычным. */
@@ -631,6 +675,7 @@ onMounted(connectWs);
             :class="{ active: s.id === currentSessionId }"
             :title="`${s.title}\nid: ${s.id}\nсообщений: ${s.count}\nсоздан: ${fmtDate(s.createdAt)}\nпоследнее сообщение: ${fmtDate(s.updatedAt)}`"
             @click="openSession(i + 1)"
+            @dblclick="openSessionRename(i + 1)"
           >
             <div class="content">
               <div class="sess-main"><span>{{ s.title }}</span></div>
@@ -736,6 +781,7 @@ onMounted(connectWs);
             @dblclick="projectDelete(ph.p)"
           >
             <span>{{ ph.p.id }}</span><span class="meta">{{ ph.h.name }}: {{ ph.h.host }}</span>
+            <span class="del" title="Добавить сервер в проект" @click.stop="projectHostAdd(ph.p)">＋</span>
             <span class="del" title="Удалить сервер" @click.stop="projectHostDelete(ph.p, ph.h)">✕</span>
           </li>
         </ul>

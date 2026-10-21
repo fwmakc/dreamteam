@@ -194,14 +194,14 @@ const agentsFile = join(dir, 'agents.json');
     history: [{ authorId: 'user', authorName: 'Хозяин', text: 'привет', ts: 1 }],
     request: '@менеджер, позови Глеба',
     projects: [{ id: 'shop', hosts: ['prod', 'staging'], agents: ['gleb'] }],
-    commands: [{ cmd: '/new', help: 'новый разговор' }, { cmd: '/session', args: '<номер>', help: 'открыть разговор' }],
+    operations: [{ cmd: '/session new', help: 'новый разговор' }, { cmd: '/session open', args: '<номер>', help: 'открыть разговор' }],
   });
   check('стейт: ростер с провайдером и temp', input.includes('katya — Катя (дизайнер), провайдер: claude, temp 0.3'), input);
   check('стейт: тула агента в ростере', input.includes('тула: files, look') && input.includes('тула нет'), input);
   check('стейт: состав чата', input.includes('В этом чате: katya'));
   check('стейт: список разговоров с номерами и текущим', input.includes('1. Текущий — 4 сообщ. (текущий)') && input.includes('2. Прошлый — 9 сообщ.'), input);
   check('стейт: проект с серверами и назначенцами', input.includes('shop: серверы prod, staging; агенты: gleb'), input);
-  check('стейт: slash-команды с аргументами', input.includes('/session <номер> — открыть разговор'), input);
+  check('стейт: операции манифеста с аргументами', input.includes('/session open <номер>'), input);
   check('стейт: просьба руководителя', input.includes('Просьба руководителя: «@менеджер, позови Глеба»'));
   check('стейт: имя и краткое содержание разговора', input.includes('имя: «Текущий»') && input.includes('Краткое содержание разговора:'), input.slice(-400));
 }

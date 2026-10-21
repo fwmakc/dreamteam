@@ -102,7 +102,7 @@ async function main(): Promise<void> {
   check('старт: одна сессия на диске', readSessions().length === 1);
 
   // ── 1. новая сессия ──────────────────────────────────────────────────────
-  await type('/new');
+  await type('/session new');
   const ok1 = await waitDisk(() => readSessions().length === 2, 'второй файл сессии');
   // приветствие менеджера пишется раундом чуть позже самого файла — дожидаемся
   const fresh = ok1 ? readSessions().slice().sort((a: any, b: any) => b.createdAt - a.createdAt)[0] : null;
@@ -116,23 +116,23 @@ async function main(): Promise<void> {
   const freshId = freshFull?.id as string;
 
   // ── 2. агент-юрист ───────────────────────────────────────────────────────
-  await type('/agent add yurist Юрист право и договоры');
+  await type('/team add yurist Юрист право и договоры');
   await waitDisk(() => readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист в agents.json');
   const yurist = readJson(agentsFile).find((a: any) => a.id === 'yurist');
-  check('2: /agent add — юрист на диске с дефолтами',
+  check('2: /team add — юрист на диске с дефолтами',
     yurist?.name === 'Юрист' && yurist?.emoji === '🤖' && String(yurist?.prompt).startsWith('Ты — Юрист'),
     JSON.stringify(yurist).slice(0, 160));
 
   // ── 3. позвать в сессию ──────────────────────────────────────────────────
-  await type('/add Юрист');
+  await type('/chat add Юрист');
   await waitDisk(() => (readSessions().find((s) => s.id === freshId)?.participants ?? []).includes('yurist'), 'юрист в participants');
-  check('3: /add — на диске participants = менеджер + юрист',
+  check('3: /chat add — на диске participants = менеджер + юрист',
     (readSessions().find((s) => s.id === freshId)?.participants ?? []).includes('yurist'));
 
   // ── 4. переименовать ─────────────────────────────────────────────────────
-  await type('/rename Юридический вопрос');
+  await type('/session rename Юридический вопрос');
   await waitDisk(() => readSessions().find((s) => s.id === freshId)?.title === 'Юридический вопрос', 'новое имя на диске');
-  check('4: /rename — title на диске изменился',
+  check('4: /session rename — title на диске изменился',
     readSessions().find((s) => s.id === freshId)?.title === 'Юридический вопрос');
 
   // ── 5. несколько сообщений ───────────────────────────────────────────────
@@ -154,10 +154,10 @@ async function main(): Promise<void> {
 
   // ── 6. экспорт ───────────────────────────────────────────────────────────
   // /export без номера — архив ДОМА; архив разговора — только с номером
-  await type('/export 1');
+  await type('/session export 1');
   await waitDisk(() => existsSync(join(proj, `dt-session-${freshId}.zip`)), 'zip экспорта в рабочей папке');
   const zipPath = join(proj, `dt-session-${freshId}.zip`);
-  check('6: /export — архив на диске', existsSync(zipPath));
+  check('6: /session export — архив на диске', existsSync(zipPath));
   const zip = new AdmZip(zipPath);
   const exported = JSON.parse(zip.readAsText('session.json'));
   check('6: внутри архива тот разговор (имя, юрист, участники)',
@@ -165,28 +165,28 @@ async function main(): Promise<void> {
     exported.messages.length === msgs.length);
 
   // ── 7. вывести из чата и удалить разговор ────────────────────────────────
-  await type('/out Юрист');
+  await type('/chat remove Юрист');
   await waitDisk(() => !(readSessions().find((s) => s.id === freshId)?.participants ?? []).includes('yurist'), 'юрист выведен из чата');
-  check('7: /out — юриста нет в participants на диске',
+  check('7: /chat remove — юриста нет в participants на диске',
     !(readSessions().find((s) => s.id === freshId)?.participants ?? []).includes('yurist'));
-  await type('/session 2'); // уходим из удаляемого (свежий — №1)
+  await type('/session open 2'); // уходим из удаляемого (свежий — №1)
   await wait(600);
-  await type('/delete 1');
+  await type('/session delete 1');
   await waitDisk(() => readSessions().length === 1, 'файл сессии удалён');
-  check('7: /delete — удалённый разговор исчез с диска',
+  check('7: /session delete — удалённый разговор исчез с диска',
     readSessions().length === 1 && readSessions()[0].id !== freshId);
 
   // ── 8. импорт ────────────────────────────────────────────────────────────
-  await type(`/import ${zipPath}`);
+  await type(`/session import ${zipPath}`);
   await waitDisk(() => readSessions().length === 2, 'сессия вернулась из архива');
   const restored = readSessions().find((s) => s.title === 'Юридический вопрос');
   check('8: /import — разговор вернулся «как новый» (другой id, содержимое на месте)',
     Boolean(restored) && restored.id !== freshId && (restored.participants ?? []).includes('yurist'));
 
   // ── 9. снова удалить ─────────────────────────────────────────────────────
-  await type('/session 2'); // импортированный свежее — №1, уходим на №2
+  await type('/session open 2'); // импортированный свежее — №1, уходим на №2
   await wait(600);
-  await type('/delete 1');
+  await type('/session delete 1');
   await waitDisk(() => readSessions().length === 1, 'импортированная сессия удалена');
   check('9: песочница в исходном состоянии',
     readSessions().length === 1 && readSessions()[0].id !== restored.id);

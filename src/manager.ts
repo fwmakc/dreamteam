@@ -159,8 +159,8 @@ export interface ManagerContext {
   request: string;
   /** Проекты из projects.json: серверы и кто назначен (для тула ssh) */
   projects?: ManagerProjectInfo[];
-  /** Slash-команды руководителя — из того же списка, что /help */
-  commands?: { cmd: string; args?: string; help: string }[];
+  /** Операции руководителя — из манифеста (operations.ts), как в /help */
+  operations?: { cmd: string; args?: string; help: string }[];
 }
 
 /** Пользовательская часть запроса: состояние переговорки + история + просьба */
@@ -191,7 +191,7 @@ export function managerStateInput(ctx: ManagerContext): string {
       return `- ${p.id}: серверы ${hosts}${who}`;
     })
     .join('\n');
-  const commands = (ctx.commands ?? []).map((c) => `${c.cmd}${c.args ? ` ${c.args}` : ''} — ${c.help}`).join('\n');
+  const ops = (ctx.operations ?? []).map((c) => `${c.cmd}${c.args ? ` ${c.args}` : ''} — ${c.help}`).join('\n');
   const history = ctx.history.length
     ? `\nПоследние сообщения:\n${ctx.history.map((m) => `${m.authorName}: ${m.text}`).join('\n')}\n`
     : '';
@@ -202,7 +202,7 @@ export function managerStateInput(ctx: ManagerContext): string {
     `Текущий разговор: ${ctx.currentSessionId} (имя: «${ctx.sessionTitle}»)\n` +
     (ctx.digest ? `Краткое содержание разговора:\n${ctx.digest}\n` : '') +
     `Руководитель: ${ctx.userName}\n` +
-    (commands ? `Slash-команды руководителя (сам ты их не исполняешь, но можешь подсказать):\n${commands}\n` : '') +
+    (ops ? `Операции руководителя (сам ты их не исполняешь, но можешь подсказать):\n${ops}\n` : '') +
     `${history}\nПросьба руководителя: «${ctx.request}»`
   );
 }
@@ -373,7 +373,7 @@ export function mergeTeamAgents(file: string, incoming: Agent[]): number {
   return added;
 }
 
-/** Удаление участника по id (для /agent delete и GUI). Валидация+откат — как везде. */
+/** Удаление участника по id (для /team delete и GUI). Валидация+откат — как везде. */
 export function removeTeamAgent(file: string, id: string): string {
   const fid = String(id ?? '').trim();
   if (!fid) throw new Error('не указан id участника');

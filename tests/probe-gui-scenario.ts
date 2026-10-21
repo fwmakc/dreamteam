@@ -137,9 +137,9 @@ try {
     JSON.stringify(fresh?.messages?.[0] ?? null).slice(0, 120));
 
   // ── 2. агент-юрист ───────────────────────────────────────────────────────
-  client.send({ type: 'rpc', id: rpcId(), method: 'agent_create', args: { id: 'yurist', name: 'Юрист', role: 'право и договоры' } });
+  client.send({ type: 'rpc', id: rpcId(), method: 'team.add', args: { id: 'yurist', name: 'Юрист', role: 'право и договоры' } });
   const r2 = await client.next<{ result: { text: string } }>((m) => m.type === 'rpc_result' && m.id === `c${rpc}`);
-  check('2: agent_create — отчёт о добавлении', String(r2.result.text).includes('Юрист'));
+  check('2: team.add — отчёт о добавлении', String(r2.result.text).includes('Юрист'));
   await waitDisk(() => existsSync(agentsFile) && readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист в agents.json');
   const yurist = readJson(agentsFile).find((a: any) => a.id === 'yurist');
   check('2: юрист на диске с дефолтами (эмодзи/цвет/автопромпт)',
@@ -155,7 +155,7 @@ try {
   check('3: на диске participants = менеджер + юрист', parts.includes('yurist') && parts.includes('manager'), JSON.stringify(parts));
 
   // ── 4. переименовать ─────────────────────────────────────────────────────
-  client.send({ type: 'command', text: '/rename Юридический вопрос' });
+  client.send({ type: 'command', text: '/session rename Юридический вопрос' });
   await waitDisk(() => readSessions().find((s) => s.id === st1.session.id)?.title === 'Юридический вопрос', 'новое имя на диске');
   check('4: title на диске изменился', readSessions().find((s) => s.id === st1.session.id).title === 'Юридический вопрос');
 
@@ -192,9 +192,9 @@ try {
   // ── 7. удалить агента и сессию ───────────────────────────────────────────
   client.send({ type: 'rpc', id: rpcId(), method: 'session.open', args: { n: 2 } }); // уходим из удаляемого
   await client.next((m) => m.type === 'session_opened');
-  client.send({ type: 'rpc', id: rpcId(), method: 'agent_delete', args: { id: 'yurist' } });
+  client.send({ type: 'rpc', id: rpcId(), method: 'team.delete', args: { id: 'yurist' } });
   const r7a = await client.next<{ result: { text: string } }>((m) => m.type === 'rpc_result' && m.id === `c${rpc}`);
-  check('7: agent_delete — отчёт', String(r7a.result.text).toLowerCase().includes('юрист'));
+  check('7: team.delete — отчёт', String(r7a.result.text).toLowerCase().includes('юрист'));
   await waitDisk(() => !readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист удалён из agents.json');
   check('7: юриста нет на диске', !readJson(agentsFile).some((a: any) => a.id === 'yurist'));
   const deletedId = st1.session.id;
@@ -217,7 +217,7 @@ try {
     readJson(agentsFile).filter((a: any) => a.id === 'yurist').length === 1);
 
   // ── 9. снова удалить ─────────────────────────────────────────────────────
-  client.send({ type: 'rpc', id: rpcId(), method: 'agent_delete', args: { id: 'yurist' } });
+  client.send({ type: 'rpc', id: rpcId(), method: 'team.delete', args: { id: 'yurist' } });
   await client.next<{ result: { text: string } }>((m) => m.type === 'rpc_result' && m.id === `c${rpc}`);
   await waitDisk(() => !readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист снова удалён');
   // текущим делаем исходный разговор, потом удаляем импортированный (он свежее — №1)

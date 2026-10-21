@@ -127,7 +127,7 @@ dump('сразу после запуска (без ввода)');
 writeFileSync('C:/tmp/dt-startup-1.txt', vt.lines().join('\n'), 'utf8');
 check('старт: промпт внизу', (vt.lines()[27] ?? '').includes('Ты >'), JSON.stringify(vt.lines()[27]));
 check('старт: хвост истории в панели', /\d{2}:\d{2}:\d{2}/.test(pane()), pane().slice(-300));
-check('старт: статичные подсказки', hints().includes('/help — команды'), hints());
+check('старт: статичные подсказки', hints().includes('/help — операции'), hints());
 check('старт: строка «Продолжаю разговор»', pane().includes('Продолжаю разговор'), pane().slice(-200));
 const paneBefore = pane();
 

@@ -6,7 +6,8 @@ import { loadTeam } from './agents.js';
 import { managerAsAgent } from './manager.js';
 import { agentToolIds } from './tools-api.js';
 import { loadToolsConfig, type ToolsConfig } from './actions.js';
-import { COMMANDS, HintPanel, MentionPicker, hintRowsFor, makeCompleter, type CompletionContext } from './completion.js';
+import { HintPanel, MentionPicker, hintRowsFor, makeCompleter, type CompletionContext } from './completion.js';
+import { OPERATIONS, operationArgs, operationCommand } from './core/operations.js';
 import { Editor } from './editor.js';
 import { Screen } from './screen.js';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
@@ -27,7 +28,7 @@ let editor: Editor | null = null;
 
 /** Подсказки на пустом вводе: постоянная шпаргалка вместо пустой зоны */
 const STATIC_HINTS = [
-  pc.dim('  /help — команды · /new — новый разговор · /sessions — список разговоров'),
+  pc.dim('  /help — операции · /session new — новый разговор · /sessions — список разговоров'),
   pc.dim('  @имя или №имя — участнику · Esc — прервать раунд · /exit — выход'),
 ];
 
@@ -452,14 +453,21 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
 }
 
 function printHelp(): void {
-  const rows = COMMANDS.map((c) => {
-    const label = (c.cmd + (c.args ? ' ' + c.args : '')).padEnd(18);
-    return `    ${label} — ${c.help}`;
-  });
+  const rows: string[] = [];
+  let group = '';
+  for (const op of OPERATIONS) {
+    const g = op.name.split('.')[0];
+    if (g !== group) {
+      group = g;
+      rows.push('');
+    }
+    const args = operationArgs(op);
+    rows.push(`    ${(operationCommand(op) + (args ? ' ' + args : '')).padEnd(26)} — ${op.help}`);
+  }
   console.log(
     [
       '',
-      '  Команды:',
+      '  Операции (то же — имена rpc и подсказки GUI):',
       ...rows,
       '',
       '  Esc или Ctrl+C во время ответа команды — прервать (частичные ответы сохранятся).',
@@ -560,14 +568,44 @@ function replaySession(session: Session): void {
 }
 
 // ─── Команды: терминал оставляет себе цветные просмотры и /exit ─────────────
-// Все остальные команды (мутации и всё новое) исполняет ядро — ввод с `/`
-// доходит до engine.handleMessage и там перехватывается (runCommandText).
+// Цветной показ — только безглагольные формы обзора (/sessions, /team,
+// /provider) и /session history; всё остальное исполняет ядро (манифест).
 
 type CommandVerdict = 'exit' | 'handled' | 'unknown';
 
+/** Цветная история разговора — /session history. */
+function printHistory(app: App, nStr?: string): void {
+  const n = Number.parseInt(nStr ?? '', 10);
+  const all = app.session.messages;
+  const shown = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
+  if (shown.length === 0) {
+    printDim('  Разговор пуст.');
+    return;
+  }
+  let team: Agent[] = [];
+  try {
+    team = loadTeam(AGENTS_FILE);
+  } catch {
+    // без agents.json печатаем без фирменных цветов
+  }
+  console.log(
+    pc.dim(`\n  Разговор «${app.session.title}» — показано ${shown.length} из ${all.length} сообщений:`),
+  );
+  for (const m of shown) {
+    console.log('');
+    for (const row of messageRows(m, team)) console.log(row);
+  }
+  console.log('');
+}
+
 function runCommand(engine: Engine, line: string): CommandVerdict {
   const app = engine.app;
-  const [cmd, ...rest] = line.slice(1).trim().split(/\s+/);
+  const [cmd, second, ...rest] = line.slice(1).trim().split(/\s+/);
+  if (cmd === 'session' && second === 'history') {
+    printHistory(app, rest[0]);
+    return 'handled';
+  }
+  if (second !== undefined) return 'unknown';
   switch (cmd) {
     case 'help':
     case 'h':
@@ -588,38 +626,11 @@ function runCommand(engine: Engine, line: string): CommandVerdict {
       console.log();
       return 'handled';
     }
-    case 'history': {
-      const n = Number.parseInt(rest[0] ?? '', 10);
-      const all = app.session.messages;
-      const shown = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
-      if (shown.length === 0) {
-        printDim('  Разговор пуст.');
-        return 'handled';
-      }
-      let team: Agent[] = [];
-      try {
-        team = loadTeam(AGENTS_FILE);
-      } catch {
-        // без agents.json печатаем без фирменных цветов
-      }
-      console.log(
-        pc.dim(`\n  Разговор «${app.session.title}» — показано ${shown.length} из ${all.length} сообщений:`),
-      );
-      for (const m of shown) {
-        console.log('');
-        for (const row of messageRows(m, team)) console.log(row);
-      }
-      console.log('');
-      return 'handled';
-    }
     case 'team':
       printTeam(app);
       return 'handled';
     case 'providers':
       printProviders(app);
-      return 'handled';
-    case 'all':
-      printDim('  Команды /all больше нет — состав отвечает по решению модератора или @упоминания.');
       return 'handled';
     case 'exit':
     case 'quit':
@@ -740,7 +751,7 @@ async function main(): Promise<void> {
   printBanner(app);
   printDim(
     `  Вы — ${app.profile.name}${app.profile.role ? ` (${app.profile.role})` : ''}. ` +
-    'Представиться команде: /me Имя; роль; о себе',
+    'Представиться команде: /profile set Имя; роль; о себе',
   );
   // Прошлый разговор сразу в панель: внизу виден хвост, вся старая история —
   // колесом/PgUp. В линейном режиме не нужно — там прокручивает сам терминал.
@@ -758,7 +769,7 @@ async function main(): Promise<void> {
     }
     screen.seed(rows);
     printDim(
-      `  Продолжаю разговор «${app.session.title}» (${app.session.messages.length} сообщ.) — /new для нового, /sessions для списка`,
+      `  Продолжаю разговор «${app.session.title}» (${app.session.messages.length} сообщ.) — /session new для нового, /sessions для списка`,
     );
   }
   // страховка от потерянных первых кадров терминала: одна полная перерисовка
@@ -766,7 +777,7 @@ async function main(): Promise<void> {
   screen?.repaint();
 
   // Пустой разговор на старте (первый запуск или неиспользованная сессия) —
-  // менеджер здоровается сам, как по /new. Только в TTY: в пайпе LLM не зовём.
+  // менеджер здоровается сам, как по /session new. Только в TTY: в пайпе LLM не зовём.
   if (editor && app.session.messages.length === 0) {
     const ac = new AbortController();
     abortActiveRound = () => ac.abort();
@@ -930,7 +941,7 @@ async function main(): Promise<void> {
     screen = null;
   }
   // плавный /exit: вливаем итоги, только если конспект свежий (дешёвый путь),
-  // иначе откладываем до следующего /new — выход не должен ждать LLM
+  // иначе откладываем до следующего /session new — выход не должен ждать LLM
   if (exitRequested) {
     try {
       await engine.flushChatMemory(app.session, { onlyIfFreshDigest: true });
