@@ -1,17 +1,31 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { extname, join, normalize } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { loadTeam } from './agents.js';
-import { managerAsAgent } from './manager.js';
-import { AGENTS_FILE } from './paths.js';
+import {
+  addProject,
+  addTeamAgent,
+  managerAsAgent,
+  updateTeamAgent,
+  mergeTeamAgents,
+  removeProject,
+  removeProjectHost,
+  removeTeamAgent,
+  updateManagerConfig,
+} from './manager.js';
+import { addProviderConfig, removeProviderConfig } from './providers/registry.js';
+import { loadSettings } from './settings.js';
+import { AGENTS_FILE, MANAGER_FILE, PROJECTS_FILE, PROVIDERS_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
+import { loadProjects, safePath } from './actions.js';
 import { Engine, chatTeam, type App } from './core/engine.js';
 import { bootstrapApp } from './core/bootstrap.js';
 import { COMMANDS } from './core/commands.js';
 import { homeEntries, packEntriesZip, readZipEntries, sessionEntries, applyHomeImport, applySessionImport } from './core/transfer.js';
+import { loadSchedule, saveSchedule, type ScheduleTask } from './core/schedule.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, Session } from './types.js';
 
@@ -64,7 +78,7 @@ function publicSession(session: Session): {
 }
 
 /** Полный снимок состояния для синхронизации оболочки. */
-export function stateSnapshot(app: App): unknown {
+export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): unknown {
   let team: Agent[] = [];
   try {
     team = loadTeam(AGENTS_FILE);
@@ -97,6 +111,9 @@ export function stateSnapshot(app: App): unknown {
     })),
     images: [...app.images].map(([id, s]) => ({ id, ok: s.ok, note: s.note })),
     profile: { name: app.profile.name, role: app.profile.role },
+    settings: loadSettings(SETTINGS_FILE, 0),
+    projects: projects ?? [],
+    auto: engine ? { mode: engine.autoMode, left: engine.autoLeft } : { mode: false, left: 0 },
     // словарь автодополнения: имена команд — из ядра; остальные данные
     // (разговоры, команда, состав чата, провайдеры, имя менеджера) выводятся
     // клиентом из остальных полей этого же снапшота
@@ -273,8 +290,31 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     return run;
   };
 
+  // ── планировщик: раз в минуту проверяем расписание задач ──────
+  const nextDue = new Map<string, number>();
+  const scheduleTimer = setInterval(() => {
+    const now = Date.now();
+    for (const task of loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json')).filter((t) => t.enabled)) {
+      const due = nextDue.get(task.id) ?? 0;
+      if (now < due) continue;
+      nextDue.set(task.id, now + task.intervalMinutes * 60_000);
+      void runRound((signal) => engine.handleMessage(task.message, signal));
+    }
+  }, 60_000);
+
+  const readProjects = (): unknown[] => {
+    try {
+      return [...loadProjects(PROJECTS_FILE).entries()].map(([id, p]) => ({
+        id,
+        hosts: [...p.hosts.entries()].map(([name, h]) => ({ name, host: h.host })),
+      }));
+    } catch {
+      return [];
+    }
+  };
+
   const broadcastState = (): void => {
-    presenter.broadcast({ type: 'state', state: stateSnapshot(app) });
+    presenter.broadcast({ type: 'state', state: stateSnapshot(app, engine, readProjects()) });
   };
 
   const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -282,6 +322,21 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     if (url.pathname === '/health') {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (url.pathname === '/api/file') {
+      const rel = url.searchParams.get('path') ?? '';
+      const abs = safePath(WORKSPACE, rel);
+      if (!abs || !existsSync(abs) || !statSync(abs).isFile()) {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('файл не найден');
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(rel.split('/').at(-1) ?? 'file')}`,
+      });
+      res.end(readFileSync(abs));
       return;
     }
     serveStatic(url.pathname, res);
@@ -303,7 +358,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       ws.send(JSON.stringify({ type: 'auth_required' }));
     } else {
       ws.authed = true;
-      ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app) }));
+      ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app, engine) }));
     }
     ws.on('message', (raw: RawData) => {
       let msg: unknown;
@@ -340,12 +395,12 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       const ok = typeof msg.token === 'string' && tokenMatches(String(msg.token));
       ws.authed = ok;
       ws.send(JSON.stringify(ok ? { type: 'auth_ok' } : { type: 'auth_failed' }));
-      if (ok) ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app) }));
+      if (ok) ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app, engine) }));
       return;
     }
     switch (type) {
       case 'hello':
-        ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app) }));
+        ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app, engine) }));
         return;
       case 'user_message':
       case 'command': {
@@ -393,6 +448,153 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return;
       }
+      case 'file': {
+        // файл от руководителя: кладём в inbox рабочей папки и шлём сообщение с меткой
+        const name = String(msg.name ?? 'file').replace(/[\/]/g, '_');
+        const data = Buffer.from(String(msg.dataB64 ?? ''), 'base64');
+        const inbox = join(WORKSPACE, 'inbox');
+        mkdirSync(inbox, { recursive: true });
+        writeFileSync(join(inbox, name), data);
+        const text = `[${name}] ${String(msg.text ?? '').trim()}`.trim();
+        void runRound((signal) => engine.handleMessage(text, signal));
+        return;
+      }
+      case 'agent_create': {
+        const id = String(msg.id ?? '').trim();
+        const name = String(msg.name ?? '').trim();
+        const role = String(msg.role ?? '').trim() || undefined;
+        const report = addTeamAgent(AGENTS_FILE, { id, name, role: role || undefined });
+        presenter.notice('  ' + report);
+        broadcastState();
+        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
+        return;
+      }
+      case 'agent_delete': {
+        const report = removeTeamAgent(AGENTS_FILE, String(msg.id ?? ''));
+        presenter.notice('  ' + report);
+        broadcastState();
+        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
+        return;
+      }
+      case 'agent_update': {
+        const fields = (msg.fields ?? {}) as Record<string, unknown>;
+        const report = updateTeamAgent(AGENTS_FILE, String(msg.id ?? ''), fields);
+        presenter.notice('  ' + report);
+        broadcastState();
+        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
+        return;
+      }
+      case 'provider_create': {
+        const config = (msg.config ?? {}) as Record<string, unknown>;
+        const report = addProviderConfig(PROVIDERS_FILE, String(msg.id ?? ''), config);
+        presenter.notice('  ' + report);
+        broadcastState();
+        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
+        return;
+      }
+      case 'provider_delete': {
+        const id = String(msg.id ?? '');
+        if (id === app.defaultProviderId || id === app.mgr.provider) {
+          throw new Error(`«${id}» — основной или менеджерский провайдер: сначала назначьте другой`);
+        }
+        const report = removeProviderConfig(PROVIDERS_FILE, id, []);
+        presenter.notice('  ' + report);
+        broadcastState();
+        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
+        return;
+      }
+      case 'projects_get': {
+        const { loadProjects } = await import('./actions.js');
+        const projects = [...loadProjects(PROJECTS_FILE).entries()].map(([id, p]) => ({
+          id,
+          hosts: [...p.hosts.entries()].map(([name, h]) => ({ name, host: h.host, user: h.user, port: h.port })),
+        }));
+        ws.send(JSON.stringify({ type: 'projects', projects }));
+        return;
+      }
+      case 'project_add': {
+        const report = addProject(PROJECTS_FILE, String(msg.id ?? ''), {
+          [String(msg.hostName ?? 'main')]: { host: String(msg.host ?? ''), user: msg.user ? String(msg.user) : undefined, port: msg.port ? Number(msg.port) : undefined },
+        });
+        presenter.notice('  ' + report);
+        broadcastState();
+        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
+        return;
+      }
+      case 'project_delete': {
+        const report = removeProject(PROJECTS_FILE, String(msg.id ?? ''));
+        presenter.notice('  ' + report);
+        broadcastState();
+        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
+        return;
+      }
+      case 'schedule_get': {
+        ws.send(JSON.stringify({ type: 'schedule', tasks: loadSchedule(dirname(PROJECTS_FILE)) }));
+        return;
+      }
+      case 'schedule_add': {
+        const message = String(msg.message ?? '').trim();
+        const interval = Number(msg.intervalMinutes ?? 10);
+        if (!message) throw new Error('укажите задание');
+        if (!Number.isFinite(interval) || interval <= 0) throw new Error('интервал — положительное число минут');
+        const tasks = loadSchedule(dirname(PROJECTS_FILE));
+        const id = `task-${Date.now().toString(36)}`;
+        tasks.push({ id, message, intervalMinutes: interval, enabled: true });
+        saveSchedule(dirname(PROJECTS_FILE), tasks);
+        ws.send(JSON.stringify({ type: 'schedule', tasks }));
+        return;
+      }
+      case 'schedule_delete': {
+        const id = String(msg.id ?? '');
+        const tasks = loadSchedule(dirname(PROJECTS_FILE)).filter((t) => t.id !== id);
+        saveSchedule(dirname(PROJECTS_FILE), tasks);
+        ws.send(JSON.stringify({ type: 'schedule', tasks }));
+        return;
+      }
+      case 'schedule_toggle': {
+        const tasks = loadSchedule(dirname(PROJECTS_FILE));
+        const task = tasks.find((t) => t.id === String(msg.id ?? ''));
+        if (task) { task.enabled = !task.enabled; saveSchedule(dirname(PROJECTS_FILE), tasks); }
+        ws.send(JSON.stringify({ type: 'schedule', tasks }));
+        return;
+      }
+      case 'settings_get': {
+        ws.send(JSON.stringify({ type: 'settings', settings: loadSettings(SETTINGS_FILE, 0) }));
+        return;
+      }
+      case 'settings_set': {
+        const patch = (msg.patch ?? {}) as Record<string, unknown>;
+        const raw = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
+        const merged = { ...raw, ...patch };
+        const tmp = SETTINGS_FILE + '.tmp';
+        writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
+        loadSettings(tmp, 0); // валидация
+        renameSync(tmp, SETTINGS_FILE);
+        presenter.notice('  ✓ настройки обновлены (язык и лимиты — со следующего раунда)');
+        broadcastState();
+        return;
+      }
+      case 'user_set': {
+        const report = engine.setProfile(String(msg.name ?? ''), msg.role ? String(msg.role) : undefined, msg.about ? String(msg.about) : undefined);
+        presenter.notice('  ' + report);
+        broadcastState();
+        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
+        return;
+      }
+      case 'manager_get': {
+        ws.send(JSON.stringify({ type: 'manager', manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, temperature: app.mgr.temperature, provider: app.mgr.provider } }));
+        return;
+      }
+      case 'manager_set': {
+        const fields = (msg.fields ?? {}) as Record<string, unknown>;
+        const known = [...app.providers.keys()];
+        const report = updateManagerConfig(MANAGER_FILE, fields, known);
+        app.mgr = (await import('./manager.js')).loadManagerConfig(MANAGER_FILE, known);
+        presenter.notice('  ' + report);
+        broadcastState();
+        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
+        return;
+      }
       case 'confirm_response': {
         presenter.resolve(String(msg.id ?? ''), msg.approved === true);
         return;
@@ -422,7 +624,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
     const args = (msg.args ?? {}) as Record<string, unknown>;
     switch (method) {
       case 'state':
-        return stateSnapshot(app);
+        return stateSnapshot(app, engine);
       case 'sessions.list':
         return { sessions: app.store.list() };
       case 'session.open': {
@@ -502,6 +704,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
     port: realPort,
     host,
     close(): Promise<void> {
+      clearInterval(scheduleTimer);
       return new Promise((resolve) => {
         wss.close();
         httpServer.close(() => resolve());

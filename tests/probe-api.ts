@@ -321,7 +321,7 @@ const client = await makeClient(handle.port);
     check(
       'state: ключи верхнего уровня',
       JSON.stringify(Object.keys(st).sort()) ===
-        JSON.stringify(['completion', 'images', 'manager', 'profile', 'providers', 'session', 'sessions', 'team']),
+        JSON.stringify(['auto', 'completion', 'images', 'manager', 'profile', 'projects', 'providers', 'session', 'sessions', 'settings', 'team']),
     );
     const sess = st.session as Record<string, unknown>;
     check('state: session = id+title+messages', JSON.stringify(Object.keys(sess).sort()) === JSON.stringify(['id', 'messages', 'title']));

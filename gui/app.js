@@ -33,6 +33,21 @@
   const authError = $('auth-error');
   const authEnter = $('auth-enter');
   const btnLogout = $('btn-logout');
+  const modalEl = $('modal');
+  const modalTitle = $('modal-title');
+  const modalFields = $('modal-fields');
+  const modalError = $('modal-error');
+  const settingsListEl = $('settings-list');
+  const projectsEl = $('projects');
+  const scheduleListEl = $('schedule-list');
+  const importFile = $('import-file');
+  const btnExportHome = $('btn-export-home');
+  const btnExportSession = $('btn-export-session');
+  const btnImportHome = $('btn-import-home');
+  const btnImportSession = $('btn-import-session');
+  const btnAuto = $('btn-auto');
+  const btnAttach = $('btn-attach');
+  const attachFile = $('attach-file');
 
   // ── состояние клиента ────────────────────────────────────────
   let ws = null;
@@ -60,6 +75,14 @@
   ));
 
   /** Текст реплики: ```блоки``` → <pre>, остальное — экранированный текст. */
+  /** [имя.расширение] → ссылка на скачивание из workspace. */
+  function fileLinks(escaped) {
+    return escaped.replace(/\[([^\[\]]+\.[A-Za-z0-9]{2,8})\]/g, (_m, name) => {
+      const href = `/api/file?path=${encodeURIComponent(name)}`;
+      return `<a class="file-link" href="${href}" download>[${name}]</a>`;
+    });
+  }
+
   function formatText(text) {
     const parts = String(text).split('```');
     let html = '';
@@ -70,7 +93,7 @@
         if (nl !== -1 && nl <= 20) code = code.slice(nl + 1); // «язык» блока
         html += `<pre>${esc(code.replace(/\n$/, ''))}</pre>`;
       } else if (parts[i]) {
-        html += `<span class="txt">${esc(parts[i])}</span>`;
+        html += `<span class="txt">${fileLinks(esc(parts[i]))}</span>`;
       }
     }
     return html || '<span class="txt"></span>';
@@ -101,12 +124,13 @@
     ws.onerror = () => ws.close();
   }
 
-  function send(obj) {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
-  }
-
-  function sendAuth(token) {
-    send({ type: 'auth', token });
+  function tryStoredToken() {
+    const saved = localStorage.getItem('dt-token');
+    if (saved) {
+      sendAuth(saved);
+      return true;
+    }
+    return false;
   }
 
   function tryStoredToken() {
@@ -116,6 +140,172 @@
       return true;
     }
     return false;
+  }
+
+  // ── модальная форма: поля [{key,label,value,placeholder?}] ────
+  let modalOnSave = null;
+  function openForm(title, fields, onSave) {
+    modalTitle.textContent = title;
+    modalFields.innerHTML = '';
+    for (const f of fields) {
+      const wrap = document.createElement('div');
+      wrap.className = 'fld';
+      const label = document.createElement('label');
+      label.textContent = f.label ?? f.key;
+      wrap.appendChild(label);
+      const input = document.createElement('input');
+      input.dataset.key = f.key;
+      input.value = f.value ?? '';
+      if (f.placeholder) input.placeholder = f.placeholder;
+      wrap.appendChild(input);
+      modalFields.appendChild(wrap);
+    }
+    modalError.classList.add('hidden');
+    modalOnSave = onSave;
+    modalEl.classList.remove('hidden');
+    modalFields.querySelector('input')?.focus();
+  }
+  function closeForm() {
+    modalEl.classList.add('hidden');
+    modalOnSave = null;
+  }
+  function submitForm() {
+    if (!modalOnSave) return;
+    const values = {};
+    for (const input of modalFields.querySelectorAll('input')) values[input.dataset.key] = input.value.trim();
+    try {
+      modalOnSave(values);
+      closeForm();
+    } catch (err) {
+      modalError.textContent = err.message;
+      modalError.classList.remove('hidden');
+    }
+  }
+  $('modal-ok').onclick = submitForm;
+  $('modal-cancel').onclick = closeForm;
+  modalEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeForm();
+    if (e.key === 'Enter') submitForm();
+  });
+
+  // ── агенты: создать/удалить/настроить ─────────────────────────
+  function openAgentCreate() {
+    openForm('Новый агент', [
+      { key: 'id', label: 'id (латиница, цифры, -/_)' },
+      { key: 'name', label: 'Имя' },
+      { key: 'role', label: 'Роль (можно пропустить)' },
+    ], (v) => {
+      rpc('agent_create', v)
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    });
+  }
+  function openAgentSettings(a) {
+    openForm(`Настройки агента ${a.name}`, [
+      { key: 'role', label: 'Роль', value: a.role ?? '' },
+      { key: 'provider', label: 'Провайдер', value: a.provider ?? '' },
+      { key: 'temperature', label: 'Температура (0–2)', value: a.temperature ?? '' },
+      { key: 'prompt', label: 'Промпт', value: a.prompt ?? '' },
+    ], (v) => {
+      const fields = {};
+      for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
+      rpc('agent_update', { id: a.id, fields })
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    });
+  }
+  function agentDelete(a) {
+    if (confirm(`Удалить агента ${a.name}? История останется, но он исчезнет из команды.`)) {
+      rpc('agent_delete', { id: a.id })
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    }
+  }
+
+  // ── провайдеры: создать/удалить ───────────────────────────────
+  function providerCreate() {
+    openForm('Новый провайдер', [
+      { key: 'id', label: 'id (латиница)' },
+      { key: 'adapter', label: 'Адаптер (openai-compatible / anthropic / gigachat)', value: 'openai-compatible' },
+      { key: 'baseUrl', label: 'baseUrl' },
+      { key: 'model', label: 'Модель' },
+      { key: 'apiKeyEnv', label: 'Имя переменной с ключом' },
+    ], (v) => {
+      rpc('provider_create', { id: v.id, config: v })
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    });
+  }
+  function providerDelete(p) {
+    if (p.isDefault) return;
+    if (confirm(`Удалить провайдера ${p.id}?`)) {
+      rpc('provider_delete', { id: p.id })
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    }
+  }
+
+  // ── расписание: список задач, добавить/удалить/вкл-выкл ───────
+  function renderSchedule(tasks) {
+    scheduleListEl.innerHTML = '';
+    const addLi = document.createElement('li');
+    addLi.innerHTML = '<span class="tag">＋ задача</span>';
+    addLi.onclick = () => openForm('Задача по расписанию', [
+      { key: 'message', label: 'Задание (уйдёт в чат как сообщение)' },
+      { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
+    ], (v) => {
+      rpc('schedule_add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    });
+    scheduleListEl.appendChild(addLi);
+
+    for (const t of tasks ?? []) {
+      const li = document.createElement('li');
+      li.innerHTML =
+        `<span class="tag ${t.enabled ? 'in' : ''}">${t.enabled ? '▶' : '⏸'}</span>` +
+        `<span class="meta">${t.intervalMinutes} мин</span>` +
+        `<span>${esc(t.message.slice(0, 40))}</span>` +
+        '<span class="del" title="Удалить задачу">✕</span>';
+      li.title = `${t.message} — каждые ${t.intervalMinutes} мин`;
+      li.querySelector('.del').onclick = (e) => {
+        e.stopPropagation();
+        rpc('schedule_delete', { id: t.id })
+          .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+      };
+      li.onclick = () => rpc('schedule_toggle', { id: t.id });
+      scheduleListEl.appendChild(li);
+    }
+  }
+
+  // ── авто-режим: тоггл (кнопка шлёт /auto через command) ───────
+  function renderAuto() {
+    const auto = state?.auto;
+    const on = Boolean(auto?.mode);
+    btnAuto.textContent = on ? `🤖 Авто (${auto?.left ?? 0})` : '🤖 Авто';
+    btnAuto.classList.toggle('in', on);
+    btnAuto.title = on
+      ? `Автономный режим вкл (осталось ${auto?.left ?? 0} ходов). Клик — выключить.`
+      : 'Автономный режим: агенты решают вопросы сами. Клик — включить.';
+  }
+
+  // ── проекты: добавить сервер/удалить ──────────────────────────
+  function projectAdd() {
+    openForm('Новый проект', [
+      { key: 'id', label: 'id проекта (латиница)' },
+      { key: 'hostName', label: 'Имя сервера (напр. prod)' },
+      { key: 'host', label: 'Хост (адрес)' },
+      { key: 'user', label: 'Пользователь (можно пропустить)' },
+      { key: 'port', label: 'Порт (можно пропустить)' },
+    ], (v) => {
+      rpc('project_add', v)
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    });
+  }
+  function projectHostDelete(p, h) {
+    rpc('project_host_delete', { id: p.id, name: h.name })
+      .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+      .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   }
 
   function showAuthForm(errorText) {
@@ -147,6 +337,19 @@
   // ── диспетчер событий сервера ────────────────────────────────
   function dispatch(msg) {
     switch (msg.type) {
+      case 'export_data': {
+        const bin = atob(msg.dataB64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = msg.name || 'dt-export.zip';
+        a.click();
+        URL.revokeObjectURL(url);
+        addFeed(`<div class="notice">· Экспорт готов: ${esc(msg.name)}</div>`);
+        break;
+      }
       case 'auth_required': {
         authed = false;
         btnLogout.classList.remove('hidden');
@@ -248,6 +451,35 @@
         busyMap.delete(msg.id);
         renderStatus();
         break;
+      case 'projects':
+        renderProjects(msg.projects);
+        break;
+      case 'settings':
+        state = state ?? {};
+        state.settings = msg.settings;
+        renderSettingsList();
+        break;
+      case 'manager':
+        state = state ?? {};
+        state.manager = msg.manager;
+        renderSettingsList();
+        break;
+      case 'schedule':
+        renderSchedule(msg.tasks);
+        break;
+      case 'confirm':
+        state = state ?? {};
+        state.settings = msg.settings;
+        renderSettingsList();
+        break;
+      case 'manager':
+        state = state ?? {};
+        state.manager = msg.manager;
+        renderSettingsList();
+        break;
+      case 'schedule':
+        renderSchedule(msg.tasks);
+        break;
       case 'confirm':
         showConfirm(msg);
         break;
@@ -337,6 +569,9 @@
     renderSidebar();
     renderTeam();
     renderProviders();
+    renderSettingsList();
+    renderProjects(state.projects);
+    renderAuto();
     renderTopbar();
     clearMsgs();
     renderHistory(state.session.messages);
@@ -400,11 +635,12 @@ id: ${s.id}
 
     for (const a of state.team ?? []) {
       const li = document.createElement('li');
-      li.title = a.inChat ? 'Вывести из чата' : 'Позвать в чат';
+      li.title = `${a.inChat ? 'Вывести из чата' : 'Позвать в чат'} · двойной клик — настройки`;
       li.innerHTML =
         `<span>${esc(a.emoji)} ${esc(a.name)}</span>` +
         `<span class="meta">${esc(a.role ?? '')}</span>` +
-        `<span class="tag ${a.inChat ? 'in' : ''}">${a.inChat ? 'в чате' : '＋ чат'}</span>`;
+        `<span class="tag ${a.inChat ? 'in' : ''}">${a.inChat ? 'в чате' : '＋ чат'}</span>` +
+        '<span class="del" title="Удалить агента">✕</span>';
       li.onclick = () => {
         if (roundActive) return;
         const method = a.inChat ? 'chat.remove' : 'chat.add';
@@ -412,27 +648,91 @@ id: ${s.id}
           .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
           .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
       };
+      li.querySelector('.del').onclick = (e) => {
+        e.stopPropagation();
+        if (!roundActive) agentDelete(a);
+      };
+      li.ondblclick = () => openAgentSettings(a);
       teamEl.appendChild(li);
     }
+
+    const addLi = document.createElement('li');
+    addLi.innerHTML = '<span class="tag">＋ создать агента</span>';
+    addLi.onclick = () => { if (!roundActive) openAgentCreate(); };
+    teamEl.appendChild(addLi);
   }
 
   function renderProviders() {
     providersEl.innerHTML = '';
     for (const p of state.providers ?? []) {
       const li = document.createElement('li');
-      li.title = p.isDefault ? 'Провайдер по умолчанию' : 'Сделать основным (для агентов)';
+      li.title = (p.isDefault ? 'Провайдер по умолчанию' : 'Сделать основным (для агентов)')
+        + ' · двойной клик — удалить провайдера';
       li.innerHTML =
         `<span>${p.ok ? '●' : '○'}</span><span>${esc(p.id)}</span>` +
         `<span class="meta">${esc(p.model ?? p.kind ?? '')}</span>` +
         (p.isManager ? '<span class="tag">менеджер</span>' : '') +
-        (p.isDefault ? '<span class="tag in">основной</span>' : '');
+        (p.isDefault ? '<span class="tag in">основной</span>' : '') +
+        (p.isDefault ? '' : '<span class="del" title="Удалить провайдера">✕</span>');
       if (!p.ok) li.title += ` · проблема: ${p.note ?? ''}`;
       li.onclick = () => {
         if (roundActive || p.isDefault) return;
         rpc('provider.set', { id: p.id })
           .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
       };
+      const del = li.querySelector('.del');
+      if (del) del.onclick = (e) => {
+        e.stopPropagation();
+        if (!roundActive) providerDelete(p);
+      };
+      li.ondblclick = () => { if (!p.isDefault && !roundActive) providerDelete(p); };
       providersEl.appendChild(li);
+    }
+  }
+
+  function renderSettingsList() {
+    settingsListEl.innerHTML = '';
+    const st = state.settings;
+    if (!st) return;
+    for (const [k, v] of [['Язык', st.language], ['Ширина', st.width], ['Автоответ', st.autoMessage]]) {
+      const li = document.createElement('li');
+      li.className = 'static';
+      li.innerHTML = `<span class="meta">${k}:</span> <span>${esc(String(v ?? '—'))}</span>`;
+      settingsListEl.appendChild(li);
+    }
+    const li = document.createElement('li');
+    li.className = 'static';
+    li.innerHTML = `<span>👤 ${esc(state.profile?.name ?? '—')}</span>` +
+      `<span class="meta">${esc(state.profile?.role ?? '')}</span>`;
+    settingsListEl.appendChild(li);
+    const li2 = document.createElement('li');
+    li2.className = 'static';
+    li2.innerHTML = `<span>${esc(state.manager?.emoji ?? '🛎')} ${esc(state.manager?.name ?? '')}</span>` +
+      `<span class="meta">менеджер</span>`;
+    settingsListEl.appendChild(li2);
+  }
+
+  function renderProjects(projects) {
+    projectsEl.innerHTML = '';
+    const addLi = document.createElement('li');
+    addLi.innerHTML = '<span class="tag">＋ новый проект</span>';
+    addLi.onclick = () => { if (!roundActive) projectAdd(); };
+    projectsEl.appendChild(addLi);
+
+    for (const p of projects ?? []) {
+      for (const h of p.hosts ?? []) {
+        const li = document.createElement('li');
+        li.title = 'Двойной клик — удалить проект целиком · ✕ — удалить сервер';
+        li.innerHTML =
+          `<span>${esc(p.id)}</span><span class="meta">${esc(h.name)}: ${esc(h.host)}</span>` +
+          '<span class="del" title="Удалить сервер">✕</span>';
+        li.querySelector('.del').onclick = (e) => {
+          e.stopPropagation();
+          if (!roundActive) projectHostDelete(p, h);
+        };
+        li.ondblclick = () => { if (!roundActive) rpc('project_delete', { id: p.id }); };
+        projectsEl.appendChild(li);
+      }
     }
   }
 
@@ -635,6 +935,7 @@ id: ${s.id}
     btnAbort.classList.toggle('hidden', !roundActive);
     busyLabelEl.textContent = label || (roundActive ? 'раунд идёт…' : '');
     btnSend.disabled = roundActive;
+    renderAuto();
   }
 
   function sendUserMessage() {
@@ -706,6 +1007,65 @@ id: ${s.id}
     rpc('session.new', {}).catch((err) =>
       addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   };
+
+  const pickImportFile = (home) => {
+    importFile.onchange = () => {
+      const f = importFile.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const bytes = new Uint8Array(reader.result);
+        let b64 = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          b64 += btoa(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
+        }
+        send({ type: home ? 'import_home' : 'import_session', dataB64: b64 });
+        addFeed(`<div class="notice">· Импорт ${home ? 'настроек' : 'разговора'} из ${esc(f.name)}…</div>`);
+      };
+      reader.readAsArrayBuffer(f);
+      importFile.value = '';
+    };
+    importFile.click();
+  };
+  btnExportHome.onclick = () => { if (!roundActive) send({ type: 'export_home' }); };
+  $('btn-schedule-add').onclick = () => { if (!roundActive) { send({ type: 'schedule_get' }); openForm('Задача по расписанию', [
+    { key: 'message', label: 'Задание (уйдёт в чат)' },
+    { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
+  ], (v) => {
+    rpc('schedule_add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
+      .then(() => send({ type: 'schedule_get' }))
+      .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+  }); } };
+  btnExportSession.onclick = () => {
+    const cur = (state?.sessions ?? []).findIndex((s) => state.session && s.id === state.session.id) + 1;
+    if (cur > 0 && !roundActive) send({ type: 'export_session', n: cur });
+  };
+  btnImportHome.onclick = () => pickImportFile(true);
+  btnImportSession.onclick = () => pickImportFile(false);
+  btnAuto.onclick = () => { if (!roundActive) send({ type: 'command', text: engine_autoToggle() }); };
+  function engine_autoToggle() { return state?.auto?.mode ? '/auto off' : '/auto'; }
+  btnAttach.onclick = () => attachFile.click();
+  attachFile.onchange = () => {
+    const f = attachFile.files[0];
+    if (!f || roundActive) { attachFile.value = ''; return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result);
+      let b64 = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        b64 += btoa(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
+      }
+      roundActive = true;
+      renderStatus();
+      send({ type: 'file', name: f.name, dataB64: b64, text: `посмотрите файл ${f.name}` });
+      addFeed(`<div class="notice">· 📎 ${esc(f.name)} (${bytes.length} Б) — отправлен команде</div>`);
+    };
+    reader.readAsArrayBuffer(f);
+    attachFile.value = '';
+  };
+  $('btn-provider-add').onclick = () => { if (!roundActive) providerCreate(); };
+  $('btn-project-add').onclick = () => { if (!roundActive) projectAdd(); };
+  $('btn-settings-edit').onclick = () => { if (!roundActive) openSettingsForm(); };
   btnLogout.onclick = () => {
     localStorage.removeItem('dt-token');
     location.reload();
@@ -714,13 +1074,6 @@ id: ${s.id}
   authInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') enterWithToken();
   });
-
-  $('confirm-yes').onclick = () => answerConfirm(true);
-  $('confirm-no').onclick = () => answerConfirm(false);
-  $('choose-cancel').onclick = () => {
-    send({ type: 'choose_response', id: chooseEl.dataset.id, index: null });
-    chooseEl.classList.add('hidden');
-  };
 
   connect();
 })();

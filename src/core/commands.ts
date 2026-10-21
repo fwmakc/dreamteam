@@ -49,6 +49,7 @@ export const COMMANDS: CommandSpec[] = [
   { cmd: '/rename', args: '<новое имя>', help: 'переименовать разговор; без имени менеджер придумает' },
   { cmd: '/export', args: '[номер]', help: 'архив настроек и истории (или одного разговора) в zip' },
   { cmd: '/import', args: '<файл.zip>', help: 'импорт архива настроек/разговора' },
+  { cmd: '/auto', args: '[N]', help: 'автономный режим: N ходов без вашего участия (по умолчанию 10)' },
   { cmd: '/history', args: '[N]', help: 'история текущего разговора (или последние N)' },
   { cmd: '/team', help: 'состав команды (· не в этом чате)' },
   { cmd: '/add', args: '<имя|номер>', help: 'позвать участника в текущий чат' },
@@ -92,6 +93,15 @@ export async function runCommandText(
       return renameCommand(engine, arg);
     case 'export':
       return exportCommand(engine, arg);
+    case 'auto': {
+      if (engine.autoMode) {
+        engine.setAutoMode(false, 0);
+        return ['🤖 автономный режим выключен.'];
+      }
+      const turns = Math.min(Math.max(Number.parseInt(arg, 10) || 10, 1), 50);
+      engine.setAutoMode(true, turns);
+      return [`🤖 автономный режим: до ${turns} ходов без вашего участия. Остановить — /auto или ⏹.`];
+    }
     case 'import':
       return importCommand(engine, arg);
     case 'session':

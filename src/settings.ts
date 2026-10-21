@@ -13,6 +13,8 @@ export interface SettingsConfig {
   /** Язык общения команды: попадает в системные промты как есть
    *  («russian», «ru-RU», «русский» — нейросети поймут любую запись) */
   language: string;
+  /** Автоответ в автономном режиме: отправляется вместо ожидания человека */
+  autoMessage: string;
   /** Отступы по краям экрана в колонках/строках (0–10) */
   margin: number;
   /** false — прежний readline-интерфейс без альтернативного экрана */
@@ -60,9 +62,14 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   if (language !== undefined && (typeof language !== 'string' || language.trim() === '')) {
     throw new Error(`${file}: поле "language" — непустая строка («russian», «ru-RU», «русский» — как угодно)`);
   }
+  const autoMessage = raw.autoMessage;
+  if (autoMessage !== undefined && (typeof autoMessage !== 'string' || autoMessage.trim() === '')) {
+    throw new Error(`${file}: поле "autoMessage" — непустая строка`);
+  }
   return {
     width: termCols > 0 ? Math.min(width, termCols) : width,
     language: typeof language === 'string' ? language.trim() : 'русский',
+    autoMessage: typeof autoMessage === 'string' ? autoMessage.trim() : 'Решите вопрос на своё усмотрение.',
     margin: typeof margin === 'number' ? margin : 2,
     screen: screen !== false,
     runTimeoutMs: typeof runTimeoutMs === 'number' ? runTimeoutMs : 180000,

@@ -155,6 +155,18 @@ export class Engine {
   /** Язык общения из settings.json — перечитывается каждый раунд (как профиль). */
   private language = 'русский';
 
+  /** Автономный режим: вопросы человеку решаются сами, раунды продолжаются. */
+  autoMode = false;
+  /** Сколько автоматических ходов осталось до остановки (лимит безопасности). */
+  autoLeft = 0;
+  /** Включить/выключить автономный режим с лимитом ходов (/auto). */
+  setAutoMode(on: boolean, turns: number): void {
+    this.autoMode = on;
+    this.autoLeft = on ? turns : 0;
+  }
+  /** Автоответ на текстовые вопросы агентов (из settings.json). */
+  private autoMessage = 'Решите вопрос на своё усмотрение.';
+
   constructor(
     public app: App,
     private presenter: Presenter,
@@ -313,6 +325,8 @@ export class Engine {
    * разговоров, "@session" — интерактивный выбор. Enter отменяет.
    */
   private async pickSession(numStr?: string): Promise<Session | null> {
+    // автономный режим: никаких интерактивных вопросов
+    if (this.autoMode) return null;
     const list = this.app.store.list().filter((s) => s.id !== this.app.session.id);
     if (list.length === 0) {
       this.presenter.notice('  ⚠ Других разговоров пока нет — нечего прикладывать.');
@@ -420,7 +434,23 @@ export class Engine {
       this.presenter.error(`не удалось прочитать команду: ${err instanceof Error ? err.message : err}`);
       return;
     }
-    await this.runRound(text, team, signal);
+
+    // автономный режим: после ответа команды авто-сообщение запускает новый
+    // раунд, пока не кончатся ходы (лимит) или авто-режим не выключат
+    let current = text;
+    let turns = 0;
+    while (current !== null) {
+      await this.runRound(current, team, signal);
+      if (!this.autoMode || this.autoLeft <= 0 || signal.aborted) {
+        if (this.autoMode && this.autoLeft <= 0 && this.autoMode) {
+          this.autoMode = false;
+          this.presenter.notice('  🤖 автономный режим завершён: лимит ходов исчерпан (/auto — включить снова)');
+        }
+        break;
+      }
+      this.autoLeft--;
+      current = this.autoMessage;
+    }
   }
 
   private async runRound(text: string, fullTeam: Agent[], signal: AbortSignal): Promise<void> {
@@ -428,8 +458,10 @@ export class Engine {
     // профиль читаем каждый раунд: правки config/user.json подхватываются на лету
     const profile = loadUserProfile(USER_FILE);
     this.app.profile = profile;
-    // язык общения — из settings.json, тоже на лету
-    this.language = loadSettings(SETTINGS_FILE, 0).language;
+    // язык общения и автоответ — из settings.json, тоже на лету
+    const ui = loadSettings(SETTINGS_FILE, 0);
+    this.language = ui.language;
+    this.autoMessage = ui.autoMessage;
     // тула тоже: переимпорт tools/*.ts и свежие карточки — без перезапуска
     await this.refreshUserTools();
     // в чате отвечают только позванные (старые чаты без списка — вся команда)
@@ -1097,10 +1129,15 @@ export class Engine {
           continue;
         }
         if (verdict === 'ask') {
-          const ok = await this.presenter.confirm({ label: toolLabelOf(action), desc: describeAction(action), who: agent });
-          if (!ok) {
-            results.push(`⛔ ${describeAction(action)} — отклонено пользователем`);
-            continue;
+          // автономный режим: вопросы решаются сами (на усмотрение агентов)
+          if (this.autoMode) {
+            results.push(`🤖 автономно: разрешаю ${describeAction(action)}`);
+          } else {
+            const ok = await this.presenter.confirm({ label: toolLabelOf(action), desc: describeAction(action), who: agent });
+            if (!ok) {
+              results.push(`⛔ ${describeAction(action)} — отклонено пользователем`);
+              continue;
+            }
           }
         }
         try {

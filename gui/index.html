@@ -28,8 +28,13 @@
   <aside id="sidebar">
     <section>
       <div class="side-head">Разговоры
+        <button id="btn-export-session" title="Экспорт текущего разговора в zip">⬇</button>
+        <button id="btn-import-session" title="Импорт разговора из zip">⬆</button>
+        <button id="btn-export-home" title="Экспорт всех настроек и истории (дом, без .env)">⬇🏠</button>
+        <button id="btn-import-home" title="Импорт настроек и истории из zip">⬆🏠</button>
         <button id="btn-new" title="Новый разговор">＋</button>
       </div>
+      <input type="file" id="import-file" accept=".zip" class="hidden">
       <ul id="sessions"></ul>
     </section>
     <section>
@@ -37,8 +42,28 @@
       <ul id="team"></ul>
     </section>
     <section>
-      <div class="side-head">Провайдеры</div>
+      <div class="side-head">Провайдеры
+        <button id="btn-provider-add" title="Новый провайдер">＋</button>
+      </div>
       <ul id="providers"></ul>
+    </section>
+    <section>
+      <div class="side-head">Настройки
+        <button id="btn-settings-edit" title="Правка настроек">✎</button>
+      </div>
+      <ul id="settings-list"></ul>
+    </section>
+    <section>
+      <div class="side-head">Расписание
+        <button id="btn-schedule-add" title="Новая задача">＋</button>
+      </div>
+      <ul id="schedule-list"></ul>
+    </section>
+    <section>
+      <div class="side-head">Проекты
+        <button id="btn-project-add" title="Новый проект">＋</button>
+      </div>
+      <ul id="projects"></ul>
     </section>
   </aside>
 
@@ -66,11 +91,14 @@
     <div id="statusbar" class="hidden">
       <span id="busy-label"></span>
       <button id="btn-abort" title="Прервать раунд (Esc в терминале)">⏹ Прервать</button>
+      <button id="btn-auto" title="Автономный режим: агенты решают вопросы сами">🤖 Авто</button>
     </div>
 
     <div id="hints" class="hidden"></div>
 
     <div id="inputrow">
+      <button id="btn-attach" title="Прикрепить файл (положится в inbox проекта)">📎</button>
+      <input type="file" id="attach-file" class="hidden">
       <textarea id="input" rows="1"
         placeholder="Напишите команде… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику, /help — команды)"></textarea>
       <button id="btn-send" title="Отправить">➤</button>
@@ -78,6 +106,17 @@
   </section>
 </main>
 
+<div id="modal" class="hidden">
+  <div class="modal-box">
+    <h2 id="modal-title"></h2>
+    <div id="modal-fields"></div>
+    <div id="modal-error" class="errline hidden"></div>
+    <div class="row">
+      <button id="modal-ok">Сохранить</button>
+      <button id="modal-cancel">Отмена</button>
+    </div>
+  </div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>

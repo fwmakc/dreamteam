@@ -26,6 +26,49 @@ const AGENT_COLORS = MANAGER_COLORS;
  * Читает config/manager.json. Файл обязателен: нет файла, битый JSON или
  * неизвестный провайдер — падение на старте с внятной ошибкой.
  */
+/** Правка manager.json из GUI по белому списку; валидация loadManagerConfig после записи. */
+export function updateManagerConfig(
+  file: string,
+  fields: Record<string, unknown>,
+  knownProviderIds: Iterable<string>,
+): string {
+  const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  const current = loadManagerConfig(file, knownProviderIds);
+  const changes: string[] = [];
+  const updatable: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields ?? {})) {
+    if (!['name', 'emoji', 'color', 'temperature', 'provider'].includes(key)) continue;
+    if (key === 'temperature') {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < 0 || num > 2) {
+        throw new Error(`temperature — жду число от 0 до 2, а не «${value}»`);
+      }
+      updatable[key] = num;
+    } else {
+      if (typeof value !== 'string' || !value.trim()) throw new Error(`поле «${key}» — непустая строка`);
+      updatable[key] = value.trim();
+    }
+    changes.push(`${key}="${String(updatable[key])}"`);
+  }
+  if (changes.length === 0) throw new Error('не понятно, что менять — нет узнаваемых полей');
+  raw.name = updatable.name ?? current.name;
+  raw.emoji = updatable.emoji ?? current.emoji;
+  raw.color = updatable.color ?? current.color;
+  raw.temperature = updatable.temperature ?? current.temperature;
+  raw.provider = updatable.provider ?? current.provider;
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}
+`, 'utf8');
+  try {
+    loadManagerConfig(tmp, knownProviderIds);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+  renameSync(tmp, file);
+  return `✓ менеджер: ${changes.join(', ')}`;
+}
+
 export function loadManagerConfig(file: string, knownProviderIds: Iterable<string>): ManagerConfig {
   let raw: unknown;
   try {
@@ -312,6 +355,66 @@ export function addTeamAgent(file: string, data: ManagerNewAgent): string {
   agents.push(agent);
   writeTeamFile(file, root);
   return `✓ ${name} (id «${id}», роль «${role}») добавлен в команду`;
+}
+
+/** Импорт: вливает входящих агентов по id — новых добавляет, совпавших не трогает.
+ *  Валидация и откат — те же (tmp → loadTeam → rename). Возвращает число добавленных. */
+export function mergeTeamAgents(file: string, incoming: Agent[]): number {
+  const { root, agents } = readTeamRoot(file);
+  const known = new Set(agents.map((a) => (a as Agent).id));
+  let added = 0;
+  for (const a of incoming) {
+    if (!a?.id || known.has(a.id)) continue;
+    agents.push(a);
+    known.add(a.id);
+    added++;
+  }
+  if (added > 0) writeTeamFile(file, root);
+  return added;
+}
+
+/** Удаление участника по id (для /agent delete и GUI). Валидация+откат — как везде. */
+export function removeTeamAgent(file: string, id: string): string {
+  const fid = String(id ?? '').trim();
+  if (!fid) throw new Error('не указан id участника');
+  const { root, agents } = readTeamRoot(file);
+  const idx = agents.findIndex((a) => (a as Agent).id === fid);
+  if (idx === -1) throw new Error(`участника с id «${fid}» нет в команде`);
+  const gone = agents[idx] as Agent;
+  agents.splice(idx, 1);
+  writeTeamFile(file, root);
+  return `✓ ${gone.emoji} ${gone.name} (id «${fid}») удалён из команды`;
+}
+
+/** Удаление проекта целиком (для GUI). Реестр валидируется, откат — как везде. */
+export function removeProject(file: string, id: string): string {
+  const pid = String(id ?? '').trim();
+  if (!pid) throw new Error('не указан id проекта');
+  const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${file}: ожидаю объект { "проект": { "hosts": { … } } }`);
+  }
+  if (raw[pid] === undefined) throw new Error(`проекта «${pid}» нет в projects.json`);
+  delete raw[pid];
+  writeProjectsFile(file, raw);
+  return `✓ проект «${pid}» удалён`;
+}
+
+/** Удаление одного сервера из проекта (для GUI). */
+export function removeProjectHost(file: string, project: string, name: string): string {
+  const pid = String(project ?? '').trim();
+  const hid = String(name ?? '').trim();
+  if (!pid || !hid) throw new Error('укажите проект и имя сервера');
+  const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  const entry = raw[pid];
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !(entry as Record<string, unknown>).hosts) {
+    throw new Error(`проекта «${pid}» нет в projects.json`);
+  }
+  const hosts = (entry as { hosts: Record<string, unknown> }).hosts;
+  if (hosts[hid] === undefined) throw new Error(`сервера «${hid}» нет у проекта «${pid}»`);
+  delete hosts[hid];
+  writeProjectsFile(file, raw);
+  return `✓ проект «${pid}»: сервер «${hid}» удалён`;
 }
 
 /** team.update: правка полей участника по белому списку. */

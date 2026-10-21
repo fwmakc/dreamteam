@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { ImageProvider, LLMProvider } from '../types.js';
 import type { ProviderConfig, ProviderFactory, ProvidersFile } from './types.js';
 import { openAiCompatibleFactory } from './openai-compatible.js';
@@ -115,4 +115,58 @@ export function loadImageProviders(file: string): LoadedImages {
   }
 
   return { images };
+}
+
+
+// ─── Правка providers.json из GUI (rpc): добавление и удаление провайдеров ──
+
+const PROVIDER_ID_RE = /^[a-z][a-z0-9_-]{1,}$/;
+
+/**
+ * Добавляет провайдера в providers.json: id, адаптер и поля карточки.
+ * Запись — tmp → валидация loadProviders → rename; неудача файл не портит.
+ * Возвращает отчёт.
+ */
+export function addProviderConfig(
+  file: string,
+  id: string,
+  config: Record<string, unknown>,
+): string {
+  const pid = String(id ?? '').trim();
+  if (!PROVIDER_ID_RE.test(pid)) {
+    throw new Error(`неверный id провайдера «${id}» — строчные буквы/цифры/-/_ от 2 символов`);
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('карточка провайдера — объект (adapter, model, baseUrl…)');
+  }
+  const adapter = String(config.adapter ?? '').trim();
+  if (adapter === '') throw new Error('не указан adapter');
+  if (!(adapter in adapters)) {
+    throw new Error(`адаптер «${adapter}» неизвестен — доступны: ${Object.keys(adapters).join(', ')}`);
+  }
+  const raw = readProvidersFile(file);
+  if (raw.providers[pid] !== undefined) throw new Error(`провайдер «${pid}» уже есть`);
+  raw.providers[pid] = { adapter, ...config } as ProviderConfig;
+  writeFileProviders(file, raw);
+  return `✓ провайдер «${pid}» (${adapter}) добавлен`;
+}
+
+/** Удаляет провайдера; защищённые id (основной, менеджерский) не трогаются. */
+export function removeProviderConfig(file: string, id: string, protectedIds: string[]): string {
+  const raw = readProvidersFile(file);
+  if (raw.providers[id] === undefined) throw new Error(`провайдера «${id}» нет`);
+  if (protectedIds.includes(id)) {
+    throw new Error(`провайдер «${id}» — основной или менеджерский: сначала назначьте другой основным`);
+  }
+  delete raw.providers[id];
+  writeFileProviders(file, raw);
+  return `✓ провайдер «${id}» удалён`;
+}
+
+/** Запись providers.json: tmp → валидация loadProviders → rename (откат при ошибке). */
+function writeFileProviders(file: string, raw: ProvidersFile): void {
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+  loadProviders(tmp); // валидация; бросает — файл не тронут
+  renameSync(tmp, file);
 }
