@@ -683,9 +683,11 @@
       const li = document.createElement('li');
       li.title = `${a.inChat ? 'Вывести из чата' : 'Позвать в чат'} · двойной клик — настройки`;
       li.innerHTML =
-        `<span>${esc(a.emoji)} ${esc(a.name)}</span>` +
-        `<span class="meta">${esc(a.role ?? '')}</span>` +
-        `<span class="tag ${a.inChat ? 'in' : ''}">${a.inChat ? 'в чате' : '＋ чат'}</span>` +
+        `<div class="content">` +
+        `<div class="sess-main"><span>${esc(a.emoji)} ${esc(a.name)}</span>` +
+        `<span class="tag ${a.inChat ? 'in' : ''}">${a.inChat ? 'в чате' : '＋ чat'}</span></div>` +
+        `<div class="sub">${esc(a.role ?? '')}</div>` +
+        `</div>` +
         '<span class="del" title="Удалить агента">✕</span>';
       li.onclick = () => {
         if (roundActive) return;
@@ -719,10 +721,12 @@
       li.title = (p.isDefault ? 'Провайдер по умолчанию' : 'Сделать основным (для агентов)')
         + (p.isDefault ? '' : ' · двойной клик — настройки');
       li.innerHTML =
-        `<span>${p.ok ? '●' : '○'}</span><span>${esc(p.id)}</span>` +
-        `<span class="meta">${esc(p.model ?? p.kind ?? '')}</span>` +
-        (p.isManager ? '<span class="tag">менеджер</span>' : '') +
+        `<div class="content">` +
+        `<div class="sess-main"><span>${p.ok ? '●' : '○'} ${esc(p.id)}</span>` +
         (p.isDefault ? '<span class="tag in">основной</span>' : '') +
+        (p.isManager ? '<span class="tag">🛎</span>' : '') + `</div>` +
+        `<div class="sub">${esc(p.model ?? p.kind ?? '')}${p.ok ? '' : ` · ${esc(p.note ?? '')}`}</div>` +
+        `</div>` +
         (p.isDefault ? '' : '<span class="del" title="Удалить провайдера">✕</span>');
       if (!p.ok) li.title += ` · проблема: ${p.note ?? ''}`;
       onCliDbl(li,
