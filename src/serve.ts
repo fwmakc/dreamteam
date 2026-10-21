@@ -459,105 +459,6 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         void runRound((signal) => engine.handleMessage(text, signal));
         return;
       }
-      case 'agent_create': {
-        const id = String(msg.id ?? '').trim();
-        const name = String(msg.name ?? '').trim();
-        const role = String(msg.role ?? '').trim() || undefined;
-        const report = addTeamAgent(AGENTS_FILE, { id, name, role: role || undefined });
-        presenter.notice('  ' + report);
-        broadcastState();
-        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
-        return;
-      }
-      case 'agent_delete': {
-        const report = removeTeamAgent(AGENTS_FILE, String(msg.id ?? ''));
-        presenter.notice('  ' + report);
-        broadcastState();
-        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
-        return;
-      }
-      case 'agent_update': {
-        const fields = (msg.fields ?? {}) as Record<string, unknown>;
-        const report = updateTeamAgent(AGENTS_FILE, String(msg.id ?? ''), fields);
-        presenter.notice('  ' + report);
-        broadcastState();
-        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
-        return;
-      }
-      case 'provider_create': {
-        const config = (msg.config ?? {}) as Record<string, unknown>;
-        const report = addProviderConfig(PROVIDERS_FILE, String(msg.id ?? ''), config);
-        presenter.notice('  ' + report);
-        broadcastState();
-        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
-        return;
-      }
-      case 'provider_delete': {
-        const id = String(msg.id ?? '');
-        if (id === app.defaultProviderId || id === app.mgr.provider) {
-          throw new Error(`«${id}» — основной или менеджерский провайдер: сначала назначьте другой`);
-        }
-        const report = removeProviderConfig(PROVIDERS_FILE, id, []);
-        presenter.notice('  ' + report);
-        broadcastState();
-        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
-        return;
-      }
-      case 'projects_get': {
-        const { loadProjects } = await import('./actions.js');
-        const projects = [...loadProjects(PROJECTS_FILE).entries()].map(([id, p]) => ({
-          id,
-          hosts: [...p.hosts.entries()].map(([name, h]) => ({ name, host: h.host, user: h.user, port: h.port })),
-        }));
-        ws.send(JSON.stringify({ type: 'projects', projects }));
-        return;
-      }
-      case 'project_add': {
-        const report = addProject(PROJECTS_FILE, String(msg.id ?? ''), {
-          [String(msg.hostName ?? 'main')]: { host: String(msg.host ?? ''), user: msg.user ? String(msg.user) : undefined, port: msg.port ? Number(msg.port) : undefined },
-        });
-        presenter.notice('  ' + report);
-        broadcastState();
-        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
-        return;
-      }
-      case 'project_delete': {
-        const report = removeProject(PROJECTS_FILE, String(msg.id ?? ''));
-        presenter.notice('  ' + report);
-        broadcastState();
-        ws.send(JSON.stringify({ type: 'notice', text: '  ' + report }));
-        return;
-      }
-      case 'schedule_get': {
-        ws.send(JSON.stringify({ type: 'schedule', tasks: loadSchedule(dirname(PROJECTS_FILE)) }));
-        return;
-      }
-      case 'schedule_add': {
-        const message = String(msg.message ?? '').trim();
-        const interval = Number(msg.intervalMinutes ?? 10);
-        if (!message) throw new Error('укажите задание');
-        if (!Number.isFinite(interval) || interval <= 0) throw new Error('интервал — положительное число минут');
-        const tasks = loadSchedule(dirname(PROJECTS_FILE));
-        const id = `task-${Date.now().toString(36)}`;
-        tasks.push({ id, message, intervalMinutes: interval, enabled: true });
-        saveSchedule(dirname(PROJECTS_FILE), tasks);
-        ws.send(JSON.stringify({ type: 'schedule', tasks }));
-        return;
-      }
-      case 'schedule_delete': {
-        const id = String(msg.id ?? '');
-        const tasks = loadSchedule(dirname(PROJECTS_FILE)).filter((t) => t.id !== id);
-        saveSchedule(dirname(PROJECTS_FILE), tasks);
-        ws.send(JSON.stringify({ type: 'schedule', tasks }));
-        return;
-      }
-      case 'schedule_toggle': {
-        const tasks = loadSchedule(dirname(PROJECTS_FILE));
-        const task = tasks.find((t) => t.id === String(msg.id ?? ''));
-        if (task) { task.enabled = !task.enabled; saveSchedule(dirname(PROJECTS_FILE), tasks); }
-        ws.send(JSON.stringify({ type: 'schedule', tasks }));
-        return;
-      }
       case 'settings_get': {
         ws.send(JSON.stringify({ type: 'settings', settings: loadSettings(SETTINGS_FILE, 0) }));
         return;
@@ -660,6 +561,96 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         if (!ok) throw new Error(`Нет провайдера «${pid}». Доступны: ${[...app.providers.keys()].join(', ')}`);
         broadcastState();
         return { ok: true };
+      }
+      case 'agent_create': {
+        const report = addTeamAgent(AGENTS_FILE, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined });
+        broadcastState();
+        return { text: report };
+      }
+      case 'agent_delete': {
+        const report = removeTeamAgent(AGENTS_FILE, String(args.id ?? ''));
+        broadcastState();
+        return { text: report };
+      }
+      case 'agent_update': {
+        const report = updateTeamAgent(AGENTS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>);
+        broadcastState();
+        return { text: report };
+      }
+      case 'provider_create': {
+        const report = addProviderConfig(PROVIDERS_FILE, String(args.id ?? ''), (args.config ?? {}) as Record<string, unknown>);
+        broadcastState();
+        return { text: report };
+      }
+      case 'provider_delete': {
+        const pid = String(args.id ?? '');
+        if (pid === app.defaultProviderId || pid === app.mgr.provider) {
+          throw new Error(`«${pid}» — основной или менеджерский провайдер: сначала назначьте другой`);
+        }
+        const report = removeProviderConfig(PROVIDERS_FILE, pid, []);
+        broadcastState();
+        return { text: report };
+      }
+      case 'projects.get':
+        return { projects: readProjects() };
+      case 'project_add': {
+        const report = addProject(PROJECTS_FILE, String(args.id ?? ''), {
+          [String(args.hostName ?? 'main')]: {
+            host: String(args.host ?? ''),
+            user: args.user ? String(args.user) : undefined,
+            port: args.port ? Number(args.port) : undefined,
+          },
+        });
+        broadcastState();
+        return { text: report };
+      }
+      case 'project_delete': {
+        const report = removeProject(PROJECTS_FILE, String(args.id ?? ''));
+        broadcastState();
+        return { text: report };
+      }
+      case 'project_host_delete': {
+        const report = removeProjectHost(PROJECTS_FILE, String(args.id ?? ''), String(args.name ?? ''));
+        broadcastState();
+        return { text: report };
+      }
+      case 'settings_set': {
+        const patch = (args.patch ?? {}) as Record<string, unknown>;
+        const rawSettings = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
+        const merged = { ...rawSettings, ...patch };
+        const tmp = SETTINGS_FILE + '.tmp';
+        writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
+        loadSettings(tmp, 0);
+        renameSync(tmp, SETTINGS_FILE);
+        broadcastState();
+        return { ok: true };
+      }
+      case 'manager_set': {
+        const fields = (args.fields ?? {}) as Record<string, unknown>;
+        const known = [...app.providers.keys()];
+        const report = updateManagerConfig(MANAGER_FILE, fields, known);
+        broadcastState();
+        return { text: report };
+      }
+      case 'schedule_get':
+        return { tasks: loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json')) };
+      case 'schedule_add': {
+        const tasks = loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'));
+        const id = `task-${Date.now().toString(36)}`;
+        tasks.push({ id, message: String(args.message ?? ''), intervalMinutes: Number(args.intervalMinutes ?? 10), enabled: true });
+        saveSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'), tasks);
+        return { tasks };
+      }
+      case 'schedule_delete': {
+        const tasks = loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json')).filter((t) => t.id !== String(args.id ?? ''));
+        saveSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'), tasks);
+        return { tasks };
+      }
+      case 'schedule_toggle': {
+        const tasks = loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'));
+        const task = tasks.find((t) => t.id === String(args.id ?? ''));
+        if (task) { task.enabled = !task.enabled; saveSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'), tasks); }
+        return { tasks };
       }
       default:
         throw new Error(`неизвестный rpc-метод «${method}»`);

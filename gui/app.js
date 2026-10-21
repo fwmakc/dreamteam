@@ -124,13 +124,12 @@
     ws.onerror = () => ws.close();
   }
 
-  function tryStoredToken() {
-    const saved = localStorage.getItem('dt-token');
-    if (saved) {
-      sendAuth(saved);
-      return true;
-    }
-    return false;
+  function send(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+  }
+
+  function sendAuth(token) {
+    send({ type: 'auth', token });
   }
 
   function tryStoredToken() {

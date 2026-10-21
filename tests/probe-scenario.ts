@@ -114,7 +114,7 @@ await gui.next((m) => m.type === 'state');
 
 // ── Шаг 2: создать агента-юриста ─────────────────────────────────────────────
 {
-  gui.send({ type: 'agent_create', id: 'lawyer', name: 'Юрист', role: 'право' });
+  gui.send({ type: 'rpc', id: 'r2a', method: 'agent_create', args: { id: 'lawyer', name: 'Юрист', role: 'право' } });
   const st = await gui.next(
     (m) => m.type === 'state' && (m.state as { team: { id: string }[] }).team.some((a) => a.id === 'lawyer'),
   );
@@ -165,12 +165,15 @@ await gui.next((m) => m.type === 'state');
 
 // ── Шаг 7: удалить агента и сессию ───────────────────────────────────────────
 {
-  gui.send({ type: 'agent_delete', id: 'lawyer' });
+  gui.send({ type: 'rpc', id: 'r7a', method: 'agent_delete', args: { id: 'lawyer' } });
   await gui.next(
     (m) => m.type === 'state' && !(m.state as { team: { id: string }[] }).team.some((a) => a.id === 'lawyer'),
   );
   check('GUI/TUI 7: агент удалён из команды', true);
-  gui.send({ type: 'command', text: '/delete 1' });
+  // создаём временную сессию: текущую удалить нельзя
+  gui.send({ type: 'command', text: '/new' });
+  await gui.next((m) => m.type === 'say');
+  gui.send({ type: 'command', text: '/delete 2' });
   const del = await gui.next((m) => m.type === 'notice' && String(m.text).includes('удалён'));
   check('GUI/TUI 7: разговор удалён', Boolean(del));
 }
