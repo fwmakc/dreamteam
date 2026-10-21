@@ -44,6 +44,18 @@
 }
 .auth-box button { padding: 8px 16px; }
 #btn-logout { margin-left: auto; }
+.badge.clickable { cursor: pointer; }
+.badge.clickable:hover { border-color: var(--accent); color: var(--accent); }
+.tb-btn {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+}
+.tb-btn:hover { color: var(--accent); }
+.spacer { margin-left: auto; }
 #btn-auto.in { border-color: var(--ok); color: var(--ok); }
 .file-link { color: var(--accent); text-decoration: underline; }
 
