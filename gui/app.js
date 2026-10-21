@@ -720,8 +720,7 @@
       li.innerHTML =
         `<div class="content">` +
         `<div class="sess-main"><span>${p.ok ? '●' : '○'} ${esc(p.id)}</span>` +
-        (p.isDefault ? '<span class="tag in">основной</span>' : '') +
-        (p.isManager ? '<span class="tag">🛎</span>' : '') + `</div>` +
+        (p.isDefault ? '<span class="tag in">основной</span>' : '') + `</div>` +
         `<div class="sub">${esc(p.model ?? p.kind ?? '')}${p.ok ? '' : ` · ${esc(p.note ?? '')}`}</div>` +
         `</div>` +
         (p.isDefault ? '' : '<span class="del" title="Удалить провайдера">✕</span>');
