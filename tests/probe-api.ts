@@ -144,10 +144,17 @@ const handle = await startServe({ port: 0 });
   check('http: нет файла — 404', missing.status === 404);
   const index = await fetch(`http://127.0.0.1:${handle.port}/`);
   check('http: / отдаёт оболочку (text/html)', index.status === 200 && (index.headers.get('content-type') ?? '').includes('text/html'));
-  const appJs = await fetch(`http://127.0.0.1:${handle.port}/app.js`);
-  check('http: app.js отдаётся (text/javascript)', appJs.status === 200 && (appJs.headers.get('content-type') ?? '').includes('javascript'));
-  const style = await fetch(`http://127.0.0.1:${handle.port}/style.css`);
-  check('http: style.css отдаётся (text/css)', style.status === 200 && (style.headers.get('content-type') ?? '').includes('text/css'));
+  // ассеты оболочки берём из отработанного index: vanilla gui/ ссылается на
+  // app.js/style.css, собранный gui-dist/ — на /assets/index-*.js/css
+  const assets = [...(await index.text()).matchAll(/(?:src|href)="([^"]+\.(?:js|css))"/g)].map((m) => m[1]);
+  const jsHref = assets.find((a) => a.endsWith('.js'));
+  const cssHref = assets.find((a) => a.endsWith('.css'));
+  check('http: оболочка ссылается на js- и css-ассеты', Boolean(jsHref && cssHref));
+  for (const [href, mime] of [[jsHref, 'javascript'], [cssHref, 'text/css']] as const) {
+    if (!href) continue;
+    const res = await fetch(`http://127.0.0.1:${handle.port}/${href.replace(/^\//, '')}`);
+    check(`http: ассет ${href} отдаётся (${mime})`, res.status === 200 && (res.headers.get('content-type') ?? '').includes(mime));
+  }
   const escape = await fetch(`http://127.0.0.1:${handle.port}/../package.json`);
   check('http: выход за gui/ не проходит', escape.status === 403 || escape.status === 404);
   const deep = await fetch(`http://127.0.0.1:${handle.port}/deep/nested.css`);
@@ -285,6 +292,32 @@ const client = await makeClient(handle.port);
   client.send({ type: 'rpc', id: 'r4', method: 'chat.remove', args: { name: 'Тест' } });
   const rem = await client.next((m) => m.type === 'rpc_result' && m.id === 'r4');
   check('rpc: chat.remove — текст отчёта', String((rem.result as { text: string }).text).includes('покинул'));
+
+  // rpc: user_set — профиль через форму настроек (обе оболочки ходят rpc-методом)
+  client.send({ type: 'rpc', id: 'r9', method: 'user_set', args: { name: 'Профиль', role: 'тест' } });
+  const us = await client.next((m) => m.type === 'rpc_result' && m.id === 'r9');
+  check('rpc: user_set — профиль обновлён', String((us.result as { text: string }).text).includes('Профиль'));
+  // то же клиентским сообщением (канал без rpc) — и вернуть профиль как был
+  client.send({ type: 'user_set', name: 'Пользователь', role: '' });
+  await client.next((m) => m.type === 'notice' && String(m.text).includes('Пользователь'));
+
+  // ws: schedule_get сообщением — событие schedule (секция «Расписание» в GUI)
+  client.send({ type: 'schedule_get' });
+  const sch = await client.next((m) => m.type === 'schedule');
+  check('ws: schedule_get — событие schedule с задачами', Array.isArray((sch as { tasks?: unknown[] }).tasks));
+
+  // rpc: расписание — полный цикл записи в schedule.json проекта
+  client.send({ type: 'rpc', id: 'r10', method: 'schedule_add', args: { message: 'Напоминание', intervalMinutes: 30 } });
+  const sa = await client.next((m) => m.type === 'rpc_result' && m.id === 'r10');
+  const added = (sa.result as { tasks: { id: string; message: string; enabled: boolean }[] }).tasks;
+  check('rpc: schedule_add — задача записана', added.length === 1 && added[0].message === 'Напоминание' && added[0].enabled === true);
+  const taskId = added[0].id;
+  client.send({ type: 'rpc', id: 'r11', method: 'schedule_toggle', args: { id: taskId } });
+  const stg = await client.next((m) => m.type === 'rpc_result' && m.id === 'r11');
+  check('rpc: schedule_toggle — выключена', (stg.result as { tasks: { enabled: boolean }[] }).tasks[0].enabled === false);
+  client.send({ type: 'rpc', id: 'r12', method: 'schedule_delete', args: { id: taskId } });
+  const sd = await client.next((m) => m.type === 'rpc_result' && m.id === 'r12');
+  check('rpc: schedule_delete — задача удалена', (sd.result as { tasks: unknown[] }).tasks.length === 0);
 
   // rpc: ошибки — честные сообщения
   client.send({ type: 'rpc', id: 'r5', method: 'provider.set', args: { id: 'nope' } });
