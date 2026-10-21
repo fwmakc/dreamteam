@@ -32,7 +32,7 @@ import type { Agent, Session } from './types.js';
 /**
  * Локальный API поверх ядра: `dreamteam serve` поднимает HTTP+WS на
  * 127.0.0.1:8080 (PORT/HOST, можно в ~/.dreamteam/.env) и раздаёт
- * веб-оболочку из gui/. Ядро общается с клиентами
+ * веб-оболочку из gui-dist/ (сборка Vue из gui-src/). Ядро общается с клиентами
  * только через ServerPresenter (тот же интерфейс Presenter, что и у
  * терминала) — никакого второго ядра нет.
  *
@@ -254,7 +254,7 @@ const MIME: Record<string, string> = {
 };
 
 /** Каталог веб-оболочки рядом с src/ — и в репозитории, и в установленном пакете. */
-const GUI_DIR = fileURLToPath(new URL('../gui/', import.meta.url));
+const GUI_DIR = fileURLToPath(new URL('../gui-dist/', import.meta.url));
 
 export interface ServeHandle {
   port: number;
