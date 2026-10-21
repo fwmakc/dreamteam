@@ -1,54 +1,177 @@
-<script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
-import {
-  authed, authNeeded, busyLabel, conn, currentStream, dispatch, feedItems,
-  notices, roundActive, rpc, send, state, streaming, connectWs,
-} from './stores/ws';
+<script setup lang='ts'>
+import { computed, onMounted, ref, watch, nextTick } from 'vue';
+import type { ChatMessage, ProjectInfo, ScheduleTaskInfo, StateSnapshot } from './types';
 
-const inputText = ref('');
-const showAuth = ref(false);
-const authToken = ref('');
-const autoLeft = computed(() => state.value.auto?.left ?? 0);
-const autoMode = computed(() => state.value.auto?.mode ?? false);
-const chatEl = ref<HTMLElement | null>(null);
+// ── WS ────────────────────────────────────────────────────────────────────────
+let ws: WebSocket | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let rpcSeq = 0;
+const rpcPending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+const busyMap = new Map<string, string>();
 
-function sendUser() {
-  const text = inputText.value.trim();
-  if (!text || roundActive.value) return;
-  inputText.value = '';
-  send({ type: 'user_message', text });
+export const conn = ref<'off' | 'on'>('off');
+export const authed = ref(true);
+export const authNeeded = ref(false);
+export const roundActive = ref(false);
+export const snapshot = reactive<Partial<StateSnapshot>>({});
+export const streaming = reactive({ open: false, name: '', emoji: '🤖', color: '', text: '' });
+export const busyText = ref('');
+export const autoMode = ref(false);
+export const autoLeft = ref(0);
+export const feedItems = reactive<{ text: string }[]>([]);
+export const chatMessages = reactive<ChatMessage[]>([]);
+export const showAuth = ref(false);
+export const authToken = ref('');
+export const authError = ref('');
+export const confirmVisible = ref(false);
+export const confirmLabel = ref('');
+export const confirmDesc = ref('');
+export const confirmWho = ref('');
+export const confirmId = ref('');
+export const chooseVisible = ref(false);
+export const chooseItems = ref<{ title: string; count: number }[]>([]);
+export const chooseId = ref('');
+
+function send(msg: any) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
-function sendCommand(text: string) {
-  if (roundActive.value) return;
-  send({ type: 'command', text });
+function rpc(method: string, args?: Record<string, unknown>): Promise<any> {
+  const id = `rpc-${++rpcSeq}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('таймаут')), 30_000);
+    rpcPending.set(id, { resolve, reject, timer });
+    send({ type: 'rpc', id, method, args: args ?? {} });
+  });
 }
-function newSession() { if (!roundActive.value) rpc('session.new', {}); }
-function toggleAuto() {
-  if (roundActive.value) return;
-  const cmd = autoMode.value ? '/auto off' : '/auto';
-  send({ type: 'command', text: cmd });
+function resolveRpc(id: string, result: unknown) {
+  const p = rpcPending.get(id);
+  if (p) { clearTimeout(p.timer); rpcPending.delete(id); p.resolve(result); }
 }
-function doAuth() {
-  const token = authToken.value.trim();
-  if (!token) return;
-  localStorage.setItem('dt-token', token);
-  send({ type: 'auth', token });
-  showAuth.value = false;
+function rejectRpc(id: string, error: string) {
+  const p = rpcPending.get(id);
+  if (p) { clearTimeout(p.timer); rpcPending.delete(id); p.reject(new Error(error)); }
 }
-function logout() {
-  localStorage.removeItem('dt-token');
-  location.reload();
+
+function connectWs() {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => {
+    conn.value = 'on';
+    const saved = localStorage.getItem('dt-token');
+    if (saved) send({ type: 'auth', token: saved });
+    else send({ type: 'hello' });
+  };
+  ws.onmessage = (e) => {
+    let msg: Record<string, unknown>;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    const type = String(msg.type ?? '');
+    if (type === 'auth_required') { authNeeded.value = true; authed.value = false; return; }
+    if (type === 'auth_ok') { authed.value = true; authNeeded.value = false; send({ type: 'hello' }); return; }
+    if (type === 'auth_failed') { authed.value = false; localStorage.removeItem('dt-token'); return; }
+    if (type === 'rpc_result') { resolveRpc(String(msg.id ?? ''), msg.result); return; }
+    if (type === 'rpc_error') { rejectRpc(String(msg.id ?? ''), String(msg.error ?? '')); return; }
+    dispatchEvent(type, msg);
+  };
+  ws.onclose = () => {
+    conn.value = 'off';
+    reconnectTimer = setTimeout(connectWs, 1500);
+  };
+  ws.onerror = () => ws.close();
 }
-function scrollToBottom() {
-  requestAnimationFrame(() => { if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight; });
+
+function dispatchEvent(type: string, msg: Record<string, unknown>): void {
+  switch (type) {
+    case 'state': {
+      Object.assign(snapshot, msg.state as StateSnapshot);
+      if (msg.state) {
+        const a = (msg.state as StateSnapshot).auto;
+        if (a) { autoMode.value = a.mode; autoLeft.value = a.left; }
+      }
+      roundActive.value = false;
+      break;
+    }
+    case 'notice':
+      addFeed(msg.text as string);
+      break;
+    case 'error':
+      addFeed(`✗ ${msg.text as string}`);
+      break;
+    case 'turn_header': {
+      const agent = msg.agent as { name: string; emoji?: string; color?: string };
+      streaming.open = true;
+      streaming.name = agent?.name ?? '';
+      streaming.emoji = agent?.emoji ?? '🤖';
+      streaming.color = agent?.color ?? '';
+      streaming.text = '';
+      break;
+    }
+    case 'delta':
+      streaming.text += msg.text as string;
+      break;
+    case 'turn_end':
+      if ((msg.full as string)?.trim()) { streaming.text = msg.full as string; streaming.open = true; }
+      streaming.open = false;
+      break;
+    case 'say':
+      streaming.text = msg.text as string;
+      streaming.open = true;
+      break;
+    case 'tool_results':
+      addFeed((msg.results as string[]).join('\n'));
+      break;
+    case 'attachment':
+      addFeed(`📎 ${msg.title as string}\n${msg.digest as string}`);
+      break;
+    case 'busy':
+      busyMap.set(String(msg.id), msg.label as string);
+      break;
+    case 'busy_end':
+      busyMap.delete(String(msg.id));
+      break;
+    case 'export_data': {
+      const bin = atob(msg.dataB64 as string);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = msg.name as string; a.click();
+      URL.revokeObjectURL(url);
+      addFeed(`Экспорт: ${msg.name as string}`);
+      break;
+    }
+    case 'confirm':
+      confirmVisible.value = true;
+      confirmLabel.value = msg.label as string;
+      confirmDesc.value = (msg.desc as string) ?? '';
+      confirmWho.value = (msg.who as { emoji?: string; name?: string })
+        ? `${(msg.who as any).emoji ?? ''} ${(msg.who as any).name ?? ''}` : '';
+      confirmId.value = msg.id as string;
+      break;
+    case 'choose_session':
+      chooseVisible.value = true;
+      chooseId.value = msg.id as string;
+      chooseItems.value = msg.items as { title: string; count: number }[];
+      break;
+    case 'projects':
+      snapshot.projects = msg.projects as ProjectInfo[];
+      break;
+    case 'settings':
+      snapshot.settings = msg.settings as StateSnapshot['settings'];
+      break;
+    case 'manager':
+      snapshot.manager = msg.manager as StateSnapshot['manager'];
+      break;
+    case 'schedule':
+      snapshot.scheduleTasks = msg.tasks as ScheduleTaskInfo[];
+      break;
+  }
 }
-watch(() => state.value.session?.messages?.length, scrollToBottom);
-watch(() => streaming.value.text, scrollToBottom);
-onMounted(() => { connectWs(); scrollToBottom(); });
 </script>
 
 <template>
-  <div v-if="authNeeded && !authed" class="auth-box">
+  <!-- Auth -->
+  <div v-if='showAuth' class='auth-box'>
     <h2>Токен доступа</h2>
     <input v-model='authToken' type='password' placeholder='TOKEN из ~/.dreamteam/.env' @keydown.enter='doAuth'>
     <button @click='doAuth'>Войти</button>
@@ -56,175 +179,89 @@ onMounted(() => { connectWs(); scrollToBottom(); });
   <template v-else>
     <header>
       <span class='logo'>🎬 Dream Team</span>
-      <span class='badge'>👤 {{ state.profile?.name ?? '—' }}</span>
-      <span class='badge'>{{ conn === 'on' ? '● на связи' : '○ отключено' }}</span>
+      <span class='badge clickable' title='Настройки пользователя' @click='openUserProfile'>👤 {{ profile.name }}</span>
+      <span class='badge clickable' title='Настройки менеджера' @click='openManagerEdit'>🛎 {{ mgr.name }}</span>
+      <button class='tb-btn' @click='openSettings'>⚙</button>
+      <button class='tb-btn' @click='exportHome'>⬇</button>
+      <button class='tb-btn' @click='pickImportFile'>⬆</button>
+      <input type='file' ref='importFileEl' class='hidden' accept='.zip' @change='onImportFile'>
+      <span class='spacer'></span>
+      <span class='conn' :class='connState'>{{ connState }}</span>
       <button class='logout' @click='logout'>Выйти</button>
     </header>
     <div class='layout'>
       <aside class='sidebar'>
         <!-- Сессии -->
         <section>
-          <div class='sec-head'>
+          <div class='side-head'>
+            <span class='sec-toggle'>▾</span>
             <span class='sec-name'>Сессии</span>
-            <button title='Экспорт сессии' @click="rpc('export_session', { n: 1 })">⬇</button>
-            <button title='Экспорт дома'>⬇🏠</button>
-            <button title='＋' @click='newSession'>＋</button>
+            <button class='sec-add' title='Новый разговор' @click='newSession'>＋</button>
+          </div>
+          <div class='sec-btns'>
+            <button @click='exportSession'>⬇ сессия</button>
+            <button @click='exportHome'>⬇ дом</button>
+            <button class='import-btn' @click='pickImportFile'>⬆ импорт</button>
           </div>
           <ul>
-            <li v-for='(s, i) in state.sessions' :key='s.id' :class="{ active: s.id === state.session?.id }"
-              :title='`${s.title}\nid: ${s.id}`' @click="rpc('session.open', { n: i + 1 })">
-              <div class='sess-main'><span>{{ s.title }}</span><span class='meta'>{{ s.count }}</span></div>
-              <div class='sub'>№{{ i + 1 }} · {{ new Date(s.updatedAt).toLocaleString('ru-RU') }}</div>
+            <li v-for='(s, i) in sessions' :key='s.id' :class="{ active: s.id === currentSessionId }"
+              :title='`${s.title}\nid: ${s.id}\nсоздан: ${fmtDate(s.createdAt)}\nпоследнее: ${fmtDate(s.updatedAt)}`'
+              @click='openSession(i + 1)'>
+              <div class='sess-line'>
+                <span class='sess-title'>{{ s.title }}</span>
+                <span class='sess-del' v-if='s.id !== currentSessionId' @click.stop='deleteSession(i + 1)'>✕</span>
+              </div>
+              <div class='sess-sub'>создан {{ fmtDate(s.createdAt) }} · последнее {{ fmtDate(s.updatedAt) }}</div>
             </li>
           </ul>
         </section>
         <!-- Команда -->
         <section>
-          <div class='sec-head'><span class='sec-name'>Команда</span></div>
+          <div class='side-head'>
+            <span class='sec-name'>Команда</span>
+            <button class='sec-add' title='Новый агент' @click='agentCreateForm'>＋</button>
+          </div>
           <ul>
-            <li class='static'>{{ state.manager?.emoji }} {{ state.manager?.name }}
-              <span class='meta'>{{ state.manager?.provider }}</span></li>
-            <li v-for='a in state.team' :key='a.id'
-              :title='`${a.inChat ? "Вывести из чата" : "Позвать"} · двойной клик — настройки`'
-              @click="rpc(a.inChat ? 'chat.remove' : 'chat.add', { name: a.name })"
-              @dblclick="rpc('agent_update', { id: a.id, fields: {} })">
-              <span>{{ a.emoji }} {{ a.name }}</span>
-              <span class='meta'>{{ a.role }}</span>
-              <span class='tag' :class="{ in: a.inChat }">{{ a.inChat ? 'в чате' : '＋ чат' }}</span>
-            </li>
-          </ul>
-        </section>
-        <!-- Провайдеры -->
-        <section>
-          <div class='sec-head'><span class='sec-name'>Провайдеры</span></div>
-          <ul>
-            <li v-for='p in state.providers' :key='p.id' :class="{ active: p.isDefault }"
-              :title='p.ok ? "" : p.note' @click="rpc('provider.set', { id: p.id })">
-              <span>{{ p.ok ? "●" : "○" }} {{ p.id }}</span>
-              <span class='meta'>{{ p.model }}</span>
-              <span v-if='p.isManager' class='tag'>🛎</span>
-              <span v-if='p.isDefault' class='tag in'>★</span>
+            <li v-for='a in team' :key='a.id' class='team-item'
+              :title='`${a.inChat ? "Вывести из чата" : "Позвать в чат"} · двойной клик — настройки`'
+              @click='toggleChat(a)'
+              @dblclick='openAgentSettings(a)'>
+              <span class='team-emoji'>{{ a.emoji }}</span>
+              <span class='team-name'>{{ a.name }}</span>
+              <span class='team-role'>{{ a.role }}</span>
+              <span class='team-badge' :class='{ in: a.inChat }'>{{ a.inChat ? 'в чате' : '＋ чат' }}</span>
             </li>
           </ul>
         </section>
         <!-- Настройки -->
         <section>
-          <div class='sec-head'><span class='sec-name'>Настройки</span></div>
-          <ul>
-            <li class='static'>Язык: {{ state.settings?.language ?? '—' }}</li>
-            <li class='static'>Автоответ: {{ (state.settings?.autoMessage ?? '').slice(0, 20) || '—' }}</li>
-            <li class='static'>👤 {{ state.profile?.name ?? '—' }} <span class='meta'>{{ state.profile?.role ?? '' }}</span></li>
-            <li class='static'>🛎 {{ state.manager?.name ?? '' }} <span class='meta'>{{ state.manager?.provider ?? '' }}</span></li>
-          </ul>
-        </section>
-        <!-- Расписание -->
-        <section>
-          <div class='sec-head'><span class='sec-name'>Расписание</span></div>
-          <ul>
-            <li v-for='t in []' :key='t'>{{ t }}</li>
-          </ul>
-        </section>
-        <!-- Проекты -->
-        <section>
-          <div class='sec-head'><span class='sec-name'>Проекты</span></div>
-          <ul>
-            <li v-for='p in state.projects' :key='p.id' class='static'>
-              {{ p.id }} <span class='meta' v-for='h in p.hosts' :key='h.name'>{{ h.name }}:{{ h.host }}</span>
-            </li>
-            <li v-if='!state.projects?.length' class='static dim'>нет проектов</li>
-          </ul>
+          <div class='side-head'>
+            <span class='sec-name'>Настройки</span>
+            <button class='sec-add' title='Правка настроек' @click='settingsForm'>⚙</button>
+          </div>
+          <div class='settings-rows'>
+            <div>Язык: {{ snapshot?.settings?.language ?? '—' }}</div>
+            <div>Автоответ: {{ (snapshot?.settings?.autoMessage ?? '').slice(0, 20) || '—' }}</div>
+            <div>👤 {{ snapshot?.profile?.name ?? '—' }} <span class='dim'>{{ snapshot?.profile?.role ?? '' }}</span></div>
+            <div>{{ snapshot?.manager?.emoji ?? '🛎' }} {{ snapshot?.manager?.name ?? '' }} <span class='dim'>{{ snapshot?.manager?.provider ?? '' }}</span></div>
+          </div>
         </section>
       </aside>
-      <section class='chat-area'>
-        <div ref='chatEl' class='chat'>
-          <template v-for='(m, i) in state.session?.messages ?? []' :key='i'>
-            <div v-if='m.authorId === "user"' class='msg user'>
-              <div class='head'>👤 {{ m.authorName }}</div>
-              <div class='txt' v-html='m.text.replace(/\[([^\]]+\.\w+)\]/g, "<a href=\"/api/file?path=$1\" download>[$1]</a>")'></div>
-            </div>
-            <div v-else-if='m.authorId === "tool"' class='toolblock'>{{ m.text }}</div>
-            <div v-else class='msg'>
-              <div class='head' :style='{ color: state.team?.find(a => a.id === m.authorId)?.color ?? "" }'>
-                {{ m.authorName }} <span class='meta'>{{ m.authorRole }}</span>
-              </div>
-              <div class='txt' v-html='m.text.replace(/\[([^\]]+\.\w+)\]/g, "<a href=\"/api/file?path=$1\" download>[$1]</a>")'></div>
-            </div>
-          </template>
-          <div v-if='streaming.open' class='msg'>
-            <div class='head'>{{ streaming.agentEmoji }} {{ streaming.agentName }}</div>
-            <div class='txt'>{{ streaming.text }}▌</div>
-          </div>
+      <section class='chat-wrap'>
+        <div class='chat-scroll' ref='chatScroll'>
+          <!-- messages -->
         </div>
         <div class='feed'>
-          <div v-for='(n, i) in notices' :key='i' class='notice'>{{ n.text }}</div>
-        </div>
-        <div class='statusbar'>
-          <span v-if='autoMode' class='auto-badge'>🤖 авто ({{ autoLeft }})</span>
-          <span v-if='busyLabel'>⏳ {{ busyLabel }}</span>
-          <button v-if='roundActive' @click="send({ type: 'abort' })">⏹</button>
-          <button :class='{ active: autoMode }' @click='toggleAuto'>🤖</button>
-        </div>
-        <div class='inputrow'>
-          <textarea v-model='inputText' rows='1'
-            placeholder='Напишите команде… (Enter — отправить, /help — команды)'
-            @keydown.enter.exact.prevent='sendUser()'></textarea>
-          <button @click='sendUser()'>➤</button>
-          <label class='attach'>📎<input type='file' class='hidden' @change='(e: Event) => {
-            const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return;
-            const r = new FileReader();
-            r.onload = () => send({ type: "file", name: f.name, dataB64: btoa(String.fromCharCode(...new Uint8Array(r.result as ArrayBuffer))), text: `файл ${f.name}` });
-            r.readAsArrayBuffer(f);
-          }'></label>
+          <div v-for='(n, i) in feedItems' :key='i' class='feed-item'>{{ n }}</div>
         </div>
       </section>
+      <footer class='input-bar'>
+        <button class='attach-btn' title='Прикрепить файл'>📎</button>
+        <input type='file' class='file-input' @change='onFilePicked'>
+        <textarea v-model='draft' placeholder='Напишите команде…' @keydown='onInputKey'></textarea>
+        <button class='send-btn' :disabled='roundActive' @click='sendMessage'>➤</button>
+        <button class='auto-toggle' :class='{ active: autoMode }' @click='toggleAuto'>🤖 {{ autoMode ? "авто" : "авто выкл" }}</button>
+      </footer>
     </div>
   </template>
 </template>
-
-<style>
-:root { --bg: #16181d; --panel: #1e222a; --panel2: #242933; --border: #2e3542; --text: #d7dae0; --dim: #8a919e; --accent: #61afef; --ok: #98c379; --bad: #e06c75; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
-header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
-.logo { font-weight: 600; }
-.badge { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 1px 10px; font-size: 12px; color: var(--dim); }
-.logout { margin-left: auto; }
-.layout { display: flex; height: calc(100vh - 41px); }
-.sidebar { width: 280px; min-width: 280px; overflow-y: auto; background: var(--panel); border-right: 1px solid var(--border); padding: 10px; }
-.sidebar section { margin-bottom: 14px; }
-.sec-head { display: flex; align-items: center; gap: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); margin-bottom: 6px; }
-.sec-head .sec-name { flex: 1; }
-.sec-head button { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 13px; padding: 0 2px; }
-.sec-head button:hover { color: var(--accent); }
-.sidebar ul { list-style: none; margin: 0; padding: 0; }
-.sidebar li { padding: 5px 8px; border-radius: 6px; cursor: pointer; overflow: hidden; }
-.sidebar li:hover { background: var(--panel2); }
-.sidebar li.active { background: var(--panel2); border-left: 2px solid var(--accent); }
-.sidebar li.static { cursor: default; }
-.sidebar .meta { color: var(--dim); font-size: 12px; }
-.sidebar .tag { font-size: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; color: var(--dim); }
-.sidebar .tag.in { color: var(--ok); border-color: var(--ok); }
-.chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.chat { flex: 1; overflow-y: auto; padding: 14px 18px; }
-.msg { margin-bottom: 12px; max-width: 860px; }
-.msg .head { font-weight: 600; margin-bottom: 2px; }
-.msg .txt { white-space: pre-wrap; overflow-wrap: anywhere; }
-.msg.user .txt { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; display: inline-block; }
-.toolblock { font: 12px/1.6 Consolas, monospace; color: var(--dim); border-left: 2px solid var(--border); padding-left: 10px; margin-bottom: 10px; white-space: pre-wrap; }
-.feed { padding: 0 18px; }
-.notice { color: var(--dim); font-style: italic; margin-bottom: 4px; white-space: pre-wrap; }
-.statusbar { display: flex; align-items: center; gap: 8px; padding: 4px 18px; color: var(--dim); font-size: 13px; }
-.auto-badge { color: var(--ok); }
-.inputrow { display: flex; gap: 8px; padding: 10px 18px 14px; align-items: flex-end; }
-.inputrow textarea { flex: 1; resize: none; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; max-height: 160px; }
-.inputrow button { padding: 8px 14px; cursor: pointer; }
-.attach { cursor: pointer; padding: 8px 4px; }
-.hidden { display: none !important; }
-.auth-box { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 10; }
-.auth-box input { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font: inherit; }
-.meta { color: var(--dim); font-size: 12px; }
-a.file-link { color: var(--accent); }
-button { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
-button:hover { border-color: var(--accent); }
-button.active { border-color: var(--ok); color: var(--ok); }
-.errline { color: var(--bad); }
-</style>
