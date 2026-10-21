@@ -282,6 +282,12 @@ function dispatchEvent(type: string, msg: Record<string, unknown>): void {
     case 'schedule':
       snapshot.scheduleTasks = msg.tasks as ScheduleTaskInfo[];
       break;
+    case 'rpc_result':
+      resolveRpc(String(msg.id ?? ''), msg.result);
+      break;
+    case 'rpc_error':
+      rejectRpc(String(msg.id ?? ''), String(msg.error ?? 'ошибка rpc'));
+      break;
     default:
       break;
   }
