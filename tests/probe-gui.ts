@@ -115,6 +115,51 @@ const unknownRpc = [...guiRpc].filter((m) => !rpcCases.has(m));
 check(`rpc-методы оболочки существуют на сервере (${guiRpc.size} шт.)`, unknownRpc.length === 0,
   `нет на сервере: ${unknownRpc.join(', ')}`);
 
+// --- 4b. каждая форма сохраняет по протоколу: в onSave есть rpc или send ---
+// Повод — заглушка формы провайдера: кнопка «Сохранить» печатала уведомление
+// и не вызывала ничего; контракт имён такое не видит, а форма выглядела рабочей.
+/** Тело вызова openForm — баланс скобок соSkip строковых литералов. */
+function balancedCall(src: string, openAt: number): string {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = openAt; i < src.length; i++) {
+    const ch = src[i];
+    if (quote) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') { quote = ch; continue; }
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return src.slice(openAt, i + 1);
+    }
+  }
+  return '';
+}
+
+function checkForms(file: string, src: string): void {
+  let at = 0;
+  let total = 0;
+  const dead: string[] = [];
+  while (true) {
+    at = src.indexOf('openForm(', at);
+    if (at === -1) break;
+    const isDefinition = src.slice(Math.max(0, at - 9), at) === 'function ';
+    const body = balancedCall(src, at + 'openForm'.length);
+    if (!isDefinition) {
+      total++;
+      if (body && !/\brpc\(|\bsend\(/.test(body)) dead.push(body.slice(0, 80));
+    }
+    at += 9;
+  }
+  check(`${file}: каждая форма сохраняет по протоколу (${total} шт.)`, dead.length === 0,
+    `onSave без rpc/send: ${dead.join(' | ')}`);
+}
+checkForms('gui-src/App.vue', appSrc);
+checkForms('gui/app.js', read('gui/app.js'));
+
 // --- 5. vanilla-фолбэк и собранная оболочка ---
 for (const f of ['gui/index.html', 'gui/app.js', 'gui/style.css']) {
   check(`vanilla-фолбэк ${f} на месте`, existsSync(join(root, f)));
