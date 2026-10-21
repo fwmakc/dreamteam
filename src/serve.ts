@@ -300,7 +300,7 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   const nextDue = new Map<string, number>();
   const scheduleTimer = setInterval(() => {
     const now = Date.now();
-    for (const task of loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json')).filter((t) => t.enabled)) {
+    for (const task of loadSchedule(dirname(PROJECTS_FILE)).filter((t) => t.enabled)) {
       const due = nextDue.get(task.id) ?? 0;
       if (now < due) continue;
       nextDue.set(task.id, now + task.intervalMinutes * 60_000);
@@ -321,6 +321,11 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
 
   const broadcastState = (): void => {
     presenter.broadcast({ type: 'state', state: stateSnapshot(app, engine, readProjects()) });
+  };
+
+  /** Расписание меняется редко, но обновиться в GUI должно сразу во всех клиентах. */
+  const broadcastSchedule = (): void => {
+    presenter.broadcast({ type: 'schedule', tasks: loadSchedule(dirname(PROJECTS_FILE)) });
   };
 
   const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -492,6 +497,11 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         ws.send(JSON.stringify({ type: 'manager', manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, temperature: app.mgr.temperature, provider: app.mgr.provider } }));
         return;
       }
+      case 'schedule_get': {
+        // оболочки просят расписание сообщением (не rpc) и ждут событие 'schedule'
+        ws.send(JSON.stringify({ type: 'schedule', tasks: loadSchedule(dirname(PROJECTS_FILE)) }));
+        return;
+      }
       case 'manager_set': {
         const fields = (msg.fields ?? {}) as Record<string, unknown>;
         const known = [...app.providers.keys()];
@@ -625,6 +635,13 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { text: report };
       }
+      case 'user_set': {
+        // профиль владельца: форма настроек в обеих оболочках идёт через rpc
+        const report = engine.setProfile(String(args.name ?? ''), args.role ? String(args.role) : undefined, args.about ? String(args.about) : undefined);
+        presenter.notice('  ' + report);
+        broadcastState();
+        return { text: report };
+      }
       case 'settings_set': {
         const patch = (args.patch ?? {}) as Record<string, unknown>;
         const rawSettings = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
@@ -644,23 +661,26 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text: report };
       }
       case 'schedule_get':
-        return { tasks: loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json')) };
+        return { tasks: loadSchedule(dirname(PROJECTS_FILE)) };
       case 'schedule_add': {
-        const tasks = loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'));
+        const tasks = loadSchedule(dirname(PROJECTS_FILE));
         const id = `task-${Date.now().toString(36)}`;
         tasks.push({ id, message: String(args.message ?? ''), intervalMinutes: Number(args.intervalMinutes ?? 10), enabled: true });
-        saveSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'), tasks);
+        saveSchedule(dirname(PROJECTS_FILE), tasks);
+        broadcastSchedule();
         return { tasks };
       }
       case 'schedule_delete': {
-        const tasks = loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json')).filter((t) => t.id !== String(args.id ?? ''));
-        saveSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'), tasks);
+        const tasks = loadSchedule(dirname(PROJECTS_FILE)).filter((t) => t.id !== String(args.id ?? ''));
+        saveSchedule(dirname(PROJECTS_FILE), tasks);
+        broadcastSchedule();
         return { tasks };
       }
       case 'schedule_toggle': {
-        const tasks = loadSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'));
+        const tasks = loadSchedule(dirname(PROJECTS_FILE));
         const task = tasks.find((t) => t.id === String(args.id ?? ''));
-        if (task) { task.enabled = !task.enabled; saveSchedule(join(dirname(PROJECTS_FILE), 'schedule.json'), tasks); }
+        if (task) { task.enabled = !task.enabled; saveSchedule(dirname(PROJECTS_FILE), tasks); }
+        broadcastSchedule();
         return { tasks };
       }
       default:
