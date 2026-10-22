@@ -214,7 +214,7 @@ function readScaffold(rel: string): Record<string, unknown> {
   }
 }
 
-/** Дом: провайдеры (wizard, если нет) и настройки (дефолты, если нет). */
+/** Дом: провайдеры (wizard, если нет), настройки и КОМАНДА (агенты, менеджер, тула). */
 export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promise<string[]> {
   const providersFile = join(homeDir, 'providers.json');
   const settingsFile = join(homeDir, 'settings.json');
@@ -224,6 +224,18 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     mkdirSync(homeDir, { recursive: true });
     writeFileSync(settingsFile, JSON.stringify(readScaffold(join('home', 'settings.json')), null, 2) + '\n');
     notes.push(`создал ${settingsFile} (язык и экран по умолчанию)`);
+  }
+  // команда — вещь машины: скаффолдим один раз, дальше живёт между проектами
+  const agentsFile = join(homeDir, 'agents.json');
+  if (!existsSync(agentsFile)) {
+    mkdirSync(homeDir, { recursive: true });
+    writeFileSync(agentsFile, JSON.stringify(readScaffold(join('home', 'agents.json')), null, 2) + '\n');
+    notes.push(`создал ${agentsFile} (пустая команда — менеджер позовёт и настроит)`);
+  }
+  const toolsDir = join(homeDir, 'tools');
+  if (!existsSync(toolsDir)) {
+    mkdirSync(toolsDir, { recursive: true });
+    notes.push(`создал ${toolsDir} (полка для своих тулов)`);
   }
   if (!existsSync(envFile)) {
     // пример со всеми переменными (ключи закомментированы): мастер допишет
@@ -241,25 +253,40 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     }
     notes.push(...(await runWizard(io, homeDir)));
   }
+  // менеджер — после wizard: его провайдер = основной, выбранный только что
+  const managerFile = join(homeDir, 'manager.json');
+  if (!existsSync(managerFile)) {
+    mkdirSync(homeDir, { recursive: true });
+    const manager = readScaffold(join('home', 'manager.json'));
+    manager.provider = defaultProviderOf(homeDir);
+    writeFileSync(managerFile, JSON.stringify(manager, null, 2) + '\n');
+    notes.push(`создал ${managerFile} (менеджер переговорки на провайдере «${manager.provider}»)`);
+  }
   return notes;
 }
 
-/** Проект: нет .dreamteam — создать минимальный набор и предупредить про git. */
+/** Проект: нет .dreamteam — создать project.json и предупредить про git. */
 export function ensureProject(defaultProvider: string, projectDir: string = DT_PROJECT): string[] {
+  void defaultProvider;
   if (existsSync(projectDir)) return [];
-  mkdirSync(join(projectDir, 'tools'), { recursive: true });
-  writeFileSync(join(projectDir, 'agents.json'), JSON.stringify(readScaffold(join('project', 'agents.json')), null, 2) + '\n');
-  // единственная динамика скелета: менеджер работает на основном провайдере дома
-  const manager = readScaffold(join('project', 'manager.json'));
-  manager.provider = defaultProvider;
-  writeFileSync(join(projectDir, 'manager.json'), JSON.stringify(manager, null, 2) + '\n');
-  writeFileSync(join(projectDir, 'projects.json'), JSON.stringify(readScaffold(join('project', 'projects.json')), null, 2) + '\n');
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(join(projectDir, 'project.json'), JSON.stringify(readScaffold(join('project', 'project.json')), null, 2) + '\n');
   const notes = [
-    `создал ${projectDir} (пустая команда, менеджер на провайдере «${defaultProvider}») — дальше менеджер всё объяснит`,
+    `создал ${projectDir} (project.json: серверы и задействованные агенты; команда живёт в доме)`,
   ];
   const gi = gitignoreNotice(dirname(projectDir));
   if (gi) notes.push(gi);
   return notes;
+}
+
+/** Основной провайдер из providers.json папки (для менеджера в скаффолде). */
+function defaultProviderOf(homeDir: string): string {
+  try {
+    const raw = JSON.parse(readFileSync(join(homeDir, 'providers.json'), 'utf8')) as { default?: string };
+    return String(raw.default ?? 'mock');
+  } catch {
+    return 'mock';
+  }
 }
 
 export function defaultIo(): WizardIo {

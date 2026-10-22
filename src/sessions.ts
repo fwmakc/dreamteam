@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import { dirname, join } from 'node:path';
 import type { Session, SessionMeta } from './types.js';
 
-/** Хранилище разговоров: один JSON-файл на разговор в data/sessions/ + человекочитаемый лог в data/transcripts/. */
+/** Хранилище разговоров: один JSON-файл на разговор в sessions/ проекта + человекочитаемый лог в transcripts/. */
 export class SessionStore {
   private readonly transcriptsDir: string;
 

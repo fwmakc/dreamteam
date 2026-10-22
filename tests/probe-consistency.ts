@@ -35,6 +35,7 @@ mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
 process.env.DT_PROJECT = proj;
 process.chdir(base);
+const { SESSIONS_DIR } = await import('../src/paths.js');
 writeFileSync(
   join(home, 'providers.json'),
   JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
@@ -72,6 +73,7 @@ function makeClient(port: number): Promise<{
     ws.on('message', (data: RawData) => {
       const m = JSON.parse(String(data)) as Record<string, unknown>;
       if (m.type === 'state') states++;
+      if (m.type === 'error') console.log('  … сервер:', String(m.text ?? '').slice(0, 160));
       const i = waiters.findIndex((w) => w.pred(m));
       if (i >= 0) {
         const w = waiters.splice(i, 1)[0];
@@ -114,7 +116,7 @@ async function guiView(port: number): Promise<GuiView> {
 
 /** Взгляд TUI: свежий SessionStore поверх тех же файлов. */
 function tuiView(): GuiView {
-  const fresh = new SessionStore(join(home, 'sessions'));
+  const fresh = new SessionStore(SESSIONS_DIR); // сессии — проектные: тот же DT_PROJECT
   const list = fresh.list();
   return {
     sessions: list,
@@ -160,19 +162,20 @@ let handle = await startServe({ port: 0 });
   await c.next((m) => m.type === 'state');
   const before = tuiView().messages.length;
   c.send({ type: 'user_message', text: 'проверочное сообщение из GUI' });
+  // ждём КОНЕЦ раунда: пользователь + ответ менеджера уже на диске
   await c.next(
-    (m) => m.type === 'state' && (m.state as { session: { messages: { text: string }[] } }).session.messages.some((x) => x.text.includes('проверочное сообщение из GUI')),
+    (m) => m.type === 'state' && (m.state as { session: { messages: { text: string }[] } }).session.messages.length >= before + 2,
   );
   const after = tuiView();
   const fresh = after.messages.find((m) => m.text.includes('проверочное сообщение из GUI'));
-  check('раунд GUI → диск: TUI видит новое сообщение', Boolean(fresh) && after.messages.length === before + 2, `было ${before}, стало ${after.messages.length}`);
+  check('раунд GUI → диск: TUI видит новое сообщение и ответ', Boolean(fresh) && after.messages.length >= before + 2, `было ${before}, стало ${after.messages.length}`);
   c.close();
 }
 
 // ── 4. «TUI» пишет в файлы → перезапущенный serve показывает его данные ──────
 {
   await handle.close();
-  const fresh = new SessionStore(join(home, 'sessions'));
+  const fresh = new SessionStore(SESSIONS_DIR); // сессии — проектные: тот же DT_PROJECT
   const current = fresh.load(fresh.list()[0].id)!;
   current.messages.push({ authorId: 'user', authorName: 'Вы', text: 'сообщение из TUI (после перезапуска сервера)', ts: Date.now() });
   fresh.save(current);

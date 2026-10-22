@@ -1,0 +1,7 @@
+{
+  "provider": "mock",
+  "name": "Менеджер",
+  "emoji": "🛎",
+  "color": "yellow",
+  "temperature": 0.2
+}

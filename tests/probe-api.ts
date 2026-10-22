@@ -203,7 +203,7 @@ const client = await makeClient(handle.port);
   check('ws: «Тест» появился в команде', st1.team.some((a) => a.id === 'test_probe'));
   check(
     'ws: agents.json временного проекта получил «Теста»',
-    readFileSync(join(proj, 'agents.json'), 'utf8').includes('test_probe'),
+    readFileSync(join(home, 'agents.json'), 'utf8').includes('test_probe'),
   );
 
   // chat.add менеджером (обращение явное: в чате уже есть Тест — без @ раунд ушёл бы модератору)
@@ -453,7 +453,7 @@ const client = await makeClient(handle.port);
 
   // --- CONFIRM ЖИВОГО РАУНДА: у Теста shell с узким allow — echo уйдёт в вопрос ---
   {
-    const teamFile = join(proj, 'agents.json');
+    const teamFile = join(home, 'agents.json');
     type TeamAgent = { id: string; tools?: Record<string, unknown> };
     const team = JSON.parse(readFileSync(teamFile, 'utf8')) as TeamAgent[];
     const tester = team.find((a) => a.id === 'test_probe');
@@ -543,14 +543,15 @@ const client = await makeClient(handle.port);
     await client.waitState(sGrant + 1);
 
     const sProj = client.stateCount();
-    client.send({ type: 'command', text: '/project add infra; main: root@127.0.0.1:2223' });
-    const p = await client.next((m) => m.type === 'notice' && String(m.text).includes('infra'));
-    check('ws: /project add — отчёт', Boolean(p));
-    check('ws: /project add — projects.json на диске', readFileSync(join(proj, 'projects.json'), 'utf8').includes('infra'));
+    client.send({ type: 'command', text: '/project host add main=root@127.0.0.1:2223' });
+    const p = await client.next((m) => m.type === 'notice' && String(m.text).includes('main'));
+    check('ws: /project host add — отчёт', Boolean(p));
+    const pf = JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as { hosts: Record<string, { host: string; user?: string; port?: number }> };
+    check('ws: /project host add — project.json на диске', pf.hosts.main?.host === '127.0.0.1' && pf.hosts.main?.user === 'root' && pf.hosts.main?.port === 2223, JSON.stringify(pf));
     await client.waitState(sProj + 1);
 
     const sHost = client.stateCount();
-    client.send({ type: 'command', text: '/project host add infra reserve=127.0.0.2' });
+    client.send({ type: 'command', text: '/project host add reserve=127.0.0.2' });
     const ph = await client.next((m) => m.type === 'notice' && String(m.text).includes('reserve'));
     check('ws: /project host — отчёт', Boolean(ph));
     await client.waitState(sHost + 1);

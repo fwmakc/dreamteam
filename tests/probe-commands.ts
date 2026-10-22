@@ -53,7 +53,7 @@ const engine = new Engine(app, stub);
 
 // команда из двух агентов — в уже скаффолденный проект
 writeFileSync(
-  join(proj, 'agents.json'),
+  join(home, 'agents.json'),
   JSON.stringify(
     [
       { id: 'test_probe', name: 'Тест', role: 'подопытный', prompt: 'Ты Тест.', emoji: '🧪', color: 'cyan' },
@@ -183,7 +183,7 @@ function check(name: string, cond: boolean): void {
   check('team add: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
   lines = await run(engine, '/team add test2 Второй лаборант');
   check('team add: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
-  let team = (await import('../src/agents.js')).loadTeam(join(proj, 'agents.json'));
+  let team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
   const second = team.find((a) => a.id === 'test2');
   check('team add: записан с ролью', second?.name === 'Второй' && second?.role === 'лаборант');
   check('team add: дефолты эмодзи/цвета', second?.emoji === '🤖' && second?.color === 'white');
@@ -197,7 +197,7 @@ function check(name: string, cond: boolean): void {
 
   lines = await run(engine, '/team update test2 role=сметана provider=mock');
   check('team update: отчёт с полями', lines[0]?.includes('role="сметана"') ?? false);
-  team = (await import('../src/agents.js')).loadTeam(join(proj, 'agents.json'));
+  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
   check('team update: роль и провайдер записаны', team.find((a) => a.id === 'test2')?.role === 'сметана');
   const badTemp = await run(engine, '/team update test2 temperature=жарко');
   check('team update: temperature не число — отказ', badTemp[0]?.includes('числом') ?? false);
@@ -206,7 +206,7 @@ function check(name: string, cond: boolean): void {
   check('team grant: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
   lines = await run(engine, '/team grant test2 files');
   check('team grant: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
-  team = (await import('../src/agents.js')).loadTeam(join(proj, 'agents.json'));
+  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
   check('team grant: тул files у агента', Boolean((team.find((a) => a.id === 'test2')?.tools as { files?: unknown })?.files));
   threw = '';
   try {
@@ -218,40 +218,34 @@ function check(name: string, cond: boolean): void {
 
   lines = await run(engine, '/team delete test2');
   check('team delete: отчёт', (lines[0]?.includes('test2') || lines[0]?.includes('Второй')) ?? false);
-  team = (await import('../src/agents.js')).loadTeam(join(proj, 'agents.json'));
+  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
   check('team delete: агента нет на диске', !team.some((a) => a.id === 'test2'));
 }
 
 // ── проекты: add/host add/host delete/delete/list ────────────────────────────
 {
-  let lines = await run(engine, '/project add');
-  check('project add: без серверов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
-  lines = await run(engine, '/project add web; prod: deploy@10.0.0.1:2202; backup: 10.0.0.2');
-  check('project add: отчёт с серверами', lines[0]?.includes('prod, backup') ?? false);
-  const projects = JSON.parse(readFileSync(join(proj, 'projects.json'), 'utf8')) as {
-    web?: { hosts: Record<string, { host: string; user?: string; port?: number }> };
+  let lines = await run(engine, '/project');
+  check('project: обзор пустого — подсказка', lines[0]?.includes('Проект пуст') ?? false);
+
+  lines = await run(engine, '/project host add prod=deploy@10.0.0.1:2202');
+  check('project host add: отчёт ✓', lines[0]?.includes('prod') ?? false);
+  lines = await run(engine, '/project host add backup=10.0.0.2');
+  check('project host add: второй сервер — отчёт ✓', lines[0]?.includes('backup') ?? false);
+  const project = JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as {
+    hosts: Record<string, { host: string; user?: string; port?: number }>;
+    agents: string[];
   };
   check(
-    'project add: user и порт разобраны',
-    projects.web?.hosts.prod?.user === 'deploy' && projects.web.hosts.prod.port === 2202
-      && projects.web.hosts.backup?.host === '10.0.0.2',
+    'project host add: user и порт разобраны',
+    project.hosts.prod?.user === 'deploy' && project.hosts.prod.port === 2202
+      && project.hosts.backup?.host === '10.0.0.2',
   );
-  lines = await run(engine, '/project host add web staging=10.0.0.3');
-  check('project host add: отчёт ✓', lines[0]?.includes('staging') ?? false);
-  let threw = '';
-  try {
-    await run(engine, '/project host add nope x=1.2.3.4');
-  } catch (err) {
-    threw = err instanceof Error ? err.message : String(err);
-  }
-  check('project host add: нет проекта — отказ', threw.includes('nope'));
-
+  lines = await run(engine, '/project host add staging=10.0.0.3');
+  check('project host add: ещё сервер — отчёт ✓', lines[0]?.includes('staging') ?? false);
   lines = await run(engine, '/project');
   check('project: обзор — список серверов', lines.some((l) => l.includes('prod: deploy@10.0.0.1:2202')) ?? false);
-  lines = await run(engine, '/project host delete web staging');
-  check('project host delete: сервер убран', !(JSON.parse(readFileSync(join(proj, 'projects.json'), 'utf8')) as typeof projects).web?.hosts.staging);
-  lines = await run(engine, '/project delete web');
-  check('project delete: проект убран', !(JSON.parse(readFileSync(join(proj, 'projects.json'), 'utf8')) as typeof projects).web);
+  lines = await run(engine, '/project host delete staging');
+  check('project host delete: сервер убран', !(JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as typeof project).hosts.staging);
 }
 
 // ── расписание: list/add/toggle/delete ───────────────────────────────────────
@@ -260,12 +254,12 @@ function check(name: string, cond: boolean): void {
   check('schedule: обзор пуст — подсказка', lines[0]?.includes('Задач нет') ?? false);
   lines = await run(engine, '/schedule add Напомнить о перерыве 15');
   check('schedule add: отчёт с интервалом', lines[0]?.includes('каждые 15 мин') ?? false);
-  const schedule = JSON.parse(readFileSync(join(proj, 'schedule.json'), 'utf8')) as Array<{ id: string; message: string; intervalMinutes: number; enabled: boolean }>;
+  const schedule = JSON.parse(readFileSync(join(home, 'schedule.json'), 'utf8')) as Array<{ id: string; message: string; intervalMinutes: number; enabled: boolean }>;
   check('schedule add: задача на диске', schedule.length === 1 && schedule[0].message === 'Напомнить о перерыве' && schedule[0].intervalMinutes === 15);
   lines = await run(engine, `/schedule toggle ${schedule[0].id}`);
   check('schedule toggle: выключена', lines[0]?.includes('⏸') ?? false);
   lines = await run(engine, `/schedule delete ${schedule[0].id}`);
-  check('schedule delete: удалена', (JSON.parse(readFileSync(join(proj, 'schedule.json'), 'utf8')) as unknown[]).length === 0);
+  check('schedule delete: удалена', (JSON.parse(readFileSync(join(home, 'schedule.json'), 'utf8')) as unknown[]).length === 0);
 }
 
 // ── настройки и менеджер ─────────────────────────────────────────────────────
@@ -281,7 +275,7 @@ function check(name: string, cond: boolean): void {
   check('manager: обзор — провайдер', lines.some((l) => l.includes('провайдер: mock')) ?? false);
   lines = await run(engine, '/manager set temperature=0.4');
   check('manager set: отчёт', lines[0]?.includes('temperature="0.4"') ?? false);
-  const manager = JSON.parse(readFileSync(join(proj, 'manager.json'), 'utf8')) as { temperature: number };
+  const manager = JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')) as { temperature: number };
   check('manager set: значение на диске', manager.temperature === 0.4);
 
   lines = await run(engine, '/auto on 3');
@@ -297,11 +291,11 @@ function check(name: string, cond: boolean): void {
 
   // свой тул: достаточно файла tools/<id>.ts — включается командой
   writeFileSync(
-    join(proj, 'tools', 'mytool.ts'),
+    join(home, 'tools', 'mytool.ts'),
     'export default () => ({ desc: "Мой тул", check: () => "allow" as const, async run() { return "ок"; } });\n',
   );
   writeFileSync(
-    join(proj, 'agents.json'),
+    join(home, 'agents.json'),
     JSON.stringify(
       [
         { id: 'test_probe', name: 'Тест', role: 'подопытный', prompt: 'Ты Тест.', emoji: '🧪', color: 'cyan' },
@@ -314,7 +308,7 @@ function check(name: string, cond: boolean): void {
   );
   const g = await run(engine, '/team grant test2 mytool');
   check('team grant: свой тул из tools/ — отчёт', g[0]?.startsWith('✓') ?? false);
-  const team = (await import('../src/agents.js')).loadTeam(join(proj, 'agents.json'));
+  const team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
   check('team grant: свой тул записан агенту', Boolean((team.find((a) => a.id === 'test2')?.tools as { mytool?: unknown })?.mytool));
 
   let threw = '';

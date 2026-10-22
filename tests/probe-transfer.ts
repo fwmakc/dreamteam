@@ -94,9 +94,9 @@ app.store.save(s2);
   check('экспорт дома: настройки/профиль/провайдеры на месте',
     ['settings.json', 'user.json', 'providers.json'].every((f) => entries.some((e) => e.rel === f)),
     JSON.stringify(entries.map((e) => e.rel)));
-  check('экспорт дома: разговоры и транскрипты внутри',
-    entries.some((e) => e.rel.startsWith('sessions/') && e.rel.endsWith('.json'))
-    && entries.some((e) => e.rel.startsWith('transcripts/')));
+  check('экспорт дома: команда внутри, переписки нет',
+    entries.some((e) => e.rel === 'agents.json') && entries.some((e) => e.rel === 'manager.json')
+      && !entries.some((e) => e.rel.startsWith('sessions/')));
   check('экспорт дома: .env с секретами не включён', !entries.some((e) => e.rel.includes('.env')));
   const zip = packEntriesZip(entries);
   const back = readZipEntries(zip);
@@ -112,27 +112,20 @@ app.store.save(s2);
       : e,
   ));
   writeFileSync(join(home, 'settings.json'), JSON.stringify({ width: 100, margin: 2, screen: true }, null, 2));
-  const s3 = app.store.create();
-  s3.title = 'Третий, будет удалён при импорте-замене';
-  app.store.save(s3);
-
   const report = applyHomeImport(app, readZipEntries(archive));
   check('импорт дома: отчёт', report.includes('Импорт дома выполнен'), report);
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('импорт дома: настройки заменены из архива', settings.width === 200 && settings.language === 'english', JSON.stringify(settings));
-  const store = (await import('../src/sessions.js')).SessionStore;
-  const ss = new store(join(home, 'sessions'));
-  const list = ss.list();
-  check('импорт дома: разговоры влиты по id', list.some((s) => s.title === 'Альфа') && list.some((s) => s.title === 'Бета'), JSON.stringify(list.map((s) => s.title)));
+  check('импорт дома: разговоры не трогаются (они в проекте)', app.store.list().length >= 1);
   check('импорт дома: app.providers жив', app.providers.get('mock') !== undefined);
 }
 
 // ── экспорт сессии: разговор + агенты + настройки ────────────────────────────
 {
   // агент «юрист» в команде — должен уехать в архив сессии
-  const agents = JSON.parse(readFileSync(join(proj, 'agents.json'), 'utf8'));
+  const agents = JSON.parse(readFileSync(join(home, 'agents.json'), 'utf8'));
   agents.push({ id: 'lawyer', name: 'Юрист', emoji: '⚖', role: 'право', color: 'blue', prompt: 'Ты юрист.' });
-  writeFileSync(join(proj, 'agents.json'), JSON.stringify(agents, null, 2) + '\n');
+  writeFileSync(join(home, 'agents.json'), JSON.stringify(agents, null, 2) + '\n');
 
   // номер «Альфы» — по факту списка (свежие сверху)
   const n = app.store.list().findIndex((m) => m.title === 'Альфа') + 1;
@@ -148,7 +141,7 @@ app.store.save(s2);
 {
   const archive = packEntriesZip(sessionEntries(app, 1));
   // убираем юриста из команды: импорт должен вернуть его
-  const agentsPath = join(proj, 'agents.json');
+  const agentsPath = join(home, 'agents.json');
   const agents = JSON.parse(readFileSync(agentsPath, 'utf8')).filter((a: { id: string }) => a.id !== 'lawyer');
   writeFileSync(agentsPath, JSON.stringify(agents, null, 2) + '\n');
   const before = app.store.list().length;

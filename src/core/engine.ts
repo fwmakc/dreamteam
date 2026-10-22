@@ -3,8 +3,7 @@ import {
   MANAGER_ID,
   MANAGER_PROMPT,
   MANAGER_ROLE,
-  addProject,
-  addProjectHost,
+  addProjectHosts,
   addTeamAgent,
   grantTool,
   managerAsAgent,
@@ -40,7 +39,7 @@ import { writeFileSync } from 'node:fs';
 import {
   AGENTS_FILE,
   MEMORY_FILE,
-  PROJECTS_FILE,
+  PROJECT_FILE,
   SETTINGS_FILE,
   TOOLS_DIR,
   USER_FILE,
@@ -317,7 +316,7 @@ export class Engine {
   }
 
   private toolsConfig(): ToolsConfig {
-    return loadToolsConfig(SETTINGS_FILE, PROJECTS_FILE, WORKSPACE);
+    return loadToolsConfig(SETTINGS_FILE, PROJECT_FILE, WORKSPACE);
   }
 
   // ── конспекты и @session ────────────────────────────────────────────────
@@ -537,7 +536,7 @@ export class Engine {
     }
     if (compressed) {
       store.save(session);
-      this.presenter.notice('  … разговор длинный: старые сообщения свёрнуты в конспект (полная история — /session history и data/transcripts)');
+      this.presenter.notice('  … разговор длинный: старые сообщения свёрнуты в конспект (полная история — /session history и transcripts/ проекта)');
     }
 
     const planning = this.presenter.busy('Модератор решает, кто из команды ответит…');
@@ -733,10 +732,10 @@ export class Engine {
         return this.renameSession(String(action.title ?? ''));
       case 'tool.grant':
         return grantTool(AGENTS_FILE, action.agent, action.tool, action.card, TOOLS_DIR);
-      case 'project.add':
-        return addProject(PROJECTS_FILE, action.id, action.hosts);
       case 'project.host.add':
-        return addProjectHost(PROJECTS_FILE, action.project, action.name, action);
+        return addProjectHosts(PROJECT_FILE, { [String(action.name ?? 'main')]: action });
+      default:
+        throw new Error(`неизвестное действие менеджера «${(action as { op: string }).op}»`);
       case 'session.list':
         return this.sessionsListText();
       case 'session.open': {

@@ -13,7 +13,6 @@ import type {
   SessionMeta,
 } from './types.js';
 import { loadTeam, MENTION_TRIGGERS } from './agents.js';
-import { loadProjects } from './actions.js';
 import { agentToolIds, BUILTIN_TOOL_IDS, normalizeAgentTools, TOOL_ID_RE } from './tools-api.js';
 
 export const MANAGER_ID = 'manager';
@@ -23,7 +22,7 @@ const MANAGER_COLORS = new Set(['black', 'red', 'green', 'yellow', 'blue', 'mage
 const AGENT_COLORS = MANAGER_COLORS;
 
 /**
- * Читает config/manager.json. Файл обязателен: нет файла, битый JSON или
+ * Читает manager.json в доме. Файл обязателен: нет файла, битый JSON или
  * неизвестный провайдер — падение на старте с внятной ошибкой.
  */
 /** Правка manager.json из GUI по белому списку; валидация loadManagerConfig после записи. */
@@ -81,11 +80,11 @@ export function loadManagerConfig(file: string, knownProviderIds: Iterable<strin
   }
   const obj = raw as Record<string, unknown>;
   const provider = typeof obj.provider === 'string' ? obj.provider.trim() : '';
-  if (!provider) throw new Error(`${file}: не указан "provider" — id провайдера из config/providers.json`);
+  if (!provider) throw new Error(`${file}: не указан "provider" — id провайдера из providers.json в доме`);
   const known = new Set(knownProviderIds);
   if (!known.has(provider)) {
     throw new Error(
-      `${file}: провайдер «${provider}» не найден в config/providers.json (есть: ${[...known].join(', ')})`,
+      `${file}: провайдер «${provider}» не найден в providers.json дома (есть: ${[...known].join(', ')})`,
     );
   }
   const color =
@@ -185,6 +184,7 @@ export function managerStateInput(ctx: ManagerContext): string {
     )
     .join('\n');
   const projects = (ctx.projects ?? [])
+    .filter((p) => p.hosts.length > 0 || p.agents.length > 0) // пустой проект — блока нет
     .map((p) => {
       const hosts = p.hosts.length > 0 ? p.hosts.join(', ') : 'нет';
       const who = p.agents.length > 0 ? `; агенты: ${p.agents.join(', ')}` : '; агентов не назначено';
@@ -218,7 +218,6 @@ const MANAGER_OPS = new Set([
   'session.delete',
   'session.rename',
   'tool.grant',
-  'project.add',
   'project.host.add',
 ]);
 
@@ -242,10 +241,8 @@ function isManagerAction(a: unknown): a is ManagerAction {
       return typeof o.title === 'string' && !!o.title.trim();
     case 'tool.grant':
       return typeof o.agent === 'string' && typeof o.tool === 'string';
-    case 'project.add':
-      return typeof o.id === 'string' && !!o.hosts && typeof o.hosts === 'object' && !Array.isArray(o.hosts);
     case 'project.host.add':
-      return typeof o.project === 'string' && typeof o.name === 'string' && typeof o.host === 'string';
+      return typeof o.name === 'string' && typeof o.host === 'string';
     default:
       return true; // session.list, session.new — обязательных полей нет
   }
@@ -386,37 +383,6 @@ export function removeTeamAgent(file: string, id: string): string {
   return `✓ ${gone.emoji} ${gone.name} (id «${fid}») удалён из команды`;
 }
 
-/** Удаление проекта целиком (для GUI). Реестр валидируется, откат — как везде. */
-export function removeProject(file: string, id: string): string {
-  const pid = String(id ?? '').trim();
-  if (!pid) throw new Error('не указан id проекта');
-  const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(`${file}: ожидаю объект { "проект": { "hosts": { … } } }`);
-  }
-  if (raw[pid] === undefined) throw new Error(`проекта «${pid}» нет в projects.json`);
-  delete raw[pid];
-  writeProjectsFile(file, raw);
-  return `✓ проект «${pid}» удалён`;
-}
-
-/** Удаление одного сервера из проекта (для GUI). */
-export function removeProjectHost(file: string, project: string, name: string): string {
-  const pid = String(project ?? '').trim();
-  const hid = String(name ?? '').trim();
-  if (!pid || !hid) throw new Error('укажите проект и имя сервера');
-  const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  const entry = raw[pid];
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !(entry as Record<string, unknown>).hosts) {
-    throw new Error(`проекта «${pid}» нет в projects.json`);
-  }
-  const hosts = (entry as { hosts: Record<string, unknown> }).hosts;
-  if (hosts[hid] === undefined) throw new Error(`сервера «${hid}» нет у проекта «${pid}»`);
-  delete hosts[hid];
-  writeProjectsFile(file, raw);
-  return `✓ проект «${pid}»: сервер «${hid}» удалён`;
-}
-
 /** team.update: правка полей участника по белому списку. */
 export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateFields): string {
   const fid = String(id ?? '').trim();
@@ -474,9 +440,33 @@ export function grantTool(file: string, agentId: string, tool: string, card?: un
     : `✓ ${agent.name}: тул «${tid}» включён`;
 }
 
-// ─── project.add / project.host.add: реестр серверов (projects.json) ──────────
+// ─── project.json: серверы и задействованные агенты текущего проекта ──────────
 
-const PROJECT_ID_RE = /^[a-z][a-z0-9_-]{1,}$/;
+/** Файл проекта: задействованные агенты + серверы; неизвестные поля сохраняем. */
+export interface ProjectFile {
+  /** Агенты, задействованные в этом проекте (id из домашней команды) */
+  agents?: string[];
+  hosts?: Record<string, ManagerHostSpec>;
+  [key: string]: unknown;
+}
+
+/** Читает project.json; нет файла или он битый — пустой проект (просмотр не падает). */
+export function loadProjectFile(file: string): ProjectFile {
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as ProjectFile;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return raw;
+  } catch {
+    return {};
+  }
+}
+
+/** Запись project.json: tmp → rename. */
+function saveProjectFile(file: string, project: ProjectFile): void {
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(project, null, 2)}\n`, 'utf8');
+  renameSync(tmp, file);
+}
 
 /** Валидирует сервер из действия менеджера → HostSpec или Error с внятной причиной. */
 function normalizeHost(where: string, spec: unknown): ManagerHostSpec {
@@ -503,59 +493,37 @@ function normalizeHost(where: string, spec: unknown): ManagerHostSpec {
   return out;
 }
 
-/** Запись projects.json: tmp → валидация loadProjects → rename. Ошибка — исходник не тронут. */
-function writeProjectsFile(file: string, raw: Record<string, unknown>): void {
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
-  try {
-    loadProjects(tmp);
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    throw err;
-  }
-  renameSync(tmp, file);
-}
-
-/** project.add: новый проект; серверов должен быть хоть один (иначе loadProjects не примет). */
-export function addProject(
+/** project host add: сервер(а) в проект; файла нет — создаём (проект = папка). */
+export function addProjectHosts(
   file: string,
-  id: string,
   hosts: Record<string, ManagerHostSpec>,
 ): string {
-  const pid = String(id ?? '').trim();
-  if (!PROJECT_ID_RE.test(pid)) {
-    throw new Error(`неверный id проекта «${id}» — строчные буквы/цифры/-/_ от 2 символов`);
-  }
   if (!hosts || typeof hosts !== 'object' || Array.isArray(hosts) || Object.keys(hosts).length === 0) {
-    throw new Error(`проекту «${pid}» нужен хоть один сервер: {"prod":{"host":"…"}}`);
+    throw new Error('проекту нужен хоть один сервер: {"prod":{"host":"…"}}');
   }
-  const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(`${file}: ожидаю объект { "проект": { "hosts": { … } } }`);
-  }
-  if (raw[pid] !== undefined) throw new Error(`проект «${pid}» уже есть`);
-  const entry: Record<string, unknown> = {};
+  const project = loadProjectFile(file);
+  project.hosts = project.hosts ?? {};
+  const added: string[] = [];
   for (const [hid, spec] of Object.entries(hosts)) {
-    entry[hid] = normalizeHost(`проект «${pid}», сервер «${hid}»`, spec);
+    if (!hid || /\s/.test(hid)) throw new Error('имя сервера — непустая строка без пробелов');
+    if (project.hosts[hid] !== undefined) {
+      throw new Error(`сервер «${hid}» уже есть — /project host delete «${hid}», если нужно заменить`);
+    }
+    project.hosts[hid] = normalizeHost(`сервер «${hid}»`, spec);
+    added.push(hid);
   }
-  raw[pid] = { hosts: entry };
-  writeProjectsFile(file, raw);
-  return `✓ проект «${pid}» добавлен (серверы: ${Object.keys(entry).join(', ')})`;
+  saveProjectFile(file, project);
+  return `✓ сервер(а) добавлены в проект: ${added.join(', ')}`;
 }
 
-/** project.host.add: сервер в существующий проект; дубликаты имён не нужны. */
-export function addProjectHost(file: string, project: string, name: string, spec: ManagerHostSpec): string {
-  const pid = String(project ?? '').trim();
+/** project host delete: убрать сервер из проекта. */
+export function removeProjectHost(file: string, name: string): string {
   const hid = String(name ?? '').trim();
-  const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  const entry = raw[pid];
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !(entry as Record<string, unknown>).hosts) {
-    throw new Error(`проекта «${pid}» нет в projects.json — сначала project.add`);
+  const project = loadProjectFile(file);
+  if (!project.hosts || project.hosts[hid] === undefined) {
+    throw new Error(`сервера «${hid}» нет в проекте — см. /project`);
   }
-  if (!hid || /\s/.test(hid)) throw new Error('имя сервера — непустая строка без пробелов');
-  const hosts = (entry as { hosts: Record<string, unknown> }).hosts;
-  if (hosts[hid] !== undefined) throw new Error(`сервер «${hid}» уже есть у проекта «${pid}»`);
-  hosts[hid] = normalizeHost(`проект «${pid}», сервер «${hid}»`, spec);
-  writeProjectsFile(file, raw);
-  return `✓ проект «${pid}»: сервер «${hid}» (${(hosts[hid] as ManagerHostSpec).host}) добавлен`;
+  delete project.hosts[hid];
+  saveProjectFile(file, project);
+  return `✓ сервер «${hid}» убран из проекта`;
 }

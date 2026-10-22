@@ -104,7 +104,7 @@ export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
       const maskedRemote = maskHit(`scp ${remote}`, dir);
       if (maskedRemote) return { deny: maskedRemote };
     } else if (remote.startsWith('/') || remote.startsWith('~') || remote.includes('..')) {
-      return { deny: `удалённый путь «${remote}» вне папки проекта — задайте хосту "dir" в config/projects.json` };
+      return { deny: `удалённый путь «${remote}» вне папки проекта — задайте хосту "dir" в project.json` };
     }
     return rules ? commandCheck(rules, body) : 'ask';
   };

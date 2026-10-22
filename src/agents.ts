@@ -4,7 +4,7 @@ import type { Agent, UserProfile } from './types.js';
 
 /**
  * Читает состав команды. Вызывается перед каждым раундом, поэтому правки
- * config/agents.json подхватываются без перезапуска приложения.
+ * agents.json в доме подхватываются без перезапуска приложения.
  */
 export function loadTeam(file: string): Agent[] {
   let raw: unknown;
@@ -45,7 +45,7 @@ export function loadTeam(file: string): Agent[] {
 }
 
 /**
- * Профиль пользователя (config/user.json, меняется командой /me).
+ * Профиль пользователя (user.json в доме, меняется командой /profile set).
  * Файл необязателен: нет файла — участники видят просто «Пользователь».
  */
 export function loadUserProfile(file: string): UserProfile {

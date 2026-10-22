@@ -72,10 +72,13 @@ const {
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('настройки: созданы с дефолтами', settings.width === 100 && settings.screen === true, JSON.stringify(settings));
   check('настройки: язык по умолчанию из скелета', settings.language === 'русский', JSON.stringify(settings));
-  check('проект: пустая команда', readFileSync(join(proj, 'agents.json'), 'utf8').trim() === '[]');
-  check('проект: менеджер на дефолтном провайдере', JSON.parse(readFileSync(join(proj, 'manager.json'), 'utf8')).provider === 'mock');
-  check('проект: пустой реестр серверов', readFileSync(join(proj, 'projects.json'), 'utf8').trim() === '{}');
-  check('проект: папка tools создана', existsSync(join(proj, 'tools')));
+  check('команда: пустая в доме', readFileSync(join(home, 'agents.json'), 'utf8').trim() === '[]');
+  check('команда: менеджер в доме на дефолтном провайдере', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).provider === 'mock');
+  check('команда: полка тулов в доме', existsSync(join(home, 'tools')));
+  check('проект: project.json — агенты и серверы пусты', (() => {
+    const p = JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as { agents: unknown; hosts: unknown };
+    return Array.isArray(p.agents) && p.agents.length === 0 && typeof p.hosts === 'object' && p.hosts !== null;
+  })());
 
   // --- .env создаётся из примера: закомментированные переменные, права 600 ---
   const envFile = join(home, '.env');
@@ -95,14 +98,14 @@ const {
     check('скелет: home/settings.json валиден по loadSettings', (() => {
       try { return loadSettings(join(SCAFFOLD_DIR, 'home', 'settings.json'), 0).language === 'русский'; } catch { return false; }
     })());
-    check('скелет: project/agents.json валиден по loadTeam', (() => {
-      try { return loadTeam(join(SCAFFOLD_DIR, 'project', 'agents.json')).length === 0; } catch { return false; }
+    check('скелет: home/agents.json валиден по loadTeam', (() => {
+      try { return loadTeam(join(SCAFFOLD_DIR, 'home', 'agents.json')).length === 0; } catch { return false; }
     })());
-    check('скелет: project/projects.json валиден по loadProjects', (() => {
-      try { return loadProjects(join(SCAFFOLD_DIR, 'project', 'projects.json')).size === 0; } catch { return false; }
+    check('скелет: project/project.json валиден по loadProjects', (() => {
+      try { return loadProjects(join(SCAFFOLD_DIR, 'project', 'project.json'), 'x').size === 1; } catch { return false; }
     })());
-    const mgrTpl = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'project', 'manager.json'), 'utf8'));
-    check('скелет: manager.json — заглушка провайдера', typeof mgrTpl.provider === 'string' && mgrTpl.provider.length > 0, JSON.stringify(mgrTpl));
+    const mgrTpl = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'home', 'manager.json'), 'utf8'));
+    check('скелет: home/manager.json — заглушка провайдера', typeof mgrTpl.provider === 'string' && mgrTpl.provider.length > 0, JSON.stringify(mgrTpl));
   }
   check('wizard: в выводе меню и приветствие', out().includes('Тип провайдера') && out().includes('живой менеджер'), out().slice(-200));
   check('gitignore: без git — тишина', !notes.some((n) => n.includes('.gitignore')), notes.join(' | '));
@@ -132,7 +135,7 @@ const {
   const envText = readFileSync(join(home, '.env'), 'utf8');
   check('.env дома: DREAMTEAM_API_KEY=ключ', envText.includes(`${PROVIDER_KEY_ENV}=секрет-ключ-42`), envText);
   check('переменная окружения выставлена сразу (без перезапуска)', process.env[PROVIDER_KEY_ENV] === 'секрет-ключ-42');
-  check('проект: менеджер на main', JSON.parse(readFileSync(join(proj, 'manager.json'), 'utf8')).provider === 'main');
+  check('менеджер в доме: на main', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).provider === 'main');
   check('проект: в .env проекта ключ не дублируется', !existsSync(join(proj, '.env')));
 }
 
@@ -175,7 +178,7 @@ const {
   check('битый файл: defaultProviderId → mock', defaultProviderId(join(home, 'providers.json')) === 'mock');
   const proj = join(root, 'p6', '.dreamteam');
   const notes = ensureProject('mock', proj);
-  check('битый файл: проект всё равно скаффолдится', notes.some((n) => n.includes('пустая команда')), notes.join(' | '));
+  check('битый файл: проект всё равно скаффолдится', notes.some((n) => n.includes('project.json')), notes.join(' | '));
 }
 
 // --- gitignoreNotice: состояния ---

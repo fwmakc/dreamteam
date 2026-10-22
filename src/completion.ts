@@ -13,7 +13,7 @@ export interface CompletionContext {
   /** Участники текущего чата — их предлагает всплывашка @упоминаний */
   chatAgents(): { name: string; role?: string }[];
   providerIds(): string[];
-  /** Имя менеджера переговорки (config/manager.json) — первый пункт всплывашки @ */
+  /** Имя менеджера переговорки (~/.dreamteam/manager.json) — первый пункт всплывашки @ */
   managerName(): string;
 }
 

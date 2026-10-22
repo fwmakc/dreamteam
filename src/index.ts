@@ -11,7 +11,7 @@ import { OPERATIONS, operationArgs, operationCommand } from './core/operations.j
 import { Editor } from './editor.js';
 import { Screen } from './screen.js';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
-import { AGENTS_FILE, PROJECTS_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
+import { AGENTS_FILE, PROJECT_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
 import { agentHeader, colorFn, printDim, printError, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 // ядро: раунды, менеджер, инструменты, память — общение только через Presenter
 import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
@@ -419,7 +419,7 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
     }
     for (const agent of team) console.log(rosterLine(agent));
   } catch (err) {
-    printError(`проблема с config/agents.json: ${err instanceof Error ? err.message : err}`);
+    printError(`проблема с agents.json в доме: ${err instanceof Error ? err.message : err}`);
   }
 
   const mgrAgent = managerAsAgent(app.mgr);
@@ -492,7 +492,7 @@ function printTeam(app: App): void {
   try {
     const fullTeam = loadTeam(AGENTS_FILE);
     const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
-    const cfg = loadToolsConfig(SETTINGS_FILE, PROJECTS_FILE, WORKSPACE);
+    const cfg = loadToolsConfig(SETTINGS_FILE, PROJECT_FILE, WORKSPACE);
     console.log(pc.dim('\n  Команда:'));
     for (const agent of fullTeam) {
       const own = agent.provider ? pc.dim(` [провайдер: ${agent.provider}]`) : '';
@@ -511,10 +511,9 @@ function accessLine(agent: Agent, cfg: ToolsConfig): string {
   const toolIds = agentToolIds(agent);
   if (toolIds.length === 0) return '';
   const parts: string[] = [];
-  const projects = (agent.projects ?? []).filter((p) => cfg.projects.has(p) || p === agent.workspace);
-  if (projects.length > 0) parts.push(`проекты: ${projects.join(', ')}`);
-  // серверы живут внутри проектов: «проект:хост» для каждого назначенного проекта
-  const servers = projects.flatMap((p) => [...(cfg.projects.get(p)?.hosts.keys() ?? [])].map((h) => `${p}:${h}`));
+  // серверы — из project.json текущего проекта: агентам доступен весь его реестр
+  // проект один — текущий: берём его серверы независимо от ключа реестра
+  const servers = [...new Set([...cfg.projects.values()].flatMap((p) => [...p.hosts.keys()]))];
   if (servers.length > 0) parts.push(`серверы: ${servers.join(', ')}`);
   if (agent.vision) parts.push(`глаза: ${agent.vision}`);
   if (agent.image) parts.push(`рисует: ${agent.image}`);
@@ -550,7 +549,7 @@ function printProviders(app: App): void {
       console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}`);
     }
   }
-  printDim('  Сменить основной: /provider <id> — он для агентов; у менеджера переговорки свой (config/manager.json).');
+  printDim('  Сменить основной: /provider <id> — он для агентов; у менеджера переговорки свой (manager.json в доме).');
   printDim('  Свой провайдер агенту — поля "provider", "vision", "image" в agents.json.');
 }
 

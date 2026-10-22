@@ -479,24 +479,23 @@ const tctx: ToolContext = {
 // --- loadProjects: пароль и папка проекта на сервере ---
 {
   const root = mkdtempSync(join(tmpdir(), 'dt-projects-'));
-  const file = join(root, 'projects.json');
+  const file = join(root, 'project.json');
   writeFileSync(
     file,
     JSON.stringify({
-      shop: {
-        hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 2222, password: 'p @ w', dir: '/var/www/app' } },
-      },
+      agents: ['devops'],
+      hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 2222, password: 'p @ w', dir: '/var/www/app' } },
     }),
   );
-  const host = loadProjects(file).get('shop')!.hosts.get('prod')!;
+  const host = loadProjects(file, 'myproj').get('myproj')!.hosts.get('prod')!;
   check('loadProjects: пароль и папка хоста дошли', host.password === 'p @ w' && host.dir === '/var/www/app', JSON.stringify(host));
-  writeFileSync(file, JSON.stringify({ shop: { hosts: { prod: { host: 'h', password: 5 } } } }));
+  writeFileSync(file, JSON.stringify({ agents: [], hosts: { prod: { host: 'h', password: 5 } } }));
   let threw = '';
-  try { loadProjects(file); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(file, 'myproj'); } catch (e) { threw = (e as Error).message; }
   check('loadProjects: кривой password — отказ', threw.includes('"password"'), threw);
-  writeFileSync(file, JSON.stringify({ shop: { hosts: { prod: { host: 'h', dir: '  ' } } } }));
+  writeFileSync(file, JSON.stringify({ agents: [], hosts: { prod: { host: 'h', dir: '  ' } } }));
   threw = '';
-  try { loadProjects(file); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(file, 'myproj'); } catch (e) { threw = (e as Error).message; }
   check('loadProjects: пустой dir — отказ', threw.includes('"dir"'), threw);
   rmSync(root, { recursive: true, force: true });
 }
@@ -537,7 +536,7 @@ const tctx: ToolContext = {
   check('scp: put мимо папки сервера — отказ', typeof putOut === 'object' && putOut.deny.includes('вне рабочей папки'), JSON.stringify(putOut));
   const putLocal = ssh.check('put ../leak.txt /var/www/app/x', ctx);
   check('scp: локальная сторона вне папки — отказ', typeof putLocal === 'object' && putLocal.deny.includes('локальный путь'), JSON.stringify(putLocal));
-  const putSvc = ssh.check('put .dreamteam/projects.json /var/www/app/x', ctx);
+  const putSvc = ssh.check('put .dreamteam/project.json /var/www/app/x', ctx);
   check('scp: локальная .dreamteam — отказ', typeof putSvc === 'object' && putSvc.deny.includes('dreamteam'), JSON.stringify(putSvc));
   const bad = ssh.check('put report.txt', ctx);
   check('scp: кривое тело — отказ с форматом', typeof bad === 'object' && bad.deny.includes('два пути'), JSON.stringify(bad));

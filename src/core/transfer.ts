@@ -12,17 +12,19 @@
  * КАК НОВАЯ сессия (новый id — ничего не перетирается), агенты вливаются
  * по id (новые добавляются, совпавшие не трогаются).
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import AdmZip from 'adm-zip';
 import { loadProviders } from '../providers/registry.js';
 import { loadTeam } from '../agents.js';
+import { loadTeamMemory } from '../memory.js';
 import {
   AGENTS_FILE,
   DT_HOME,
+  MEMORY_FILE,
   PROVIDERS_FILE,
-  SESSIONS_DIR,
   SETTINGS_FILE,
+  TOOLS_DIR,
   USER_FILE,
 } from '../paths.js';
 import { mergeTeamAgents } from '../manager.js';
@@ -34,22 +36,18 @@ export interface TransferEntry {
   data: Buffer;
 }
 
-const HOME_FILES = ['settings.json', 'user.json', 'providers.json'] as const;
+const HOME_FILES = ['settings.json', 'user.json', 'providers.json', 'agents.json', 'manager.json'] as const;
 
-/** Записи домашнего слоя: настройки, профиль, провайдеры (без .env с ключами), разговоры и транскрипты. */
+/** Записи домашнего слоя: настройки, профиль, провайдеры и КОМАНДА (без .env с ключами и tools/). */
 export function homeEntries(): TransferEntry[] {
   const out: TransferEntry[] = [];
   for (const f of HOME_FILES) {
     const p = join(DT_HOME, f);
     if (existsSync(p)) out.push({ rel: f, data: readFileSync(p) });
   }
-  for (const dir of ['sessions', 'transcripts']) {
-    const abs = join(DT_HOME, dir);
-    if (!existsSync(abs)) continue;
-    for (const name of readdirSync(abs)) {
-      const p = join(abs, name);
-      if (existsSync(p)) out.push({ rel: `${dir}/${name}`, data: readFileSync(p) });
-    }
+  for (const name of readdirSync(TOOLS_DIR)) {
+    const p = join(TOOLS_DIR, name);
+    if (existsSync(p) && statSync(p).isFile()) out.push({ rel: `tools/${name}`, data: readFileSync(p) });
   }
   return out;
 }
@@ -85,7 +83,7 @@ export function readZipEntries(data: Buffer): TransferEntry[] {
   return out;
 }
 
-/** Импорт домашнего слоя: настройки/профиль/провайдеры — замена, разговоры — вливание по id. */
+/** Импорт домашнего слоя: настройки/профиль/провайдеры/команда — замена (разговоры импортируются отдельно, /session import). */
 export function applyHomeImport(app: App, entries: TransferEntry[]): string {
   const report: string[] = [];
   for (const f of HOME_FILES) {
@@ -94,19 +92,21 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     writeFileSync(join(DT_HOME, f), e.data);
     report.push(`${f} — заменён`);
   }
-  let sessions = 0;
-  for (const e of entries.filter((x) => x.rel.startsWith('sessions/'))) {
-    const name = e.rel.slice('sessions/'.length);
-    if (!name.endsWith('.json')) continue;
-    writeFileSync(join(SESSIONS_DIR, name), e.data);
-    sessions++;
+  mkdirSync(TOOLS_DIR, { recursive: true });
+  let tools = 0;
+  for (const e of entries.filter((x) => x.rel.startsWith('tools/'))) {
+    const name = e.rel.slice('tools/'.length);
+    if (!name || name.includes('/') || name.includes('..')) continue;
+    writeFileSync(join(TOOLS_DIR, name), e.data);
+    tools++;
   }
-  let transcripts = 0;
-  for (const e of entries.filter((x) => x.rel.startsWith('transcripts/'))) {
-    writeFileSync(join(DT_HOME, 'transcripts', e.rel.slice('transcripts/'.length)), e.data);
-    transcripts++;
+  if (tools > 0) report.push(`тулов влито: ${tools}`);
+  // после замены команды перечитываем её — агенты в текущем разговоре могли измениться
+  try {
+    app.memory = loadTeamMemory(MEMORY_FILE);
+  } catch {
+    // память необязательна
   }
-  report.push(`разговоров влито: ${sessions}, транскриптов: ${transcripts}`);
   // провайдеры: перечитываем и обновляем карту приложения (ключи остаются в .env)
   try {
     const loaded = loadProviders(PROVIDERS_FILE);

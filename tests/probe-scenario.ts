@@ -119,7 +119,7 @@ await gui.next((m) => m.type === 'state');
     (m) => m.type === 'state' && (m.state as { team: { id: string }[] }).team.some((a) => a.id === 'lawyer'),
   );
   check('GUI/TUI 2: агент-юрист создан', Boolean(st.state));
-  const agentsFile = join(proj, 'agents.json');
+  const agentsFile = join(home, 'agents.json'); // команда — в доме
   check('GUI/TUI 2: юрист записан в agents.json', readFileSync(agentsFile, 'utf8').includes('lawyer'));
 }
 
@@ -149,7 +149,7 @@ await gui.next((m) => m.type === 'state');
   await gui.next(
     (m) => m.type === 'state' && (m.state as { session: { messages: { text: string }[] } }).session.messages.some((x) => x.text.includes('риски')),
   );
-  const store = new SessionStore(join(home, 'sessions'));
+  const store = new SessionStore(join(proj, 'sessions'));
   const list = store.list();
   check('GUI/TUI 5: сообщения записаны на диск', list.length === 2, JSON.stringify(list.map((s) => s.title)));
 }

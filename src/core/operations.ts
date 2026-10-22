@@ -13,15 +13,14 @@
  * вызывающему (терминал покажет, сервер ушлёт error/rpc_error).
  */
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { loadTeam } from '../agents.js';
 import {
-  addProject,
-  addProjectHost,
+  addProjectHosts,
   addTeamAgent,
   grantTool,
   loadManagerConfig,
-  removeProject,
+  loadProjectFile,
   removeProjectHost,
   removeTeamAgent,
   updateManagerConfig,
@@ -29,7 +28,7 @@ import {
 } from '../manager.js';
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from '../providers/registry.js';
 import { agentToolIds } from '../tools-api.js';
-import { AGENTS_FILE, MANAGER_FILE, PROJECTS_FILE, PROVIDERS_FILE, SETTINGS_FILE, TOOLS_DIR } from '../paths.js';
+import { AGENTS_FILE, DT_HOME, MANAGER_FILE, PROJECT_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR } from '../paths.js';
 import { loadSettings } from '../settings.js';
 import { chatTeam, isSessionRef, type App, type Engine } from './engine.js';
 import { loadSchedule, saveSchedule } from './schedule.js';
@@ -187,22 +186,17 @@ function memoryText(app: App, arg: string): string[] {
 }
 
 function projectListText(app: App): string[] {
-  let file: unknown;
-  try {
-    file = JSON.parse(readFileSync(PROJECTS_FILE, 'utf8'));
-  } catch {
-    return ['projects.json недоступен.'];
-  }
-  const projects = (file ?? {}) as Record<string, { hosts?: Record<string, { host: string; user?: string; port?: number }> }>;
-  const ids = Object.keys(projects);
-  if (ids.length === 0) return ['Проектов нет — /project add <id>; <имя>: [пользователь@]хост[:порт]'];
+  const project = loadProjectFile(PROJECT_FILE);
   const lines: string[] = [''];
-  for (const id of ids) {
-    lines.push(`• ${id}`);
-    for (const [name, h] of Object.entries(projects[id].hosts ?? {})) {
-      lines.push(`    ${name}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`);
-    }
+  const hosts = Object.entries(project.hosts ?? {}) as [string, { host: string; user?: string; port?: number }][];
+  const agents = project.agents ?? [];
+  if (hosts.length === 0 && agents.length === 0) {
+    return ['Проект пуст — серверы: /project host add <имя>=[пользователь@]хост[:порт]'];
   }
+  for (const [name, h] of hosts) {
+    lines.push(`• ${name}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`);
+  }
+  if (agents.length > 0) lines.push(`задействованные агенты: ${agents.join(', ')}`);
   lines.push('');
   return lines;
 }
@@ -593,29 +587,6 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine) => projectListText(engine.app),
   },
   {
-    name: 'project.add',
-    args: [{ name: 'id; имя: [пользователь@]хост[:порт]…', required: true }],
-    title: 'новый проект',
-    help: 'пароля в команде сознательно нет — он остался бы в транскрипте',
-    run: async (_engine, rest) => {
-      const segs = rest.join(' ').split(';').map((s) => s.trim()).filter(Boolean);
-      const pid = segs.shift() ?? '';
-      if (!pid || segs.length === 0) {
-        return ['Синтаксис: /project add <id>; <имя>: [пользователь@]хост[:порт] …'];
-      }
-      const hosts: Record<string, ManagerHostSpec> = {};
-      for (const seg of segs) {
-        const colon = seg.indexOf(':');
-        if (colon === -1) return [`Сервер без адреса: «${seg}» — жду <имя>: <хост>`];
-        const name = seg.slice(0, colon).trim();
-        const spec = seg.slice(colon + 1).trim();
-        if (!name || !spec) return [`Сервер без имени или адреса: «${seg}»`];
-        hosts[name] = parseHostSpec(spec);
-      }
-      return [addProject(PROJECTS_FILE, pid, hosts)];
-    },
-  },
-  {
     name: 'project.host.add',
     args: [
       { name: 'проект', required: true },
@@ -625,45 +596,27 @@ export const OPERATIONS: OpSpec[] = [
     help: 'в существующий проект; формат хоста [пользователь@]хост[:порт]',
     run: async (_engine, rest) => {
       const body = rest.join(' ');
-      const space = body.indexOf(' ');
       const eq = body.indexOf('=');
-      if (!body || space === -1 || eq === -1 || eq < space) {
-        return ['Синтаксис: /project host add <проект> <имя>=[пользователь@]хост[:порт]'];
+      if (!body || eq === -1) {
+        return ['Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]'];
       }
-      const pid = body.slice(0, space).trim();
-      const name = body.slice(space + 1, eq).trim();
+      const name = body.slice(0, eq).trim();
       const spec = body.slice(eq + 1).trim();
-      if (!name || !spec) return ['Синтаксис: /project host add <проект> <имя>=[пользователь@]хост[:порт]'];
-      return [addProjectHost(PROJECTS_FILE, pid, name, parseHostSpec(spec))];
+      if (!name || !spec) return ['Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]'];
+      return [addProjectHosts(PROJECT_FILE, { [name]: parseHostSpec(spec) })];
     },
   },
   {
     name: 'project.host.delete',
-    args: [
-      { name: 'проект', required: true },
-      { name: 'имя', required: true },
-    ],
+    args: [{ name: 'имя', required: true }],
     title: 'убрать сервер',
-    help: 'из существующего проекта',
+    help: 'из текущего проекта',
     run: async (_engine, rest) => {
-      const [pid, name] = rest;
-      if (!pid || !name) return ['Синтаксис: /project host delete <проект> <имя>'];
-      return [removeProjectHost(PROJECTS_FILE, pid, name)];
+      const [name] = rest;
+      if (!name) return ['Синтаксис: /project host delete <имя>'];
+      return [removeProjectHost(PROJECT_FILE, name)];
     },
   },
-  {
-    name: 'project.delete',
-    args: [{ name: 'id', required: true, hint: 'projects' }],
-    title: 'удалить проект',
-    help: 'целиком, со всеми серверами',
-    run: async (_engine, rest) => {
-      const id = rest[0];
-      if (!id) return ['Синтаксис: /project delete <id>'];
-      return [removeProject(PROJECTS_FILE, id)];
-    },
-  },
-
-  // расписание
   {
     name: 'schedule.list', implicit: true, title: 'расписание',
     help: 'задачи, которые serve запускает сам по интервалу',
@@ -824,7 +777,7 @@ export const OPERATIONS: OpSpec[] = [
 
 // ── расписание: schedule.json лежит в проектном слое рядом с projects.json ──
 
-const scheduleDir = (): string => dirname(PROJECTS_FILE);
+const scheduleDir = (): string => DT_HOME;
 
 // ── поиск и исполнение ───────────────────────────────────────────────────────
 

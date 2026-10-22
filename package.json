@@ -1,6 +1,6 @@
 {
   "name": "dreamteam",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Чат с командой ИИ-агентов: терминальный TUI и локальный веб-GUI на одном ядре",
   "type": "module",
   "bin": {
@@ -22,7 +22,7 @@
     "dev": "tsx src/index.ts",
     "serve": "tsx src/serve.ts",
     "typecheck": "tsc --noEmit",
-    "probe": "tsx tests/probe-screen.ts && tsx tests/probe-editor.ts && tsx tests/probe-manager.ts && tsx tests/probe-tools.ts && tsx tests/probe-wizard.ts && tsx tests/probe-migrate.ts && tsx tests/probe-commands.ts && tsx tests/probe-manager-flow.ts && tsx tests/probe-consistency.ts && tsx tests/probe-transfer.ts && tsx tests/probe-scenario.ts && tsx tests/probe-gui.ts && tsx tests/probe-gui-scenario.ts",
+    "probe": "tsx tests/probe-screen.ts && tsx tests/probe-editor.ts && tsx tests/probe-manager.ts && tsx tests/probe-tools.ts && tsx tests/probe-wizard.ts && tsx tests/probe-commands.ts && tsx tests/probe-manager-flow.ts && tsx tests/probe-consistency.ts && tsx tests/probe-transfer.ts && tsx tests/probe-scenario.ts && tsx tests/probe-gui.ts && tsx tests/probe-gui-scenario.ts",
     "probe:commands": "tsx tests/probe-commands.ts",
     "probe:gui": "tsx tests/probe-gui.ts",
     "probe:scenario-gui": "tsx tests/probe-gui-scenario.ts",

@@ -8,7 +8,7 @@
  *  2. ПРОЕКТИРОВАНИЕ: промт объявляет все 11 операций и JSON-протокол
  *     {say, actions}; сценарии с заготовленными ответами скриптового LLM.
  *  3. ВЫПОЛНЕНИЕ: каждый op через настоящий managerTurn на герметичных слоях —
- *     итог в файлах (agents.json/projects.json), отчёты ✓/✗ в истории
+ *     итог в файлах (агенты — в доме, project.json — в проекте), отчёты ✓/✗ в истории
  *     разговора, реплика менеджера сохраняется в СТАРЫЙ разговор до
  *     переключения (pendingSwitches), мусорный ответ — без изменений конфига.
  * Запуск: npm run probe:manager-flow
@@ -34,8 +34,8 @@ function check(name: string, cond: boolean, detail?: string): void {
 const base = mkdtempSync(join(tmpdir(), 'dt-mflow-'));
 const home = join(base, 'home');
 const proj = join(base, 'proj');
-const agentsFile = join(proj, 'agents.json');
-const projectsFile = join(proj, 'projects.json');
+const agentsFile = join(home, 'agents.json');
+const projectsFile = join(proj, 'project.json');
 mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
 process.env.DT_PROJECT = proj;
@@ -134,7 +134,7 @@ function lastManagerMessage(): string {
     { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'Ты — Катя.', provider: 'claude', temperature: 0.3, tools: { files: {}, look: {} } },
     { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'Ты — Глеб.', projects: ['shop'] },
   ], null, 2) + '\n');
-  writeFileSync(projectsFile, JSON.stringify({ shop: { hosts: { prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } } } }, null, 2) + '\n');
+  writeFileSync(projectsFile, JSON.stringify({ name: 'shop', agents: ['katya'], hosts: { prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } } }, null, 2) + '\n');
   for (let i = 1; i <= 14; i++) {
     app.session.messages.push({ authorId: 'user', authorName: 'Хозяин', text: `строка ${i}`, ts: i });
   }
@@ -226,7 +226,7 @@ function lastManagerMessage(): string {
   // save() штампует updatedAt = сейчас, поэтому «свежесть» цели пишем в файл напрямую
   app.store.save(second);
   second.updatedAt = Date.now() + 60_000;
-  writeFileSync(join(home, 'sessions', `${second.id}.json`), JSON.stringify(second, null, 2), 'utf8');
+  writeFileSync(join(proj, 'sessions', `${second.id}.json`), JSON.stringify(second, null, 2), 'utf8');
 
   // номер цели берём по факту: раунд сам сохраняет сообщение пользователя и
   // обновляет updatedAt текущего разговора — порядок списка не угадать заранее
@@ -283,17 +283,17 @@ function lastManagerMessage(): string {
   check('tool.grant: ✓ и ✗ в одной реплике', msg.includes('✓') && msg.includes('✗') && msg.includes('не существует'), msg.slice(-200));
 }
 
-// project.add + project.host.add + дубликат: реестр серверов
+// project.host.add + дубликат: серверы текущего проекта
 {
   await askManager(
-    'Завожу.\n{"say":"Завожу проект.","actions":[{"op":"project.add","id":"infra","hosts":{"prod":{"host":"203.0.113.10"}}},{"op":"project.host.add","project":"infra","name":"staging","host":"stg.example.com","port":2222},{"op":"project.add","id":"infra","hosts":{"x":{"host":"y"}}}]}',
-    'заведи проект infra',
+    'Завожу.\n{"say":"Завожу проект.","actions":[{"op":"project.host.add","name":"dev","host":"203.0.113.10"},{"op":"project.host.add","name":"qa","host":"stg.example.com","port":2222},{"op":"project.host.add"}]}',
+    'заведи серверы проекта',
   );
-  const raw = JSON.parse(readFileSync(projectsFile, 'utf8')) as { infra?: { hosts: Record<string, { host: string; port?: number }> } };
-  check('project: проект с сервером', raw.infra?.hosts.prod?.host === '203.0.113.10', JSON.stringify(raw));
-  check('project: сервер с портом добавлен', raw.infra?.hosts.staging?.port === 2222, JSON.stringify(raw));
-  const msg = lastManagerMessage();
-  check('project: ✓✓✗ в одной реплике', msg.includes('✓ проект «infra» добавлен') && msg.includes('✗') && msg.includes('уже есть'), msg.slice(-240));
+  const raw = JSON.parse(readFileSync(projectsFile, 'utf8')) as { hosts?: Record<string, { host: string; port?: number }> };
+  check('project: сервер с хостом добавлен', raw.hosts?.dev?.host === '203.0.113.10', JSON.stringify(raw));
+  check('project: сервер с портом добавлен', raw.hosts?.qa?.port === 2222, JSON.stringify(raw));
+  check('project: отчёты ✓ в истории менеджера',
+    app.session.messages.some((m) => m.authorId === 'manager' && m.text.includes('сервер(а) добавлены')), lastManagerMessage().slice(-160));
 }
 
 // session.rename: менеджер переименовывает текущий разговор
@@ -317,7 +317,7 @@ function lastManagerMessage(): string {
   await askManager('Просто болтаю без изменений.', 'как дела?');
   check('мусор: реплика менеджера — чистый текст', lastManagerMessage() === 'Просто болтаю без изменений.', lastManagerMessage());
   check('мусор: agents.json не тронут', readFileSync(agentsFile, 'utf8') === agentsBefore);
-  check('мусор: projects.json не тронут', readFileSync(projectsFile, 'utf8') === projectsBefore);
+  check('мусор: project.json не тронут', readFileSync(projectsFile, 'utf8') === projectsBefore);
 }
 
 // пустой ответ: менеджер молчит — заметка, без реплики в истории

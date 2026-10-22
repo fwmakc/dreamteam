@@ -13,7 +13,7 @@ import { loadSettings } from './settings.js';
  * у тула ('allow' — молча, 'deny' — отказ, 'ask' — вопрос y/n), выполняет и
  * возвращает результаты следующим сообщением в истории.
  *
- * Проекты: реестр в projects.json (в .dreamteam проекта) — {id: {hosts?}}:
+ * Проекты: реестр в project.json (в .dreamteam проекта) — {id: {hosts?}}:
  * именованные группы ssh-серверов; в блоках адресуются префиксом —
  * ```run shop:docker compose up, ```ssh shop:prod systemctl status nginx.
  * Доступ агенту выдаётся полем projects в agents.json. Локально инструменты
@@ -36,7 +36,7 @@ export interface HostConfig {
   dir?: string;
 }
 
-/** Проект из projects.json: именованная группа его ssh-серверов. */
+/** Проект из project.json: именованная группа его ssh-серверов. */
 export interface ProjectEntry {
   hosts: Map<string, HostConfig>;
 }
@@ -88,7 +88,7 @@ export interface ToolContext {
   getImageProvider(agent: Agent | undefined): { provider: ImageProvider } | { error: string };
 }
 
-/** Читает settings.json (лимиты) + projects.json (серверы); оба файла обязательны. */
+/** Читает settings.json (лимиты) + project.json (серверы); оба файла обязательны. */
 export function loadToolsConfig(settingsFile: string, projectsFile: string, workspaceAbs: string): ToolsConfig {
   const settings = loadSettings(settingsFile, 0);
   return {
@@ -99,65 +99,46 @@ export function loadToolsConfig(settingsFile: string, projectsFile: string, work
   };
 }
 
-/** Читает projects.json: {id: {hosts?}}; нет файла или битые поля — внятная ошибка. */
-export function loadProjects(file: string): Map<string, ProjectEntry> {
-  let raw: Record<string, unknown>;
+/** Читает project.json (один проект — текущая папка); нет файла или битые поля — внятная ошибка. */
+export function loadProjects(file: string, projectId?: string): Map<string, ProjectEntry> {
+  let raw: { name?: unknown; hosts?: Record<string, unknown>; agents?: unknown };
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    raw = JSON.parse(readFileSync(file, 'utf8')) as { hosts?: Record<string, unknown> };
   } catch (err) {
     throw new Error(`не удалось прочитать ${file}: ${err instanceof Error ? err.message : err}`);
   }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(`${file}: ожидается объект { "id": { "dir": "…", "hosts": { … } } }`);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.hosts !== 'object' || raw.hosts === null) {
+    throw new Error(`${file}: ожидается объект { "name": "…", "agents": [ … ], "hosts": { … } }`);
+  }
+  const id = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : (projectId ?? 'project');
+  const hosts = new Map<string, HostConfig>();
+  for (const [hid, h] of Object.entries(raw.hosts)) {
+    if (!h || typeof h !== 'object' || Array.isArray(h)) {
+      throw new Error(`${file}: сервер «${hid}» — ожидается объект { "host": "…", "dir": "…" }`);
+    }
+    const o = h as Record<string, unknown>;
+    if (typeof o.host !== 'string' || !o.host) {
+      throw new Error(`${file}: сервер «${hid}» — обязательное поле "host"`);
+    }
+    const host: HostConfig = { host: o.host };
+    for (const key of ['user', 'password', 'dir'] as const) {
+      const v = o[key];
+      if (v === undefined) continue;
+      if (typeof v !== 'string' || (key === 'dir' && !v.trim())) {
+        throw new Error(`${file}: сервер «${hid}» — "${key}" жду непустой строкой`);
+      }
+      host[key] = v;
+    }
+    if (o.port !== undefined) {
+      if (typeof o.port !== 'number' || !Number.isInteger(o.port) || o.port <= 0) {
+        throw new Error(`${file}: сервер «${hid}» — "port" жду целым числом больше нуля`);
+      }
+      host.port = o.port;
+    }
+    hosts.set(hid, host);
   }
   const projects = new Map<string, ProjectEntry>();
-  for (const [id, v] of Object.entries(raw)) {
-    // id — префикс в блоках («shop:…»), поэтому строчные буквы/цифры/-/_ от 2 символов
-    if (!/^[a-z][a-z0-9_-]{1,}$/.test(id)) {
-      throw new Error(`${file}: «${id}» — id проекта: строчные буквы/цифры/-/_ от 2 символов`);
-    }
-    if (!v || typeof v !== 'object' || Array.isArray(v)) {
-      throw new Error(`${file}: «${id}» — ожидается объект { "dir": "…", "hosts": { … } }`);
-    }
-    const o = v as Record<string, unknown>;
-    if (o.dir !== undefined) {
-      throw new Error(
-        `${file}: «${id}».dir — поле удалено: приложение работает в папке, где запущено; у проекта остались только "hosts"`,
-      );
-    }
-    const hosts = new Map<string, HostConfig>();
-    if (o.hosts !== undefined) {
-      if (!o.hosts || typeof o.hosts !== 'object' || Array.isArray(o.hosts)) {
-        throw new Error(`${file}: «${id}».hosts — объект { "имя": { "host": "…" } }`);
-      }
-      for (const [hid, hv] of Object.entries(o.hosts as Record<string, unknown>)) {
-        if (!hv || typeof hv !== 'object' || Array.isArray(hv)) {
-          throw new Error(`${file}: «${id}».hosts.${hid} — объект { "host": "…", "user": "…", "port": 22 }`);
-        }
-        const h = hv as Partial<HostConfig>;
-        if (typeof h.host !== 'string' || !h.host.trim()) {
-          throw new Error(`${file}: «${id}».hosts.${hid} — обязательное поле "host"`);
-        }
-        for (const [k, want] of [['password', 'строку'], ['dir', 'строку']] as const) {
-          const v = h[k];
-          if (v !== undefined && (typeof v !== 'string' || !v.trim())) {
-            throw new Error(`${file}: «${id}».hosts.${hid} — "${k}" жду ${want} или убери поле`);
-          }
-        }
-        hosts.set(hid, {
-          host: h.host.trim(),
-          user: typeof h.user === 'string' && h.user.trim() ? h.user.trim() : undefined,
-          password: typeof h.password === 'string' && h.password.trim() ? h.password.trim() : undefined,
-          port: typeof h.port === 'number' && h.port > 0 ? h.port : undefined,
-          dir: typeof h.dir === 'string' && h.dir.trim() ? h.dir.trim() : undefined,
-        });
-      }
-    }
-    if (hosts.size === 0) {
-      throw new Error(`${file}: «${id}» — нужен "hosts" (серверы проекта), хоть один`);
-    }
-    projects.set(id, { hosts });
-  }
+  projects.set(id, { hosts });
   return projects;
 }
 
@@ -178,7 +159,7 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
     const pid = ref.slice(0, qi);
     const hid = ref.slice(qi + 1);
     const h = cfg.projects.get(pid)?.hosts.get(hid);
-    if (!h) return { error: `хост «${ref}» не настроен в projects.json` };
+    if (!h) return { error: `хост «${ref}» не настроен в project.json` };
     return { project: pid, id: hid, host: h };
   }
   const hits: HostTarget[] = [];
@@ -186,7 +167,7 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
     const h = entry.hosts.get(ref);
     if (h) hits.push({ project: pid, id: ref, host: h });
   }
-  if (hits.length === 0) return { error: `хост «${ref}» не настроен в projects.json` };
+  if (hits.length === 0) return { error: `хост «${ref}» не настроен в project.json` };
   if (hits.length > 1) {
     const fulls = hits.map((h) => `${h.project}:${ref}`).join(' или ');
     return {
@@ -339,7 +320,7 @@ export function checkPermission(agent: Agent, action: Action, cfg: ToolsConfig):
   }
   if (action.project) {
     if (!agent.projects?.includes(action.project)) return `проект «${action.project}» этому агенту не назначен`;
-    if (!cfg.projects.has(action.project)) return `проект «${action.project}» не настроен в projects.json`;
+    if (!cfg.projects.has(action.project)) return `проект «${action.project}» не настроен в project.json`;
   }
   return null;
 }

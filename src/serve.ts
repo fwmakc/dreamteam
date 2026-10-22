@@ -12,19 +12,19 @@ import {
   updateTeamAgent,
   grantTool,
   loadManagerConfig,
-  addProject,
+  loadProjectFile,
+  addProjectHosts,
   mergeTeamAgents,
-  addProjectHost,
-  removeProject,
   removeProjectHost,
   removeTeamAgent,
   updateManagerConfig,
 } from './manager.js';
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from './providers/registry.js';
 import { loadSettings } from './settings.js';
-import { AGENTS_FILE, MANAGER_FILE, PROJECTS_FILE, PROVIDERS_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
+import { AGENTS_FILE, DT_HOME, MANAGER_FILE, PROJECT_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
 import { agentToolIds } from './tools-api.js';
 import { loadProjects, safePath } from './actions.js';
+import { basename } from 'node:path';
 import { Engine, chatTeam, type App } from './core/engine.js';
 import { bootstrapApp } from './core/bootstrap.js';
 import { operationHints } from './core/operations.js';
@@ -308,7 +308,7 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   const nextDue = new Map<string, number>();
   const scheduleTimer = setInterval(() => {
     const now = Date.now();
-    for (const task of loadSchedule(dirname(PROJECTS_FILE)).filter((t) => t.enabled)) {
+    for (const task of loadSchedule(DT_HOME).filter((t) => t.enabled)) {
       const due = nextDue.get(task.id) ?? 0;
       if (now < due) continue;
       nextDue.set(task.id, now + task.intervalMinutes * 60_000);
@@ -316,24 +316,25 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     }
   }, 60_000);
 
+  const broadcastState = (): void => {
+    presenter.broadcast({ type: 'state', state: stateSnapshot(app, engine, readProjects()) });
+  };
+
   const readProjects = (): unknown[] => {
     try {
-      return [...loadProjects(PROJECTS_FILE).entries()].map(([id, p]) => ({
-        id,
-        hosts: [...p.hosts.entries()].map(([name, h]) => ({ name, host: h.host })),
-      }));
+      const project = loadProjectFile(PROJECT_FILE);
+      const hosts = project.hosts ?? {};
+      const agents = project.agents ?? [];
+      // пустой проект = блока в снимке нет
+      if (Object.keys(hosts).length === 0 && agents.length === 0) return [];
+      return [{ id: basename(WORKSPACE), hosts, agents }];
     } catch {
       return [];
     }
   };
 
-  const broadcastState = (): void => {
-    presenter.broadcast({ type: 'state', state: stateSnapshot(app, engine, readProjects()) });
-  };
-
-  /** Расписание меняется редко, но обновиться в GUI должно сразу во всех клиентах. */
   const broadcastSchedule = (): void => {
-    presenter.broadcast({ type: 'schedule', tasks: loadSchedule(dirname(PROJECTS_FILE)) });
+    presenter.broadcast({ type: 'schedule', tasks: loadSchedule(DT_HOME) });
   };
 
   const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -617,20 +618,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       case 'project.list':
         return { projects: readProjects() };
       case 'project.host.add': {
-        const report = addProjectHost(PROJECTS_FILE, String(args.id ?? ''), String(args.hostName ?? ''), {
-          host: String(args.host ?? ''),
-          user: args.user ? String(args.user) : undefined,
-          port: args.port ? Number(args.port) : undefined,
-        });
-        broadcastState();
-        return { text: report };
-      }
-      case 'manager.show':
-        return { manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, temperature: app.mgr.temperature, provider: app.mgr.provider } };
-      case 'settings.show':
-        return { settings: loadSettings(SETTINGS_FILE, 0) };
-      case 'project.add': {
-        const report = addProject(PROJECTS_FILE, String(args.id ?? ''), {
+        const report = addProjectHosts(PROJECT_FILE, {
           [String(args.hostName ?? 'main')]: {
             host: String(args.host ?? ''),
             user: args.user ? String(args.user) : undefined,
@@ -640,13 +628,12 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { text: report };
       }
-      case 'project.delete': {
-        const report = removeProject(PROJECTS_FILE, String(args.id ?? ''));
-        broadcastState();
-        return { text: report };
-      }
+      case 'manager.show':
+        return { manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, temperature: app.mgr.temperature, provider: app.mgr.provider } };
+      case 'settings.show':
+        return { settings: loadSettings(SETTINGS_FILE, 0) };
       case 'project.host.delete': {
-        const report = removeProjectHost(PROJECTS_FILE, String(args.id ?? ''), String(args.name ?? ''));
+        const report = removeProjectHost(PROJECT_FILE, String(args.name ?? ''));
         broadcastState();
         return { text: report };
       }
@@ -676,25 +663,25 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text: report };
       }
       case 'schedule.list':
-        return { tasks: loadSchedule(dirname(PROJECTS_FILE)) };
+        return { tasks: loadSchedule(DT_HOME) };
       case 'schedule.add': {
-        const tasks = loadSchedule(dirname(PROJECTS_FILE));
+        const tasks = loadSchedule(DT_HOME);
         const id = `task-${Date.now().toString(36)}`;
         tasks.push({ id, message: String(args.message ?? ''), intervalMinutes: Number(args.intervalMinutes ?? 10), enabled: true });
-        saveSchedule(dirname(PROJECTS_FILE), tasks);
+        saveSchedule(DT_HOME, tasks);
         broadcastSchedule();
         return { tasks };
       }
       case 'schedule.delete': {
-        const tasks = loadSchedule(dirname(PROJECTS_FILE)).filter((t) => t.id !== String(args.id ?? ''));
-        saveSchedule(dirname(PROJECTS_FILE), tasks);
+        const tasks = loadSchedule(DT_HOME).filter((t) => t.id !== String(args.id ?? ''));
+        saveSchedule(DT_HOME, tasks);
         broadcastSchedule();
         return { tasks };
       }
       case 'schedule.toggle': {
-        const tasks = loadSchedule(dirname(PROJECTS_FILE));
+        const tasks = loadSchedule(DT_HOME);
         const task = tasks.find((t) => t.id === String(args.id ?? ''));
-        if (task) { task.enabled = !task.enabled; saveSchedule(dirname(PROJECTS_FILE), tasks); }
+        if (task) { task.enabled = !task.enabled; saveSchedule(DT_HOME, tasks); }
         broadcastSchedule();
         return { tasks };
       }

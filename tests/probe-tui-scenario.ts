@@ -50,17 +50,17 @@ process.env.DT_PROJECT = dt;
 // из корня репозитория; песочница живёт в DT_HOME/DT_PROJECT и в cwd самого pty
 writeFileSync(join(home, 'providers.json'), JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n');
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000 }, null, 2) + '\n');
-writeFileSync(join(dt, 'manager.json'), JSON.stringify({ provider: 'mock', model: 'mock-1' }, null, 2) + '\n');
-writeFileSync(join(dt, 'agents.json'), '[]\n');
-writeFileSync(join(dt, 'projects.json'), '{}\n');
-// .dreamteam создаём руками — воспроизводим весь скаффолд ensureProject (включая пустой tools/)
-mkdirSync(join(dt, 'tools'), { recursive: true });
+writeFileSync(join(home, 'manager.json'), JSON.stringify({ provider: 'mock', model: 'mock-1' }, null, 2) + '\n');
+writeFileSync(join(home, 'agents.json'), '[]\n');
+writeFileSync(join(dt, 'project.json'), '{ "agents": [], "hosts": {} }\n');
+// скаффолд руками: команда и manager — в доме, project.json — в проекте
+mkdirSync(join(home, 'tools'), { recursive: true });
 process.on('exit', () => { try { rmSync(base, { recursive: true, force: true }); } catch { /* Windows держит файлы */ } });
 process.on('SIGINT', () => process.exit(130));
 process.on('SIGTERM', () => process.exit(143));
 
-const sessionsDir = join(home, 'sessions');
-const agentsFile = join(dt, 'agents.json');
+const sessionsDir = join(dt, 'sessions'); // переписка — в проекте
+const agentsFile = join(home, 'agents.json');
 const readJson = (p: string): any => JSON.parse(readFileSync(p, 'utf8'));
 const readSessions = (): any[] =>
   readdirSync(sessionsDir).filter((f) => f.endsWith('.json')).map((f) => readJson(join(sessionsDir, f)));
@@ -96,7 +96,7 @@ let exitedCleanly = false;
 
 async function main(): Promise<void> {
   // ждём готовый экран и приветствие консьержа
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 90_000; // холодный старт tsx на занятой машине
   while (Date.now() < deadline && !(out.includes('/help — команды') && out.includes('Я менеджер переговорки'))) await wait(200);
   check('старт: экран готов, менеджер поприветствовал', out.includes('/help — команды') && out.includes('Я менеджер переговорки'));
   check('старт: одна сессия на диске', readSessions().length === 1);

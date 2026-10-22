@@ -43,18 +43,19 @@ j('providers.json', {
 });
 j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000 });
 j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
-pj('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
-pj('projects.json', { dreamteam: { hosts: { dev: { host: '192.0.2.1' } } } });
+// команда — в доме; проект — только project.json (серверы + задействованные)
+j('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
+pj('project.json', { name: 'dreamteam', agents: [], hosts: { dev: { host: '192.0.2.1' } } });
 const team = JSON.parse(readFileSync('.dreamteam/agents.json', 'utf8')) as Array<Record<string, unknown>>;
 for (const a of team) {
   if (a.provider) a.provider = 'mock';
   if (a.vision) a.vision = 'mock';
   if (a.image) a.image = 'mock-images';
 }
-pj('agents.json', team);
+j('agents.json', team);
 // прошлый разговор с историей: хвост в панели, «Продолжаю разговор», @Глеб в попапе
 {
-  const store = new SessionStore(join(home, 'sessions'));
+  const store = new SessionStore(join(proj, '.dreamteam', 'sessions')); // переписка — в проекте
   const s = store.create();
   s.title = 'Прошлый разговор';
   let ts = Date.now() - 180_000;

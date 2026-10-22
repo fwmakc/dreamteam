@@ -239,7 +239,7 @@ function projectAdd(): void {
     { key: 'host', label: 'Хост (адрес)' },
     { key: 'user', label: 'Пользователь (можно пропустить)' },
     { key: 'port', label: 'Порт (можно пропустить)' },
-  ], (v) => rpcReport(rpc('project.add', v)));
+  ], (v) => rpcReport(rpc('project.host.add', v)));
 }
 function projectHostAdd(p: ProjectInfo): void {
   if (roundActive.value) return;
@@ -252,11 +252,7 @@ function projectHostAdd(p: ProjectInfo): void {
 }
 function projectHostDelete(p: ProjectInfo, h: ProjectHost): void {
   if (roundActive.value) return;
-  rpcReport(rpc('project.host.delete', { id: p.id, name: h.name }));
-}
-function projectDelete(p: ProjectInfo): void {
-  if (roundActive.value) return;
-  rpc('project.delete', { id: p.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
+  rpcReport(rpc('project.host.delete', { name: h.name }));
 }
 
 // ── расписание ───────────────────────────────────────────────────────────────
@@ -782,8 +778,7 @@ onMounted(connectWs);
           <li
             v-for="ph in projects.flatMap((p) => (p.hosts ?? []).map((h) => ({ p, h })))"
             :key="ph.p.id + ':' + ph.h.name"
-            title="Двойной клик — удалить проект целиком · ✕ — удалить сервер"
-            @dblclick="projectDelete(ph.p)"
+            title="✕ — удалить сервер · ＋ — добавить сервер"
           >
             <span>{{ ph.p.id }}</span><span class="meta">{{ ph.h.name }}: {{ ph.h.host }}</span>
             <span class="del" title="Добавить сервер в проект" @click.stop="projectHostAdd(ph.p)">＋</span>

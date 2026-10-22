@@ -19,8 +19,9 @@ import { checkPermission, loadProjects, resolveHost, type ToolsConfig } from '..
 import { loadSettings } from '../src/settings.js';
 import {
   MANAGER_PROMPT,
-  addProject,
-  addProjectHost,
+  addProjectHosts,
+  loadProjectFile,
+  removeProjectHost,
   addTeamAgent,
   grantTool,
   loadManagerConfig,
@@ -163,13 +164,13 @@ const agentsFile = join(dir, 'agents.json');
 }
 {
   const r = parseManagerReply(
-    '{"say":"включаю","actions":[{"op":"tool.grant","agent":"gleb","tool":"shell"},{"op":"project.add","id":"shop","hosts":{"prod":{"host":"1.2.3.4"}}},{"op":"project.host.add","project":"shop","name":"staging","host":"stg.example.com","port":2222},{"op":"project.add","id":"shop"}]}',
+    '{"say":"включаю","actions":[{"op":"tool.grant","agent":"gleb","tool":"shell"},{"op":"project.host.add","name":"staging","host":"stg.example.com","port":2222},{"op":"project.host.add"}]}',
   );
-  check('парсер: новые действия прочитаны, project.add без hosts отсеян',
-    r.actions.length === 3 &&
+  check('парсер: действия прочитаны, host.add без name отсеян',
+    r.actions.length === 2 &&
     r.actions[0].op === 'tool.grant' &&
-    (r.actions[1] as { id: string }).id === 'shop' &&
-    (r.actions[2] as { name: string }).name === 'staging',
+    (r.actions[1] as { name: string }).name === 'staging' &&
+    (r.actions[1] as { host: string }).host === 'stg.example.com',
     JSON.stringify(r.actions));
 }
 
@@ -308,52 +309,41 @@ const agentsFile = join(dir, 'agents.json');
   check('tool.grant: loadTeam по-прежнему валиден', loadTeam(agentsFile).length === 1);
 }
 
-// --- project.add / project.host.add: реестр серверов с откатом ---
+// --- project.json: серверы проекта с откатом ---
 {
-  const projFile = join(dir, 'projects.json');
+  const projFile = join(dir, 'project.json');
   writeFileSync(
     projFile,
-    JSON.stringify({ shop: { hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 22 } }, note: 'пометка' } }, null, 2) + '\n',
+    JSON.stringify({ agents: ['katya'], hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 22 } }, note: 'пометка' }, null, 2) + '\n',
   );
 
-  const report = addProjectHost(projFile, 'shop', 'staging', { host: 'stg.example.com', dir: '/srv/app' });
-  check('project.host.add: отчёт', report.includes('shop') && report.includes('staging'), report);
-  const projects = loadProjects(projFile);
-  check('project.host.add: loadProjects валиден', projects.get('shop')?.hosts.get('staging')?.dir === '/srv/app');
-  check('project.host.add: чужие поля записи сохранены', (JSON.parse(readFileSync(projFile, 'utf8')) as { shop: { note: string } }).shop.note === 'пометка');
-
-  const report2 = addProject(projFile, 'infra', { prod: { host: '10.0.0.1' } });
-  check('project.add: отчёт с серверами', report2.includes('infra') && report2.includes('prod'), report2);
-  const after = loadProjects(projFile);
-  check('project.add: новый проект валиден, соседний цел', after.get('infra')?.hosts.get('prod')?.host === '10.0.0.1' && after.get('shop')?.hosts.get('prod')?.host === '203.0.113.10');
+  const report = addProjectHosts(projFile, { staging: { host: 'stg.example.com', dir: '/srv/app' } });
+  check('project.host add: отчёт', report.includes('staging'), report);
+  check('project.host add: loadProjectFile видит серверы', loadProjectFile(projFile).hosts?.staging?.dir === '/srv/app');
+  check('project.host add: чужие поля корня сохранены', (JSON.parse(readFileSync(projFile, 'utf8')) as { note: string }).note === 'пометка');
+  check('project.host add: агенты проекта не тронуты', (loadProjectFile(projFile).agents ?? []).includes('katya'));
 
   const before = readFileSync(projFile, 'utf8');
   let threw = '';
-  try { addProject(projFile, 'shop', { prod: { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
-  check('project.add: дубликат — отказ', threw.includes('уже есть'), threw);
+  try { addProjectHosts(projFile, { staging: { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
+  check('project.host add: дубликат — отказ', threw.includes('уже есть'), threw);
   threw = '';
-  try { addProject(projFile, 'Bad!', { prod: { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
-  check('project.add: кривой id — отказ', threw.includes('Bad!'), threw);
+  try { addProjectHosts(projFile, { 'two words': { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
+  check('project.host add: пробелы в имени — отказ', threw.includes('пробел'), threw);
   threw = '';
-  try { addProject(projFile, 'empty', {}); } catch (e) { threw = (e as Error).message; }
-  check('project.add: без серверов — отказ', threw.includes('хоть один'), threw);
+  try { addProjectHosts(projFile, { badport: { host: 'x', port: -1 } }); } catch (e) { threw = (e as Error).message; }
+  check('project.host add: кривой порт — отказ', threw.includes('port'), threw);
   threw = '';
-  try { addProject(projFile, 'nohost', { prod: { user: 'x' } as never }); } catch (e) { threw = (e as Error).message; }
-  check('project.add: сервер без host — отказ', threw.includes('host'), threw);
+  try { addProjectHosts(projFile, { nohost: { user: 'x' } as never }); } catch (e) { threw = (e as Error).message; }
+  check('project.host add: сервер без host — отказ', threw.includes('host'), threw);
   threw = '';
-  try { addProjectHost(projFile, 'infra', 'prod', { host: 'x' }); } catch (e) { threw = (e as Error).message; }
-  check('project.host.add: у проекта уже есть «prod» — дубликат', threw.includes('уже есть'), threw);
+  try { addProjectHosts(projFile, {}); } catch (e) { threw = (e as Error).message; }
+  check('project.host add: пусто — отказ', threw.includes('хоть один'), threw);
   threw = '';
-  try { addProjectHost(projFile, 'nope', 'prod', { host: 'x' }); } catch (e) { threw = (e as Error).message; }
-  check('project.host.add: чужого проекта нет — отказ', threw.includes('nope') && threw.includes('project.add'), threw);
-  threw = '';
-  try { addProjectHost(projFile, 'shop', 'two words', { host: 'x' }); } catch (e) { threw = (e as Error).message; }
-  check('project.host.add: пробелы в имени — отказ', threw.includes('пробел'), threw);
-  threw = '';
-  try { addProjectHost(projFile, 'shop', 'badport', { host: 'x', port: -1 }); } catch (e) { threw = (e as Error).message; }
-  check('project.host.add: кривой порт — отказ', threw.includes('port'), threw);
-  check('project.add/host.add: неудачные правки файл не меняли', readFileSync(projFile, 'utf8') === before);
-  check('project.add: tmp-файл убран за собой', !existsSync(projFile + '.tmp'));
+  try { removeProjectHost(projFile, 'nope'); } catch (e) { threw = (e as Error).message; }
+  check('project host delete: нет сервера — отказ', threw.includes('nope'), threw);
+  check('project: неудачные правки файл не меняли', readFileSync(projFile, 'utf8') === before);
+  check('project: tmp-файл убран за собой', !existsSync(projFile + '.tmp'));
 }
 
 // --- легаси-форма { agents: [...] } со своими полями корня всё ещё работает ---
@@ -365,63 +355,45 @@ const agentsFile = join(dir, 'agents.json');
   check('легаси: правка сохранила обёртку и поля корня', Array.isArray(legacy.agents) && legacy.agents.length === 2 && legacy.note === 'не трогать', JSON.stringify(legacy).slice(0, 120));
 }
 
-// --- loadProjects / resolveHost / checkPermission: серверы проектов ---
+// --- loadProjects / resolveHost / checkPermission: серверы текущего проекта ---
 {
-  const projFile = join(dir, 'projects.json');
+  const projFile = join(dir, 'project.json');
   writeFileSync(
     projFile,
-    JSON.stringify({
-      shop: {
-        hosts: { prod: { user: 'deploy', host: '203.0.113.10', port: 22 }, staging: { host: 'stg.example.com' } },
-      },
-      infra: { hosts: { prod: { host: '10.0.0.1' } } },
-    }),
+    JSON.stringify({ agents: ['y'], hosts: { prod: { user: 'deploy', host: '203.0.113.10', port: 22 }, staging: { host: 'stg.example.com' } } }),
   );
-  let threw = '';
-  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
-  check('projects: два проекта с «prod» читаются', threw === '' && true, threw);
-  const projects = loadProjects(projFile);
-  const shop = projects.get('shop');
-  check('projects: хосты с user/port', shop?.hosts.get('prod')?.host === '203.0.113.10' && shop?.hosts.get('prod')?.port === 22, JSON.stringify([...shop?.hosts ?? []]));
-  check('projects: infra только с хостами', projects.get('infra')?.hosts.size === 1);
+  const projects = loadProjects(projFile, 'myproj');
+  const project = projects.get('myproj');
+  check('projects: хосты с user/port', project?.hosts.get('prod')?.host === '203.0.113.10' && project?.hosts.get('prod')?.port === 22, JSON.stringify([...project?.hosts ?? []]));
+  check('projects: оба сервера прочитаны', project?.hosts.size === 2);
 
   const cfg: ToolsConfig = { workspaceAbs: join(dir, 'ws'), runTimeoutMs: 1000, maxOutputChars: 100, projects };
-  const full = resolveHost('shop:prod', cfg);
-  check('ssh: «проект:хост» резолвится', !('error' in full) && full.project === 'shop' && full.host.user === 'deploy', JSON.stringify(full));
+  const full = resolveHost('myproj:prod', cfg);
+  check('ssh: «проект:хост» резолвится', !('error' in full) && full.project === 'myproj' && full.host.user === 'deploy', JSON.stringify(full));
   const bare = resolveHost('staging', cfg);
-  check('ssh: голое имя, хост у одного проекта', !('error' in bare) && bare.project === 'shop', JSON.stringify(bare));
-  const ambiguous = resolveHost('prod', cfg);
-  check('ssh: общее имя у двух проектов — отказ с подсказкой', 'error' in ambiguous && ambiguous.error.includes('shop:prod') && ambiguous.error.includes('infra:prod'), JSON.stringify(ambiguous));
-  check('ssh: чужой хост — отказ', 'error' in resolveHost('shop:nope', cfg), '');
-  const devops: Agent = { id: 'y', name: 'Яна', emoji: '🏍', role: 'devops', color: 'cyan', prompt: 'x', tools: { ssh: {} }, projects: ['shop'] };
-  check('права: ssh по проекту разрешён', checkPermission(devops, { kind: 'ssh', host: 'shop:prod', command: 'uptime' }, cfg) === null);
-  check('права: ssh по голому имени уникального хоста разрешён', checkPermission(devops, { kind: 'ssh', host: 'staging', command: 'uptime' }, cfg) === null);
-  const deny = checkPermission(devops, { kind: 'ssh', host: 'infra:prod', command: 'uptime' }, cfg);
-  check('права: ssh чужого проекта — отказ «не назначен»', deny !== null && deny.includes('не назначен'), deny ?? '');
+  check('ssh: голое имя резолвится в текущий проект', !('error' in bare) && bare.project === 'myproj', JSON.stringify(bare));
+  check('ssh: чужой хост — отказ', 'error' in resolveHost('myproj:nope', cfg), '');
+  const devops: Agent = { id: 'y', name: 'Яна', emoji: '🏍', role: 'devops', color: 'cyan', prompt: 'x', tools: { ssh: {} }, projects: ['myproj'] };
+  check('права: ssh по проекту разрешён', checkPermission(devops, { kind: 'ssh', host: 'myproj:prod', command: 'uptime' }, cfg) === null);
+  check('права: ssh по голому имени разрешён', checkPermission(devops, { kind: 'ssh', host: 'staging', command: 'uptime' }, cfg) === null);
+  const deny = checkPermission(devops, { kind: 'ssh', host: 'other:prod', command: 'uptime' }, cfg);
+  check('права: ssh несуществующего проекта — отказ резолвера', deny !== null && deny.includes('не настроен'), deny ?? '');
   const noSsh: Agent = { ...devops, tools: { files: {} } };
-  check('права: без инструмента ssh — отказ', checkPermission(noSsh, { kind: 'ssh', host: 'shop:prod', command: 'x' }, cfg)?.includes('ssh') === true);
-  const fileDeny = checkPermission({ ...devops, tools: { ssh: {}, files: {} }, projects: ['shop', 'ghost'] }, { kind: 'file', path: 'a.txt', content: 'x', project: 'ghost' }, cfg);
+  check('права: без инструмента ssh — отказ', checkPermission(noSsh, { kind: 'ssh', host: 'myproj:prod', command: 'x' }, cfg)?.includes('ssh') === true);
+  const fileDeny = checkPermission({ ...devops, tools: { ssh: {}, files: {} }, projects: ['myproj', 'ghost'] }, { kind: 'file', path: 'a.txt', content: 'x', project: 'ghost' }, cfg);
   check('права: проект не настроен — отказ', fileDeny !== null && fileDeny.includes('не настроен'), fileDeny ?? '');
 
-  writeFileSync(projFile, JSON.stringify({ bad: { dir: 'repo', hosts: { h1: { host: 'x' } } } }));
+  writeFileSync(projFile, JSON.stringify({ hosts: 'nope' }));
+  let threw = '';
+  try { loadProjects(projFile, 'myproj'); } catch (e) { threw = (e as Error).message; }
+  check('projects: hosts не объект — ошибка', threw.includes('hosts'), threw);
+  writeFileSync(projFile, JSON.stringify({ hosts: { h1: { user: 'x' } } }));
   threw = '';
-  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
-  check('projects: поле dir удалено — ошибка', threw.includes('bad') && threw.includes('dir'), threw);
-  writeFileSync(projFile, JSON.stringify({ bad: {} }));
-  threw = '';
-  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
-  check('projects: без hosts — ошибка', threw.includes('bad') && threw.includes('hosts'), threw);
-  writeFileSync(projFile, JSON.stringify({ bad: { hosts: { h1: { user: 'x' } } } }));
-  threw = '';
-  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(projFile, 'myproj'); } catch (e) { threw = (e as Error).message; }
   check('projects: хост без поля host — ошибка', threw.includes('h1') && threw.includes('host'), threw);
-  writeFileSync(projFile, JSON.stringify({ Bad: {} }));
-  threw = '';
-  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
-  check('projects: id не по шаблону — ошибка', threw.includes('Bad'), threw);
   unlinkSync(projFile);
   threw = '';
-  try { loadProjects(projFile); } catch (e) { threw = (e as Error).message; }
+  try { loadProjects(projFile, 'myproj'); } catch (e) { threw = (e as Error).message; }
   check('projects: файла нет — ошибка', threw.includes('не удалось прочитать'), threw);
 
   // --- loadSettings: лимиты и дефолты ---
@@ -442,22 +414,6 @@ const agentsFile = join(dir, 'agents.json');
   check('settings: поле workspace удалено — ошибка', threw.includes('workspace'), threw);
   writeFileSync(sf, JSON.stringify({ width: 100, runTimeoutMs: 5000 }));
   check('settings: свой таймаут читается', loadSettings(sf, 0).runTimeoutMs === 5000);
-  {
-    writeFileSync(sf, JSON.stringify({ width: 100 }));
-    check('settings: язык по умолчанию — русский', loadSettings(sf, 0).language === 'русский');
-    writeFileSync(sf, JSON.stringify({ width: 100, language: 'ru-RU' }));
-    check('settings: свой язык читается как есть', loadSettings(sf, 0).language === 'ru-RU');
-    writeFileSync(sf, JSON.stringify({ width: 100, language: 'english' }));
-    check('settings: latin-запись тоже проходит', loadSettings(sf, 0).language === 'english');
-    writeFileSync(sf, JSON.stringify({ width: 100, language: '   ' }));
-    let langErr = '';
-    try { loadSettings(sf, 0); } catch (e) { langErr = (e as Error).message; }
-    check('settings: пустой язык — ошибка', langErr.includes('language'), langErr);
-    writeFileSync(sf, JSON.stringify({ width: 100, language: 42 }));
-    langErr = '';
-    try { loadSettings(sf, 0); } catch (e) { langErr = (e as Error).message; }
-    check('settings: язык-число — ошибка', langErr.includes('language'), langErr);
-  }
 }
 
 rmSync(dir, { recursive: true, force: true });

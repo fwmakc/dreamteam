@@ -351,13 +351,13 @@
       { key: 'user', label: 'Пользователь (можно пропустить)' },
       { key: 'port', label: 'Порт (можно пропустить)' },
     ], (v) => {
-      rpc('project.add', v)
+      rpc('project.host.add', v)
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
   }
   function projectHostDelete(p, h) {
-    rpc('project.host.delete', { id: p.id, name: h.name })
+    rpc('project.host.delete', { name: h.name })
       .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
       .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   }
@@ -802,7 +802,6 @@
           e.stopPropagation();
           if (!roundActive) projectHostDelete(p, h);
         };
-        li.ondblclick = () => { if (!roundActive) rpc('project.delete', { id: p.id }); };
         projectsEl.appendChild(li);
       }
     }

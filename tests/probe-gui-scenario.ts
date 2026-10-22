@@ -51,8 +51,8 @@ process.on('exit', () => { try { rmSync(base, { recursive: true, force: true });
 process.on('SIGINT', () => process.exit(130));
 process.on('SIGTERM', () => process.exit(143));
 
-const sessionsDir = join(home, 'sessions');
-const agentsFile = join(proj, 'agents.json'); // DT_PROJECT — сама папка .dreamteam
+const sessionsDir = join(proj, 'sessions'); // переписка — в проекте
+const agentsFile = join(home, 'agents.json'); // команда — в доме // DT_PROJECT — сама папка .dreamteam
 const readJson = (p: string): any => JSON.parse(readFileSync(p, 'utf8'));
 const sessionFile = (id: string): string => join(sessionsDir, `${id}.json`);
 const readSessions = (): any[] =>
