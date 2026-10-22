@@ -204,7 +204,7 @@ ANTHROPIC_API_KEY=ваш_ключ
 | `team.list` | `/team` | состав команды: роли, тула, кто в чате |
 | `team.add <id> <Имя> [роль]` | `/team add yurist Юрист право` | новый участник (дефолты как у менеджера) |
 | `team.update <id> поле=знач…` | `/team update yurist role=сметана` | править: name, role, emoji, color, description, prompt, provider, temperature |
-| `team.delete <id>` | `/team delete yurist` | удалить участника из команды |
+| `team.delete <id…>` | `/team delete yurist, keks` | удалить участников: список через запятую или пробел |
 | `team.grant <агент> <тул>` | `/team grant yurist files` | включить тул: files, shell, ssh, look, image или свой из tools/ |
 | `provider.list` | `/provider` | провайдеры и их статус |
 | `provider.set <id>` | `/provider set glm` | сменить основного провайдера |

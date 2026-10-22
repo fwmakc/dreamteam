@@ -220,6 +220,22 @@ function check(name: string, cond: boolean): void {
   check('team delete: отчёт', (lines[0]?.includes('test2') || lines[0]?.includes('Второй')) ?? false);
   team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
   check('team delete: агента нет на диске', !team.some((a) => a.id === 'test2'));
+
+  // список: и через запятую, и через пробел, вперемешку; чужой id не валит остальных
+  for (const id of ['t3', 't4', 't5']) {
+    lines = await run(engine, `/team add ${id} Тест-${id}`);
+  }
+  lines = await run(engine, '/team delete t3, t4 t5');
+  check('team delete: список — три отчёта ✓', lines.filter((l) => l.startsWith('✓')).length === 3);
+  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
+  check('team delete: список — все удалены с диска', !team.some((a) => ['t3', 't4', 't5'].includes(a.id)));
+  lines = await run(engine, '/team delete t3, призрак');
+  check(
+    'team delete: чужой id — ✗, без падения',
+    lines.length === 2 && lines.every((l) => l.startsWith('✗')) && lines[1].includes('призрак'),
+  );
+  lines = await run(engine, '/team delete');
+  check('team delete: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
 }
 
 // ── проекты: add/host add/host delete/delete/list ────────────────────────────

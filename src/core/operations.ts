@@ -442,13 +442,22 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'team.delete',
-    args: [{ name: 'id', required: true }],
+    args: [{ name: 'id…', required: true }],
     title: 'удалить участника',
-    help: 'то же, что попросить менеджера; из чата исчезнет сам',
+    help: 'можно несколько — через запятую или пробел; то же, что попросить менеджера',
     run: async (_engine, rest) => {
-      const id = rest[0];
-      if (!id) return ['Синтаксис: /team delete <id>'];
-      return [removeTeamAgent(AGENTS_FILE, id)];
+      // «keks, volt, gosha» и «keks volt gosha» — одно и то же: запятые — разделители
+      const ids = rest.flatMap((t) => t.split(',')).map((s) => s.trim()).filter(Boolean);
+      if (ids.length === 0) return ['Синтаксис: /team delete <id> [id…] — id через пробел или запятую'];
+      const lines: string[] = [];
+      for (const id of ids) {
+        try {
+          lines.push(removeTeamAgent(AGENTS_FILE, id));
+        } catch (err) {
+          lines.push(`✗ ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      return lines;
     },
   },
   {
