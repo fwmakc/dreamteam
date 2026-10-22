@@ -21,7 +21,7 @@ import {
 } from './manager.js';
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from './providers/registry.js';
 import { loadSettings } from './settings.js';
-import { AGENTS_FILE, DT_HOME, MANAGER_FILE, PROJECT_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
+import { AGENTS_FILE, APP_VERSION, DT_HOME, MANAGER_FILE, PROJECT_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
 import { agentToolIds } from './tools-api.js';
 import { loadProjects, safePath } from './actions.js';
 import { basename } from 'node:path';
@@ -745,7 +745,7 @@ const entry = (process.argv[1] ?? '').replace(/\\/g, '/');
 if (process.env.DT_SERVE === '1' || entry.endsWith('/src/serve.ts')) {
   startServe()
     .then(({ port, host }) => {
-      console.log(pc.dim(`\n  API поднято: http://${host}:${port} (WS — /ws) · ${host === '127.0.0.1' ? 'только локально' : 'ОТКРЫТО В СЕТЬ — авторизации нет'} · Ctrl+C — останов`));
+      console.log(pc.dim(`\n  API поднято: http://${host}:${port} (WS — /ws) · dreamteam v${APP_VERSION} · ${host === '127.0.0.1' ? 'только локально' : 'ОТКРЫТО В СЕТЬ — авторизации нет'} · Ctrl+C — останов`));
     })
     .catch((err) => {
       console.error(pc.red(`Фатальная ошибка: ${err instanceof Error ? err.stack ?? err.message : err}`));

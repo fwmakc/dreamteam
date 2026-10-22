@@ -9,7 +9,7 @@
  * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер.
  * Запуск: npm run probe:scenario
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
@@ -41,6 +41,7 @@ writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Босс', role: 
 const { startServe } = await import('../src/serve.js');
 const { SessionStore } = await import('../src/sessions.js');
 import type { Session } from '../src/types.js';
+import { rmTemp } from './rm-tmp.js';
 
 function makeClient(port: number): Promise<{
   next(pred: (m: Record<string, unknown>) => boolean, ms?: number): Promise<Record<string, unknown>>;
@@ -205,6 +206,6 @@ await handle.close();
 
 // ── чистка ───────────────────────────────────────────────────────────────────
 process.chdir(tmpdir());
-rmSync(base, { recursive: true, force: true });
+rmTemp(base);
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);

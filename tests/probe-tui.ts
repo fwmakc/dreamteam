@@ -9,14 +9,15 @@
  * Изоляция: зонд полностью герметичен и реальные данные не трогает. Приложение
  * запускается во временном проекте (cwd) с переменными DT_HOME/DT_PROJECT во
  * временные папки: там свои providers.json (всё на mock — ни одного настоящего
- * запроса к API), settings.json, user.json и копия боевой команды. Сценарий —
+ * запроса к API), settings.json, user.json, менеджер и копия боевой команды
+ * (слой дома), в проекте — project.json. Сценарий —
  * консьерж-поток: пустой разговор → приветствие менеджера на старте → первая
  * реплика менеджеру (team.add «Теста» с тулами) → chat.add → раунд с
- * инструментами. team.add реально пишет во временный agents.json — зонд
+ * инструментами. team.add реально пишет в agents.json дома — зонд
  * проверяет это по файлу и убирает за собой всё при любом завершении.
  */
 import { createRequire } from 'node:module';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -56,17 +57,22 @@ j('providers.json', {
 });
 j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000 });
 j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
-pj('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
-pj('projects.json', { dreamteam: { hosts: { dev: { host: '192.0.2.1' } } } });
-// команда — копия боевой: имена и роли важны для сценария, провайдеры сажаем на mock
+// команда — вещь машины: менеджер и команда в доме
+j('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
+// проект — только свой project.json (серверы и задействованные агенты)
+pj('project.json', { name: 'dreamteam', agents: [], hosts: { dev: { host: '192.0.2.1' } } });
+// команда — копия боевой (фикстура в репозитории): имена и роли важны для
+// сценария, провайдеры сажаем на mock
 const team = JSON.parse(readFileSync('.dreamteam/agents.json', 'utf8')) as Array<Record<string, unknown>>;
 for (const a of team) {
   if (a.provider) a.provider = 'mock';
   if (a.vision) a.vision = 'mock';
   if (a.image) a.image = 'mock-images';
 }
-pj('agents.json', team);
-process.on('exit', () => rmSync(root, { recursive: true, force: true }));
+j('agents.json', team);
+import { rmTemp } from './rm-tmp.js';
+
+process.on('exit', () => rmTemp(root));
 process.on('SIGINT', () => process.exit(130));
 process.on('SIGTERM', () => process.exit(143));
 
@@ -206,9 +212,9 @@ const code = await Promise.race([
 check('tui: процесс завершился сам', code === 0, String(code));
 if (code === null) term.kill();
 writeFileSync('/tmp/dt-tui-raw.txt', out, 'utf8');
-// team.add менеджера писал в agents.json временного проекта — проверяем по файлу
-check('tui: «Тест» записан в агенты временного проекта', readFileSync(join(proj, '.dreamteam', 'agents.json'), 'utf8').includes('test_probe'));
-check('tui: разговор сохранился во временном доме', readdirSync(join(home, 'sessions')).length === 1);
+// team.add менеджера писал в agents.json дома (команда — вещь машины) — проверяем по файлу
+check('tui: «Тест» записан в агенты дома', readFileSync(join(home, 'agents.json'), 'utf8').includes('test_probe'));
+check('tui: разговор сохранился в проекте', readdirSync(join(proj, '.dreamteam', 'sessions')).length === 1);
 
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);

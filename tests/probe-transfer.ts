@@ -10,11 +10,12 @@
  * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер, confirm-заглушка.
  * Запуск: npm run probe:transfer
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MANAGER_ID } from '../src/manager.js';
 import type { Presenter, SpeakerRef, TurnSink } from '../src/core/presenter.js';
+import { rmTemp } from './rm-tmp.js';
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -184,6 +185,6 @@ app.store.save(s2);
 
 // ── чистка ───────────────────────────────────────────────────────────────────
 process.chdir(tmpdir());
-rmSync(base, { recursive: true, force: true });
+rmTemp(base);
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);

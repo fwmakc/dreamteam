@@ -11,7 +11,7 @@ import { OPERATIONS, operationArgs, operationCommand } from './core/operations.j
 import { Editor } from './editor.js';
 import { Screen } from './screen.js';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
-import { AGENTS_FILE, PROJECT_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
+import { AGENTS_FILE, APP_VERSION, DT_HOME, PROJECT_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
 import { agentHeader, colorFn, printDim, printError, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 // ядро: раунды, менеджер, инструменты, память — общение только через Presenter
 import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
@@ -410,6 +410,7 @@ function messageRows(m: ChatMessage, team: Agent[]): string[] {
 function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔══════════════════════════════════════════════╗')));
   console.log(pc.bold(pc.cyan('  ║   🎬  DREAM TEAM — совещание начинается      ║')));
   console.log(pc.bold(pc.cyan('  ╚══════════════════════════════════════════════╝')));
+  console.log(pc.dim(`  версия ${APP_VERSION} · дом: ${DT_HOME}`));
 
   try {
     const team = loadTeam(AGENTS_FILE);

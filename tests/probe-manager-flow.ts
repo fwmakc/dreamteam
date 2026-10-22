@@ -13,13 +13,14 @@
  *     переключения (pendingSwitches), мусорный ответ — без изменений конфига.
  * Запуск: npm run probe:manager-flow
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MANAGER_PROMPT } from '../src/manager.js';
 import type { LLMProvider, StreamRequest } from '../src/types.js';
 import { MANAGER_ID } from '../src/manager.js';
 import type { Presenter, SpeakerRef, TurnSink } from '../src/core/presenter.js';
+import { rmTemp } from './rm-tmp.js';
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -347,6 +348,6 @@ function lastManagerMessage(): string {
 
 // ── чистка ───────────────────────────────────────────────────────────────────
 process.chdir(tmpdir()); // Windows не даёт удалить каталог процесса
-rmSync(base, { recursive: true, force: true });
+rmTemp(base);
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);

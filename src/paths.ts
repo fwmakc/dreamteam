@@ -14,12 +14,16 @@
  * пробники: указывают во временные папки и гарантированно не трогают реальные
  * данные.
  */
+import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 /** Корень пакета (код приложения, только чтение). */
 export const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** Версия пакета (package.json) — для баннера TUI и лога serve. */
+export const APP_VERSION = (JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8')) as { version: string }).version;
 
 /** Дом: ключи, настройки, профиль, команда целиком. */
 export const DT_HOME = process.env.DT_HOME ? resolve(process.env.DT_HOME) : join(homedir(), '.dreamteam');

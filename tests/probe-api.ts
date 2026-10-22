@@ -11,10 +11,11 @@
  * замораживаются на импорте) во временные каталоги; сервер — на порту 0.
  * Запуск: npm run probe:api
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
+import { rmTemp } from './rm-tmp.js';
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -700,8 +701,8 @@ try {
 }
 check('close: сервер остановился', closed);
 
-rmSync(home, { recursive: true, force: true });
-rmSync(proj, { recursive: true, force: true });
+rmTemp(home);
+rmTemp(proj);
 
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);

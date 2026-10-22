@@ -13,7 +13,7 @@
  * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер.
  * Запуск: npm run probe:consistency
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
@@ -44,6 +44,7 @@ writeFileSync(
 const { startServe } = await import('../src/serve.js');
 const { SessionStore } = await import('../src/sessions.js');
 import type { Session } from '../src/types.js';
+import { rmTemp } from './rm-tmp.js';
 
 // ── сеем два разговора так, как их сохранила бы любая из оболочек ───────────
 const storeTUI = new SessionStore(join(home, 'sessions'));
@@ -191,6 +192,6 @@ let handle = await startServe({ port: 0 });
 
 await handle.close();
 process.chdir(tmpdir()); // Windows не даёт удалить каталог процесса
-rmSync(base, { recursive: true, force: true });
+rmTemp(base);
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);
