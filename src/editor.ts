@@ -65,6 +65,18 @@ function seqName(seq: string): string | null {
       return 'end';
     case '\x1b[3~':
       return 'delete';
+    case '\x1b[1;5C': // xterm-модификаторы: 5 = Ctrl
+      return 'ctrl+right';
+    case '\x1b[1;5D':
+      return 'ctrl+left';
+    case '\x1b[1;6C': // 6 = Ctrl+Shift
+      return 'ctrl+shift+right';
+    case '\x1b[1;6D':
+      return 'ctrl+shift+left';
+    case '\x1b[1;6H': // Ctrl+Shift+Home/End — выделение до начала/конца строки
+      return 'ctrl+shift+home';
+    case '\x1b[1;6F':
+      return 'ctrl+shift+end';
     case '\x1b[5~':
       return 'pageup';
     case '\x1b[6~':
@@ -176,7 +188,8 @@ export function wrapPlain(
 /**
  * Редактор строки ввода для управляемого экрана: сырой ввод без readline.
  * Кодпоинты (не режет эмодзи), история (↑/↓), Ctrl+U — очистить, Ctrl+W —
- * удалить слово, Home/End/Delete, мягкий перенос Ctrl+Enter (LF) и Alt+Enter,
+ * удалить слово, Ctrl+←/→ — по словам (Ctrl+Shift+←/→ — выделение по словам),
+ * Home/End/Delete, мягкий перенос Ctrl+Enter (LF) и Alt+Enter,
  * вставка из буфера (bracketed paste) — переносы становятся пробелами.
  * Отрисовка целиком живёт в Screen: зоны не мешают друг другу.
  */
@@ -474,6 +487,28 @@ export class Editor {
         case 'ctrl+pagedown':
           this.hooks.onScroll('bottom', 0);
           return;
+        case 'ctrl+left':
+        case 'ctrl+right':
+          // выделение есть — схлопнуть к его началу/концу, без движения
+          if (this.selA !== null) {
+            const b = this.selBounds()!;
+            this.cursor = name === 'ctrl+left' ? b[0] : b[1];
+            this.selA = null;
+          } else {
+            this.cursor = name === 'ctrl+left' ? this.wordBack(this.cursor) : this.wordFwd(this.cursor);
+          }
+          return;
+        case 'ctrl+shift+left':
+        case 'ctrl+shift+right':
+        case 'ctrl+shift+home':
+        case 'ctrl+shift+end':
+          // выделение по словам (или до края) в набираемом сообщении
+          if (this.selA === null) this.selA = this.cursor;
+          if (name === 'ctrl+shift+home') this.cursor = 0;
+          else if (name === 'ctrl+shift+end') this.cursor = this.buffer.length;
+          else this.cursor = name === 'ctrl+shift+left' ? this.wordBack(this.cursor) : this.wordFwd(this.cursor);
+          if (this.selA === this.cursor) this.selA = null; // схлопнулось
+          return;
         case 'shift+up':
         case 'shift+down':
         case 'shift+left':
@@ -560,6 +595,23 @@ export class Editor {
     while (i > 0 && this.buffer[i - 1] !== ' ') i = prevCp(this.buffer, i);
     this.buffer = this.buffer.slice(0, i) + this.buffer.slice(this.cursor);
     this.cursor = i;
+  }
+
+  /** Начало слова левее курсора (Ctrl+←): пробелы, потом слово — как deleteWord, но без удаления */
+  private wordBack(i: number): number {
+    let j = i;
+    while (j > 0 && this.buffer[j - 1] === ' ') j--;
+    while (j > 0 && this.buffer[j - 1] !== ' ') j = prevCp(this.buffer, j);
+    return j;
+  }
+
+  /** Правее курсора: через слово и пробелы за ним — курсор встаёт перед следующим словом (Ctrl+→) */
+  private wordFwd(i: number): number {
+    let j = i;
+    while (j < this.buffer.length && this.buffer[j] === ' ') j = nextCp(this.buffer, j);
+    while (j < this.buffer.length && this.buffer[j] !== ' ') j = nextCp(this.buffer, j);
+    while (j < this.buffer.length && this.buffer[j] === ' ') j = nextCp(this.buffer, j);
+    return j;
   }
 
   private histPrev(): void {

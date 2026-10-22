@@ -310,5 +310,39 @@ const sleep = (): Promise<void> => new Promise<void>((r) => setImmediate(r));
   cleanup();
 }
 
+// --- Ctrl+стрелки: по словам; Ctrl+Shift — выделение по словам; Del удаляет ---
+{
+  const { ed, feed, events, cleanup } = makeEditor();
+  await feed('привет команда мир');
+  const cur = (): number => events.edits[events.edits.length - 1][1];
+  await feed('\x1b[1;5D'); // Ctrl+влево: с конца — перед «мир»
+  check('ввод: ctrl+влево — перед «мир»', cur() === 15, String(cur()));
+  await feed('\x1b[1;5D');
+  check('ввод: ctrl+влево — перед «команда»', cur() === 7, String(cur()));
+  await feed('\x1b[1;5D');
+  check('ввод: ctrl+влево — в начало строки', cur() === 0, String(cur()));
+  await feed('\x1b[1;5C'); // Ctrl+вправо — к следующему слову
+  check('ввод: ctrl+вправо — перед «команда»', cur() === 7, String(cur()));
+  await feed('\x1b[1;5C');
+  await feed('\x1b[1;5C');
+  check('ввод: ctrl+вправо — в конец строки', cur() === 18, String(cur()));
+  await feed('\x15'); // Ctrl+U
+  await feed('раз единорог');
+  await feed('\x1b[D\x1b[D'); // ←← — внутрь слова
+  await feed('\x1b[1;5D'); // Ctrl+влево из середины слова
+  check('ввод: ctrl+влево из середины слова — в его начало', cur() === 4, String(cur()));
+  await feed('\x15'); // Ctrl+U
+  await feed('раз два три');
+  await feed('\x1b[1;6D'); // Ctrl+Shift+влево — выделил «три»
+  check('ввод: ctrl+shift+влево выделил «три»', ed.selectionText() === 'три', JSON.stringify(ed.selectionText()));
+  await feed('\x1b[1;6D'); // ещё слово к якорю
+  check('ввод: ctrl+shift+влево расширил до «два три»', ed.selectionText() === 'два три', JSON.stringify(ed.selectionText()));
+  await feed('\x1b[3~'); // Delete удаляет выделение целиком
+  check('ввод: delete удалил выделение', ed.text === 'раз ' && !ed.hasSelection(), JSON.stringify(ed.text));
+  await feed('\x1b[1;6C'); // Ctrl+Shift+вправо в конце строки — схлопнулось
+  check('ввод: ctrl+shift+вправо в конце — без выделения', !ed.hasSelection(), JSON.stringify(ed.selectionText()));
+  cleanup();
+}
+
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);
