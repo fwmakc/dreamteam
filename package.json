@@ -46,7 +46,8 @@
     "probe:transfer": "tsx tests/probe-transfer.ts && tsx tests/probe-scenario.ts",
     "probe:scenario": "tsx tests/probe-scenario.ts",
     "build:gui": "vite build gui-src",
-    "typecheck:gui": "vue-tsc --noEmit -p gui-src"
+    "typecheck:gui": "vue-tsc --noEmit -p gui-src",
+    "prepublishOnly": "npm run typecheck && npm run build:gui"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
