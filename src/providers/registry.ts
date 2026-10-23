@@ -122,68 +122,7 @@ export function loadImageProviders(file: string): LoadedImages {
 }
 
 
-// ─── Одноразовая миграция: ключи моделей из окружения → карточки providers.json ──
-
-/**
- * Раньше карточка хранила ИМЯ переменной окружения (apiKeyEnv/keyEnv), а само
- * значение жило в ~/.dreamteam/.env. Теперь ключ лежит прямо в карточке
- * ("apiKey", у gigachat — "clientId"/"clientSecret"). Эта функция при старте
- * переносит старые записи: имя переменной → её значение из process.env.
- *
- * Переписывает файл только если что-то изменилось; битый файл не трогает —
- * о нём следом скажет loadProviders своей внятной ошибкой. Если переменная
- * не задана, имя-прослойка всё равно удаляется: дальше адаптер сам скажет
- * «впиши apiKey в providers.json».
- */
-export function migrateProviderEnvKeys(file: string): string[] {
-  let raw: ProvidersFile;
-  try {
-    raw = readProvidersFile(file);
-  } catch {
-    return [];
-  }
-  const notes: string[] = [];
-
-  /** Имя переменной (поле envField) заменяем на её значение (поле field). */
-  const move = (card: Record<string, unknown>, envField: string, field: string): boolean => {
-    const name = card[envField];
-    if (typeof name !== 'string' || !name.trim()) return false;
-    delete card[envField];
-    const value = process.env[name.trim()];
-    if (value) card[field] = value;
-    return true;
-  };
-
-  for (const [pid, cfg] of Object.entries(raw.providers ?? {})) {
-    const card = cfg as Record<string, unknown> | null;
-    if (!card || typeof card !== 'object') continue;
-    const before = JSON.stringify(card);
-    const moved: string[] = [];
-    // ключ мог называться apiKeyEnv (openai/anthropic/images) или keyEnv (gigachat)
-    if (move(card, 'apiKeyEnv', 'apiKey') || move(card, 'keyEnv', 'apiKey')) moved.push('apiKey');
-    if (move(card, 'clientIdEnv', 'clientId')) moved.push('clientId');
-    if (move(card, 'clientSecretEnv', 'clientSecret')) moved.push('clientSecret');
-    // старые умолчания без явных имён: anthropic и gigachat брали ключ из
-    // ANTHROPIC_API_KEY / GIGA_API_KEY, даже если карточка имени не называла
-    if (card.apiKey === undefined) {
-      const legacy =
-        card.adapter === 'anthropic' ? 'ANTHROPIC_API_KEY' :
-        card.adapter === 'gigachat' ? 'GIGA_API_KEY' :
-        undefined;
-      if (legacy && process.env[legacy]) {
-        card.apiKey = process.env[legacy];
-        moved.push('apiKey');
-      }
-    }
-    if (JSON.stringify(card) !== before) {
-      raw.providers[pid] = card as ProviderConfig;
-      notes.push(`провайдер «${pid}»: ключ перенесён из окружения в карточку (${[...new Set(moved)].join(', ')})`);
-    }
-  }
-  if (notes.length > 0) writeFileProviders(file, raw);
-  return notes;
-}
-
+// ─── Правка providers.json из GUI (rpc): добавление и удаление провайдеров ──
 
 const PROVIDER_ID_RE = /^[a-z][a-z0-9_-]{1,}$/;
 

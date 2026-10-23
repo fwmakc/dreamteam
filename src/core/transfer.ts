@@ -4,10 +4,10 @@
  * settings/user/providers + sessions/ + transcripts/ для дома;
  * session.json + agents.json + settings.json для сессии.
  *
- * Экспорт — полный снимок дома, включая секреты: ключи карточек провайдеров
- * и .env (TOKEN, свои переменные). Смысл переноса — развернуться на другой
- * машине без ручного вписывания всего заново. Обратная сторона: архив — это
- * ваши пароли целиком, хранить его стоит соответствующе.
+ * Экспорт — снимок дома для переезда на другую машину: настройки, команда,
+ * провайдеры вместе с ключами карточек (apiKey…). Не переносится только .env:
+ * это настройки самой машины (TOKEN, PORT, HOST для serve), на новом месте
+ * дом создаст его из примера.
  *
  * Импорт дома: настройки/профиль/провайдеры заменяются, разговоры вливаются
  * по id (совпавшие — заменяются). Импорт сессии: разговор разворачивается
@@ -38,9 +38,9 @@ export interface TransferEntry {
   data: Buffer;
 }
 
-const HOME_FILES = ['settings.json', 'user.json', 'providers.json', 'agents.json', 'manager.json', '.env'] as const;
+const HOME_FILES = ['settings.json', 'user.json', 'providers.json', 'agents.json', 'manager.json'] as const;
 
-/** Записи домашнего слоя: настройки, профиль, провайдеры (с ключами), команда, тула и .env. */
+/** Записи домашнего слоя: настройки, профиль, провайдеры (с ключами карточек), команда и тула; .env — вещь машины. */
 export function homeEntries(): TransferEntry[] {
   const out: TransferEntry[] = [];
   for (const f of HOME_FILES) {
@@ -91,8 +91,7 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
   for (const f of HOME_FILES) {
     const e = entries.find((x) => x.rel === f);
     if (!e) continue;
-    // .env с секретами — права только у владельца, как при создании
-    writeFileSync(join(DT_HOME, f), e.data, f === '.env' ? { mode: 0o600 } : undefined);
+    writeFileSync(join(DT_HOME, f), e.data);
     report.push(`${f} — заменён`);
   }
   mkdirSync(TOOLS_DIR, { recursive: true });

@@ -1,7 +1,7 @@
 /**
  * Импорт-экспорт: дом и отдельная сессия.
- *  - экспорт дома: полный снимок — настройки/профиль/провайдеры с ключами,
- *    .env и разговоры;
+ *  - экспорт дома: снимок для переезда — настройки/профиль/провайдеры
+ *    с ключами + разговоры; .env (TOKEN/PORT — вещь машины) не включается;
  *  - импорт дома: настройки/провайдеры заменяются, разговоры вливаются по id;
  *  - экспорт/импорт одной сессии: разговор как новый (новый id), агенты
  *    вливаются по id (новые добавляются, совпавшие не трогаются);
@@ -98,8 +98,7 @@ app.store.save(s2);
   check('экспорт дома: команда внутри, переписки нет',
     entries.some((e) => e.rel === 'agents.json') && entries.some((e) => e.rel === 'manager.json')
       && !entries.some((e) => e.rel.startsWith('sessions/')));
-  check('экспорт дома: .env внутри (токен serve и переменные команд)',
-    entries.some((e) => e.rel === '.env') && entries.find((e) => e.rel === '.env')!.data.toString('utf8').includes('секрет-токен-serve'));
+  check('экспорт дома: .env (вещь машины) не включён', !entries.some((e) => e.rel.includes('.env')));
   const provEntry = entries.find((e) => e.rel === 'providers.json');
   const provText = provEntry ? provEntry.data.toString('utf8') : '';
   check('экспорт дома: карточка провайдера с ключом — снимок полный',
@@ -118,16 +117,12 @@ app.store.save(s2);
       : e,
   ));
   writeFileSync(join(home, 'settings.json'), JSON.stringify({ width: 100, margin: 2, screen: true }, null, 2));
-  // .env затираем — импорт должен вернуть его из архива вместе с секретами
-  writeFileSync(join(home, '.env'), 'TOKEN=старьё\n');
   const report = applyHomeImport(app, readZipEntries(archive));
   check('импорт дома: отчёт', report.includes('Импорт дома выполнен'), report);
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('импорт дома: настройки заменены из архива', settings.width === 200 && settings.language === 'english', JSON.stringify(settings));
   check('импорт дома: разговоры не трогаются (они в проекте)', app.store.list().length >= 1);
   check('импорт дома: app.providers жив', app.providers.get('mock') !== undefined);
-  check('импорт дома: .env восстановлен вместе с секретами',
-    readFileSync(join(home, '.env'), 'utf8').includes('секрет-токен-serve'), report);
 }
 
 // ── экспорт сессии: разговор + агенты + настройки ────────────────────────────

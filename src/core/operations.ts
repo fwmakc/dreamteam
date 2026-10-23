@@ -269,7 +269,7 @@ function exportZip(engine: Engine, n: number | undefined): string[] {
   const entries = n !== undefined ? sessionEntries(app, n) : homeEntries();
   const file = join(process.cwd(), n !== undefined ? `dt-session-${app.store.list()[n - 1].id}.zip` : `dt-home-${ts}.zip`);
   writeFileSync(file, packEntriesZip(entries));
-  return [`Экспорт: ${file} (${entries.length} записей${n !== undefined ? '' : ', включая .env и ключи провайдеров — хранить как пароль'})`];
+  return [`Экспорт: ${file} (${entries.length} записей${n !== undefined ? '' : ', включая ключи провайдеров — хранить как пароль'})`];
 }
 
 // ── манифест ─────────────────────────────────────────────────────────────────
@@ -355,7 +355,7 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'home.export', title: 'экспорт дома',
-    help: 'полный снимок дома для переезда: настройки, профиль, провайдеры с ключами, .env и все разговоры',
+    help: 'снимок дома для переезда: настройки, провайдеры с ключами и все разговоры; .env (TOKEN/PORT) — вещь машины',
     run: async (engine) => exportZip(engine, undefined),
   },
   {

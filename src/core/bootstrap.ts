@@ -19,7 +19,7 @@ import {
   USER_FILE,
 } from '../paths.js';
 import { ensureLayers } from '../wizard.js';
-import { loadProviders, loadImageProviders, migrateProviderEnvKeys } from '../providers/registry.js';
+import { loadProviders, loadImageProviders } from '../providers/registry.js';
 import { loadTeamMemory } from '../memory.js';
 import { printDim, printError } from '../ui.js';
 import type { App } from './engine.js';
@@ -30,14 +30,12 @@ import type { App } from './engine.js';
  * заметки печатаются в обычный терминал — оболочка стартует после.
  */
 export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> {
-  // переменные дома (.env) — для команд агентов и serve (TOKEN); ключи моделей
-  // живут в providers.json: ровно один .env, в доме, ни корень проекта, ни
-  // папка установки не читаются (не надо гадать, откуда взялась переменная)
+  // переменные дома (.env) — настройки самого приложения: serve читает TOKEN,
+  // PORT, HOST. Ровно один .env, в доме: ни корень проекта, ни папка установки
+  // не читаются (не надо гадать, откуда взялась переменная)
   dotenv.config({ path: join(DT_HOME, '.env') });
-  // первый запуск: wizard (нет провайдеров) и скаффолдинг .dreamteam в проекте;
-  // перед ними — одноразовый перенос ключей из .env в карточки providers.json
+  // первый запуск: wizard (нет провайдеров) и скаффолдинг .dreamteam в проекте
   try {
-    for (const note of migrateProviderEnvKeys(PROVIDERS_FILE)) console.log(pc.dim(`  ${note}`));
     for (const note of await ensureLayers()) console.log(pc.dim(`  ${note}`));
   } catch (err) {
     printError(err instanceof Error ? err.message : String(err));

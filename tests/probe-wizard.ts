@@ -6,7 +6,6 @@
  *    .dreamteam (пустая команда, менеджер на дефолтном провайдере, пустые
  *    серверы, tools/); существующие слои не трогаются;
  *  - не-TTY без providers.json — внятный отказ, а не тихий mock;
- *  - migrateProviderEnvKeys: одноразовый перенос ключей из .env в карточки;
  *  - gitignoreNotice: git без .gitignore / без строки / уже скрыто / без git.
  *
  * Все функции принимают явные пути (дом/проект) — каждый сценарий в своём
@@ -80,12 +79,12 @@ const {
     return typeof p.hosts === 'object' && p.hosts !== null;
   })());
 
-  // --- .env создаётся из примера: переменные для команд/serve, права 600 ---
+  // --- .env создаётся из примера: только настройки serve, права 600 ---
   const envFile = join(home, '.env');
   const envMode = (await import('node:fs')).statSync(envFile).mode & 0o777;
   check('env: создан из примера', existsSync(envFile));
   const envText0 = readFileSync(envFile, 'utf8');
-  check('env: ключей моделей в примере нет, есть подсказка про apiKey', !/^OPENAI_API_KEY=|^ANTHROPIC_API_KEY=|^GIGA_API_KEY=|^DREAMTEAM_API_KEY=/m.test(envText0) && envText0.includes('"apiKey"'), envText0);
+  check('env: только настройки serve — ключей моделей в примере нет', !/OPENAI_API_KEY=|ANTHROPIC_API_KEY=|GIGA_API_KEY=|DREAMTEAM_API_KEY=|apiKey/m.test(envText0) && envText0.includes('# TOKEN='), envText0);
   check('env: порт и адрес примера на месте', envText0.includes('# PORT=8080') && envText0.includes('# HOST=127.0.0.1'));
   check('env: права только у владельца (POSIX)', process.platform === 'win32' || envMode === 0o600, envMode.toString(8));
   check('env: мастер создал токен доступа TOKEN', /^TOKEN=.+/m.test(envText0));
@@ -151,43 +150,6 @@ const {
   await runWizard(io4, home4);
   const p4 = JSON.parse(readFileSync(join(home4, 'providers.json'), 'utf8'));
   check('anthropic: два отказа ключа — два повтора', p4.providers.claude.model === 'claude-sonnet-4-5' && p4.providers.claude.apiKey === 'claude-ключ' && (out4().match(/без ключа Claude/g) ?? []).length === 2, out4());
-}
-
-// --- миграция: ключи из окружения переезжают в карточки (одноразово) ---
-{
-  const { migrateProviderEnvKeys } = await import('../src/providers/registry.js');
-  const home = join(root, 'h7');
-  mkdirSync(home, { recursive: true });
-  const file = join(home, 'providers.json');
-  writeFileSync(file, JSON.stringify({
-    default: 'main',
-    providers: {
-      main: { adapter: 'openai-compatible', baseUrl: 'https://api.test/v1', model: 'm', apiKeyEnv: 'DT_TEST_KEY' },
-      claude: { adapter: 'anthropic', model: 'claude-sonnet-4-5' }, // старое умолчание ANTHROPIC_API_KEY
-      giga: { adapter: 'gigachat', keyEnv: 'DT_TEST_GIGA' },
-      img: { adapter: 'openai-images', baseUrl: 'https://api.test/v1', model: 'd', apiKeyEnv: 'DT_TEST_UNSET' },
-      fresh: { adapter: 'openai-compatible', baseUrl: 'https://api.test/v1', model: 'm', apiKey: 'уже-в-карточке' },
-    },
-  }, null, 2) + '\n');
-  process.env.DT_TEST_KEY = 'ключ-из-env';
-  process.env.DT_TEST_GIGA = 'giga-из-env';
-  const savedAnthropic = process.env.ANTHROPIC_API_KEY;
-  process.env.ANTHROPIC_API_KEY = 'claude-из-env';
-
-  const notes = migrateProviderEnvKeys(file);
-  const raw = JSON.parse(readFileSync(file, 'utf8')) as { providers: Record<string, Record<string, unknown>> };
-  check('миграция: openai — значение вместо имени', raw.providers.main.apiKey === 'ключ-из-env' && !('apiKeyEnv' in raw.providers.main), JSON.stringify(raw.providers.main));
-  check('миграция: anthropic без имени — старое умолчание ANTHROPIC_API_KEY', raw.providers.claude.apiKey === 'claude-из-env', JSON.stringify(raw.providers.claude));
-  check('миграция: gigachat keyEnv → apiKey', raw.providers.giga.apiKey === 'giga-из-env' && !('keyEnv' in raw.providers.giga), JSON.stringify(raw.providers.giga));
-  check('миграция: unset-переменная — прослойка удалена, ключа нет', !('apiKeyEnv' in raw.providers.img) && !('apiKey' in raw.providers.img), JSON.stringify(raw.providers.img));
-  check('миграция: карточка с ключом не тронута', raw.providers.fresh.apiKey === 'уже-в-карточке', JSON.stringify(raw.providers.fresh));
-  check('миграция: заметка о переносе', notes.some((n) => n.includes('«main»')) && notes.some((n) => n.includes('«giga»')), notes.join(' | '));
-  check('миграция: повторный запуск — ничего не меняет', migrateProviderEnvKeys(file).length === 0);
-
-  delete process.env.DT_TEST_KEY;
-  delete process.env.DT_TEST_GIGA;
-  if (savedAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
-  else process.env.ANTHROPIC_API_KEY = savedAnthropic;
 }
 
 // --- не-TTY без providers.json — честный отказ, а не тихий mock ---

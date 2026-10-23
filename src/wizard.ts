@@ -233,12 +233,11 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     notes.push(`создал ${toolsDir} (полка для своих тулов)`);
   }
   if (!existsSync(envFile)) {
-    // пример со всеми переменными: мастер допишет токен serve поверх,
-    // остальное (свои переменные для команд) разбирается руками.
-    // До wizard: его дописки должны лечь в файл с примерами
+    // пример настроек serve: мастер при создании допишет токен доступа,
+    // порт/адрес и токен разбираются руками
     mkdirSync(homeDir, { recursive: true });
     writeFileSync(envFile, readFileSync(join(SCAFFOLD_DIR, 'home', 'env.example'), 'utf8'), { mode: 0o600 });
-    notes.push(`создал ${envFile} из примера (env.example) — переменные для команд и serve`);
+    notes.push(`создал ${envFile} из примера (env.example) — настройки serve`);
   }
   if (!existsSync(providersFile)) {
     if (!io.isTTY) {
