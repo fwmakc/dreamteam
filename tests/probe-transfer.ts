@@ -1,7 +1,7 @@
 /**
  * Импорт-экспорт: дом и отдельная сессия.
- *  - экспорт дома: настройки/профиль/провайдеры + разговоры и транскрипты;
- *    .env и ключи карточек провайдеров (apiKey…) — не включаются;
+ *  - экспорт дома: полный снимок — настройки/профиль/провайдеры с ключами,
+ *    .env и разговоры;
  *  - импорт дома: настройки/провайдеры заменяются, разговоры вливаются по id;
  *  - экспорт/импорт одной сессии: разговор как новый (новый id), агенты
  *    вливаются по id (новые добавляются, совпавшие не трогаются);
@@ -38,7 +38,7 @@ writeFileSync(
   join(home, 'providers.json'),
   JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock', apiKey: 'СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА' } } }, null, 2) + '\n',
 );
-writeFileSync(join(home, '.env'), 'DREAMTEAM_API_KEY=СЕКРЕТ-НЕ-ПЕРЕНОСИТЬ\n');
+writeFileSync(join(home, '.env'), 'TOKEN=секрет-токен-serve\nПОЧТА_KEY=секрет-для-команд\n');
 writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Хозяин', role: 'босс' }, null, 2) + '\n');
 
 const { bootstrapApp } = await import('../src/core/bootstrap.js');
@@ -98,11 +98,12 @@ app.store.save(s2);
   check('экспорт дома: команда внутри, переписки нет',
     entries.some((e) => e.rel === 'agents.json') && entries.some((e) => e.rel === 'manager.json')
       && !entries.some((e) => e.rel.startsWith('sessions/')));
-  check('экспорт дома: .env с секретами не включён', !entries.some((e) => e.rel.includes('.env')));
+  check('экспорт дома: .env внутри (токен serve и переменные команд)',
+    entries.some((e) => e.rel === '.env') && entries.find((e) => e.rel === '.env')!.data.toString('utf8').includes('секрет-токен-serve'));
   const provEntry = entries.find((e) => e.rel === 'providers.json');
   const provText = provEntry ? provEntry.data.toString('utf8') : '';
-  check('экспорт дома: карточка провайдера без ключа, конфиг на месте',
-    provText.includes('"adapter": "mock"') && !provText.includes('СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА'), provText);
+  check('экспорт дома: карточка провайдера с ключом — снимок полный',
+    provText.includes('"adapter": "mock"') && provText.includes('СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА'), provText);
   const zip = packEntriesZip(entries);
   const back = readZipEntries(zip);
   check('экспорт дома: zip roundtrip без потерь', back.length === entries.length);
@@ -117,13 +118,16 @@ app.store.save(s2);
       : e,
   ));
   writeFileSync(join(home, 'settings.json'), JSON.stringify({ width: 100, margin: 2, screen: true }, null, 2));
+  // .env затираем — импорт должен вернуть его из архива вместе с секретами
+  writeFileSync(join(home, '.env'), 'TOKEN=старьё\n');
   const report = applyHomeImport(app, readZipEntries(archive));
   check('импорт дома: отчёт', report.includes('Импорт дома выполнен'), report);
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('импорт дома: настройки заменены из архива', settings.width === 200 && settings.language === 'english', JSON.stringify(settings));
   check('импорт дома: разговоры не трогаются (они в проекте)', app.store.list().length >= 1);
   check('импорт дома: app.providers жив', app.providers.get('mock') !== undefined);
-  check('импорт дома: напоминание вписать ключи', report.includes('"apiKey"'), report);
+  check('импорт дома: .env восстановлен вместе с секретами',
+    readFileSync(join(home, '.env'), 'utf8').includes('секрет-токен-serve'), report);
 }
 
 // ── экспорт сессии: разговор + агенты + настройки ────────────────────────────
