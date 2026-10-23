@@ -256,14 +256,14 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
   return notes;
 }
 
-/** Проект: нет .dreamteam — создать project.json и предупредить про git. */
+/** Проект: нет .dreamteam — создать hosts.json и предупредить про git. */
 export function ensureProject(defaultProvider: string, projectDir: string = DT_PROJECT): string[] {
   void defaultProvider;
   if (existsSync(projectDir)) return [];
   mkdirSync(projectDir, { recursive: true });
-  writeFileSync(join(projectDir, 'project.json'), JSON.stringify(readScaffold(join('project', 'project.json')), null, 2) + '\n');
+  writeFileSync(join(projectDir, 'hosts.json'), JSON.stringify(readScaffold(join('project', 'hosts.json')), null, 2) + '\n');
   const notes = [
-    `создал ${projectDir} (project.json: серверы и задействованные агенты; команда живёт в доме)`,
+    `создал ${projectDir} (hosts.json: ssh-серверы проекта; почта и боты — mail.json/messengers.json, когда понадобятся)`,
   ];
   const gi = gitignoreNotice(dirname(projectDir));
   if (gi) notes.push(gi);

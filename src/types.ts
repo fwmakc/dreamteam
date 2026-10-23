@@ -76,9 +76,9 @@ export interface Agent {
   temperature?: number;
   /** Инструменты-карточки {"shell": {…} или null} (поле tools в agents.json) */
   tools?: AgentTools;
-  /** Проекты (ярлыки из project.json) — агенту доступны и папка проекта, и его серверы */
+  /** Доступ к серверам hosts.json (поле projects в agents.json) — префикс «project:» в блоках */
   projects?: string[];
-  /** Проект по умолчанию (ярлык name из project.json) или путь — куда идут блоки без префикса */
+  /** Подпапка рабочей папки или абсолютный путь — куда идут блоки без префикса */
   workspace?: string;
   /** Чем агент смотрит картинки (```look): id провайдера с "vision": true; по умолчанию — его же провайдер */
   vision?: string;

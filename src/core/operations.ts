@@ -20,7 +20,7 @@ import {
   addTeamAgent,
   grantTool,
   loadManagerConfig,
-  loadProjectFile,
+  loadHostsFile,
   removeProjectHost,
   removeTeamAgent,
   updateManagerConfig,
@@ -28,7 +28,7 @@ import {
 } from '../manager.js';
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from '../providers/registry.js';
 import { agentToolIds } from '../tools-api.js';
-import { AGENTS_FILE, DT_HOME, MANAGER_FILE, PROJECT_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR } from '../paths.js';
+import { AGENTS_FILE, DT_HOME, HOSTS_FILE, MANAGER_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR } from '../paths.js';
 import { loadSettings } from '../settings.js';
 import { chatTeam, isSessionRef, type App, type Engine } from './engine.js';
 import { loadSchedule, saveSchedule } from './schedule.js';
@@ -186,9 +186,10 @@ function memoryText(app: App, arg: string): string[] {
 }
 
 function projectListText(app: App): string[] {
-  const project = loadProjectFile(PROJECT_FILE);
+  void app;
+  const registry = loadHostsFile(HOSTS_FILE);
   const lines: string[] = [''];
-  const hosts = Object.entries(project.hosts ?? {}) as [string, { host: string; user?: string; port?: number }][];
+  const hosts = Object.entries(registry) as [string, { host: string; user?: string; port?: number }][];
   if (hosts.length === 0) {
     return ['Проект пуст — серверы: /project host add <имя>=[пользователь@]хост[:порт]'];
   }
@@ -590,7 +591,7 @@ export const OPERATIONS: OpSpec[] = [
   // проекты
   {
     name: 'project.list', implicit: true, title: 'проекты',
-    help: 'реестр серверов (project.json)',
+    help: 'реестр серверов (hosts.json)',
     run: async (engine) => projectListText(engine.app),
   },
   {
@@ -609,7 +610,7 @@ export const OPERATIONS: OpSpec[] = [
       const name = body.slice(0, eq).trim();
       const spec = body.slice(eq + 1).trim();
       if (!name || !spec) return ['Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]'];
-      return [addProjectHosts(PROJECT_FILE, { [name]: parseHostSpec(spec) })];
+      return [addProjectHosts(HOSTS_FILE, { [name]: parseHostSpec(spec) })];
     },
   },
   {
@@ -620,7 +621,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (_engine, rest) => {
       const [name] = rest;
       if (!name) return ['Синтаксис: /project host delete <имя>'];
-      return [removeProjectHost(PROJECT_FILE, name)];
+      return [removeProjectHost(HOSTS_FILE, name)];
     },
   },
   {

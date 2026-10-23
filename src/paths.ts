@@ -7,7 +7,7 @@
  *    профиль, команда (агенты, менеджер, тула), расписание, общая память.
  *    Команда — свойство машины: симулятор команды настраивается один раз.
  *  - проект (DT_PROJECT, по умолчанию <cwd>/.dreamteam): ВСЁ про конкретный
- *    проект — project.json (ssh-серверы), почта и боты проекта (mail.json,
+ *    проект — hosts.json (ssh-серверы), почта и боты проекта (mail.json,
  *    messengers.json), переписка (sessions/, transcripts/). Файлы работы
  *    тулов — в текущей папке (WORKSPACE).
  *
@@ -29,7 +29,7 @@ export const APP_VERSION = (JSON.parse(readFileSync(join(APP_ROOT, 'package.json
 /** Дом: ключи, настройки, профиль, команда целиком. */
 export const DT_HOME = process.env.DT_HOME ? resolve(process.env.DT_HOME) : join(homedir(), '.dreamteam');
 
-/** Служебная папка проекта (.dreamteam): project.json, переписка. */
+/** Служебная папка проекта (.dreamteam): hosts.json, почта, переписка. */
 export const DT_PROJECT = process.env.DT_PROJECT ? resolve(process.env.DT_PROJECT) : join(resolve(process.cwd()), '.dreamteam');
 
 /** Рабочая папка инструментов: всегда текущая папка (проект = где запущено). */
@@ -46,7 +46,8 @@ export const SCHEDULE_FILE = join(DT_HOME, 'schedule.json');
 export const MEMORY_FILE = join(DT_HOME, 'memory.json');
 
 /** Файлы проект-слоя: конкретный проект. */
-export const PROJECT_FILE = join(DT_PROJECT, 'project.json');
+/** ssh-серверы проекта (тул ssh): { "prod": { "host": "…", … } }. */
+export const HOSTS_FILE = join(DT_PROJECT, 'hosts.json');
 /** Ящики тула mail — секреты проекта. */
 export const MAIL_FILE = join(DT_PROJECT, 'mail.json');
 /** Токены ботов telegram/max — секреты проекта. */

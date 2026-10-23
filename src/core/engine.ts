@@ -38,8 +38,8 @@ import { writeFileSync } from 'node:fs';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
 import {
   AGENTS_FILE,
+  HOSTS_FILE,
   MEMORY_FILE,
-  PROJECT_FILE,
   SETTINGS_FILE,
   TOOLS_DIR,
   USER_FILE,
@@ -319,7 +319,7 @@ export class Engine {
   }
 
   private toolsConfig(): ToolsConfig {
-    return loadToolsConfig(SETTINGS_FILE, PROJECT_FILE, WORKSPACE);
+    return loadToolsConfig(SETTINGS_FILE, HOSTS_FILE, WORKSPACE);
   }
 
   // ── конспекты и @session ────────────────────────────────────────────────
@@ -736,7 +736,7 @@ export class Engine {
       case 'tool.grant':
         return grantTool(AGENTS_FILE, action.agent, action.tool, action.card, TOOLS_DIR);
       case 'project.host.add':
-        return addProjectHosts(PROJECT_FILE, { [String(action.name ?? 'main')]: action });
+        return addProjectHosts(HOSTS_FILE, { [String(action.name ?? 'main')]: action });
       default:
         throw new Error(`неизвестное действие менеджера «${(action as { op: string }).op}»`);
       case 'session.list':

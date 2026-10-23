@@ -10,7 +10,7 @@
  * запускается во временном проекте (cwd) с переменными DT_HOME/DT_PROJECT во
  * временные папки: там свои providers.json (всё на mock — ни одного настоящего
  * запроса к API), settings.json, user.json, менеджер и копия боевой команды
- * (слой дома), в проекте — project.json. Сценарий —
+ * (слой дома), в проекте — hosts.json. Сценарий —
  * консьерж-поток: пустой разговор → приветствие менеджера на старте → первая
  * реплика менеджеру (team.add «Теста» с тулами) → chat.add → раунд с
  * инструментами. team.add реально пишет в agents.json дома — зонд
@@ -59,8 +59,8 @@ j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, 
 j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
 // команда — вещь машины: менеджер и команда в доме
 j('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
-// проект — только свой project.json (серверы и задействованные агенты)
-pj('project.json', { name: 'dreamteam', hosts: { dev: { host: '192.0.2.1' } } });
+// проект — только свой hosts.json (серверы)
+pj('hosts.json', { dev: { host: '192.0.2.1' } });
 // команда — копия боевой (фикстура в репозитории): имена и роли важны для
 // сценария, провайдеры сажаем на mock
 const team = JSON.parse(readFileSync('.dreamteam/agents.json', 'utf8')) as Array<Record<string, unknown>>;

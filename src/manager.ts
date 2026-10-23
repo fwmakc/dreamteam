@@ -155,7 +155,7 @@ export interface ManagerContext {
   history: ChatMessage[];
   /** Просьба руководителя, из-за которой позвали менеджера */
   request: string;
-  /** Проекты из project.json (сейчас один — текущий): серверы (для тула ssh) */
+  /** Серверы из hosts.json текущего проекта (для тула ssh) */
   projects?: ManagerProjectInfo[];
   /** Операции руководителя — из манифеста (operations.ts), как в /help */
   operations?: { cmd: string; args?: string; help: string }[];
@@ -452,29 +452,26 @@ export function grantTool(file: string, agentId: string, tool: string, card?: un
     : `✓ ${agent.name}: тул «${tid}» включён`;
 }
 
-// ─── project.json: серверы текущего проекта ──────────────────────────────────
+// ─── hosts.json: серверы текущего проекта ────────────────────────────────────
 
-/** Файл проекта: реестр серверов для ssh; неизвестные поля сохраняем. */
-export interface ProjectFile {
-  hosts?: Record<string, ManagerHostSpec>;
-  [key: string]: unknown;
-}
+/** Файл серверов: { "prod": { host, user?, password?, dir?, port? } } — плоский словарь. */
+export type HostsFile = Record<string, ManagerHostSpec>;
 
-/** Читает project.json; нет файла или он битый — пустой проект (просмотр не падает). */
-export function loadProjectFile(file: string): ProjectFile {
+/** Читает hosts.json; нет файла или он битый — пусто (просмотр не падает). */
+export function loadHostsFile(file: string): HostsFile {
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as ProjectFile;
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as unknown;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-    return raw;
+    return raw as HostsFile;
   } catch {
     return {};
   }
 }
 
-/** Запись project.json: tmp → rename. */
-function saveProjectFile(file: string, project: ProjectFile): void {
+/** Запись hosts.json: tmp → rename. */
+function saveHostsFile(file: string, hosts: HostsFile): void {
   const tmp = `${file}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(project, null, 2)}\n`, 'utf8');
+  writeFileSync(tmp, `${JSON.stringify(hosts, null, 2)}\n`, 'utf8');
   renameSync(tmp, file);
 }
 
@@ -503,7 +500,7 @@ function normalizeHost(where: string, spec: unknown): ManagerHostSpec {
   return out;
 }
 
-/** project host add: сервер(а) в проект; файла нет — создаём (проект = папка). */
+/** project host add: сервер(а) в hosts.json; файла нет — создаём. */
 export function addProjectHosts(
   file: string,
   hosts: Record<string, ManagerHostSpec>,
@@ -511,29 +508,28 @@ export function addProjectHosts(
   if (!hosts || typeof hosts !== 'object' || Array.isArray(hosts) || Object.keys(hosts).length === 0) {
     throw new Error('проекту нужен хоть один сервер: {"prod":{"host":"…"}}');
   }
-  const project = loadProjectFile(file);
-  project.hosts = project.hosts ?? {};
+  const registry = loadHostsFile(file);
   const added: string[] = [];
   for (const [hid, spec] of Object.entries(hosts)) {
     if (!hid || /\s/.test(hid)) throw new Error('имя сервера — непустая строка без пробелов');
-    if (project.hosts[hid] !== undefined) {
+    if (registry[hid] !== undefined) {
       throw new Error(`сервер «${hid}» уже есть — /project host delete «${hid}», если нужно заменить`);
     }
-    project.hosts[hid] = normalizeHost(`сервер «${hid}»`, spec);
+    registry[hid] = normalizeHost(`сервер «${hid}»`, spec);
     added.push(hid);
   }
-  saveProjectFile(file, project);
+  saveHostsFile(file, registry);
   return `✓ сервер(а) добавлены в проект: ${added.join(', ')}`;
 }
 
-/** project host delete: убрать сервер из проекта. */
+/** project host delete: убрать сервер из hosts.json. */
 export function removeProjectHost(file: string, name: string): string {
   const hid = String(name ?? '').trim();
-  const project = loadProjectFile(file);
-  if (!project.hosts || project.hosts[hid] === undefined) {
+  const registry = loadHostsFile(file);
+  if (registry[hid] === undefined) {
     throw new Error(`сервера «${hid}» нет в проекте — см. /project`);
   }
-  delete project.hosts[hid];
-  saveProjectFile(file, project);
+  delete registry[hid];
+  saveHostsFile(file, registry);
   return `✓ сервер «${hid}» убран из проекта`;
 }

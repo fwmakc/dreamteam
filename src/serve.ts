@@ -12,7 +12,7 @@ import {
   updateTeamAgent,
   grantTool,
   loadManagerConfig,
-  loadProjectFile,
+  loadHostsFile,
   addProjectHosts,
   mergeTeamAgents,
   removeProjectHost,
@@ -21,9 +21,9 @@ import {
 } from './manager.js';
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from './providers/registry.js';
 import { loadSettings } from './settings.js';
-import { AGENTS_FILE, APP_VERSION, DT_HOME, MANAGER_FILE, PROJECT_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
+import { AGENTS_FILE, APP_VERSION, DT_HOME, HOSTS_FILE, MANAGER_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
 import { agentToolIds } from './tools-api.js';
-import { loadProjects, safePath } from './actions.js';
+import { safePath } from './actions.js';
 import { basename } from 'node:path';
 import { Engine, chatTeam, type App } from './core/engine.js';
 import { bootstrapApp } from './core/bootstrap.js';
@@ -321,9 +321,8 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
 
   const readProjects = (): unknown[] => {
     try {
-      const project = loadProjectFile(PROJECT_FILE);
-      const hosts = project.hosts ?? {};
-      // пустой проект = блока в снимке нет
+      const hosts = loadHostsFile(HOSTS_FILE);
+      // пустой реестр = блока в снимке нет
       if (Object.keys(hosts).length === 0) return [];
       return [{ id: basename(WORKSPACE), hosts }];
     } catch {
@@ -616,7 +615,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       case 'project.list':
         return { projects: readProjects() };
       case 'project.host.add': {
-        const report = addProjectHosts(PROJECT_FILE, {
+        const report = addProjectHosts(HOSTS_FILE, {
           [String(args.hostName ?? 'main')]: {
             host: String(args.host ?? ''),
             user: args.user ? String(args.user) : undefined,
@@ -631,7 +630,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       case 'settings.show':
         return { settings: loadSettings(SETTINGS_FILE, 0) };
       case 'project.host.delete': {
-        const report = removeProjectHost(PROJECT_FILE, String(args.name ?? ''));
+        const report = removeProjectHost(HOSTS_FILE, String(args.name ?? ''));
         broadcastState();
         return { text: report };
       }

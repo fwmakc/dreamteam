@@ -8,7 +8,7 @@
  *  2. ПРОЕКТИРОВАНИЕ: промт объявляет все 11 операций и JSON-протокол
  *     {say, actions}; сценарии с заготовленными ответами скриптового LLM.
  *  3. ВЫПОЛНЕНИЕ: каждый op через настоящий managerTurn на герметичных слоях —
- *     итог в файлах (агенты — в доме, project.json — в проекте), отчёты ✓/✗ в истории
+ *     итог в файлах (агенты — в доме, hosts.json — в проекте), отчёты ✓/✗ в истории
  *     разговора, реплика менеджера сохраняется в СТАРЫЙ разговор до
  *     переключения (pendingSwitches), мусорный ответ — без изменений конфига.
  * Запуск: npm run probe:manager-flow
@@ -36,7 +36,7 @@ const base = mkdtempSync(join(tmpdir(), 'dt-mflow-'));
 const home = join(base, 'home');
 const proj = join(base, 'proj');
 const agentsFile = join(home, 'agents.json');
-const projectsFile = join(proj, 'project.json');
+const hostsFile = join(proj, 'hosts.json');
 mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
 process.env.DT_PROJECT = proj;
@@ -133,9 +133,9 @@ function lastManagerMessage(): string {
   // наполняем переговорку: команда с тула­ми и провайдерами, проект, история
   writeFileSync(agentsFile, JSON.stringify([
     { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'Ты — Катя.', provider: 'claude', temperature: 0.3, tools: { files: {}, look: {} } },
-    { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'Ты — Глеб.', projects: ['shop'] },
+    { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'Ты — Глеб.', projects: ['project'] },
   ], null, 2) + '\n');
-  writeFileSync(projectsFile, JSON.stringify({ name: 'shop', hosts: { prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } } }, null, 2) + '\n');
+  writeFileSync(hostsFile, JSON.stringify({ prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } }, null, 2) + '\n');
   for (let i = 1; i <= 14; i++) {
     app.session.messages.push({ authorId: 'user', authorName: 'Хозяин', text: `строка ${i}`, ts: i });
   }
@@ -149,7 +149,7 @@ function lastManagerMessage(): string {
   check('снимок: агент без тула — пометка', req.user?.includes('- gleb — Глеб (разработчик), провайдер: основной; тула нет') ?? false, req.user);
   check('снимок: состав чата — только позванные', req.user?.includes('В этом чате: katya') ?? false, req.user);
   check('снимок: проект — серверы',
-    req.user?.includes('- shop: серверы prod, staging') ?? false, req.user);
+    req.user?.includes('- project: серверы prod, staging') ?? false, req.user);
   const historyBlock = req.user?.slice(req.user.indexOf('Последние сообщения'), req.user.indexOf('Просьба руководителя')) ?? '';
   const historyLines = historyBlock.split('\n').filter((l) => l.includes(': ')).length;
   check('снимок: окно истории — ровно 12 сообщений', historyLines === 12, `${historyLines}: ${historyBlock.slice(0, 160)}`);
@@ -290,9 +290,9 @@ function lastManagerMessage(): string {
     'Завожу.\n{"say":"Завожу проект.","actions":[{"op":"project.host.add","name":"dev","host":"203.0.113.10"},{"op":"project.host.add","name":"qa","host":"stg.example.com","port":2222},{"op":"project.host.add"}]}',
     'заведи серверы проекта',
   );
-  const raw = JSON.parse(readFileSync(projectsFile, 'utf8')) as { hosts?: Record<string, { host: string; port?: number }> };
-  check('project: сервер с хостом добавлен', raw.hosts?.dev?.host === '203.0.113.10', JSON.stringify(raw));
-  check('project: сервер с портом добавлен', raw.hosts?.qa?.port === 2222, JSON.stringify(raw));
+  const raw = JSON.parse(readFileSync(hostsFile, 'utf8')) as Record<string, { host: string; port?: number }>;
+  check('project: сервер с хостом добавлен', raw.dev?.host === '203.0.113.10', JSON.stringify(raw));
+  check('project: сервер с портом добавлен', raw.qa?.port === 2222, JSON.stringify(raw));
   check('project: отчёты ✓ в истории менеджера',
     app.session.messages.some((m) => m.authorId === 'manager' && m.text.includes('сервер(а) добавлены')), lastManagerMessage().slice(-160));
 }
@@ -314,11 +314,11 @@ function lastManagerMessage(): string {
 // мусорный ответ: конфиг не тронут, реплика — чистый текст
 {
   const agentsBefore = readFileSync(agentsFile, 'utf8');
-  const projectsBefore = readFileSync(projectsFile, 'utf8');
+  const hostsBefore = readFileSync(hostsFile, 'utf8');
   await askManager('Просто болтаю без изменений.', 'как дела?');
   check('мусор: реплика менеджера — чистый текст', lastManagerMessage() === 'Просто болтаю без изменений.', lastManagerMessage());
   check('мусор: agents.json не тронут', readFileSync(agentsFile, 'utf8') === agentsBefore);
-  check('мусор: project.json не тронут', readFileSync(projectsFile, 'utf8') === projectsBefore);
+  check('мусор: hosts.json не тронут', readFileSync(hostsFile, 'utf8') === hostsBefore);
 }
 
 // пустой ответ: менеджер молчит — заметка, без реплики в истории

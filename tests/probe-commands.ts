@@ -247,21 +247,17 @@ function check(name: string, cond: boolean): void {
   check('project host add: отчёт ✓', lines[0]?.includes('prod') ?? false);
   lines = await run(engine, '/project host add backup=10.0.0.2');
   check('project host add: второй сервер — отчёт ✓', lines[0]?.includes('backup') ?? false);
-  const project = JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as {
-    hosts: Record<string, { host: string; user?: string; port?: number }>;
-    agents: string[];
-  };
+  const hosts = JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as Record<string, { host: string; user?: string; port?: number }>;
   check(
     'project host add: user и порт разобраны',
-    project.hosts.prod?.user === 'deploy' && project.hosts.prod.port === 2202
-      && project.hosts.backup?.host === '10.0.0.2',
+    hosts.prod?.user === 'deploy' && hosts.prod.port === 2202 && hosts.backup?.host === '10.0.0.2',
   );
   lines = await run(engine, '/project host add staging=10.0.0.3');
   check('project host add: ещё сервер — отчёт ✓', lines[0]?.includes('staging') ?? false);
   lines = await run(engine, '/project');
   check('project: обзор — список серверов', lines.some((l) => l.includes('prod: deploy@10.0.0.1:2202')) ?? false);
   lines = await run(engine, '/project host delete staging');
-  check('project host delete: сервер убран', !(JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as typeof project).hosts.staging);
+  check('project host delete: сервер убран', !(JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as typeof hosts).staging);
 }
 
 // ── расписание: list/add/toggle/delete ───────────────────────────────────────

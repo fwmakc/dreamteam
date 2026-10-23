@@ -15,7 +15,7 @@
  * у агентов — тула (elena: files+docs; andrey: files+ocr+mail;
  * olga: files+mail; timur: web с sites consultant.ru).
  *
- * Слои: DT_PROJECT — служебная папка <проект>/.dreamteam (project.json,
+ * Слои: DT_PROJECT — служебная папка <проект>/.dreamteam (hosts.json,
  * mail.json и переписка), рабочая папка инструментов — cwd процесса, поэтому
  * драйвер делает chdir в корень проекта. Дом не подменяем: реальный
  * провайдер. Каждый прогон создаёт свежий разговор — его можно открыть в

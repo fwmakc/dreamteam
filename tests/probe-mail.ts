@@ -47,22 +47,22 @@ const errOf = async (body: string): Promise<string> => {
 // ─── нет mail.json ───────────────────────────────────────────────────────────
 {
   const msg = await errOf('boxes');
-  check('нет mail.json — отказ с примером', msg.includes('mail.json') && msg.includes('preset'), msg.slice(0, 160));
+  check('нет mail.json — отказ с примером', msg.includes('mail.json') && msg.includes('imap.yandex.ru') && msg.includes('smtpHost'), msg.slice(0, 160));
 }
 
 // ─── битый конфиг: каждое поле со своей ошибкой ──────────────────────────────
 {
-  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'outlook', user: 'x@x.ru', password: 'p' } }));
-  check('неизвестный пресет', (await errOf('boxes')).includes('preset «outlook» не знаю'));
-  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'gmail' } }));
-  check('нет user/password', (await errOf('boxes')).includes('"user" и "password"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'custom', user: 'x@corp.ru', password: 'p' } }));
-  check('custom без host/smtpHost', (await errOf('boxes')).includes('"host" (IMAP) и "smtpHost"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'gmail', user: 'x', password: 'p', fromName: 'Я' } }));
+  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'yandex', user: 'x@x.ru', password: 'p', host: 'imap.x.ru', smtpHost: 'smtp.x.ru' } }));
+  check('поле preset больше не знает — отказ', (await errOf('boxes')).includes('неизвестные поля "preset"'));
+  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x@x.ru' } }));
+  check('нет password/host/smtpHost — сначала user/password', (await errOf('boxes')).includes('"user" и "password"'));
+  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x@corp.ru', password: 'p' } }));
+  check('без host/smtpHost — отказ', (await errOf('boxes')).includes('"host" (IMAP) и "smtpHost"'));
+  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', host: 'imap.x.ru', smtpHost: 'smtp.x.ru', fromName: 'Я' } }));
   check('лишнее поле в ящике', (await errOf('boxes')).includes('неизвестные поля "fromName"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'gmail', user: 'x', password: 'p', port: 'девятьсот' } }));
+  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', host: 'imap.x.ru', smtpHost: 'smtp.x.ru', port: 'девятьсот' } }));
   check('порт не число', (await errOf('boxes')).includes('"port"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'gmail', user: 'x', password: 'p', tlsNoVerify: 'конечно' } }));
+  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', host: 'imap.x.ru', smtpHost: 'smtp.x.ru', tlsNoVerify: 'конечно' } }));
   check('tlsNoVerify не булево — отказ', (await errOf('boxes')).includes('"tlsNoVerify" должен быть true или false'));
   writeFileSync(mailFile, 'это не json');
   check('битый json', (await errOf('boxes')).includes('кривой JSON'));
@@ -71,8 +71,8 @@ const errOf = async (body: string): Promise<string> => {
 // ─── валидный конфиг: два ящика ──────────────────────────────────────────────
 {
   writeFileSync(mailFile, JSON.stringify({
-    личное: { preset: 'yandex', user: 'я@yandex.ru', password: 'секрет-1' },
-    работа: { preset: 'custom', user: 'я@corp.ru', password: 'секрет-2', host: 'imap.corp.ru', smtpHost: 'smtp.corp.ru', smtpPort: 587, tlsNoVerify: true },
+    личное: { user: 'я@yandex.ru', password: 'секрет-1', host: 'imap.yandex.ru', smtpHost: 'smtp.yandex.ru' },
+    работа: { user: 'я@corp.ru', password: 'секрет-2', host: 'imap.corp.ru', smtpHost: 'smtp.corp.ru', smtpPort: 587, tlsNoVerify: true },
   }));
   const boxes = await run('boxes');
   check('boxes: оба ящика с хостами', boxes.includes('личное — я@yandex.ru (imap: imap.yandex.ru') && boxes.includes('smtp.corp.ru'), boxes);
@@ -107,15 +107,14 @@ const errOf = async (body: string): Promise<string> => {
   check('send: секретный файл', (await errOf('send личное\nкому: a@b.ru\nфайлы: .env\n\nтекст')).includes('секретный'));
 }
 
-// ─── resolveEndpoints: пресеты и переопределения ─────────────────────────────
+// ─── resolveEndpoints: явные хосты и переопределения ─────────────────────────
 {
   const accounts = loadAccounts();
   const yandex = resolveEndpoints(accounts['личное']!);
-  check('пресет yandex: адреса', yandex.imap.host === 'imap.yandex.ru' && yandex.smtp.host === 'smtp.yandex.ru', JSON.stringify(yandex));
-  check('пресет yandex: порты 993/465 secure', yandex.imap.port === 993 && yandex.imap.secure && yandex.smtp.port === 465 && yandex.smtp.secure);
+  check('хосты из конфига', yandex.imap.host === 'imap.yandex.ru' && yandex.smtp.host === 'smtp.yandex.ru', JSON.stringify(yandex));
+  check('порты 993/465 secure по умолчанию', yandex.imap.port === 993 && yandex.imap.secure && yandex.smtp.port === 465 && yandex.smtp.secure);
   const corp = resolveEndpoints(accounts['работа']!);
-  check('custom: хосты из конфига', corp.imap.host === 'imap.corp.ru' && corp.smtp.host === 'smtp.corp.ru');
-  check('custom: smtpPort 587 → без implicit TLS', corp.smtp.port === 587 && !corp.smtp.secure && corp.imap.secure, JSON.stringify(corp));
+  check('порт smtp 587 → без implicit TLS', corp.smtp.port === 587 && !corp.smtp.secure && corp.imap.secure, JSON.stringify(corp));
 }
 
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);

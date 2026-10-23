@@ -13,15 +13,12 @@ import { loadSettings } from './settings.js';
  * у тула ('allow' — молча, 'deny' — отказ, 'ask' — вопрос y/n), выполняет и
  * возвращает результаты следующим сообщением в истории.
  *
- * Проекты: реестр в project.json (в .dreamteam проекта) — {id: {hosts?}}:
- * именованные группы ssh-серверов; в блоках адресуются префиксом —
- * ```run shop:docker compose up, ```ssh shop:prod systemctl status nginx.
- * Доступ агенту выдаётся полем projects в agents.json. Локально инструменты
- * работают всегда в текущей папке (проект = где запущено приложение), префикс
- * проекта адресует только его серверы.
- * Серверы: блок ```ssh shop:prod выполняет команду на сервере штатным
- * ssh-клиентом этого ПК; голое имя («prod») — если такой хост ровно у одного
- * проекта.
+ * Серверы: реестр в hosts.json (в .dreamteam проекта) — { "prod": { "host": … } };
+ * в блоках адресуются именем — ```ssh prod systemctl status nginx (префикс
+ * «project:» тоже понимается, проект один — текущая папка). Доступ агенту
+ * выдаётся полем projects в agents.json. Локально инструменты
+ * работают всегда в текущей папке (проект = где запущено приложение), имя
+ * сервера адресует только его.
  * Картинки: ```look показывает файл vision-модели агента, ```image уходит в
  * image-провайдер агента; файлы сохраняются в images/ рабочей папки.
  */
@@ -36,7 +33,7 @@ export interface HostConfig {
   dir?: string;
 }
 
-/** Проект из project.json: именованная группа его ssh-серверов. */
+/** Серверы проекта из hosts.json: имя → параметры подключения. */
 export interface ProjectEntry {
   hosts: Map<string, HostConfig>;
 }
@@ -47,7 +44,7 @@ export interface ToolsConfig {
   workspaceAbs: string;
   runTimeoutMs: number;
   maxOutputChars: number;
-  /** Именованные проекты: id → папка и хосты */
+  /** Именованные серверы: проект один (текущая папка), ключ — «project» */
   projects: Map<string, ProjectEntry>;
 }
 
@@ -88,31 +85,31 @@ export interface ToolContext {
   getImageProvider(agent: Agent | undefined): { provider: ImageProvider } | { error: string };
 }
 
-/** Читает settings.json (лимиты) + project.json (серверы); оба файла обязательны. */
-export function loadToolsConfig(settingsFile: string, projectsFile: string, workspaceAbs: string): ToolsConfig {
+/** Читает settings.json (лимиты) + hosts.json (серверы); settings обязателен, hosts.json нет — серверов нет. */
+export function loadToolsConfig(settingsFile: string, hostsFile: string, workspaceAbs: string): ToolsConfig {
   const settings = loadSettings(settingsFile, 0);
   return {
     workspaceAbs,
     runTimeoutMs: settings.runTimeoutMs,
     maxOutputChars: settings.maxOutputChars,
-    projects: loadProjects(projectsFile),
+    projects: new Map([['project', { hosts: loadHosts(hostsFile) }]]),
   };
 }
 
-/** Читает project.json (один проект — текущая папка); нет файла или битые поля — внятная ошибка. */
-export function loadProjects(file: string, projectId?: string): Map<string, ProjectEntry> {
-  let raw: { name?: unknown; hosts?: Record<string, unknown> };
+/** Читает hosts.json ({ "prod": { "host": … } }); файла нет — серверов нет, битые поля — внятная ошибка. */
+export function loadHosts(file: string): Map<string, HostConfig> {
+  let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8')) as { hosts?: Record<string, unknown> };
+    raw = JSON.parse(readFileSync(file, 'utf8'));
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return new Map();
     throw new Error(`не удалось прочитать ${file}: ${err instanceof Error ? err.message : err}`);
   }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.hosts !== 'object' || raw.hosts === null) {
-    throw new Error(`${file}: ожидается объект { "name": "…", "hosts": { … } }`);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${file}: ожидается объект { "сервер": { "host": "…", … } }`);
   }
-  const id = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : (projectId ?? 'project');
   const hosts = new Map<string, HostConfig>();
-  for (const [hid, h] of Object.entries(raw.hosts)) {
+  for (const [hid, h] of Object.entries(raw as Record<string, unknown>)) {
     if (!h || typeof h !== 'object' || Array.isArray(h)) {
       throw new Error(`${file}: сервер «${hid}» — ожидается объект { "host": "…", "dir": "…" }`);
     }
@@ -137,9 +134,7 @@ export function loadProjects(file: string, projectId?: string): Map<string, Proj
     }
     hosts.set(hid, host);
   }
-  const projects = new Map<string, ProjectEntry>();
-  projects.set(id, { hosts });
-  return projects;
+  return hosts;
 }
 
 /** Куда бьёт ссылка на хост: проект + имя внутри проекта + параметры подключения. */
@@ -150,8 +145,8 @@ export interface HostTarget {
 }
 
 /**
- * «shop:prod» → хост prod проекта shop. Голое имя («prod») — если такой хост
- * ровно у одного проекта; иначе отказ с подсказкой уточнить проект.
+ * «project:prod» → хост prod (проект один — текущая папка, префикс можно
+ * опустить: «prod»). Неизвестный проект — отказ с подсказкой.
  */
 export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error: string } {
   const qi = ref.indexOf(':');
@@ -159,7 +154,7 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
     const pid = ref.slice(0, qi);
     const hid = ref.slice(qi + 1);
     const h = cfg.projects.get(pid)?.hosts.get(hid);
-    if (!h) return { error: `хост «${ref}» не настроен в project.json` };
+    if (!h) return { error: `хост «${ref}» не настроен в hosts.json` };
     return { project: pid, id: hid, host: h };
   }
   const hits: HostTarget[] = [];
@@ -167,7 +162,7 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
     const h = entry.hosts.get(ref);
     if (h) hits.push({ project: pid, id: ref, host: h });
   }
-  if (hits.length === 0) return { error: `хост «${ref}» не настроен в project.json` };
+  if (hits.length === 0) return { error: `хост «${ref}» не настроен в hosts.json` };
   if (hits.length > 1) {
     const fulls = hits.map((h) => `${h.project}:${ref}`).join(' или ');
     return {
@@ -320,7 +315,7 @@ export function checkPermission(agent: Agent, action: Action, cfg: ToolsConfig):
   }
   if (action.project) {
     if (!agent.projects?.includes(action.project)) return `проект «${action.project}» этому агенту не назначен`;
-    if (!cfg.projects.has(action.project)) return `проект «${action.project}» не настроен в project.json`;
+    if (!cfg.projects.has(action.project)) return `проект «${action.project}» не известен — серверы в hosts.json, префикс «project:»`;
   }
   return null;
 }

@@ -11,7 +11,7 @@ import { OPERATIONS, operationArgs, operationCommand } from './core/operations.j
 import { Editor } from './editor.js';
 import { Screen } from './screen.js';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
-import { AGENTS_FILE, APP_VERSION, DT_HOME, PROJECT_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
+import { AGENTS_FILE, APP_VERSION, DT_HOME, HOSTS_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
 import { agentHeader, colorFn, printDim, printError, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 // ядро: раунды, менеджер, инструменты, память — общение только через Presenter
 import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
@@ -493,7 +493,7 @@ function printTeam(app: App): void {
   try {
     const fullTeam = loadTeam(AGENTS_FILE);
     const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
-    const cfg = loadToolsConfig(SETTINGS_FILE, PROJECT_FILE, WORKSPACE);
+    const cfg = loadToolsConfig(SETTINGS_FILE, HOSTS_FILE, WORKSPACE);
     console.log(pc.dim('\n  Команда:'));
     for (const agent of fullTeam) {
       const own = agent.provider ? pc.dim(` [провайдер: ${agent.provider}]`) : '';
@@ -512,7 +512,7 @@ function accessLine(agent: Agent, cfg: ToolsConfig): string {
   const toolIds = agentToolIds(agent);
   if (toolIds.length === 0) return '';
   const parts: string[] = [];
-  // серверы — из project.json текущего проекта: агентам доступен весь его реестр
+  // серверы — из hosts.json текущего проекта: агентам доступен весь его реестр
   // проект один — текущий: берём его серверы независимо от ключа реестра
   const servers = [...new Set([...cfg.projects.values()].flatMap((p) => [...p.hosts.keys()]))];
   if (servers.length > 0) parts.push(`серверы: ${servers.join(', ')}`);

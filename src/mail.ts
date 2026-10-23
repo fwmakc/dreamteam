@@ -3,13 +3,15 @@
  * — приём (IMAP) и отправка (SMTP). Секреты живут в проекте, не в карточках
  * агентов: карточка тула ничего не знает о паролях.
  *
- *   { "личное": { "preset": "yandex", "user": "…@yandex.ru", "password": "пароль приложения" },
- *     "работа": { "preset": "custom", "user": "…", "password": "…", "host": "imap.corp.ru", "smtpHost": "smtp.corp.ru" } }
+ *   { "личное": { "user": "я@yandex.ru", "password": "пароль приложения",
+ *                 "host": "imap.yandex.ru", "smtpHost": "smtp.yandex.ru" },
+ *     "работа": { "user": "…", "password": "…", "host": "imap.corp.ru", "smtpHost": "smtp.corp.ru" } }
  *
- * Пресеты: yandex (imap.yandex.ru/smtp.yandex.ru), gmail (imap.gmail.com/
- * smtp.gmail.com), mailru (imap.mail.ru/smtp.mail.ru); порты 993/465, у
- * custom можно переопределить полями port/smtpPort. Пароли — «пароли
- * приложений» почтовых провайдеров (обычный пароль от веб-почты не подойдёт).
+ * Всё явно: host (сервер входящей почты, IMAP) и smtpHost (исходящей, SMTP)
+ * обязательны; порты 993/465 — дефолт, переопределяются полями port/smtpPort.
+ * Пароли — «пароли приложений» почтовых провайдеров (обычный пароль от
+ * веб-почты не подойдёт). Хосты популярных провайдеров — в README, раздел
+ * «Почта».
  *
  * Если почтовик хостера отдаёт сертификат не на имя сервера (типично для
  * mail.на-хостинге.ru с панелью webhost1 и т.п.), соединение не проходит
@@ -25,20 +27,15 @@ import dns from 'node:dns';
 import { promisify } from 'node:util';
 import { MAIL_FILE } from './paths.js';
 
-const PRESETS: Record<string, { imap: string; smtp: string }> = {
-  yandex: { imap: 'imap.yandex.ru', smtp: 'smtp.yandex.ru' },
-  gmail: { imap: 'imap.gmail.com', smtp: 'smtp.gmail.com' },
-  mailru: { imap: 'imap.mail.ru', smtp: 'smtp.mail.ru' },
-};
-
-const ACCOUNT_FIELDS = ['preset', 'user', 'password', 'host', 'smtpHost', 'port', 'smtpPort', 'tlsNoVerify'];
+const ACCOUNT_FIELDS = ['user', 'password', 'host', 'smtpHost', 'port', 'smtpPort', 'tlsNoVerify'];
 
 export interface MailAccount {
-  preset: string;
   user: string;
   password: string;
-  host?: string;
-  smtpHost?: string;
+  /** Сервер входящей почты (IMAP). */
+  host: string;
+  /** Сервер исходящей почты (SMTP). */
+  smtpHost: string;
   port?: number;
   smtpPort?: number;
   /** Не сверять имя сервера с сертификатом (хостинги с чужим сертификатом). */
@@ -56,8 +53,8 @@ export function loadAccounts(file = MAIL_FILE): Record<string, MailAccount> {
   if (!existsSync(file)) {
     throw new Error(
       `нет файла ${file} — опишите ящики, например:\n` +
-      '{ "личное": { "preset": "yandex", "user": "я@yandex.ru", "password": "пароль приложения" } }\n' +
-      'пресеты: yandex, gmail, mailru; свой сервер — preset "custom" + "host" и "smtpHost"',
+      '{ "личное": { "user": "я@yandex.ru", "password": "пароль приложения", "host": "imap.yandex.ru", "smtpHost": "smtp.yandex.ru" } }\n' +
+      'host — сервер входящей почты (IMAP), smtpHost — исходящей (SMTP)',
     );
   }
   let raw: unknown;
@@ -84,16 +81,12 @@ function readAccount(name: string, raw: Record<string, unknown>, file: string): 
   if (extra.length > 0) {
     throw new Error(`${file}: ящик «${name}» — неизвестные поля ${extra.map((k) => `"${k}"`).join(', ')} (разрешены: ${ACCOUNT_FIELDS.join(', ')})`);
   }
-  const preset = String(raw.preset ?? '').trim();
-  if (!PRESETS[preset] && preset !== 'custom') {
-    throw new Error(`${file}: ящик «${name}» — preset «${preset}» не знаю; есть: ${Object.keys(PRESETS).join(', ')}, custom`);
-  }
   const user = String(raw.user ?? '').trim();
   const password = String(raw.password ?? '');
+  const host = String(raw.host ?? '').trim();
+  const smtpHost = String(raw.smtpHost ?? '').trim();
   if (!user || !password) throw new Error(`${file}: ящик «${name}» — нужны "user" и "password" (пароль приложения от провайдера почты)`);
-  if (preset === 'custom' && (!String(raw.host ?? '').trim() || !String(raw.smtpHost ?? '').trim())) {
-    throw new Error(`${file}: ящик «${name}» — для custom нужны "host" (IMAP) и "smtpHost"`);
-  }
+  if (!host || !smtpHost) throw new Error(`${file}: ящик «${name}» — нужны адреса серверов: "host" (IMAP) и "smtpHost" (SMTP)`);
   for (const key of ['port', 'smtpPort'] as const) {
     if (raw[key] !== undefined && (!Number.isInteger(raw[key]) || (raw[key] as number) < 1 || (raw[key] as number) > 65535)) {
       throw new Error(`${file}: ящик «${name}» — "${key}" должен быть целым числом 1…65535`);
@@ -102,21 +95,18 @@ function readAccount(name: string, raw: Record<string, unknown>, file: string): 
   if (raw.tlsNoVerify !== undefined && typeof raw.tlsNoVerify !== 'boolean') {
     throw new Error(`${file}: ящик «${name}» — "tlsNoVerify" должен быть true или false`);
   }
-  return { ...raw, preset, user, password } as MailAccount;
+  const acc: MailAccount = { user, password, host, smtpHost };
+  if (raw.port !== undefined) acc.port = raw.port as number;
+  if (raw.smtpPort !== undefined) acc.smtpPort = raw.smtpPort as number;
+  if (raw.tlsNoVerify !== undefined) acc.tlsNoVerify = raw.tlsNoVerify as boolean;
+  return acc;
 }
 
-/** Адреса IMAP/SMTP: пресет или custom, порты с переопределением. */
+/** Адреса IMAP/SMTP: явные хосты, порты 993/465 с переопределением. */
 export function resolveEndpoints(acc: MailAccount): MailEndpoints {
-  if (acc.preset === 'custom') {
-    return {
-      imap: { host: acc.host!, port: acc.port ?? 993, secure: (acc.port ?? 993) === 993 },
-      smtp: { host: acc.smtpHost!, port: acc.smtpPort ?? 465, secure: (acc.smtpPort ?? 465) === 465 },
-    };
-  }
-  const p = PRESETS[acc.preset]!;
   return {
-    imap: { host: p.imap, port: acc.port ?? 993, secure: true },
-    smtp: { host: p.smtp, port: acc.smtpPort ?? 465, secure: true },
+    imap: { host: acc.host, port: acc.port ?? 993, secure: (acc.port ?? 993) === 993 },
+    smtp: { host: acc.smtpHost, port: acc.smtpPort ?? 465, secure: (acc.smtpPort ?? 465) === 465 },
   };
 }
 
@@ -289,8 +279,8 @@ export async function sendMail(acc: MailAccount, args: SendArgs): Promise<string
 export function mailConfigHint(): string {
   return JSON.stringify(
     {
-      личное: { preset: 'yandex', user: 'я@yandex.ru', password: 'пароль-приложения' },
-      работа: { preset: 'custom', user: 'я@corp.ru', password: '…', host: 'imap.corp.ru', smtpHost: 'smtp.corp.ru' },
+      личное: { user: 'я@yandex.ru', password: 'пароль-приложения', host: 'imap.yandex.ru', smtpHost: 'smtp.yandex.ru' },
+      работа: { user: 'я@corp.ru', password: '…', host: 'imap.corp.ru', smtpHost: 'smtp.corp.ru' },
     },
     null,
     2,

@@ -52,8 +52,8 @@ writeFileSync(join(home, 'providers.json'), JSON.stringify({ default: 'mock', pr
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000 }, null, 2) + '\n');
 writeFileSync(join(home, 'manager.json'), JSON.stringify({ provider: 'mock', model: 'mock-1' }, null, 2) + '\n');
 writeFileSync(join(home, 'agents.json'), '[]\n');
-writeFileSync(join(dt, 'project.json'), '{ "hosts": {} }\n');
-// скаффолд руками: команда и manager — в доме, project.json — в проекте
+writeFileSync(join(dt, 'hosts.json'), '{}\n');
+// скаффолд руками: команда и manager — в доме, hosts.json — в проекте
 mkdirSync(join(home, 'tools'), { recursive: true });
 process.on('exit', () => { try { rmSync(base, { recursive: true, force: true }); } catch { /* Windows держит файлы */ } });
 process.on('SIGINT', () => process.exit(130));

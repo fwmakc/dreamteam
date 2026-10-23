@@ -4,7 +4,7 @@
  * уходит в штатный scp. Цель — «проект:хост» (приходит через ctx.arg).
  *
  * check() — слои от жёсткого к мягкому:
- *  1. папка проекта на сервере (host.dir из projects.json) и маски карточки
+ *  1. папка проекта на сервере (host.dir из hosts.json) и маски карточки
  *     ("masks", gitignore-синтаксис) — отказ всегда, правила карточки их
  *     не обходят: выход за папку и запретные файлы не бывают «молча»;
  *  2. правила карточки (allow/deny) или дефолт из default.json — read-only
@@ -112,7 +112,7 @@ export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
       const maskedRemote = maskHit(`scp ${remote}`, dir);
       if (maskedRemote) return { deny: maskedRemote };
     } else if (remote.startsWith('/') || remote.startsWith('~') || remote.includes('..')) {
-      return { deny: `удалённый путь «${remote}» вне папки проекта — задайте хосту "dir" в project.json` };
+      return { deny: `удалённый путь «${remote}» вне папки проекта — задайте хосту "dir" в hosts.json` };
     }
     return rules ? commandCheck(rules, body) : 'ask';
   };

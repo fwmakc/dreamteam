@@ -547,8 +547,8 @@ const client = await makeClient(handle.port);
     client.send({ type: 'command', text: '/project host add main=root@127.0.0.1:2223' });
     const p = await client.next((m) => m.type === 'notice' && String(m.text).includes('main'));
     check('ws: /project host add — отчёт', Boolean(p));
-    const pf = JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as { hosts: Record<string, { host: string; user?: string; port?: number }> };
-    check('ws: /project host add — project.json на диске', pf.hosts.main?.host === '127.0.0.1' && pf.hosts.main?.user === 'root' && pf.hosts.main?.port === 2223, JSON.stringify(pf));
+    const pf = JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as Record<string, { host: string; user?: string; port?: number }>;
+    check('ws: /project host add — hosts.json на диске', pf.main?.host === '127.0.0.1' && pf.main?.user === 'root' && pf.main?.port === 2223, JSON.stringify(pf));
     await client.waitState(sProj + 1);
 
     const sHost = client.stateCount();

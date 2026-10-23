@@ -74,9 +74,9 @@ const {
   check('команда: пустая в доме', readFileSync(join(home, 'agents.json'), 'utf8').trim() === '[]');
   check('команда: менеджер в доме на дефолтном провайдере', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).provider === 'mock');
   check('команда: полка тулов в доме', existsSync(join(home, 'tools')));
-  check('проект: project.json — серверы пусты', (() => {
-    const p = JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as { hosts: unknown };
-    return typeof p.hosts === 'object' && p.hosts !== null;
+  check('проект: hosts.json — пустой реестр серверов', (() => {
+    const p = JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as Record<string, unknown>;
+    return typeof p === 'object' && p !== null && Object.keys(p).length === 0;
   })());
 
   // --- .env создаётся из примера: только настройки serve, права 600 ---
@@ -94,15 +94,15 @@ const {
     const { SCAFFOLD_DIR } = await import('../src/wizard.js');
     const { loadSettings } = await import('../src/settings.js');
     const { loadTeam } = await import('../src/agents.js');
-    const { loadProjects } = await import('../src/actions.js');
+    const { loadHosts } = await import('../src/actions.js');
     check('скелет: home/settings.json валиден по loadSettings', (() => {
       try { return loadSettings(join(SCAFFOLD_DIR, 'home', 'settings.json'), 0).language === 'русский'; } catch { return false; }
     })());
     check('скелет: home/agents.json валиден по loadTeam', (() => {
       try { return loadTeam(join(SCAFFOLD_DIR, 'home', 'agents.json')).length === 0; } catch { return false; }
     })());
-    check('скелет: project/project.json валиден по loadProjects', (() => {
-      try { return loadProjects(join(SCAFFOLD_DIR, 'project', 'project.json'), 'x').size === 1; } catch { return false; }
+    check('скелет: project/hosts.json валиден по loadHosts', (() => {
+      try { return loadHosts(join(SCAFFOLD_DIR, 'project', 'hosts.json')).size === 0; } catch { return false; }
     })());
     const mgrTpl = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'home', 'manager.json'), 'utf8'));
     check('скелет: home/manager.json — заглушка провайдера', typeof mgrTpl.provider === 'string' && mgrTpl.provider.length > 0, JSON.stringify(mgrTpl));
@@ -173,7 +173,7 @@ const {
   check('битый файл: defaultProviderId → mock', defaultProviderId(join(home, 'providers.json')) === 'mock');
   const proj = join(root, 'p6', '.dreamteam');
   const notes = ensureProject('mock', proj);
-  check('битый файл: проект всё равно скаффолдится', notes.some((n) => n.includes('project.json')), notes.join(' | '));
+  check('битый файл: проект всё равно скаффолдится', notes.some((n) => n.includes('hosts.json')), notes.join(' | '));
 }
 
 // --- gitignoreNotice: состояния ---

@@ -7,7 +7,7 @@
  *  - addTeamAgent/updateTeamAgent на временных agents.json: валидность после
  *    записи (loadTeam), дефолты, белый список tools, сохранение неизвестных
  *    полей корня, дубликаты, «неудачная правка не портит файл».
- *  - loadProjects/resolveHost/checkPermission: серверы проектов, ssh-адресация
+ *  - loadHosts/resolveHost/checkPermission: серверы проекта, ssh-адресация
  *    «проект:хост», права через проекты; loadSettings: лимиты.
  * Запуск: npm run probe:manager
  */
@@ -15,12 +15,12 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, unlinkSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findMentions, loadTeam } from '../src/agents.js';
-import { checkPermission, loadProjects, resolveHost, type ToolsConfig } from '../src/actions.js';
+import { checkPermission, loadHosts, resolveHost, type ToolsConfig } from '../src/actions.js';
 import { loadSettings } from '../src/settings.js';
 import {
   MANAGER_PROMPT,
   addProjectHosts,
-  loadProjectFile,
+  loadHostsFile,
   removeProjectHost,
   addTeamAgent,
   grantTool,
@@ -324,40 +324,40 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('tool.grant: loadTeam по-прежнему валиден', loadTeam(agentsFile).length === 1);
 }
 
-// --- project.json: серверы проекта с откатом ---
+// --- hosts.json: серверы проекта с откатом ---
 {
-  const projFile = join(dir, 'project.json');
+  const hostsFile = join(dir, 'hosts.json');
   writeFileSync(
-    projFile,
-    JSON.stringify({ hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 22 } }, note: 'пометка' }, null, 2) + '\n',
+    hostsFile,
+    JSON.stringify({ prod: { host: '203.0.113.10', user: 'deploy', port: 22 } }, null, 2) + '\n',
   );
 
-  const report = addProjectHosts(projFile, { staging: { host: 'stg.example.com', dir: '/srv/app' } });
+  const report = addProjectHosts(hostsFile, { staging: { host: 'stg.example.com', dir: '/srv/app' } });
   check('project.host add: отчёт', report.includes('staging'), report);
-  check('project.host add: loadProjectFile видит серверы', loadProjectFile(projFile).hosts?.staging?.dir === '/srv/app');
-  check('project.host add: чужие поля корня сохранены', (JSON.parse(readFileSync(projFile, 'utf8')) as { note: string }).note === 'пометка');
+  check('project.host add: loadHostsFile видит серверы', loadHostsFile(hostsFile).staging?.dir === '/srv/app');
+  check('project.host add: старый сервер на месте', loadHostsFile(hostsFile).prod?.host === '203.0.113.10');
 
-  const before = readFileSync(projFile, 'utf8');
+  const before = readFileSync(hostsFile, 'utf8');
   let threw = '';
-  try { addProjectHosts(projFile, { staging: { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
+  try { addProjectHosts(hostsFile, { staging: { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
   check('project.host add: дубликат — отказ', threw.includes('уже есть'), threw);
   threw = '';
-  try { addProjectHosts(projFile, { 'two words': { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
+  try { addProjectHosts(hostsFile, { 'two words': { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
   check('project.host add: пробелы в имени — отказ', threw.includes('пробел'), threw);
   threw = '';
-  try { addProjectHosts(projFile, { badport: { host: 'x', port: -1 } }); } catch (e) { threw = (e as Error).message; }
+  try { addProjectHosts(hostsFile, { badport: { host: 'x', port: -1 } }); } catch (e) { threw = (e as Error).message; }
   check('project.host add: кривой порт — отказ', threw.includes('port'), threw);
   threw = '';
-  try { addProjectHosts(projFile, { nohost: { user: 'x' } as never }); } catch (e) { threw = (e as Error).message; }
+  try { addProjectHosts(hostsFile, { nohost: { user: 'x' } as never }); } catch (e) { threw = (e as Error).message; }
   check('project.host add: сервер без host — отказ', threw.includes('host'), threw);
   threw = '';
-  try { addProjectHosts(projFile, {}); } catch (e) { threw = (e as Error).message; }
+  try { addProjectHosts(hostsFile, {}); } catch (e) { threw = (e as Error).message; }
   check('project.host add: пусто — отказ', threw.includes('хоть один'), threw);
   threw = '';
-  try { removeProjectHost(projFile, 'nope'); } catch (e) { threw = (e as Error).message; }
+  try { removeProjectHost(hostsFile, 'nope'); } catch (e) { threw = (e as Error).message; }
   check('project host delete: нет сервера — отказ', threw.includes('nope'), threw);
-  check('project: неудачные правки файл не меняли', readFileSync(projFile, 'utf8') === before);
-  check('project: tmp-файл убран за собой', !existsSync(projFile + '.tmp'));
+  check('project: неудачные правки файл не меняли', readFileSync(hostsFile, 'utf8') === before);
+  check('project: tmp-файл убран за собой', !existsSync(hostsFile + '.tmp'));
 }
 
 // --- легаси-форма { agents: [...] } со своими полями корня всё ещё работает ---
@@ -369,46 +369,48 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('легаси: правка сохранила обёртку и поля корня', Array.isArray(legacy.agents) && legacy.agents.length === 2 && legacy.note === 'не трогать', JSON.stringify(legacy).slice(0, 120));
 }
 
-// --- loadProjects / resolveHost / checkPermission: серверы текущего проекта ---
+// --- loadHosts / resolveHost / checkPermission: серверы текущего проекта ---
 {
-  const projFile = join(dir, 'project.json');
+  const hostsFile = join(dir, 'hosts.json');
   writeFileSync(
-    projFile,
-    JSON.stringify({ hosts: { prod: { user: 'deploy', host: '203.0.113.10', port: 22 }, staging: { host: 'stg.example.com' } } }),
+    hostsFile,
+    JSON.stringify({ prod: { user: 'deploy', host: '203.0.113.10', port: 22 }, staging: { host: 'stg.example.com' } }),
   );
-  const projects = loadProjects(projFile, 'myproj');
-  const project = projects.get('myproj');
-  check('projects: хосты с user/port', project?.hosts.get('prod')?.host === '203.0.113.10' && project?.hosts.get('prod')?.port === 22, JSON.stringify([...project?.hosts ?? []]));
-  check('projects: оба сервера прочитаны', project?.hosts.size === 2);
+  const hosts = loadHosts(hostsFile);
+  check('hosts: хосты с user/port', hosts.get('prod')?.host === '203.0.113.10' && hosts.get('prod')?.port === 22, JSON.stringify([...hosts]));
+  check('hosts: оба сервера прочитаны', hosts.size === 2);
 
+  const projects = new Map([['project', { hosts }]]);
   const cfg: ToolsConfig = { workspaceAbs: join(dir, 'ws'), runTimeoutMs: 1000, maxOutputChars: 100, projects };
-  const full = resolveHost('myproj:prod', cfg);
-  check('ssh: «проект:хост» резолвится', !('error' in full) && full.project === 'myproj' && full.host.user === 'deploy', JSON.stringify(full));
+  const full = resolveHost('project:prod', cfg);
+  check('ssh: «project:хост» резолвится', !('error' in full) && full.project === 'project' && full.host.user === 'deploy', JSON.stringify(full));
   const bare = resolveHost('staging', cfg);
-  check('ssh: голое имя резолвится в текущий проект', !('error' in bare) && bare.project === 'myproj', JSON.stringify(bare));
-  check('ssh: чужой хост — отказ', 'error' in resolveHost('myproj:nope', cfg), '');
-  const devops: Agent = { id: 'y', name: 'Яна', emoji: '🏍', role: 'devops', color: 'cyan', prompt: 'x', tools: { ssh: {} }, projects: ['myproj'] };
-  check('права: ssh по проекту разрешён', checkPermission(devops, { kind: 'ssh', host: 'myproj:prod', command: 'uptime' }, cfg) === null);
+  check('ssh: голое имя резолвится', !('error' in bare) && bare.project === 'project', JSON.stringify(bare));
+  check('ssh: чужой хост — отказ', 'error' in resolveHost('project:nope', cfg), '');
+  const devops: Agent = { id: 'y', name: 'Яна', emoji: '🏍', role: 'devops', color: 'cyan', prompt: 'x', tools: { ssh: {} }, projects: ['project'] };
+  check('права: ssh по проекту разрешён', checkPermission(devops, { kind: 'ssh', host: 'project:prod', command: 'uptime' }, cfg) === null);
   check('права: ssh по голому имени разрешён', checkPermission(devops, { kind: 'ssh', host: 'staging', command: 'uptime' }, cfg) === null);
-  const deny = checkPermission(devops, { kind: 'ssh', host: 'other:prod', command: 'uptime' }, cfg);
+  const deny = checkPermission(devops, { kind: 'ssh', host: 'ghost:prod', command: 'uptime' }, cfg);
   check('права: ssh несуществующего проекта — отказ резолвера', deny !== null && deny.includes('не настроен'), deny ?? '');
   const noSsh: Agent = { ...devops, tools: { files: {} } };
-  check('права: без инструмента ssh — отказ', checkPermission(noSsh, { kind: 'ssh', host: 'myproj:prod', command: 'x' }, cfg)?.includes('ssh') === true);
-  const fileDeny = checkPermission({ ...devops, tools: { ssh: {}, files: {} }, projects: ['myproj', 'ghost'] }, { kind: 'file', path: 'a.txt', content: 'x', project: 'ghost' }, cfg);
-  check('права: проект не настроен — отказ', fileDeny !== null && fileDeny.includes('не настроен'), fileDeny ?? '');
+  check('права: без инструмента ssh — отказ', checkPermission(noSsh, { kind: 'ssh', host: 'project:prod', command: 'x' }, cfg)?.includes('ssh') === true);
+  const fileDeny = checkPermission({ ...devops, tools: { ssh: {}, files: {} }, projects: ['project', 'ghost'] }, { kind: 'file', path: 'a.txt', content: 'x', project: 'ghost' }, cfg);
+  check('права: проект не настроен — отказ', fileDeny !== null && fileDeny.includes('не известен'), fileDeny ?? '');
 
-  writeFileSync(projFile, JSON.stringify({ hosts: 'nope' }));
+  writeFileSync(hostsFile, JSON.stringify(['nope']));
   let threw = '';
-  try { loadProjects(projFile, 'myproj'); } catch (e) { threw = (e as Error).message; }
-  check('projects: hosts не объект — ошибка', threw.includes('hosts'), threw);
-  writeFileSync(projFile, JSON.stringify({ hosts: { h1: { user: 'x' } } }));
+  try { loadHosts(hostsFile); } catch (e) { threw = (e as Error).message; }
+  check('hosts: не объект — ошибка', threw.includes('ожидается объект'), threw);
+  writeFileSync(hostsFile, JSON.stringify({ h1: { user: 'x' } }));
   threw = '';
-  try { loadProjects(projFile, 'myproj'); } catch (e) { threw = (e as Error).message; }
-  check('projects: хост без поля host — ошибка', threw.includes('h1') && threw.includes('host'), threw);
-  unlinkSync(projFile);
+  try { loadHosts(hostsFile); } catch (e) { threw = (e as Error).message; }
+  check('hosts: сервер без поля host — ошибка', threw.includes('h1') && threw.includes('host'), threw);
+  writeFileSync(hostsFile, 'это не json');
   threw = '';
-  try { loadProjects(projFile, 'myproj'); } catch (e) { threw = (e as Error).message; }
-  check('projects: файла нет — ошибка', threw.includes('не удалось прочитать'), threw);
+  try { loadHosts(hostsFile); } catch (e) { threw = (e as Error).message; }
+  check('hosts: кривой json — ошибка', threw.includes('не удалось прочитать'), threw);
+  unlinkSync(hostsFile);
+  check('hosts: файла нет — серверов нет (пусто)', loadHosts(hostsFile).size === 0);
 
   // --- loadSettings: лимиты и дефолты ---
   const sf = join(dir, 'settings.json');
