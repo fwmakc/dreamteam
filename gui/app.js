@@ -754,6 +754,14 @@
   function renderTeam() {
     teamEl.innerHTML = '';
 
+    // битый agents.json: ошибка вместо молчаливой пустой команды
+    if (state?.teamError) {
+      const err = document.createElement('li');
+      err.className = 'errline';
+      err.textContent = `agents.json: ${state.teamError}`;
+      teamEl.appendChild(err);
+    }
+
     for (const a of state.team ?? []) {
       const li = document.createElement('li');
       li.title = `${a.inChat ? 'Вывести из чата' : 'Позвать в чат'} · правая кнопка — изменить/удалить`;

@@ -410,3 +410,4 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 }
 .ctx-menu button:hover { background: var(--panel2); }
 .confirm-subject { color: var(--dim); margin: 0; font-size: 13px; }
+#team .errline { margin: 4px 10px; font-size: 12px; }

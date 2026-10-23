@@ -92,6 +92,7 @@
 }
 .modal-box .row { display: flex; gap: 8px; margin-top: 14px; }
 .confirm-subject { color: var(--dim); margin: 0; font-size: 13px; }
+.side-err { margin: 4px 10px; font-size: 12px; }
 
 /* ── контекстное меню (правая кнопка мыши) ─────────────────────────────── */
 .ctx-overlay { position: fixed; inset: 0; z-index: 30; }

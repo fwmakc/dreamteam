@@ -5,7 +5,7 @@ import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { loadTeam } from './agents.js';
+import { loadTeamOrEmpty } from './agents.js';
 import {
   addTeamAgent,
   managerAsAgent,
@@ -88,15 +88,19 @@ function publicSession(session: Session): {
 /** Полный снимок состояния для синхронизации оболочки. */
 export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): unknown {
   let team: Agent[] = [];
+  let teamError: string | null = null;
   try {
-    team = loadTeam(AGENTS_FILE);
-  } catch {
-    team = []; // нет agents.json — консьерж-старт, GUI покажет пустую команду
+    team = loadTeamOrEmpty(AGENTS_FILE);
+  } catch (err) {
+    // битый agents.json: в снимке пусто, а ошибка — отдельным полем,
+    // чтобы оболочка показала её, а не молчаливую пустую команду
+    teamError = err instanceof Error ? err.message : String(err);
   }
   const inChat = new Set(chatTeam(app.session, team).map((a) => a.id));
   return {
     session: publicSession(app.session),
     sessions: app.store.list(),
+    teamError,
     team: team.map((a) => ({
       id: a.id,
       name: a.name,

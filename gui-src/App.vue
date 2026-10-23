@@ -15,6 +15,7 @@ const profile = computed(() => snapshot.profile);
 const sessions = computed(() => (snapshot.sessions ?? []) as SessionMeta[]);
 const currentSessionId = computed(() => snapshot.session?.id ?? '');
 const team = computed(() => (snapshot.team ?? []) as AgentInfo[]);
+const teamError = computed(() => snapshot.teamError ?? null);
 const providers = computed(() => (snapshot.providers ?? []) as ProviderInfo[]);
 const projects = computed(() => (snapshot.projects ?? []) as ProjectInfo[]);
 const scheduleTasks = computed(() => (snapshot.scheduleTasks ?? []) as ScheduleTaskInfo[]);
@@ -742,6 +743,7 @@ onMounted(connectWs);
           <span class="sec-name">Команда</span>
           <button class="sec-add" title="Новый агент" @click.stop="openAgentCreate">＋</button>
         </div>
+        <div v-if="teamError" class="errline side-err">agents.json: {{ teamError }}</div>
         <ul id="team">
           <li
             v-for="a in team"

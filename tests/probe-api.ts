@@ -11,7 +11,7 @@
  * замораживаются на импорте) во временные каталоги; сервер — на порту 0.
  * Запуск: npm run probe:api
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
@@ -172,14 +172,36 @@ const handle = await startServe({ port: 0 });
 const client = await makeClient(handle.port);
 {
   const first = await client.next((m) => m.type === 'state');
-  const st0 = first.state as { session?: unknown; team?: unknown[]; providers?: { id: string; isDefault: boolean }[] };
+  const st0 = first.state as { session?: unknown; team?: unknown[]; teamError?: string | null; providers?: { id: string; isDefault: boolean }[] };
   check('ws: первичный state пришёл', Boolean(st0.session));
   check('ws: команда пуста (консьерж-старт)', Array.isArray(st0.team) && st0.team.length === 0);
+  check('ws: нет agents.json — без ошибки в state', st0.teamError == null);
   check('ws: провайдер mock — основной', (st0.providers ?? []).some((p) => p.id === 'mock' && p.isDefault));
 
   client.send({ type: 'hello' });
   const again = await client.next((m) => m.type === 'state');
   check('ws: hello возвращает свежий state', Boolean((again.state as { session?: unknown }).session));
+
+  // ── битый agents.json: команда не может молча исчезнуть — ошибка в state ──
+  writeFileSync(join(home, 'agents.json'), '{ это не json');
+  client.send({ type: 'hello' });
+  const bad = await client.next((m) => m.type === 'state');
+  const stBad = bad.state as { teamError?: string | null; team?: unknown[] };
+  check('ws: битый json — teamError в state', typeof stBad.teamError === 'string' && stBad.teamError.includes('не удалось прочитать'));
+  check('ws: битый json — команда в снимке пуста', Array.isArray(stBad.team) && stBad.team.length === 0);
+
+  writeFileSync(join(home, 'agents.json'), JSON.stringify([{ id: 'x' }]));
+  client.send({ type: 'hello' });
+  const bad2 = await client.next((m) => m.type === 'state');
+  check('ws: агент без name/prompt — ошибка называет поля', String((bad2.state as { teamError?: string }).teamError ?? '').includes('обязательны поля'));
+
+  writeFileSync(join(home, 'agents.json'), JSON.stringify([{ id: 'boss', name: 'Босс', prompt: 'Ты руководитель.' }]));
+  client.send({ type: 'hello' });
+  const good = await client.next((m) => m.type === 'state');
+  const stGood = good.state as { teamError?: string | null; team?: { id: string }[] };
+  check('ws: починили — teamError ушёл', stGood.teamError == null);
+  check('ws: починили — команда в снимке', Array.isArray(stGood.team) && stGood.team.some((a) => a.id === 'boss'));
+  rmSync(join(home, 'agents.json')); // песочнице возвращаем консьерж-старт
 
   // пустой разговор: менеджер здоровается сам (как в терминале) — ждём приветствие
   await client.next((m) => m.type === 'say' && String(m.text).includes('менеджер переговорки'));

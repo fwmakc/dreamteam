@@ -70,6 +70,8 @@ export interface OpHint {
 export interface StateSnapshot {
   session: { id: string; title: string; messages: ChatMessage[] };
   sessions: SessionMeta[];
+  /** битый agents.json: текст ошибки (нет файла — пустая команда, ошибки нет) */
+  teamError?: string | null;
   team: AgentInfo[];
   manager: { name: string; emoji: string; color: string; provider: string; temperature?: number };
   providers: ProviderInfo[];

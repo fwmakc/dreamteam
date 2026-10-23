@@ -274,12 +274,19 @@ function check(name: string, cond: boolean): void {
   );
   lines = await run(engine, '/mail');
   check('mail: обзор — ящик виден', lines.some((l) => l.includes('работа') && l.includes('imap.corp.ru:993') && l.includes('smtp.corp.ru:587')) ?? false);
-  lines = await run(engine, '/mail add работа user=x@ya.ru password=p imap=imap.yandex.ru smtp=smtp.yandex.ru');
-  check('mail add: дубликат — ✗', (lines[0]?.startsWith('✗') && lines[0].includes('уже есть')) ?? false);
+  // ошибки записи летят вызывающему (как у team.add) — оболочка сама их форматирует
+  let threw = '';
+  try {
+    await run(engine, '/mail add работа user=x@ya.ru password=p imap=imap.yandex.ru smtp=smtp.yandex.ru');
+  } catch (err) { threw = err instanceof Error ? err.message : String(err); }
+  check('mail add: дубликат — ошибка', threw.includes('уже есть'));
   lines = await run(engine, '/mail add кривая');
   check('mail add: без пар — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
-  lines = await run(engine, '/mail add бред user=x password=p smtp=s');
-  check('mail add: нет imap — отказ валидатора', lines[0]?.includes('imap') ?? false);
+  threw = '';
+  try {
+    await run(engine, '/mail add бред user=x password=p smtp=s');
+  } catch (err) { threw = err instanceof Error ? err.message : String(err); }
+  check('mail add: нет imap — отказ валидатора', threw.includes('imap'));
   lines = await run(engine, '/mail remove работа');
   check('mail remove: ящик убран', !(JSON.parse(readFileSync(join(proj, 'mails.json'), 'utf8')) as typeof mails)['работа']);
 }
@@ -295,10 +302,16 @@ function check(name: string, cond: boolean): void {
   check('messenger add: токен на диске', mess.telegram?.token === '123456:ABC-cmd');
   lines = await run(engine, '/messenger');
   check('messenger: обзор — бот виден', lines.some((l) => l.includes('telegram')) ?? false);
-  lines = await run(engine, '/messenger add slack x');
-  check('messenger add: чужой ключ — ✗', lines[0]?.startsWith('✗') ?? false);
-  lines = await run(engine, '/messenger add telegram другой');
-  check('messenger add: дубликат — ✗', lines[0]?.includes('уже есть') ?? false);
+  let threw = '';
+  try {
+    await run(engine, '/messenger add slack x');
+  } catch (err) { threw = err instanceof Error ? err.message : String(err); }
+  check('messenger add: чужой ключ — ошибка', threw.includes('telegram'));
+  threw = '';
+  try {
+    await run(engine, '/messenger add telegram другой');
+  } catch (err) { threw = err instanceof Error ? err.message : String(err); }
+  check('messenger add: дубликат — ошибка', threw.includes('уже есть'));
   lines = await run(engine, '/messenger remove telegram');
   check('messenger remove: бот убран', !(JSON.parse(readFileSync(join(proj, 'messengers.json'), 'utf8')) as typeof mess).telegram);
 }

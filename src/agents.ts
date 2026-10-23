@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { normalizeAgentTools } from './tools-api.js';
 import type { Agent, UserProfile } from './types.js';
 
@@ -42,6 +42,16 @@ export function loadTeam(file: string): Agent[] {
       image: typeof a.image === 'string' && a.image.trim() ? a.image.trim() : undefined,
     };
   });
+}
+
+/**
+ * Команда для показа (снимок состояния). Нет файла — пустая команда: это
+ * легитимный консьерж-старт. А вот битый или невалидный файл — ошибка наружу:
+ * команда не имеет права молча исчезать из оболочки.
+ */
+export function loadTeamOrEmpty(file: string): Agent[] {
+  if (!existsSync(file)) return [];
+  return loadTeam(file);
 }
 
 /**
