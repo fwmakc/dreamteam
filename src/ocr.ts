@@ -96,7 +96,7 @@ async function renderPdfPages(file: string, dpi: number, pagesSpec?: string): Pr
       const page = await doc.getPage(n);
       const viewport = page.getViewport({ scale: imageDpi / 72 });
       const canvas = createCanvas(Math.max(1, Math.ceil(viewport.width)), Math.max(1, Math.ceil(viewport.height)));
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport } as Parameters<typeof page.render>[0]).promise;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport } as unknown as Parameters<typeof page.render>[0]).promise;
       images.push({ name: `${file.split(/[\\/]/).pop()} · страница ${n}`, data: canvas.toBuffer('image/png') });
       page.cleanup();
     }

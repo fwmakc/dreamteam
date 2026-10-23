@@ -796,6 +796,15 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
         'png/jpg/bmp/webp, страницы pdf, картинки внутри docx. Распознанное всегда перепроверяй по смыслу.',
     );
   }
+  if (ids.includes('web')) {
+    lines.push(
+      '```web read https://…/страница',
+      '```web links https://…/раздел фильтр',
+      '```',
+      'web читает разрешённые сайты (список задал хозяин): read — страница текстом, links — ссылки страницы ' +
+        '(фильтр — подстрока в адресе). JavaScript не исполняется; если страница пустая, она рисуется скриптами.',
+    );
+  }
   for (const id of ids.filter((t) => !(BUILTIN_TOOL_IDS as readonly string[]).includes(t))) {
     const tool = customTools?.get(id);
     lines.push(

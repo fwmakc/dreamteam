@@ -69,7 +69,7 @@ export type ToolConfig = Record<string, unknown>;
 export type ToolFactory = (config: ToolConfig) => Tool;
 
 /** Встроенные тула: их имена нельзя занимать файлами в tools/ */
-export const BUILTIN_TOOL_IDS = ['files', 'shell', 'git', 'arch', 'ssh', 'look', 'image', 'docs', 'ocr'] as const;
+export const BUILTIN_TOOL_IDS = ['files', 'shell', 'git', 'arch', 'ssh', 'look', 'image', 'docs', 'ocr', 'web'] as const;
 
 /** id тула: имя файла в tools/ или встроенный; строчные буквы/цифры/-/_ от 2 символов */
 export const TOOL_ID_RE = /^[a-z][a-z0-9_-]{1,}$/;

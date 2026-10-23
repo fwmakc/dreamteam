@@ -32,6 +32,7 @@ import lookTool from './tools/look.js';
 import imageTool from './tools/image.js';
 import docsTool from './tools/docs.js';
 import ocrTool from './tools/ocr.js';
+import webTool from './tools/web.js';
 import type { Agent } from './types.js';
 
 const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
@@ -44,6 +45,7 @@ const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
   image: imageTool,
   docs: docsTool,
   ocr: ocrTool,
+  web: webTool,
 };
 
 /** Проверяет, что объект правда тул; иначе — внятная ошибка с именем тула. */
