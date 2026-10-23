@@ -473,7 +473,7 @@ export class Engine {
     const attachments: ChatMessage[] = [];
     const usedIds = new Set<string>();
     let cleaned = text;
-    const refRegex = /[@№]session(?:\s+(\d+))?/gi;
+    const refRegex = /[@!]session(?:\s+(\d+))?/gi;
     for (const match of text.matchAll(refRegex)) {
       const picked = await this.pickSession(match[1]);
       if (!picked || picked.id === session.id || usedIds.has(picked.id)) continue;

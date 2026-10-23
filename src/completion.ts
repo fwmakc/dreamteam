@@ -115,7 +115,7 @@ export function makeCompleter(ctx: CompletionContext) {
       const hits = tabInsert(options, fragment);
       return hits.length > 0 ? [hits, line.slice(line.length - fragment.length)] : [[], line];
     }
-    const ses = /[@№]session[ \t]+(\S*)$/.exec(line);
+    const ses = /[@!]session[ \t]+(\S*)$/.exec(line);
     if (ses) {
       const fragment = ses[1];
       const hits = tabInsert(
@@ -124,7 +124,7 @@ export function makeCompleter(ctx: CompletionContext) {
       );
       return hits.length > 0 ? [hits, line.slice(line.length - fragment.length)] : [[], line];
     }
-    const at = /[@№](\S*)$/.exec(line);
+    const at = /[@!](\S*)$/.exec(line);
     if (at) {
       const fragment = at[1];
       const hits = tabInsert(mentionOptions(ctx), fragment);
@@ -168,7 +168,7 @@ export function hintRowsFor(line: string, ctx: CompletionContext): string[] | nu
   if (line.startsWith('/')) {
     return hintRowsForCommand(line, ctx);
   }
-  const ses = /[@№]session[ \t]+(\S*)$/.exec(line);
+  const ses = /[@!]session[ \t]+(\S*)$/.exec(line);
   if (ses) return sessionRows(ctx, ses[1]);
   // @упоминания рисует MentionPicker (с выбором стрелками) — здесь молчим
   return null;
@@ -294,8 +294,8 @@ const SESSION_ITEM: MentionItem = { label: 'session', hint: 'конспект д
 
 const normName = (s: string): string => s.toLowerCase().replace(/ё/g, 'е');
 
-/** @фрагмент, за которым курсор: @ или № в начале строки или после пробела, без пробелов до курсора */
-const MENTION_RE = /(?:^|\s)([@№])([^\s@№]*)$/;
+/** @фрагмент, за которым курсор: @ или ! в начале строки или после пробела, без пробелов до курсора */
+const MENTION_RE = /(?:^|\s)([@!])([^\s@!]*)$/;
 
 /** Сколько вариантов видно в всплывашке без прокрутки */
 const MENTION_VISIBLE = 8;
@@ -321,7 +321,7 @@ function mentionItems(ctx: CompletionContext): MentionItem[] {
 export class MentionPicker {
   private items: MentionItem[] = [];
   private sel = 0;
-  /** Индекс триггера (@ или №) во вставленном варианте и срез строки на последний пересчёт */
+  /** Индекс триггера (@ или !) во вставленном варианте и срез строки на последний пересчёт */
   private at = 0;
   /** Какой триггер набрал пользователь — его же и вставляем */
   private trigger = '@';

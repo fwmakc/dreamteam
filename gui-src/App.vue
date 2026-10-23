@@ -450,8 +450,8 @@ function updateHints(): void {
   const d = completionData.value;
   if (!d) { hideHints(); return; }
 
-  // @/№ — попап упоминаний (менеджер, участники чата, session)
-  const at = /(?:^|\s)([@№])([^\s@№]*)$/.exec(before);
+  // @/! — попап упоминаний (менеджер, участники чата, session)
+  const at = /(?:^|\s)([@!])([^\s@!]*)$/.exec(before);
   if (at) {
     const items = mentionItems(d).filter((it) => norm(it.label).startsWith(norm(at[2])));
     if (items.length > 0) {

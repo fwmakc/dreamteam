@@ -114,7 +114,7 @@ export function managerAsAgent(cfg: ManagerConfig): Agent {
 
 const norm = (s: string): string => s.toLowerCase().replace(/ё/g, 'е');
 
-/** Позвали ли менеджера: @менеджер / @manager / @<имя из manager.json> (или с «№» вместо «@») */
+/** Позвали ли менеджера: @менеджер / @manager / @<имя из manager.json> (или с «!» вместо «@») */
 export function managerMentioned(text: string, cfg: ManagerConfig): boolean {
   const t = norm(text);
   const names = new Set(['менеджер', 'manager', norm(cfg.name), MANAGER_ID]);

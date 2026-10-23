@@ -208,7 +208,7 @@ const client = await makeClient(handle.port);
   );
 
   // chat.add менеджером (обращение явное: в чате уже есть Тест — без @ раунд ушёл бы модератору)
-  client.send({ type: 'user_message', text: '№менеджер, позови Теста в чат' });
+  client.send({ type: 'user_message', text: '!менеджер, позови Теста в чат' });
   const joined = await client.next(
     (m) => m.type === 'notice' && String(m.text).includes('присоединился к чат'),
   );

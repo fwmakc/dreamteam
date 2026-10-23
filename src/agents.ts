@@ -61,10 +61,10 @@ export function loadUserProfile(file: string): UserProfile {
 }
 
 /**
- * Символы-триггеры упоминания: «@» — общепринятый, «№» — полный синоним для
- * русской раскладки (Shift+3, переключать раскладку не нужно).
+ * Символы-триггеры упоминания: «@» — общепринятый, «!» — полный синоним
+ * (Shift+1 на любой раскладке и в любом языке).
  */
-export const MENTION_TRIGGERS = ['@', '№'] as const;
+export const MENTION_TRIGGERS = ['@', '!'] as const;
 
 /** Находит упоминания участников: работает и по имени (@марина), и по id (@marina). */
 export function findMentions(text: string, team: Agent[]): Agent[] {

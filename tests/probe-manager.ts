@@ -2,7 +2,7 @@
  * Проверка менеджера переговорки (без LLM и терминала):
  *  - loadManagerConfig: дефолты, строгая валидация (нет файла, битый JSON,
  *    неизвестный провайдер), цвет;
- *  - managerMentioned: @менеджер/@manager/@имя и синоним «№», регистр и «ё» не важны;
+ *  - managerMentioned: @менеджер/@manager/@имя и синоним «!», регистр и «ё» не важны;
  *  - parseManagerReply: текст + JSON-действия, мусор и чужие op отсеиваются;
  *  - addTeamAgent/updateTeamAgent на временных agents.json: валидность после
  *    записи (loadTeam), дефолты, белый список tools, сохранение неизвестных
@@ -107,17 +107,17 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('mention: @менеджер', managerMentioned('@менеджер, добавь Катю', cfg));
   check('mention: регистр не важен', managerMentioned('@Менеджер', cfg));
   check('mention: @manager — английский вариант', managerMentioned('а @manager пусть зайдёт', cfg));
-  check('mention: № — синоним @', managerMentioned('№менеджер, позови всех', cfg));
-  check('mention: № перед своим именем', managerMentioned('№Менеджер', cfg));
-  check('mention: без @/№ — не упоминание', !managerMentioned('менеджер, ты тут?', cfg));
+  check('mention: ! — синоним @', managerMentioned('!менеджер, позови всех', cfg));
+  check('mention: ! перед своим именем', managerMentioned('!Менеджер', cfg));
+  check('mention: без @/! — не упоминание', !managerMentioned('менеджер, ты тут?', cfg));
   check('mention: чужое @имя — мимо', !managerMentioned('@катя, привет', cfg));
   check('mention: мимо и без слова вообще', !managerMentioned('привет всем', cfg));
-  // триггер № для обычных участников (findMentions); результат — уникальные агенты
+  // триггер ! для обычных участников (findMentions); результат — уникальные агенты
   const team: Agent[] = [{ id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'p' }];
   check('mention: findMentions @имя и @id', findMentions('@Катя и @katya', team).length === 1);
-  check('mention: findMentions №имя и №id', findMentions('№катя, №katya', team).length === 1);
-  check('mention: findMentions «ё» и регистр', findMentions('Ёжик №КАТЯ', team).length === 1);
-  check('mention: findMentions чужое имя — мимо', findMentions('№кира, привет', team).length === 0);
+  check('mention: findMentions !имя и !id', findMentions('!катя, !katya', team).length === 1);
+  check('mention: findMentions «ё» и регистр', findMentions('Ёжик !КАТЯ', team).length === 1);
+  check('mention: findMentions чужое имя — мимо', findMentions('!кира, привет', team).length === 0);
 }
 {
   // псевдо-агент пригоден для шапки: есть все поля рендера
