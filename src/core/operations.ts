@@ -16,19 +16,26 @@ import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadTeam } from '../agents.js';
 import {
+  addMailAccount,
+  addMessengerBot,
   addProjectHosts,
   addTeamAgent,
   grantTool,
-  loadManagerConfig,
   loadHostsFile,
+  loadMailsFile,
+  loadManagerConfig,
+  loadMessengersFile,
+  removeMailAccount,
+  removeMessengerBot,
   removeProjectHost,
   removeTeamAgent,
   updateManagerConfig,
   updateTeamAgent,
 } from '../manager.js';
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from '../providers/registry.js';
+import { resolveEndpoints } from '../mail.js';
 import { agentToolIds } from '../tools-api.js';
-import { AGENTS_FILE, DT_HOME, HOSTS_FILE, MANAGER_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR } from '../paths.js';
+import { AGENTS_FILE, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR } from '../paths.js';
 import { loadSettings } from '../settings.js';
 import { chatTeam, isSessionRef, type App, type Engine } from './engine.js';
 import { loadSchedule, saveSchedule } from './schedule.js';
@@ -198,6 +205,27 @@ function projectListText(app: App): string[] {
   }
   lines.push('');
   return lines;
+}
+
+/** Разбор пар поле=значение для /mail add; голый «tlsNoVerify» = true, порты — числами. */
+function parseMailSpec(pairs: string[]): Record<string, unknown> | string {
+  const out: Record<string, unknown> = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf('=');
+    if (eq === -1) {
+      if (pair === 'tlsNoVerify') {
+        out.tlsNoVerify = true;
+        continue;
+      }
+      return `Синтаксис: пары поле=значение (например user=я@yandex.ru); «${pair}» — без "="`;
+    }
+    out[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+  }
+  for (const key of ['port', 'smtpPort'] as const) {
+    if (typeof out[key] === 'string') out[key] = Number(out[key]);
+  }
+  if (typeof out.tlsNoVerify === 'string') out.tlsNoVerify = out.tlsNoVerify !== 'false';
+  return out;
 }
 
 // ── общая обвязка ────────────────────────────────────────────────────────────
@@ -622,6 +650,92 @@ export const OPERATIONS: OpSpec[] = [
       const [name] = rest;
       if (!name) return ['Синтаксис: /project host delete <имя>'];
       return [removeProjectHost(HOSTS_FILE, name)];
+    },
+  },
+
+  // почта и боты проекта
+  {
+    name: 'mail.list', implicit: true, title: 'ящики',
+    help: 'реестр ящиков (mails.json)',
+    run: async () => {
+      const mails = loadMailsFile(MAIL_FILE);
+      const names = Object.keys(mails);
+      if (names.length === 0) {
+        return ['Ящиков нет — /mail add <имя> user=… password=… imap=… smtp=… или попросите менеджера'];
+      }
+      return [
+        '',
+        'Ящики:',
+        ...Object.entries(mails).map(([n, a]) => {
+          const ep = resolveEndpoints(a);
+          return `• ${n}: ${a.user} — imap ${ep.imap.host}:${ep.imap.port}, smtp ${ep.smtp.host}:${ep.smtp.port}${a.tlsNoVerify ? ' (без сверки сертификата)' : ''}`;
+        }),
+        '',
+      ];
+    },
+  },
+  {
+    name: 'mail.add',
+    args: [
+      { name: 'имя', required: true },
+      { name: 'user=… password=… imap=… smtp=…', required: true },
+    ],
+    title: 'добавить ящик',
+    help: 'пароль приложения; в mails.json проекта — руками, командой или через менеджера',
+    run: async (_engine, rest) => {
+      const [name, ...pairs] = rest;
+      if (!name || pairs.length === 0) {
+        return ['Синтаксис: /mail add <имя> user=… password=… imap=… smtp=… [port=…] [smtpPort=…] [tlsNoVerify]'];
+      }
+      const spec = parseMailSpec(pairs);
+      if (typeof spec === 'string') return [spec];
+      return [addMailAccount(MAIL_FILE, name, spec)];
+    },
+  },
+  {
+    name: 'mail.remove',
+    args: [{ name: 'имя', required: true }],
+    title: 'убрать ящик',
+    help: 'из mails.json проекта',
+    run: async (_engine, rest) => {
+      const [name] = rest;
+      if (!name) return ['Синтаксис: /mail remove <имя>'];
+      return [removeMailAccount(MAIL_FILE, name)];
+    },
+  },
+  {
+    name: 'messenger.list', implicit: true, title: 'боты',
+    help: 'токены ботов (messengers.json)',
+    run: async () => {
+      const cfg = loadMessengersFile(MESSENGERS_FILE);
+      const rows = (['telegram', 'max'] as const).filter((k) => cfg[k] !== undefined).map((k) => `• ${k}: токен сохранён`);
+      if (rows.length === 0) return ['Ботов нет — /messenger add <telegram|max> <токен> или попросите менеджера'];
+      return ['', 'Боты:', ...rows, ''];
+    },
+  },
+  {
+    name: 'messenger.add',
+    args: [
+      { name: 'telegram|max', required: true },
+      { name: 'токен', required: true },
+    ],
+    title: 'токен бота',
+    help: 'в messengers.json проекта; Telegram — @BotFather, MAX — dev.max.ru',
+    run: async (_engine, rest) => {
+      const [key, token] = rest;
+      if (!key || !token) return ['Синтаксис: /messenger add <telegram|max> <токен>'];
+      return [addMessengerBot(MESSENGERS_FILE, key, token)];
+    },
+  },
+  {
+    name: 'messenger.remove',
+    args: [{ name: 'telegram|max', required: true }],
+    title: 'убрать бота',
+    help: 'из messengers.json проекта',
+    run: async (_engine, rest) => {
+      const [key] = rest;
+      if (!key) return ['Синтаксис: /messenger remove <telegram|max>'];
+      return [removeMessengerBot(MESSENGERS_FILE, key)];
     },
   },
   {

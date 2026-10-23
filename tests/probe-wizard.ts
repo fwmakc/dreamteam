@@ -78,6 +78,14 @@ const {
     const p = JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as Record<string, unknown>;
     return typeof p === 'object' && p !== null && Object.keys(p).length === 0;
   })());
+  check('проект: mails.json — пустой реестр ящиков', (() => {
+    const p = JSON.parse(readFileSync(join(proj, 'mails.json'), 'utf8')) as Record<string, unknown>;
+    return typeof p === 'object' && p !== null && Object.keys(p).length === 0;
+  })());
+  check('проект: messengers.json — пустой реестр ботов', (() => {
+    const p = JSON.parse(readFileSync(join(proj, 'messengers.json'), 'utf8')) as Record<string, unknown>;
+    return typeof p === 'object' && p !== null && Object.keys(p).length === 0;
+  })());
 
   // --- .env создаётся из примера: только настройки serve, права 600 ---
   const envFile = join(home, '.env');
@@ -103,6 +111,13 @@ const {
     })());
     check('скелет: project/hosts.json валиден по loadHosts', (() => {
       try { return loadHosts(join(SCAFFOLD_DIR, 'project', 'hosts.json')).size === 0; } catch { return false; }
+    })());
+    check('скелет: project/mails.json и messengers.json — пустые словари', (() => {
+      try {
+        const mails = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'project', 'mails.json'), 'utf8')) as Record<string, unknown>;
+        const mess = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'project', 'messengers.json'), 'utf8')) as Record<string, unknown>;
+        return Object.keys(mails).length === 0 && Object.keys(mess).length === 0;
+      } catch { return false; }
     })());
     const mgrTpl = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'home', 'manager.json'), 'utf8'));
     check('скелет: home/manager.json — заглушка провайдера', typeof mgrTpl.provider === 'string' && mgrTpl.provider.length > 0, JSON.stringify(mgrTpl));

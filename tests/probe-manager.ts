@@ -19,8 +19,14 @@ import { checkPermission, loadHosts, resolveHost, type ToolsConfig } from '../sr
 import { loadSettings } from '../src/settings.js';
 import {
   MANAGER_PROMPT,
+  addMailAccount,
+  addMessengerBot,
   addProjectHosts,
   loadHostsFile,
+  loadMailsFile,
+  loadMessengersFile,
+  removeMailAccount,
+  removeMessengerBot,
   removeProjectHost,
   addTeamAgent,
   grantTool,
@@ -31,6 +37,8 @@ import {
   parseManagerReply,
   updateTeamAgent,
 } from '../src/manager.js';
+import { loadAccounts } from '../src/mail.js';
+import { loadMessengers } from '../src/messengers.js';
 import type { Agent, AgentTools, SessionMeta } from '../src/types.js';
 
 let fails = 0;
@@ -126,7 +134,7 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('псевдо-агент: id/имя/роль/эмодзи/цвет',
     agent.id === 'manager' && agent.name === cfg.name && agent.role === 'менеджер переговорки' &&
     agent.emoji === cfg.emoji && agent.color === cfg.color);
-  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 2200 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
+  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 2450 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
 }
 
 // --- parseManagerReply ---
@@ -358,6 +366,85 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('project host delete: нет сервера — отказ', threw.includes('nope'), threw);
   check('project: неудачные правки файл не меняли', readFileSync(hostsFile, 'utf8') === before);
   check('project: tmp-файл убран за собой', !existsSync(hostsFile + '.tmp'));
+}
+
+// --- mails.json: ящики проекта с откатом ---
+{
+  const mailsFile = join(dir, 'mails.json');
+  writeFileSync(
+    mailsFile,
+    JSON.stringify({ личное: { user: 'я@yandex.ru', password: 'секрет', imap: 'imap.yandex.ru', smtp: 'smtp.yandex.ru' } }, null, 2) + '\n',
+  );
+
+  const report = addMailAccount(mailsFile, 'работа', { user: 'робот@corp.ru', password: 'пароль-приложения', imap: 'imap.corp.ru', smtp: 'smtp.corp.ru', smtpPort: 587, tlsNoVerify: true });
+  check('mail add: отчёт', report.includes('работа') && report.includes('smtp.corp.ru'), report);
+  check('mail add: пароль в отчёт не попал', !report.includes('пароль-приложения'), report);
+  const mails = loadMailsFile(mailsFile);
+  check('mail add: loadMailsFile видит ящик', mails['работа']?.smtpPort === 587 && mails['работа']?.tlsNoVerify === true);
+  check('mail add: старый ящик на месте', mails['личное']?.imap === 'imap.yandex.ru');
+  check('mail add: файл валиден по loadAccounts', (() => { try { return Object.keys(loadAccounts(mailsFile)).length === 2; } catch { return false; } })());
+
+  const before = readFileSync(mailsFile, 'utf8');
+  let threw = '';
+  try { addMailAccount(mailsFile, 'работа', { user: 'x', password: 'p', imap: 'i', smtp: 's' }); } catch (e) { threw = (e as Error).message; }
+  check('mail add: дубликат — отказ', threw.includes('уже есть'), threw);
+  threw = '';
+  try { addMailAccount(mailsFile, 'два слова', { user: 'x', password: 'p', imap: 'i', smtp: 's' }); } catch (e) { threw = (e as Error).message; }
+  check('mail add: пробелы в имени — отказ', threw.includes('пробел'), threw);
+  threw = '';
+  try { addMailAccount(mailsFile, 'лишнее', { user: 'x', password: 'p', imap: 'i', smtp: 's', preset: 'yandex' }); } catch (e) { threw = (e as Error).message; }
+  check('mail add: неизвестное поле — отказ', threw.includes('неизвестные поля'), threw);
+  threw = '';
+  try { addMailAccount(mailsFile, 'безпароля', { user: 'x', imap: 'i', smtp: 's' }); } catch (e) { threw = (e as Error).message; }
+  check('mail add: нет пароля — отказ', threw.includes('password'), threw);
+  threw = '';
+  try { addMailAccount(mailsFile, 'безсерверов', { user: 'x', password: 'p' }); } catch (e) { threw = (e as Error).message; }
+  check('mail add: нет imap/smtp — отказ', threw.includes('imap'), threw);
+  threw = '';
+  try { addMailAccount(mailsFile, 'кривойпорт', { user: 'x', password: 'p', imap: 'i', smtp: 's', port: '993' }); } catch (e) { threw = (e as Error).message; }
+  check('mail add: порт строкой — отказ', threw.includes('port'), threw);
+  threw = '';
+  try { removeMailAccount(mailsFile, 'nope'); } catch (e) { threw = (e as Error).message; }
+  check('mail remove: нет ящика — отказ', threw.includes('nope'), threw);
+  check('mail: неудачные правки файл не меняли', readFileSync(mailsFile, 'utf8') === before);
+  check('mail: tmp-файл убран за собой', !existsSync(mailsFile + '.tmp'));
+  check('mail remove: убирает ящик', removeMailAccount(mailsFile, 'работа').includes('работа'));
+  check('mail remove: остался один ящик', Object.keys(loadMailsFile(mailsFile)).length === 1);
+}
+
+// --- messengers.json: боты проекта с откатом ---
+{
+  const messFile = join(dir, 'messengers.json');
+  writeFileSync(messFile, '{}\n');
+
+  const report = addMessengerBot(messFile, 'telegram', '123456:ABC-secret');
+  check('messenger add: отчёт', report.includes('telegram'), report);
+  check('messenger add: токен в отчёт не попал', !report.includes('ABC-secret'), report);
+  addMessengerBot(messFile, 'MAX', 'max-token-1');
+  check('messenger add: ключ без учёта регистра записан', loadMessengersFile(messFile).max !== undefined);
+
+  const before = readFileSync(messFile, 'utf8');
+  let threw = '';
+  try { addMessengerBot(messFile, 'slack', 'x'); } catch (e) { threw = (e as Error).message; }
+  check('messenger add: чужой ключ — отказ', threw.includes('telegram') && threw.includes('max'), threw);
+  threw = '';
+  try { addMessengerBot(messFile, 'telegram', '   '); } catch (e) { threw = (e as Error).message; }
+  check('messenger add: пустой токен — отказ', threw.includes('токен'), threw);
+  threw = '';
+  try { addMessengerBot(messFile, 'telegram', 'другой'); } catch (e) { threw = (e as Error).message; }
+  check('messenger add: дубликат — отказ', threw.includes('уже есть'), threw);
+  threw = '';
+  try { removeMessengerBot(messFile, 'vk'); } catch (e) { threw = (e as Error).message; }
+  check('messenger remove: чужой ключ — отказ', threw.includes('telegram'), threw);
+  check('messenger: неудачные правки файл не меняли', readFileSync(messFile, 'utf8') === before);
+  check('messenger remove: убирает бота', removeMessengerBot(messFile, 'max').includes('max'));
+  threw = '';
+  try { removeMessengerBot(messFile, 'max'); } catch (e) { threw = (e as Error).message; }
+  check('messenger remove: бота уже нет — отказ', threw.includes('нет'), threw);
+  const rest = loadMessengersFile(messFile);
+  check('messenger: telegram остался, max убран', rest.telegram !== undefined && rest.max === undefined);
+  check('messenger: файл валиден по loadMessengers', (() => { try { loadMessengers(messFile); return true; } catch { return false; } })());
+  check('messenger: tmp-файл убран за собой', !existsSync(messFile + '.tmp'));
 }
 
 // --- легаси-форма { agents: [...] } со своими полями корня всё ещё работает ---

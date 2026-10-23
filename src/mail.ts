@@ -76,7 +76,8 @@ export function loadAccounts(file = MAIL_FILE): Record<string, MailAccount> {
   return accounts;
 }
 
-function readAccount(name: string, raw: Record<string, unknown>, file: string): MailAccount {
+/** Валидирует и собирает ящик; ошибки — с именем файла (используется и менеджером при записи). */
+export function readAccount(name: string, raw: Record<string, unknown>, file: string): MailAccount {
   const extra = Object.keys(raw).filter((k) => !ACCOUNT_FIELDS.includes(k));
   if (extra.length > 0) {
     throw new Error(`${file}: ящик «${name}» — неизвестные поля ${extra.map((k) => `"${k}"`).join(', ')} (разрешены: ${ACCOUNT_FIELDS.join(', ')})`);

@@ -260,6 +260,49 @@ function check(name: string, cond: boolean): void {
   check('project host delete: сервер убран', !(JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as typeof hosts).staging);
 }
 
+// ── почта: list/add/remove ───────────────────────────────────────────────────
+{
+  let lines = await run(engine, '/mail');
+  check('mail: обзор пустого — подсказка', lines[0]?.includes('Ящиков нет') ?? false);
+
+  lines = await run(engine, '/mail add работа user=робот@corp.ru password=пароль-приложения imap=imap.corp.ru smtp=smtp.corp.ru smtpPort=587 tlsNoVerify');
+  check('mail add: отчёт ✓', lines[0]?.includes('работа') ?? false);
+  const mails = JSON.parse(readFileSync(join(proj, 'mails.json'), 'utf8')) as Record<string, { user?: string; smtpPort?: number; tlsNoVerify?: boolean }>;
+  check(
+    'mail add: пары разобраны (порт числом, флаг булевым)',
+    mails['работа']?.user === 'робот@corp.ru' && mails['работа']?.smtpPort === 587 && mails['работа']?.tlsNoVerify === true,
+  );
+  lines = await run(engine, '/mail');
+  check('mail: обзор — ящик виден', lines.some((l) => l.includes('работа') && l.includes('imap.corp.ru:993') && l.includes('smtp.corp.ru:587')) ?? false);
+  lines = await run(engine, '/mail add работа user=x@ya.ru password=p imap=imap.yandex.ru smtp=smtp.yandex.ru');
+  check('mail add: дубликат — ✗', (lines[0]?.startsWith('✗') && lines[0].includes('уже есть')) ?? false);
+  lines = await run(engine, '/mail add кривая');
+  check('mail add: без пар — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+  lines = await run(engine, '/mail add бред user=x password=p smtp=s');
+  check('mail add: нет imap — отказ валидатора', lines[0]?.includes('imap') ?? false);
+  lines = await run(engine, '/mail remove работа');
+  check('mail remove: ящик убран', !(JSON.parse(readFileSync(join(proj, 'mails.json'), 'utf8')) as typeof mails)['работа']);
+}
+
+// ── мессенджеры: list/add/remove ─────────────────────────────────────────────
+{
+  let lines = await run(engine, '/messenger');
+  check('messenger: обзор пустого — подсказка', lines[0]?.includes('Ботов нет') ?? false);
+
+  lines = await run(engine, '/messenger add telegram 123456:ABC-cmd');
+  check('messenger add: отчёт ✓', lines[0]?.includes('telegram') ?? false);
+  const mess = JSON.parse(readFileSync(join(proj, 'messengers.json'), 'utf8')) as Record<string, { token?: string } | undefined>;
+  check('messenger add: токен на диске', mess.telegram?.token === '123456:ABC-cmd');
+  lines = await run(engine, '/messenger');
+  check('messenger: обзор — бот виден', lines.some((l) => l.includes('telegram')) ?? false);
+  lines = await run(engine, '/messenger add slack x');
+  check('messenger add: чужой ключ — ✗', lines[0]?.startsWith('✗') ?? false);
+  lines = await run(engine, '/messenger add telegram другой');
+  check('messenger add: дубликат — ✗', lines[0]?.includes('уже есть') ?? false);
+  lines = await run(engine, '/messenger remove telegram');
+  check('messenger remove: бот убран', !(JSON.parse(readFileSync(join(proj, 'messengers.json'), 'utf8')) as typeof mess).telegram);
+}
+
 // ── расписание: list/add/toggle/delete ───────────────────────────────────────
 {
   let lines = await run(engine, '/schedule');

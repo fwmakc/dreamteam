@@ -13,15 +13,19 @@ import {
   grantTool,
   loadManagerConfig,
   loadHostsFile,
+  addMailAccount,
+  addMessengerBot,
   addProjectHosts,
   mergeTeamAgents,
+  removeMailAccount,
+  removeMessengerBot,
   removeProjectHost,
   removeTeamAgent,
   updateManagerConfig,
 } from './manager.js';
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from './providers/registry.js';
 import { loadSettings } from './settings.js';
-import { AGENTS_FILE, APP_VERSION, DT_HOME, HOSTS_FILE, MANAGER_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
+import { AGENTS_FILE, APP_VERSION, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
 import { agentToolIds } from './tools-api.js';
 import { safePath } from './actions.js';
 import { basename } from 'node:path';
@@ -631,6 +635,32 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { settings: loadSettings(SETTINGS_FILE, 0) };
       case 'project.host.delete': {
         const report = removeProjectHost(HOSTS_FILE, String(args.name ?? ''));
+        broadcastState();
+        return { text: report };
+      }
+      case 'mail.add': {
+        // name — имя ящика, остальное (user/password/imap/smtp/порты/tlsNoVerify) уходит в валидацию как есть
+        const { name, ...spec } = args as Record<string, unknown>;
+        const report = addMailAccount(MAIL_FILE, String(name ?? ''), spec);
+        presenter.notice('  ' + report);
+        broadcastState();
+        return { text: report };
+      }
+      case 'mail.remove': {
+        const report = removeMailAccount(MAIL_FILE, String(args.name ?? ''));
+        presenter.notice('  ' + report);
+        broadcastState();
+        return { text: report };
+      }
+      case 'messenger.add': {
+        const report = addMessengerBot(MESSENGERS_FILE, String(args.key ?? ''), String(args.token ?? ''));
+        presenter.notice('  ' + report);
+        broadcastState();
+        return { text: report };
+      }
+      case 'messenger.remove': {
+        const report = removeMessengerBot(MESSENGERS_FILE, String(args.key ?? ''));
+        presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }

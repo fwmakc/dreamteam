@@ -3,6 +3,8 @@ import {
   MANAGER_ID,
   MANAGER_PROMPT,
   MANAGER_ROLE,
+  addMailAccount,
+  addMessengerBot,
   addProjectHosts,
   addTeamAgent,
   grantTool,
@@ -10,6 +12,8 @@ import {
   managerMentioned,
   managerStateInput,
   parseManagerReply,
+  removeMailAccount,
+  removeMessengerBot,
   updateTeamAgent,
 } from '../manager.js';
 import {
@@ -39,7 +43,9 @@ import { writeFileSync } from 'node:fs';
 import {
   AGENTS_FILE,
   HOSTS_FILE,
+  MAIL_FILE,
   MEMORY_FILE,
+  MESSENGERS_FILE,
   SETTINGS_FILE,
   TOOLS_DIR,
   USER_FILE,
@@ -737,6 +743,17 @@ export class Engine {
         return grantTool(AGENTS_FILE, action.agent, action.tool, action.card, TOOLS_DIR);
       case 'project.host.add':
         return addProjectHosts(HOSTS_FILE, { [String(action.name ?? 'main')]: action });
+      case 'mail.add': {
+        // op и name — поля действия, не ящика: в spec не идут (валидация строга к лишним полям)
+        const { op, name, ...spec } = action;
+        return addMailAccount(MAIL_FILE, String(name), spec);
+      }
+      case 'mail.remove':
+        return removeMailAccount(MAIL_FILE, String(action.name));
+      case 'messenger.add':
+        return addMessengerBot(MESSENGERS_FILE, action.key, action.token);
+      case 'messenger.remove':
+        return removeMessengerBot(MESSENGERS_FILE, action.key);
       default:
         throw new Error(`неизвестное действие менеджера «${(action as { op: string }).op}»`);
       case 'session.list':

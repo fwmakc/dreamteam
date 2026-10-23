@@ -5,20 +5,18 @@
  *     пользовательская часть = состояние переговорки (ростер с тула­ми и
  *     провайдерами, состав чата, разговоры с номерами, проекты, команды,
  *     окно истории, просьба).
- *  2. ПРОЕКТИРОВАНИЕ: промт объявляет все 11 операций и JSON-протокол
+ *  2. ПРОЕКТИРОВАНИЕ: промт объявляет все 15 операций и JSON-протокол
  *     {say, actions}; сценарии с заготовленными ответами скриптового LLM.
  *  3. ВЫПОЛНЕНИЕ: каждый op через настоящий managerTurn на герметичных слоях —
- *     итог в файлах (агенты — в доме, hosts.json — в проекте), отчёты ✓/✗ в истории
- *     разговора, реплика менеджера сохраняется в СТАРЫЙ разговор до
- *     переключения (pendingSwitches), мусорный ответ — без изменений конфига.
+ *     итог в файлах (агенты — в доме, hosts/mails/messengers.json — в проекте),
+ *     отчёты ✓/✗ в истории разговора, реплика менеджера сохраняется в СТАРЫЙ
+ *     разговор до переключения (pendingSwitches), мусорный ответ — без правок.
  * Запуск: npm run probe:manager-flow
  */
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MANAGER_PROMPT } from '../src/manager.js';
 import type { LLMProvider, StreamRequest } from '../src/types.js';
-import { MANAGER_ID } from '../src/manager.js';
 import type { Presenter, SpeakerRef, TurnSink } from '../src/core/presenter.js';
 import { rmTemp } from './rm-tmp.js';
 
@@ -37,10 +35,16 @@ const home = join(base, 'home');
 const proj = join(base, 'proj');
 const agentsFile = join(home, 'agents.json');
 const hostsFile = join(proj, 'hosts.json');
+const mailsFile = join(proj, 'mails.json');
+const messFile = join(proj, 'messengers.json');
 mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
 process.env.DT_PROJECT = proj;
 process.chdir(base); // рабочая папка инструментов — песочница
+
+// src-модули — строго после подмены слоёв: paths.ts вычисляет пути в момент
+// загрузки, а manager.ts теперь транзитно тянет paths.js (через mail.js)
+const { MANAGER_PROMPT, MANAGER_ID } = await import('../src/manager.js');
 
 writeFileSync(
   join(home, 'providers.json'),
@@ -162,6 +166,7 @@ function lastManagerMessage(): string {
     'team.add', 'team.update', 'chat.add', 'chat.remove',
     'session.list', 'session.open', 'session.new', 'session.delete',
     'tool.grant', 'project.host.add',
+    'mail.add', 'mail.remove', 'messenger.add', 'messenger.remove',
   ]) {
     check(`проектирование: промт объявляет ${op}`, MANAGER_PROMPT.includes(op));
   }
@@ -295,6 +300,27 @@ function lastManagerMessage(): string {
   check('project: сервер с портом добавлен', raw.qa?.port === 2222, JSON.stringify(raw));
   check('project: отчёты ✓ в истории менеджера',
     app.session.messages.some((m) => m.authorId === 'manager' && m.text.includes('сервер(а) добавлены')), lastManagerMessage().slice(-160));
+}
+
+// mail.add + messenger.add + кривой ключ: ящики и боты текущего проекта
+{
+  await askManager(
+    'Подключаю.\n{"say":"Подключаю ящик и бота.","actions":[' +
+    '{"op":"mail.add","name":"работа","user":"робот@corp.ru","password":"пароль-приложения","imap":"imap.corp.ru","smtp":"smtp.corp.ru","smtpPort":587},' +
+    '{"op":"messenger.add","key":"telegram","token":"123456:ABC-flow"},' +
+    '{"op":"messenger.add","key":"slack","token":"чужой"},' +
+    '{"op":"mail.add","name":"работа","user":"дубль@corp.ru","password":"p","imap":"i","smtp":"s"}]}',
+    'заведи ящик и телеграм-бота',
+  );
+  const mails = JSON.parse(readFileSync(mailsFile, 'utf8')) as Record<string, { imap?: string; smtpPort?: number }>;
+  check('mail: ящик добавлен с портом', mails['работа']?.imap === 'imap.corp.ru' && mails['работа']?.smtpPort === 587, JSON.stringify(mails));
+  const mess = JSON.parse(readFileSync(messFile, 'utf8')) as Record<string, { token?: string } | undefined>;
+  check('messenger: токен telegram записан', mess.telegram?.token === '123456:ABC-flow', JSON.stringify(mess));
+  check('messenger: чужой ключ отфильтрован', mess.slack === undefined, JSON.stringify(mess));
+  check('mail: дубликат — ✗ в истории, файл без дубля',
+    Object.keys(mails).length === 1 &&
+    app.session.messages.some((m) => m.authorId === 'manager' && m.text.includes('✗') && m.text.includes('уже есть')),
+    lastManagerMessage().slice(-200));
 }
 
 // session.rename: менеджер переименовывает текущий разговор

@@ -13,6 +13,7 @@ import type {
   SessionMeta,
 } from './types.js';
 import { loadTeam, MENTION_TRIGGERS } from './agents.js';
+import { readAccount, type MailAccount } from './mail.js';
 import { agentToolIds, BUILTIN_TOOL_IDS, normalizeAgentTools, TOOL_ID_RE } from './tools-api.js';
 
 export const MANAGER_ID = 'manager';
@@ -127,7 +128,7 @@ export function managerMentioned(text: string, cfg: ManagerConfig): boolean {
 /** Короткий промпт менеджера (маркер «менеджер переговорки» в начале — по нему mock-провайдер узнаёт его) */
 export const MANAGER_PROMPT =
   'Ты — менеджер переговорки: модератор беседы и единственный, кто меняет состав команды, ' +
-  'состав чата, разговоры, инструменты участников и реестр серверов. Пиши коротко, по-русски. ' +
+  'состав чата, разговоры, инструменты участников и реестры проекта (серверы, ящики, боты). Пиши коротко, по-русски. ' +
   'Если просят изменение — сделай его сам.\n' +
   'Формат ответа: сначала короткий текст для человека, затем строго один JSON-объект:\n' +
   '{"say":"текст для человека","actions":[...действия...]}\n' +
@@ -138,6 +139,8 @@ export const MANAGER_PROMPT =
   '- {"op":"session.list"} — показать разговоры; {"op":"session.open","n":2} — открыть №2; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","n":3} — удалить №3 (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (когда просят придумать имя — опирайся на краткое содержание или начало разговора)\n' +
   '- {"op":"tool.grant","agent":"id_участника","tool":"files","card":{"allow":["git *"]}} — включить тул агенту или обновить его карточку; card можно опустить (настройки по умолчанию). Встроенные: files, shell, git, arch, ssh, look, image; свои — имя файла из tools/ (включить можно только существующий, код тулов пишет человек)\n' +
   '- {"op":"project.host.add","name":"prod","host":"203.0.113.10","user":"deploy","port":22,"dir":"/srv/app"} — сервер в текущий проект (password лучше не передавать в переписке — пусть человек впишет сам)\n' +
+  '- {"op":"mail.add","name":"ящик","user":"робот@corp.ru","password":"пароль-приложения","imap":"imap.corp.ru","smtp":"smtp.corp.ru","smtpPort":587} — ящик в mails.json (tlsNoVerify — опционально)\n' +
+  '- {"op":"mail.remove","name":"ящик"}; {"op":"messenger.add","key":"telegram","token":"123456:ABC…"} / {"op":"messenger.remove","key":"max"} — токены ботов в messengers.json (key: telegram|max)\n' +
   'Делай только те действия, о которых попросили. Если изменение не требуется — ответь одним текстом, без JSON.';
 
 export interface ManagerContext {
@@ -214,6 +217,10 @@ const MANAGER_OPS = new Set([
   'session.rename',
   'tool.grant',
   'project.host.add',
+  'mail.add',
+  'mail.remove',
+  'messenger.add',
+  'messenger.remove',
 ]);
 
 function isManagerAction(a: unknown): a is ManagerAction {
@@ -238,6 +245,18 @@ function isManagerAction(a: unknown): a is ManagerAction {
       return typeof o.agent === 'string' && typeof o.tool === 'string';
     case 'project.host.add':
       return typeof o.name === 'string' && typeof o.host === 'string';
+    case 'mail.add':
+      return (
+        typeof o.name === 'string' &&
+        typeof o.user === 'string' && typeof o.password === 'string' &&
+        typeof o.imap === 'string' && typeof o.smtp === 'string'
+      );
+    case 'mail.remove':
+      return typeof o.name === 'string';
+    case 'messenger.add':
+      return (o.key === 'telegram' || o.key === 'max') && typeof o.token === 'string';
+    case 'messenger.remove':
+      return o.key === 'telegram' || o.key === 'max';
     default:
       return true; // session.list, session.new — обязательных полей нет
   }
@@ -532,4 +551,113 @@ export function removeProjectHost(file: string, name: string): string {
   delete registry[hid];
   saveHostsFile(file, registry);
   return `✓ сервер «${hid}» убран из проекта`;
+}
+
+// ─── mails.json: ящики проекта ───────────────────────────────────────────────
+
+/** Реестр ящиков: { "работа": { user, password, imap, smtp, … } } — плоский словарь. */
+export type MailsFile = Record<string, MailAccount>;
+
+/** Читает mails.json; нет файла или он битый — пусто (просмотр не падает). */
+export function loadMailsFile(file: string): MailsFile {
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return raw as MailsFile;
+  } catch {
+    return {};
+  }
+}
+
+/** Запись mails.json: tmp → rename. */
+function saveMailsFile(file: string, mails: MailsFile): void {
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(mails, null, 2)}\n`, 'utf8');
+  renameSync(tmp, file);
+}
+
+/**
+ * mail add: ящик в mails.json; файла нет — создаём. Валидация та же, что у
+ * тула mail (readAccount), до записи; пароль в отчёте не светится.
+ */
+export function addMailAccount(file: string, name: string, spec: unknown): string {
+  const box = String(name ?? '').trim();
+  if (!box || /\s/.test(box)) throw new Error('имя ящика — непустая строка без пробелов');
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+    throw new Error('ящик — объект { "user", "password", "imap", "smtp" }');
+  }
+  const acc = readAccount(box, spec as Record<string, unknown>, file);
+  const mails = loadMailsFile(file);
+  if (mails[box] !== undefined) {
+    throw new Error(`ящик «${box}» уже есть — /mail remove «${box}», если нужно заменить`);
+  }
+  mails[box] = acc;
+  saveMailsFile(file, mails);
+  return `✓ ящик «${box}» добавлен (${acc.user} — imap ${acc.imap}, smtp ${acc.smtp})`;
+}
+
+/** mail remove: убрать ящик из mails.json. */
+export function removeMailAccount(file: string, name: string): string {
+  const box = String(name ?? '').trim();
+  const mails = loadMailsFile(file);
+  if (mails[box] === undefined) {
+    throw new Error(`ящика «${box}» нет — см. /mail`);
+  }
+  delete mails[box];
+  saveMailsFile(file, mails);
+  return `✓ ящик «${box}» убран`;
+}
+
+// ─── messengers.json: боты telegram/max ──────────────────────────────────────
+
+const MESSENGER_KEYS = ['telegram', 'max'] as const;
+
+/** Читает messengers.json; нет файла или он битый — пусто (просмотр не падает). */
+export function loadMessengersFile(file: string): Record<string, unknown> {
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return raw as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/** Запись messengers.json: tmp → rename. */
+function saveMessengersFile(file: string, cfg: Record<string, unknown>): void {
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(cfg, null, 2)}\n`, 'utf8');
+  renameSync(tmp, file);
+}
+
+/** messenger add: токен бота в messengers.json; файла нет — создаём. Токен в отчёте не светится. */
+export function addMessengerBot(file: string, key: string, token: string): string {
+  const k = String(key ?? '').trim().toLowerCase();
+  if (!(MESSENGER_KEYS as readonly string[]).includes(k)) {
+    throw new Error(`ключ бота — «telegram» или «max», получено «${key}»`);
+  }
+  const tok = String(token ?? '').trim();
+  if (!tok) throw new Error('нужен токен (Telegram — @BotFather, MAX — dev.max.ru)');
+  const cfg = loadMessengersFile(file);
+  if (cfg[k] !== undefined) {
+    throw new Error(`бот «${k}» уже есть — /messenger remove ${k}, если нужно заменить`);
+  }
+  cfg[k] = { token: tok };
+  saveMessengersFile(file, cfg);
+  return `✓ токен бота «${k}» сохранён в messengers.json`;
+}
+
+/** messenger remove: убрать бота из messengers.json. */
+export function removeMessengerBot(file: string, key: string): string {
+  const k = String(key ?? '').trim().toLowerCase();
+  if (!(MESSENGER_KEYS as readonly string[]).includes(k)) {
+    throw new Error(`ключ бота — «telegram» или «max», получено «${key}»`);
+  }
+  const cfg = loadMessengersFile(file);
+  if (cfg[k] === undefined) {
+    throw new Error(`бота «${k}» нет — см. /messenger`);
+  }
+  delete cfg[k];
+  saveMessengersFile(file, cfg);
+  return `✓ бот «${k}» убран из messengers.json`;
 }

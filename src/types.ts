@@ -199,7 +199,15 @@ export type ManagerAction =
   | { op: 'session.rename'; title: string }
   /** Включить тул агенту / обновить его карточку (tools в agents.json) */
   | { op: 'tool.grant'; agent: string; tool: string; card?: unknown }
-  | { op: 'project.host.add'; project?: string; name: string } & ManagerHostSpec;
+  | { op: 'project.host.add'; project?: string; name: string } & ManagerHostSpec
+  /** Ящик в mails.json проекта (поля как в конфиге тула mail) */
+  | { op: 'mail.add'; name: string; user: string; password: string; imap: string; smtp: string; port?: number; smtpPort?: number; tlsNoVerify?: boolean }
+  /** Убрать ящик из mails.json проекта */
+  | { op: 'mail.remove'; name: string }
+  /** Токен бота в messengers.json проекта */
+  | { op: 'messenger.add'; key: 'telegram' | 'max'; token: string }
+  /** Убрать бота из messengers.json */
+  | { op: 'messenger.remove'; key: 'telegram' | 'max' };
 
 /** Сервер в действии менеджера (project.host.add) */
 export interface ManagerHostSpec {
