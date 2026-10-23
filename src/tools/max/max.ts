@@ -14,9 +14,9 @@
  * «Избранное» — диалог бота с хозяином: его chat_id смотрите в «chats».
  */
 import { basename } from 'node:path';
-import { checkCardKeys, splitArgs, type Tool, type ToolConfig, type ToolRunContext, type ToolVerdict } from '../tools-api.js';
-import { apiGet, apiPost, loadMessengers, maxUploadToken, MAX_API, parseSendText, pickMessenger } from '../messengers.js';
-import { attachmentPath } from './mail.js';
+import { checkCardKeys, resolveCard, splitArgs, type Tool, type ToolConfig, type ToolRunContext, type ToolVerdict } from '../../tools-api.js';
+import { apiGet, apiPost, loadMessengers, maxUploadToken, MAX_API, parseSendText, pickMessenger } from '../../messengers.js';
+import { attachmentPath } from '../mail/mail.js';
 
 interface MaxChat {
   chat_id?: number | string;
@@ -37,7 +37,7 @@ function isImage(name: string): boolean {
 }
 
 export default (config: ToolConfig): Tool => {
-  checkCardKeys(config, 'max');
+  checkCardKeys(resolveCard('max', config), 'max');
 
   return {
     desc:

@@ -17,7 +17,9 @@
  * но «разрешить молча» — тоже его ответственность, хозяин читает его код.
  */
 
+import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { Agent, AgentTools } from './types.js';
 import type { ToolsConfig, ToolContext } from './actions.js';
@@ -195,12 +197,46 @@ export function commandCheck(rules: CommandRules, body: string): ToolVerdict {
 
 // ─── Дефолтная политика командных тулов (shell, ssh) ────────────────────────
 
-/** Read-only подкоманды git — общий набор для тула git и для shell (git …). */
-export const GIT_READONLY_SUBCOMMANDS = new Set([
-  'status', 'log', 'diff', 'show', 'blame', 'shortlog', 'describe', 'rev-parse',
-  'reflog', 'grep', 'cat-file', 'diff-tree', 'merge-base', 'ls-files',
-  'branch', 'tag', 'help', 'version',
-]);
+/**
+ * Обязательный дефолтный конфиг встроенного тула: src/tools/<id>/default.json
+ * рядом с кодом тула. Единственное место, где живут правила «что текёт
+ * молча» и заводские настройки: файл открытый, его можно прочитать и
+ * обсудить, а не копаться в коде. Фабрика тула валидирует его теми же
+ * проверками, что и карточки агентов; нет файла или кривой JSON — ошибка
+ * при сборке тула, а не молча другая политика. Результат кэшируется.
+ */
+const defaultsCache = new Map<string, ToolConfig>();
+
+export function toolDefaults(toolId: string): ToolConfig {
+  const cached = defaultsCache.get(toolId);
+  if (cached) return cached;
+  const file = fileURLToPath(new URL(`./tools/${toolId}/default.json`, import.meta.url));
+  let raw: string;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch {
+    throw new Error(`у встроенного тула «${toolId}» нет обязательного дефолтного конфига: ${file}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`${file} — кривой JSON: ${e instanceof Error ? e.message : e}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${file} — ожидается объект (карточка по умолчанию)`);
+  }
+  defaultsCache.set(toolId, parsed as ToolConfig);
+  return parsed as ToolConfig;
+}
+
+/**
+ * Карточка тула для фабрики: что задал агент — то и работает (заменяет
+ * дефолт целиком); пустая карточка (null/{}) — дефолт из default.json.
+ */
+export function resolveCard(toolId: string, config: ToolConfig): ToolConfig {
+  return config && Object.keys(config).length > 0 ? config : toolDefaults(toolId);
+}
 
 /** Строка команды → аргументы: пробелы вне кавычек — границы, кавычки снимаются. */
 export function splitArgs(command: string): string[] {

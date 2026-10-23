@@ -25,7 +25,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 }
 
 const cwd = mkdtempSync(join(tmpdir(), 'dt-docs-'));
-const tool = (await import('../src/tools/docs.js')).default({});
+const tool = (await import('../src/tools/docs/docs.js')).default({});
 const run = (body: string): Promise<string> =>
   tool.run(body, { cwd, run: async () => ({ ok: true, output: '' }), http: async () => ({ ok: true, output: '' }), confirm: async () => false });
 

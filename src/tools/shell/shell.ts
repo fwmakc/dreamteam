@@ -3,49 +3,51 @@
  *
  * Команды исполняются системным шеллом платформы: на Windows — cmd.exe,
  * на Linux/macOS — /bin/sh. Поэтому и белый список read-only, и подсказка
- * агенту — платформенные: на Windows bash-команды (ls, pwd, cat) физически
- * не существуют, а родные команды cmd (dir, type, findstr) — существуют.
+ * агенту — платформенные (default.json: "allow" для POSIX-шелла,
+ * "allowWin32" для cmd), а на Windows bash-команды (ls, pwd, cat) физически
+ * не существуют, и родные команды cmd (dir, type, findstr) — существуют.
  *
  * check() — два режима:
  *  - правила карточки (allow/deny) заданы — работает commandCheck: та же
  *    механика, что у git (deny бьёт любую часть цепочки, allow — целыми
  *    словами и без подстановок), дефолтная политика вытесняется целиком;
- *  - карточка пуста — дефолтная политика: read-only команды (ls, cat, git
- *    status… / dir, type, findstr…) текут молча, но ТОЛЬКО внутри рабочей
- *    папки: путь за её пределами или похожий на секрет — отказ с
- *    обоснованием (deny), не вопрос.
+ *  - карточка пуста — дефолтная политика из default.json: read-only команды
+ *    (ls, cat… / dir, type…) текут молча, но ТОЛЬКО внутри рабочей папки:
+ *    путь за её пределами или похожий на секрет — отказ с обоснованием
+ *    (deny), не вопрос. Git-команды в дефолт не входят сознательно: работа
+ *    с репозиторием — отдельный тул git (```git), в shell она остаётся
+ *    вопросом человеку.
  *
  * run() исполняет команду через системный шелл, таймаут и обрезка вывода —
  * из настроек. Рабочая папка — папка действия (текущая папка проекта).
  */
-import { executeRunAction } from '../actions.js';
+import { executeRunAction } from '../../actions.js';
 import {
   checkCardKeys,
   commandCheck,
   defaultCommandCheck,
-  GIT_READONLY_SUBCOMMANDS,
   parseCommandRules,
-} from '../tools-api.js';
-import type { BuiltinDeps, Tool, ToolConfig } from '../tools-api.js';
-
-/** Read-only команды Unix-шелла: только читают (у find мутации ловит отдельный фильтр). */
-const SHELL_SAFE_UNIX = new Set([
-  'pwd', 'ls', 'cat', 'head', 'tail', 'grep', 'find', 'tree', 'wc', 'file',
-  'stat', 'du', 'df', 'which', 'whoami', 'hostname', 'date', 'echo', 'printf',
-]);
+  toolDefaults,
+} from '../../tools-api.js';
+import type { BuiltinDeps, Tool, ToolConfig } from '../../tools-api.js';
 
 /**
- * Read-only команды cmd.exe на Windows — аналоги POSIX-набора.
- * Без date: голая `date` в cmd ждёт ввод с stdin и виснет до таймаута.
- * cd оставлен: голая `cd` печатает папку (аналог pwd); `cd куда-то` —
- * только внутри одного блока, сквозной смены папки не существует.
+ * Белый список read-only команд — из default.json рядом с кодом ("allow" для
+ * POSIX-шелла, "allowWin32" для cmd.exe: голая `date` в cmd ждёт ввод с stdin
+ * и виснет до таймаута, поэтому её в win32-наборе нет; голая `cd` печатает
+ * папку — оставлена как аналог pwd). Валидируется теми же правилами, что и
+ * карточки: кривой дефолт роняет сборку тула, а не молча меняет политику.
  */
-const SHELL_SAFE_WIN32 = new Set([
-  'cd', 'dir', 'type', 'findstr', 'find', 'where', 'tree', 'echo',
-  'hostname', 'whoami',
-]);
-
-const SHELL_SAFE = process.platform === 'win32' ? SHELL_SAFE_WIN32 : SHELL_SAFE_UNIX;
+const SAFE_LISTS = toolDefaults('shell');
+checkCardKeys(SAFE_LISTS, 'shell default.json', 'allow', 'allowWin32', 'deny');
+const pickSafe = (key: 'allow' | 'allowWin32'): Set<string> => {
+  const list = SAFE_LISTS[key];
+  if (!Array.isArray(list) || list.some((s) => typeof s !== 'string' || !s.trim())) {
+    throw new Error(`src/tools/shell/default.json: "${key}" — массив непустых строк`);
+  }
+  return new Set((list as string[]).map((s) => s.trim()));
+};
+const SHELL_SAFE = process.platform === 'win32' ? pickSafe('allowWin32') : pickSafe('allow');
 
 /** find умеет удалять и запускать — такие флаги мимо дефолта. */
 const FIND_MUTATIONS = /-(delete|exec|execdir|ok|okdir)\b/;
@@ -61,8 +63,9 @@ export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
       'а для git — отдельный тул git. Read-only — молча, но только внутри рабочей ' +
       'папки (выход, секреты и подстановки %переменные% — отказ); ' +
       'остальное — по правилам карточки shell или вопрос человеку.'
-    : 'Команды оболочки этого ПК (```run). Read-only (ls, cat, grep, git status…) — ' +
+    : 'Команды оболочки этого ПК (```run). Read-only (ls, cat, grep…) — ' +
       'молча, но только внутри рабочей папки (выход и секреты — отказ); ' +
+      'для git — отдельный тул git (```git), для серверов — ssh; ' +
       'остальное — по правилам карточки shell или вопрос человеку.';
   return {
     desc,
@@ -71,7 +74,6 @@ export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
         ? commandCheck(rules, body)
         : defaultCommandCheck(body, {
             safe: SHELL_SAFE,
-            nested: { command: 'git', readonlySet: GIT_READONLY_SUBCOMMANDS, bareOnly: ['branch', 'tag'] },
             cwd: ctx?.cwd,
             askIf: FIND_MUTATIONS,
           }),

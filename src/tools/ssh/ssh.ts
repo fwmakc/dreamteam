@@ -7,13 +7,14 @@
  *  1. папка проекта на сервере (host.dir из projects.json) и маски карточки
  *     ("masks", gitignore-синтаксис) — отказ всегда, правила карточки их
  *     не обходят: выход за папку и запретные файлы не бывают «молча»;
- *  2. правила карточки (allow/deny) или дефолт — read-only команды
- *     (uptime, df, systemctl status…) молча, остальное — вопрос человеку.
+ *  2. правила карточки (allow/deny) или дефолт из default.json — read-only
+ *     команды (uptime, df, systemctl status…) молча, остальное — вопрос
+ *     человеку.
  * На сервере всё исполняется из папки проекта (cd + pwd в executeSshAction),
  * так что относительные пути — от неё.
  */
 import { relative } from 'node:path';
-import { executeScpTransfer, executeSshAction, resolveHost, safePath, type HostConfig } from '../actions.js';
+import { executeScpTransfer, executeSshAction, resolveHost, safePath, type HostConfig } from '../../actions.js';
 import {
   checkCardKeys,
   commandCheck,
@@ -25,24 +26,31 @@ import {
   protectedPath,
   splitArgs,
   splitChain,
+  toolDefaults,
   type BuiltinDeps,
   type Tool,
   type ToolCheckContext,
   type ToolConfig,
   type ToolVerdict,
-} from '../tools-api.js';
+} from '../../tools-api.js';
 
-/** Безопасные команды на сервере: только читают. */
-const SSH_SAFE = new Set([
-  'pwd', 'ls', 'cat', 'head', 'tail', 'grep', 'ps', 'df', 'du', 'free',
-  'uptime', 'whoami', 'hostname', 'uname', 'id', 'date', 'which', 'journalctl',
-]);
-
-/** systemctl только спрашивающие подкоманды — управляющие мимо дефолта. */
-const SYSTEMCTL_READONLY = new Set([
-  'status', 'is-active', 'is-enabled', 'is-failed', 'list-units',
-  'list-unit-files', 'list-timers', 'show', 'cat',
-]);
+/**
+ * Дефолтная политика — из default.json рядом с кодом: "allow" — read-only
+ * команды сервера, "allowSystemctl" — спрашивающие подкоманды systemctl
+ * (управляющие — мимо дефолта). Валидируется теми же правилами, что и
+ * карточки: кривой дефолт роняет сборку тула.
+ */
+const DEF = toolDefaults('ssh');
+checkCardKeys(DEF, 'ssh default.json', 'allow', 'allowSystemctl', 'deny');
+const readList = (key: 'allow' | 'allowSystemctl'): Set<string> => {
+  const list = DEF[key];
+  if (!Array.isArray(list) || list.some((s) => typeof s !== 'string' || !s.trim())) {
+    throw new Error(`src/tools/ssh/default.json: "${key}" — массив непустых строк`);
+  }
+  return new Set((list as string[]).map((s) => s.trim()));
+};
+const SSH_SAFE = readList('allow');
+const SYSTEMCTL_READONLY = readList('allowSystemctl');
 
 export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
   checkCardKeys(config, 'ssh', 'allow', 'deny', 'masks');

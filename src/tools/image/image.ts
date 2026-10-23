@@ -4,12 +4,12 @@
  * пишет только в папку images/ и проверяется глазами через look; протокол
  * «эскизы → одобрение босса» — в промптах художников.
  */
-import { executeImageAction, parseImageParams } from '../actions.js';
-import { checkCardKeys } from '../tools-api.js';
-import type { BuiltinDeps, Tool, ToolConfig } from '../tools-api.js';
+import { executeImageAction, parseImageParams } from '../../actions.js';
+import { checkCardKeys, resolveCard } from '../../tools-api.js';
+import type { BuiltinDeps, Tool, ToolConfig } from '../../tools-api.js';
 
 export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
-  checkCardKeys(config, 'image');
+  checkCardKeys(resolveCard('image', config), 'image');
   return {
     desc: 'Генерация изображений image-моделью (```image, параметры строками «prompt: …», «size: …» и т.д.).',
     check: () => 'allow',

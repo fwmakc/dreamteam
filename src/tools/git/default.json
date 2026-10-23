@@ -1,0 +1,3 @@
+{
+  "allow": ["status", "log", "diff", "show", "blame", "shortlog", "describe", "rev-parse", "reflog", "grep", "cat-file", "diff-tree", "merge-base", "ls-files", "branch", "tag", "help", "version"]
+}

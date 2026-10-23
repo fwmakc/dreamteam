@@ -80,7 +80,7 @@ writeFileSync(join(cwd, 'таблица.png'), pngWithText([
   writeFileSync(join(cwd, 'сканы.docx'), await Packer.toBuffer(doc));
 }
 
-const tool = (await import('../src/tools/ocr.js')).default({});
+const tool = (await import('../src/tools/ocr/ocr.js')).default({});
 const run = (body: string): Promise<string> =>
   tool.run(body, { cwd, run: async () => ({ ok: true, output: '' }), http: async () => ({ ok: true, output: '' }), confirm: async () => false });
 

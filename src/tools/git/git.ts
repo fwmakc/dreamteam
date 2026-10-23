@@ -5,9 +5,9 @@
  *  - правила карточки (allow/deny) заданы — работает commandCheck: та же
  *    механика, что у shell (deny бьёт любую часть цепочки, allow — целыми
  *    словами и без подстановок), дефолтная политика вытесняется;
- *  - карточка пуста — встроенная политика: read-only команды (status, log,
- *    diff, show, blame…) текут молча, всё изменяющее (commit, push, reset…)
- *    и любые подстановки — вопрос человеку.
+ *  - карточка пуста — встроенная политика из default.json: read-only команды
+ *    (status, log, diff, show, blame…) текут молча, всё изменяющее (commit,
+ *    push, reset…) и любые подстановки — вопрос человеку.
  *
  * run() запускает настоящий git: spawn с массивом аргументов (без cmd.exe —
  * инъекции исключены), таймаут и обрезка вывода из карточки. Репозиторий —
@@ -23,16 +23,24 @@ import { resolve } from 'node:path';
 import {
   checkCardKeys,
   commandCheck,
-  GIT_READONLY_SUBCOMMANDS,
   parseCommandRules,
   splitArgs,
   splitChain,
   SUBST,
+  toolDefaults,
   type Tool,
   type ToolConfig,
   type ToolRunContext,
   type ToolVerdict,
-} from '../tools-api.js';
+} from '../../tools-api.js';
+
+/** Read-only подкоманды git — из default.json рядом с кодом. */
+const DEF = toolDefaults('git');
+checkCardKeys(DEF, 'git default.json', 'allow');
+if (!Array.isArray(DEF.allow) || DEF.allow.some((s) => typeof s !== 'string' || !s.trim())) {
+  throw new Error('src/tools/git/default.json: "allow" — массив непустых строк');
+}
+const GIT_READONLY_SUBCOMMANDS = new Set((DEF.allow as string[]).map((s) => s.trim()));
 
 /** Дефолтная политика без карточки: каждая команда цепочки должна быть read-only. */
 function defaultCheck(body: string): ToolVerdict {

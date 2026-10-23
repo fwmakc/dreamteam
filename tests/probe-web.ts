@@ -14,7 +14,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   }
 }
 
-const { default: makeTool } = await import('../src/tools/web.js');
+const { default: makeTool } = await import('../src/tools/web/web.js');
 import http from 'node:http';
 
 /** Локальный сайт: страница с двумя ссылками и редирект — для links и редиректов. */

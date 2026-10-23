@@ -11,8 +11,8 @@
  * с подсказкой, куда сайт добавить. JS на страницах не исполняется — то, что
  * отдал сервер, то и разбираем. Каждый редирект сверяется со списком.
  */
-import { checkCardKeys, splitArgs, type Tool, type ToolConfig, type ToolVerdict } from '../tools-api.js';
-import { extractArticle, extractLinks, fetchPage, hostAllowed } from '../web.js';
+import { checkCardKeys, resolveCard, splitArgs, type Tool, type ToolConfig, type ToolVerdict } from '../../tools-api.js';
+import { extractArticle, extractLinks, fetchPage, hostAllowed } from '../../web.js';
 
 /** Разбор заголовка блока: подкоманда + аргументы. */
 function parseHead(body: string): { sub: string; rest: string[] } {
@@ -25,11 +25,12 @@ function syntax(): string {
 }
 
 export default (config: ToolConfig): Tool => {
-  checkCardKeys(config, 'web', 'sites');
-  if (config.sites !== undefined && (!Array.isArray(config.sites) || (config.sites as unknown[]).some((s) => typeof s !== 'string' || !s.trim()))) {
+  const card = resolveCard('web', config);
+  checkCardKeys(card, 'web', 'sites');
+  if (card.sites !== undefined && (!Array.isArray(card.sites) || (card.sites as unknown[]).some((s) => typeof s !== 'string' || !s.trim()))) {
     throw new Error('карточка тула web: "sites" — массив непустых доменов ["wikipedia.org", "github.com"]');
   }
-  const sites = ((config.sites as string[] | undefined) ?? []).map((s) => s.trim());
+  const sites =  ((card.sites as string[] | undefined) ?? []).map((s) => s.trim());
 
   /** Адрес валиден и разрешён? Для check() и run() — одна и та же причина отказа. */
   const guard = (urlText: string): { url: URL } | { deny: string } => {

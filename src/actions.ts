@@ -737,7 +737,28 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
     lines.push('```file ' + sample, '<полное содержимое файла>', '```');
   }
   if (ids.includes('shell')) {
-    lines.push('```run', projects.length > 0 ? `${projects[0]}:одна команда оболочки, например docker ps` : '<одна команда оболочки, например docker ps>', '```');
+    lines.push(
+      '```run',
+      projects.length > 0 ? `${projects[0]}:одна команда оболочки, например docker ps` : '<одна команда оболочки, например docker ps>',
+      '```',
+      'Это локальная командная строка этого ПК. Каждый домен — свой блок: работа с git — блоком ```git (если включён), команды на серверах — ```ssh, запись файлов — ```file; run — всё остальное локальное.',
+    );
+  }
+  if (ids.includes('git')) {
+    lines.push(
+      '```git status',
+      '```git log --oneline -5',
+      '```',
+      'git — вся работа с репозиторием, только этим блоком (не через run): read-only (status, log, diff, show, blame…) — молча; изменяющее (commit, push, reset…) — по правилам карточки или вопрос человеку. Репозиторий — рабочая папка действия или закреплён в карточке.',
+    );
+  }
+  if (ids.includes('arch')) {
+    lines.push(
+      '```arch pack архив.zip папка/или/файл',
+      '```arch unpack архив.zip',
+      '```',
+      'arch — архивы zip/tar/tar.gz без внешних программ: pack, unpack, list. Симлинки, секреты (.env, *.pem, id_rsa…) и выход за рабочую папку — отказ.',
+    );
   }
   if (ids.includes('ssh')) {
     // цели ssh — хосты тех проектов, что назначены агенту; адресуем «проект:хост»
@@ -750,7 +771,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
         '```ssh ' + targets[0],
         '<команда для выполнения на сервере по ssh>',
         '```',
-        `Доступные тебе серверы: ${targets.join(', ')}. Если имя хоста не повторяется в других твоих проектах, можно без префикса проекта.`,
+        `Доступные тебе серверы: ${targets.join(', ')}. Если имя хоста не повторяется в других твоих проектах, можно без префикса проекта. Команды на серверах — только здесь; локальные — через run.`,
       );
     }
   }

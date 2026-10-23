@@ -35,9 +35,9 @@ import {
   writeXlsx,
   xlsxSheets,
   type DocSheet,
-} from '../documents.js';
-import { safePath } from '../actions.js';
-import { checkCardKeys, splitArgs, type Tool, type ToolConfig, type ToolRunContext } from '../tools-api.js';
+} from '../../documents.js';
+import { safePath } from '../../actions.js';
+import { checkCardKeys, resolveCard, splitArgs, type Tool, type ToolConfig, type ToolRunContext } from '../../tools-api.js';
 
 const DEFAULT_SOFFICE = 'http://127.0.0.1:8200';
 
@@ -73,9 +73,11 @@ const LEGACY_HINT = 'legacy-формат читается только мост�
   '(сервис: cd docker && docker compose --profile soffice up -d)';
 
 export default (config: ToolConfig): Tool => {
-  checkCardKeys(config, 'docs', 'soffice', 'font');
-  const soffice = typeof config.soffice === 'string' && config.soffice.trim() ? config.soffice.trim() : DEFAULT_SOFFICE;
-  const font = typeof config.font === 'string' ? config.font : undefined;
+  // заводской адрес моста LibreOffice — в default.json рядом с кодом
+  const card = resolveCard('docs', config);
+  checkCardKeys(card, 'docs', 'soffice', 'font');
+  const soffice = typeof card.soffice === 'string' && card.soffice.trim() ? card.soffice.trim() : DEFAULT_SOFFICE;
+  const font = typeof card.font === 'string' ? card.font : undefined;
 
   return {
     desc:

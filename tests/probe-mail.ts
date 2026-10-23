@@ -26,7 +26,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 
 const cwd = mkdtempSync(join(tmpdir(), 'dt-mail-cwd-'));
 const mailFile = join(home, 'mail.json');
-const { default: makeTool } = await import('../src/tools/mail.js');
+const { default: makeTool } = await import('../src/tools/mail/mail.js');
 const { resolveEndpoints, loadAccounts } = await import('../src/mail.js');
 
 const tool = makeTool({});

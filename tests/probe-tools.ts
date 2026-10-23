@@ -28,7 +28,7 @@ import {
 import { checkPermission, loadProjects, parseActions, type ToolContext, type ToolsConfig } from '../src/actions.js';
 import { buildToolset, loadUserTools } from '../src/tools-registry.js';
 import { loadTeam } from '../src/agents.js';
-import gitFactory from '../src/tools/git.js';
+import gitFactory from '../src/tools/git/git.js';
 import type { Agent } from '../src/types.js';
 
 let fails = 0;
@@ -285,7 +285,7 @@ const tctx: ToolContext = {
   const readCmd = (c: string) => (isWin ? c : c.replace(/^dir\b/, 'ls').replace(/^type\b/, 'cat').replace(/^findstr\b/, 'grep'));
   check('shell дефолт: листинг папки — молча', shell.check(readCmd('dir'), { cwd: root }) === 'allow');
   check('shell дефолт: чтение файла внутри папки — молча', shell.check(readCmd('type package.json'), { cwd: root }) === 'allow');
-  check('shell дефолт: git read-only — молча', shell.check('git status && git log -1', { cwd: root }) === 'allow');
+  check('shell дефолт: git — вопрос (репозиторий — тул git, не shell)', shell.check('git status && git log -1', { cwd: root }) === 'ask');
   check('shell дефолт: git push — вопрос', shell.check('git push origin main') === 'ask');
   check('shell дефолт: git branch с аргументом — вопрос', shell.check('git branch feature') === 'ask');
   check('shell дефолт: npm test — вопрос', shell.check('npm test') === 'ask');
@@ -315,7 +315,7 @@ const tctx: ToolContext = {
 
   // ── arch: zip/tar/tgz без внешних программ, zip-slip/секреты/лимиты ──────
   {
-    const { default: archFactory } = await import('../src/tools/arch.js');
+    const { default: archFactory } = await import('../src/tools/arch/arch.js');
     const AdmZip = (await import('adm-zip')).default;
     const arch = archFactory({});
     const archDir = join(dir, 'arch');
@@ -606,6 +606,25 @@ const tctx: ToolContext = {
   check('гейт: чужой проект — отказ', checkPermission(withTool, action, withShop)?.includes('не назначен') === true);
   const assigned: Agent = { ...withTool, projects: ['shop'] };
   check('гейт: тул включён и проект назначен — пускает к check()', checkPermission(assigned, action, withShop) === null);
+}
+
+// --- default.json: обязательный дефолтный конфиг каждого встроенного тула ---
+{
+  const { BUILTIN_TOOL_IDS, toolDefaults, resolveCard } = await import('../src/tools-api.js');
+  for (const id of BUILTIN_TOOL_IDS) {
+    let ok = true;
+    try {
+      const def = toolDefaults(id);
+      ok = def && typeof def === 'object' && !Array.isArray(def);
+    } catch {
+      ok = false;
+    }
+    check(`default.json на месте: ${id}`, ok);
+  }
+  const webCard = resolveCard('web', {});
+  check('resolveCard: пустая карточка → дефолт из default.json', Array.isArray(webCard.sites), JSON.stringify(webCard));
+  const own: ToolConfig = { allow: ['dir'] };
+  check('resolveCard: заданная карточка вместо дефолта', resolveCard('shell', own) === own);
 }
 
 rmSync(dir, { recursive: true, force: true });

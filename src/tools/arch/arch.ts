@@ -30,15 +30,22 @@ import {
   protectedPath,
   SENSITIVE,
   splitArgs,
+  toolDefaults,
   type BuiltinDeps,
   type Tool,
   type ToolConfig,
   type ToolRunContext,
-} from '../tools-api.js';
-import { safePath } from '../actions.js';
+} from '../../tools-api.js';
+import { safePath } from '../../actions.js';
 
-const DEFAULT_MAX_ENTRIES = 5000;
-const DEFAULT_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+/** Заводские лимиты архивов-бомб — из default.json рядом с кодом. */
+const DEF = toolDefaults('arch');
+checkCardKeys(DEF, 'arch default.json', 'maxEntries', 'maxTotalBytes');
+const DEFAULT_MAX_ENTRIES = DEF.maxEntries as number;
+const DEFAULT_MAX_TOTAL_BYTES = DEF.maxTotalBytes as number;
+if (!Number.isInteger(DEFAULT_MAX_ENTRIES) || DEFAULT_MAX_ENTRIES <= 0 || !Number.isInteger(DEFAULT_MAX_TOTAL_BYTES) || DEFAULT_MAX_TOTAL_BYTES <= 0) {
+  throw new Error('src/tools/arch/default.json: "maxEntries" и "maxTotalBytes" — положительные целые числа');
+}
 
 /** Расширение → формат; неизвестное — ошибка (rar/7z сознательно не поддержаны). */
 function formatOf(file: string): 'zip' | 'tar' | 'tgz' {

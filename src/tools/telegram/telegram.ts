@@ -12,9 +12,9 @@
  * «Избранное» для бота — диалог с хозяином: его chat_id смотрите в «list».
  */
 import { basename } from 'node:path';
-import { checkCardKeys, splitArgs, type Tool, type ToolConfig, type ToolRunContext, type ToolVerdict } from '../tools-api.js';
-import { parseSendText, pickMessenger, loadMessengers, TELEGRAM_API, telegramCall, telegramSendFile } from '../messengers.js';
-import { attachmentPath } from './mail.js';
+import { checkCardKeys, resolveCard, splitArgs, type Tool, type ToolConfig, type ToolRunContext, type ToolVerdict } from '../../tools-api.js';
+import { parseSendText, pickMessenger, loadMessengers, TELEGRAM_API, telegramCall, telegramSendFile } from '../../messengers.js';
+import { attachmentPath } from '../mail/mail.js';
 
 interface TgChat {
   id: number | string;
@@ -61,7 +61,7 @@ async function fetchIncoming(api: string, token: string): Promise<Array<{ chatId
 }
 
 export default (config: ToolConfig): Tool => {
-  checkCardKeys(config, 'telegram');
+  checkCardKeys(resolveCard('telegram', config), 'telegram');
 
   return {
     desc:

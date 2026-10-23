@@ -5,13 +5,14 @@
  * — отказ с обоснованием: слои поверх рамки рабочей папки.
  */
 import { relative } from 'node:path';
-import { executeFileAction, safePath } from '../actions.js';
-import { checkCardKeys, maskDeny, parseMasks, protectedPath } from '../tools-api.js';
-import type { BuiltinDeps, Tool, ToolCheckContext, ToolConfig } from '../tools-api.js';
+import { executeFileAction, safePath } from '../../actions.js';
+import { checkCardKeys, resolveCard, maskDeny, parseMasks, protectedPath } from '../../tools-api.js';
+import type { BuiltinDeps, Tool, ToolCheckContext, ToolConfig } from '../../tools-api.js';
 
 export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
-  checkCardKeys(config, 'files', 'masks');
-  const masks = parseMasks(config, 'files');
+  const card = resolveCard('files', config);
+  checkCardKeys(card, 'files', 'masks');
+  const masks = parseMasks(card, 'files');
   return {
     desc: 'Запись файлов в рабочую папку (```file путь, тело — полное содержимое файла). Внутри папки пишется молча.',
     check(path: string, ctx?: ToolCheckContext) {

@@ -12,16 +12,16 @@
  * работают без сети. Файлы только внутри рабочей папки (safePath), поэтому
  * check() как у docs — всегда 'allow'.
  */
-import { safePath } from '../actions.js';
+import { safePath } from '../../actions.js';
 import {
   collectImages,
   linesToRows,
   recognizeImages,
   rowsToMarkdown,
   wordsToLines,
-} from '../ocr.js';
-import { rowsToCsv } from '../documents.js';
-import { checkCardKeys, splitArgs, type Tool, type ToolConfig, type ToolRunContext } from '../tools-api.js';
+} from '../../ocr.js';
+import { rowsToCsv } from '../../documents.js';
+import { checkCardKeys, resolveCard, splitArgs, type Tool, type ToolConfig, type ToolRunContext } from '../../tools-api.js';
 
 /** Разбор заголовка блока: подкоманда + аргументы. */
 function parseHead(body: string): { sub: string; rest: string[] } {
@@ -43,10 +43,12 @@ function localPath(cwd: string, rel: string): string {
 }
 
 export default (config: ToolConfig): Tool => {
-  checkCardKeys(config, 'ocr', 'lang', 'langPath', 'dpi');
-  const lang = typeof config.lang === 'string' && config.lang.trim() ? config.lang.trim() : undefined;
-  const langPath = typeof config.langPath === 'string' && config.langPath.trim() ? config.langPath.trim() : undefined;
-  const dpi = typeof config.dpi === 'number' ? config.dpi : undefined;
+  // заводы настройки (rus+eng, dpi 200) — в default.json рядом с кодом
+  const card = resolveCard('ocr', config);
+  checkCardKeys(card, 'ocr', 'lang', 'langPath', 'dpi');
+  const lang = typeof card.lang === 'string' && card.lang.trim() ? card.lang.trim() : undefined;
+  const langPath = typeof card.langPath === 'string' && card.langPath.trim() ? card.langPath.trim() : undefined;
+  const dpi = typeof card.dpi === 'number' ? card.dpi : undefined;
 
   const recognize = async (file: string, pages?: string) =>
     recognizeImages(await collectImages(file, { dpi, pages }), { lang, langPath });

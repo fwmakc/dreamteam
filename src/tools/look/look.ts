@@ -3,12 +3,12 @@
  * check(): всегда allow — чтение своей картинки ничего не меняет; вопрос
  * человеку не нужен. Провайдер зрения берётся из мостов (deps.tctx).
  */
-import { executeLookAction } from '../actions.js';
-import { checkCardKeys } from '../tools-api.js';
-import type { BuiltinDeps, Tool, ToolConfig } from '../tools-api.js';
+import { executeLookAction } from '../../actions.js';
+import { checkCardKeys, resolveCard } from '../../tools-api.js';
+import type { BuiltinDeps, Tool, ToolConfig } from '../../tools-api.js';
 
 export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
-  checkCardKeys(config, 'look');
+  checkCardKeys(resolveCard('look', config), 'look');
   return {
     desc: 'Показать файл своей vision-модели (```look путь, тело — вопрос по картинке).',
     check: () => 'allow',

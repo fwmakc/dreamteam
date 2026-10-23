@@ -1,0 +1,4 @@
+{
+  "allow": ["pwd", "ls", "cat", "head", "tail", "grep", "ps", "df", "du", "free", "uptime", "whoami", "hostname", "uname", "id", "date", "which", "journalctl"],
+  "allowSystemctl": ["status", "is-active", "is-enabled", "is-failed", "list-units", "list-unit-files", "list-timers", "show", "cat"]
+}

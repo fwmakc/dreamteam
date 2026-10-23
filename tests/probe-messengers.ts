@@ -104,8 +104,8 @@ const goodConfig = {
 };
 writeFileSync(messengersFile, JSON.stringify(goodConfig));
 
-const { default: makeTg } = await import('../src/tools/telegram.js');
-const { default: makeMax } = await import('../src/tools/max.js');
+const { default: makeTg } = await import('../src/tools/telegram/telegram.js');
+const { default: makeMax } = await import('../src/tools/max/max.js');
 const { TELEGRAM_API, MAX_API, parseSendText } = await import('../src/messengers.js');
 
 const tg = makeTg({});

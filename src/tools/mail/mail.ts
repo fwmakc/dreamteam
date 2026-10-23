@@ -16,8 +16,8 @@
  */
 import { basename, join } from 'node:path';
 import { statSync } from 'node:fs';
-import { safePath } from '../actions.js';
-import { SENSITIVE, checkCardKeys, splitArgs, type Tool, type ToolConfig, type ToolRunContext, type ToolVerdict } from '../tools-api.js';
+import { safePath } from '../../actions.js';
+import { SENSITIVE, checkCardKeys, resolveCard, splitArgs, type Tool, type ToolConfig, type ToolRunContext, type ToolVerdict } from '../../tools-api.js';
 import {
   findMail,
   formatHeader,
@@ -30,7 +30,7 @@ import {
   resolveEndpoints,
   saveAttachments,
   sendMail,
-} from '../mail.js';
+} from '../../mail.js';
 
 const SEND_HEAD = /^[ \t]*(кому|тема|файлы)[ \t]*:[ \t]*(.*)$/;
 
@@ -63,7 +63,7 @@ export function attachmentPath(cwd: string, rel: string): string {
 }
 
 export default (config: ToolConfig): Tool => {
-  checkCardKeys(config, 'mail');
+  checkCardKeys(resolveCard('mail', config), 'mail');
 
   return {
     desc:

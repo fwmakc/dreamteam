@@ -23,19 +23,19 @@ import {
   type ToolConfig,
   type ToolFactory,
 } from './tools-api.js';
-import filesTool from './tools/files.js';
-import shellTool from './tools/shell.js';
-import gitTool from './tools/git.js';
-import archTool from './tools/arch.js';
-import sshTool from './tools/ssh.js';
-import lookTool from './tools/look.js';
-import imageTool from './tools/image.js';
-import docsTool from './tools/docs.js';
-import ocrTool from './tools/ocr.js';
-import webTool from './tools/web.js';
-import mailTool from './tools/mail.js';
-import telegramTool from './tools/telegram.js';
-import maxTool from './tools/max.js';
+import filesTool from './tools/files/files.js';
+import shellTool from './tools/shell/shell.js';
+import gitTool from './tools/git/git.js';
+import archTool from './tools/arch/arch.js';
+import sshTool from './tools/ssh/ssh.js';
+import lookTool from './tools/look/look.js';
+import imageTool from './tools/image/image.js';
+import docsTool from './tools/docs/docs.js';
+import ocrTool from './tools/ocr/ocr.js';
+import webTool from './tools/web/web.js';
+import mailTool from './tools/mail/mail.js';
+import telegramTool from './tools/telegram/telegram.js';
+import maxTool from './tools/max/max.js';
 import type { Agent } from './types.js';
 
 const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
