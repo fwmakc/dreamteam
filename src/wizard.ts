@@ -145,7 +145,12 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
       notes.push(`ключ не указан — провайдер будет работать в mock-режиме`);
     }
     // токен доступа к API (dreamteam serve): мастер генерирует сам, вручную
-    // можно перегенерировать (README «Доступ извне»)
+    // можно перегенерировать (README «Доступ извне»). Файл начинается
+    // с примера, чтобы PORT/HOST были перед глазами.
+    if (!existsSync(envFile)) {
+      writeFileSync(envFile, readFileSync(join(SCAFFOLD_DIR, 'home', 'env.example'), 'utf8'), { mode: 0o600 });
+      notes.push(`создал ${envFile} из примера (env.example)`);
+    }
     writeEnvKey(envFile, 'TOKEN', randomBytes(32).toString('base64url'));
     notes.push(`создал токен доступа TOKEN в ${envFile} (для dreamteam serve)`);
     io.output.write(pc.green(`\n  Готово. Дальше — живой менеджер: спроси его «что ты умеешь?»\n`));
@@ -213,7 +218,6 @@ function readScaffold(rel: string): Record<string, unknown> {
 export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promise<string[]> {
   const providersFile = join(homeDir, 'providers.json');
   const settingsFile = join(homeDir, 'settings.json');
-  const envFile = join(homeDir, '.env');
   const notes: string[] = [];
   if (!existsSync(settingsFile)) {
     mkdirSync(homeDir, { recursive: true });
@@ -231,13 +235,6 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
   if (!existsSync(toolsDir)) {
     mkdirSync(toolsDir, { recursive: true });
     notes.push(`создал ${toolsDir} (полка для своих тулов)`);
-  }
-  if (!existsSync(envFile)) {
-    // пример настроек serve: мастер при создании допишет токен доступа,
-    // порт/адрес и токен разбираются руками
-    mkdirSync(homeDir, { recursive: true });
-    writeFileSync(envFile, readFileSync(join(SCAFFOLD_DIR, 'home', 'env.example'), 'utf8'), { mode: 0o600 });
-    notes.push(`создал ${envFile} из примера (env.example) — настройки serve`);
   }
   if (!existsSync(providersFile)) {
     if (!io.isTTY) {
