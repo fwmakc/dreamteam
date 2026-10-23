@@ -109,4 +109,10 @@ check('без ошибок провайдера', errors.length === 0, errors.jo
 
 process.chdir(tmpdir());
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
-process.exit(fails === 0 ? 0 : 1);
+// выходим естественным сливом цикла: принудительный process.exit с живыми
+// хэндлами на Windows роняет процесс libuv-ассертом (win/async.c)
+const code = fails === 0 ? 0 : 1;
+server.closeAllConnections();
+server.close(() => { /* слушатель закрыт — цикл иссякнет сам */ });
+setTimeout(() => process.exit(code), 5000); // страховка от зависания
+process.exitCode = code;

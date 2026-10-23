@@ -182,27 +182,6 @@ const client = await makeClient(handle.port);
   const again = await client.next((m) => m.type === 'state');
   check('ws: hello возвращает свежий state', Boolean((again.state as { session?: unknown }).session));
 
-  // ── битый agents.json: команда не может молча исчезнуть — ошибка в state ──
-  writeFileSync(join(home, 'agents.json'), '{ это не json');
-  client.send({ type: 'hello' });
-  const bad = await client.next((m) => m.type === 'state');
-  const stBad = bad.state as { teamError?: string | null; team?: unknown[] };
-  check('ws: битый json — teamError в state', typeof stBad.teamError === 'string' && stBad.teamError.includes('не удалось прочитать'));
-  check('ws: битый json — команда в снимке пуста', Array.isArray(stBad.team) && stBad.team.length === 0);
-
-  writeFileSync(join(home, 'agents.json'), JSON.stringify([{ id: 'x' }]));
-  client.send({ type: 'hello' });
-  const bad2 = await client.next((m) => m.type === 'state');
-  check('ws: агент без name/prompt — ошибка называет поля', String((bad2.state as { teamError?: string }).teamError ?? '').includes('обязательны поля'));
-
-  writeFileSync(join(home, 'agents.json'), JSON.stringify([{ id: 'boss', name: 'Босс', prompt: 'Ты руководитель.' }]));
-  client.send({ type: 'hello' });
-  const good = await client.next((m) => m.type === 'state');
-  const stGood = good.state as { teamError?: string | null; team?: { id: string }[] };
-  check('ws: починили — teamError ушёл', stGood.teamError == null);
-  check('ws: починили — команда в снимке', Array.isArray(stGood.team) && stGood.team.some((a) => a.id === 'boss'));
-  rmSync(join(home, 'agents.json')); // песочнице возвращаем консьерж-старт
-
   // пустой разговор: менеджер здоровается сам (как в терминале) — ждём приветствие
   await client.next((m) => m.type === 'say' && String(m.text).includes('менеджер переговорки'));
   await client.next(
@@ -387,7 +366,7 @@ const client = await makeClient(handle.port);
     check(
       'state: ключи верхнего уровня',
       JSON.stringify(Object.keys(st).sort()) ===
-        JSON.stringify(['auto', 'completion', 'images', 'manager', 'memory', 'profile', 'projects', 'providers', 'session', 'sessions', 'settings', 'team']),
+        JSON.stringify(['auto', 'completion', 'images', 'manager', 'memory', 'profile', 'projects', 'providers', 'session', 'sessions', 'settings', 'team', 'teamError']),
     );
     const sess = st.session as Record<string, unknown>;
     check('state: session = id+title+messages', JSON.stringify(Object.keys(sess).sort()) === JSON.stringify(['id', 'messages', 'title']));
@@ -596,6 +575,33 @@ const client = await makeClient(handle.port);
     );
     const saved = (stBig.state as { session: { messages: { text: string }[] } }).session.messages.find((x) => x.text.includes('ёёё'));
     check('ws: юникод, html и 8КБ — дошли без искажений', saved?.text === sent);
+  }
+
+  // --- БИТЫЙ agents.json: команда не может молча исчезнуть (в конце — чтобы
+  // наши hello не глотали state-события идущих раундов; предикаты прицельные:
+  // в очереди к этому месту копятся несвежие state от прошлых секций) ---
+  {
+    writeFileSync(join(home, 'agents.json'), '{ это не json');
+    client.send({ type: 'hello' });
+    const bad = await client.next((m) => m.type === 'state' && (m.state as { teamError?: unknown }).teamError != null);
+    const stBad = bad.state as { teamError: string; team: unknown[] };
+    check('ws: битый json — teamError в state', stBad.teamError.includes('не удалось прочитать'));
+    check('ws: битый json — команда в снимке пуста', Array.isArray(stBad.team) && stBad.team.length === 0);
+
+    writeFileSync(join(home, 'agents.json'), JSON.stringify([{ id: 'x' }]));
+    client.send({ type: 'hello' });
+    const bad2 = await client.next((m) => m.type === 'state' && String((m.state as { teamError?: string }).teamError ?? '').includes('обязательны поля'));
+    check('ws: агент без name/prompt — ошибка называет поля', Boolean(bad2));
+
+    writeFileSync(join(home, 'agents.json'), JSON.stringify([{ id: 'boss', name: 'Босс', prompt: 'Ты руководитель.' }]));
+    client.send({ type: 'hello' });
+    const good = await client.next((m) => m.type === 'state' && (m.state as { team?: { id: string }[] }).team?.some((a) => a.id === 'boss') === true);
+    const stGood = good.state as { teamError?: string | null };
+    check('ws: починили — teamError ушёл, команда в снимке', stGood.teamError == null);
+    rmSync(join(home, 'agents.json')); // песочнице возвращаем отсутствие файла
+    client.send({ type: 'hello' });
+    const none = await client.next((m) => m.type === 'state' && (m.state as { team?: unknown[] }).team?.length === 0 && (m.state as { teamError?: unknown }).teamError == null);
+    check('ws: файла нет — пусто и без ошибки', Boolean(none));
   }
 
   client.close();
