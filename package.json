@@ -23,10 +23,11 @@
     "dev": "tsx src/index.ts",
     "serve": "tsx src/serve.ts",
     "typecheck": "tsc --noEmit",
-    "probe": "tsx tests/probe-bin.ts && tsx tests/probe-screen.ts && tsx tests/probe-editor.ts && tsx tests/probe-manager.ts && tsx tests/probe-tools.ts && tsx tests/probe-wizard.ts && tsx tests/probe-commands.ts && tsx tests/probe-manager-flow.ts && tsx tests/probe-consistency.ts && tsx tests/probe-transfer.ts && tsx tests/probe-scenario.ts && tsx tests/probe-docs.ts && tsx tests/probe-gui.ts && tsx tests/probe-gui-scenario.ts",
+    "probe": "tsx tests/probe-bin.ts && tsx tests/probe-screen.ts && tsx tests/probe-editor.ts && tsx tests/probe-manager.ts && tsx tests/probe-tools.ts && tsx tests/probe-wizard.ts && tsx tests/probe-commands.ts && tsx tests/probe-manager-flow.ts && tsx tests/probe-consistency.ts && tsx tests/probe-transfer.ts && tsx tests/probe-scenario.ts && tsx tests/probe-docs.ts && tsx tests/probe-ocr.ts && tsx tests/probe-gui.ts && tsx tests/probe-gui-scenario.ts",
     "probe:bin": "tsx tests/probe-bin.ts",
     "probe:commands": "tsx tests/probe-commands.ts",
     "probe:docs": "tsx tests/probe-docs.ts",
+    "probe:ocr": "tsx tests/probe-ocr.ts",
     "probe:gui": "tsx tests/probe-gui.ts",
     "probe:scenario-gui": "tsx tests/probe-gui-scenario.ts",
     "probe:scenario-tui": "npm i --no-save node-pty && tsx tests/probe-tui-scenario.ts && npm prune",
@@ -43,6 +44,7 @@
     "typecheck:gui": "vue-tsc --noEmit -p gui-src"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.13",
     "adm-zip": "^0.6.1",
     "docx": "^9.14.0",
     "dotenv": "^16.4.5",
@@ -52,6 +54,7 @@
     "pdfkit": "^0.20.2",
     "picocolors": "^1.1.1",
     "tar": "^7.5.22",
+    "tesseract.js": "^7.0.0",
     "tsx": "^4.19.2",
     "ws": "^8.22.0"
   },

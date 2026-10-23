@@ -787,6 +787,15 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
         'append дописывает абзацы в конец существующего docx; convert pdf файл.doc перекодирует формат.',
     );
   }
+  if (ids.includes('ocr')) {
+    lines.push(
+      '```ocr text скан.png',
+      '```ocr tables скан.pdf 1-3',
+      '```',
+      'ocr распознаёт текст (text) и таблицы (tables → markdown, «csv» — вторым словом) со сканов: ' +
+        'png/jpg/bmp/webp, страницы pdf, картинки внутри docx. Распознанное всегда перепроверяй по смыслу.',
+    );
+  }
   for (const id of ids.filter((t) => !(BUILTIN_TOOL_IDS as readonly string[]).includes(t))) {
     const tool = customTools?.get(id);
     lines.push(
