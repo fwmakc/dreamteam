@@ -75,9 +75,9 @@ const {
   check('команда: пустая в доме', readFileSync(join(home, 'agents.json'), 'utf8').trim() === '[]');
   check('команда: менеджер в доме на дефолтном провайдере', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).provider === 'mock');
   check('команда: полка тулов в доме', existsSync(join(home, 'tools')));
-  check('проект: project.json — агенты и серверы пусты', (() => {
-    const p = JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as { agents: unknown; hosts: unknown };
-    return Array.isArray(p.agents) && p.agents.length === 0 && typeof p.hosts === 'object' && p.hosts !== null;
+  check('проект: project.json — серверы пусты', (() => {
+    const p = JSON.parse(readFileSync(join(proj, 'project.json'), 'utf8')) as { hosts: unknown };
+    return typeof p.hosts === 'object' && p.hosts !== null;
   })());
 
   // --- .env создаётся из примера: закомментированные переменные, права 600 ---

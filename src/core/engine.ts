@@ -721,9 +721,9 @@ export class Engine {
   ): Promise<string> {
     switch (action.op) {
       case 'team.add':
-        return addTeamAgent(AGENTS_FILE, action);
+        return addTeamAgent(AGENTS_FILE, action, this.app.providers);
       case 'team.update':
-        return updateTeamAgent(AGENTS_FILE, action.id, action.fields);
+        return updateTeamAgent(AGENTS_FILE, action.id, action.fields, this.app.providers);
       case 'chat.add':
         return this.addToChat(action.who, fullTeam);
       case 'chat.remove':

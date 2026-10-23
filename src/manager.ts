@@ -137,8 +137,7 @@ export const MANAGER_PROMPT =
   '- {"op":"chat.add","who":"имя или id"} / {"op":"chat.remove","who":"имя или id"} — позвать или вывести из текущего чата\n' +
   '- {"op":"session.list"} — показать разговоры; {"op":"session.open","n":2} — открыть №2; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","n":3} — удалить №3 (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (когда просят придумать имя — опирайся на краткое содержание или начало разговора)\n' +
   '- {"op":"tool.grant","agent":"id_участника","tool":"files","card":{"allow":["git *"]}} — включить тул агенту или обновить его карточку; card можно опустить (настройки по умолчанию). Встроенные: files, shell, git, arch, ssh, look, image; свои — имя файла из tools/ (включить можно только существующий, код тулов пишет человек)\n' +
-  '- {"op":"project.add","id":"код-латиницей","hosts":{"prod":{"host":"203.0.113.10","user":"deploy","port":22}}} — новый проект в реестре серверов (host обязателен, hostов хоть один)\n' +
-  '- {"op":"project.host.add","project":"код проекта","name":"prod","host":"203.0.113.10","user":"deploy","port":22,"dir":"/srv/app"} — сервер в проект (password лучше не передавать в переписке — пусть человек впишет сам)\n' +
+  '- {"op":"project.host.add","name":"prod","host":"203.0.113.10","user":"deploy","port":22,"dir":"/srv/app"} — сервер в текущий проект (password лучше не передавать в переписке — пусть человек впишет сам)\n' +
   'Делай только те действия, о которых попросили. Если изменение не требуется — ответь одним текстом, без JSON.';
 
 export interface ManagerContext {
@@ -156,7 +155,7 @@ export interface ManagerContext {
   history: ChatMessage[];
   /** Просьба руководителя, из-за которой позвали менеджера */
   request: string;
-  /** Проекты из projects.json: серверы и кто назначен (для тула ssh) */
+  /** Проекты из project.json (сейчас один — текущий): серверы (для тула ssh) */
   projects?: ManagerProjectInfo[];
   /** Операции руководителя — из манифеста (operations.ts), как в /help */
   operations?: { cmd: string; args?: string; help: string }[];
@@ -184,12 +183,8 @@ export function managerStateInput(ctx: ManagerContext): string {
     )
     .join('\n');
   const projects = (ctx.projects ?? [])
-    .filter((p) => p.hosts.length > 0 || p.agents.length > 0) // пустой проект — блока нет
-    .map((p) => {
-      const hosts = p.hosts.length > 0 ? p.hosts.join(', ') : 'нет';
-      const who = p.agents.length > 0 ? `; агенты: ${p.agents.join(', ')}` : '; агентов не назначено';
-      return `- ${p.id}: серверы ${hosts}${who}`;
-    })
+    .filter((p) => p.hosts.length > 0) // пустой проект — блока нет
+    .map((p) => `- ${p.id}: серверы ${p.hosts.length > 0 ? p.hosts.join(', ') : 'нет'}`)
     .join('\n');
   const ops = (ctx.operations ?? []).map((c) => `${c.cmd}${c.args ? ` ${c.args}` : ''} — ${c.help}`).join('\n');
   const history = ctx.history.length
@@ -322,8 +317,15 @@ function writeTeamFile(file: string, root: unknown): void {
   renameSync(tmp, file);
 }
 
+/** Провайдер в agents.json — только существующий id: иначе пишется слово («основной») вместо id */
+function requireProvider(providers: ReadonlyMap<string, unknown>, pid: string): void {
+  if (providers.has(pid)) return;
+  const ids = [...providers.keys()].join(', ') || 'нет ни одного';
+  throw new Error(`неизвестный провайдер «${pid}» — есть: ${ids}`);
+}
+
 /** team.add: новый участник в agents.json. Бросает Error с причиной для отчёта «✗ …». */
-export function addTeamAgent(file: string, data: ManagerNewAgent): string {
+export function addTeamAgent(file: string, data: ManagerNewAgent, providers: ReadonlyMap<string, unknown>): string {
   const id = String(data.id ?? '').trim();
   const name = String(data.name ?? '').trim();
   if (!/^[a-z0-9_-]+$/i.test(id)) throw new Error(`неверный id «${data.id}» — нужна латиница, цифры, «-» и «_»`);
@@ -347,7 +349,11 @@ export function addTeamAgent(file: string, data: ManagerNewAgent): string {
   };
   if (typeof data.description === 'string' && data.description.trim()) agent.description = data.description.trim();
   if (typeof data.temperature === 'number' && Number.isFinite(data.temperature)) agent.temperature = data.temperature;
-  if (typeof data.provider === 'string' && data.provider.trim()) agent.provider = data.provider.trim();
+  if (typeof data.provider === 'string' && data.provider.trim()) {
+    const pid = data.provider.trim();
+    requireProvider(providers, pid);
+    agent.provider = pid;
+  }
   if (data.tools !== undefined) agent.tools = normalizeAgentTools(id, data.tools);
   agents.push(agent);
   writeTeamFile(file, root);
@@ -384,7 +390,7 @@ export function removeTeamAgent(file: string, id: string): string {
 }
 
 /** team.update: правка полей участника по белому списку. */
-export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateFields): string {
+export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateFields, providers: ReadonlyMap<string, unknown>): string {
   const fid = String(id ?? '').trim();
   const { root, agents } = readTeamRoot(file);
   const agent = agents.find((a) => (a as Agent).id === fid) as Agent | undefined;
@@ -396,6 +402,12 @@ export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateF
       if (typeof value !== 'number' || !Number.isFinite(value)) continue;
       agent.temperature = value;
       changes.push(`temperature=${value}`);
+    } else if (key === 'provider') {
+      if (typeof value !== 'string' || !value.trim()) continue;
+      const pid = value.trim();
+      requireProvider(providers, pid);
+      agent.provider = pid;
+      changes.push(`provider="${pid}"`);
     } else if (typeof value === 'string' && value.trim()) {
       (agent as unknown as Record<string, unknown>)[key] = value.trim();
       changes.push(`${key}="${value.trim()}"`);
@@ -440,12 +452,10 @@ export function grantTool(file: string, agentId: string, tool: string, card?: un
     : `✓ ${agent.name}: тул «${tid}» включён`;
 }
 
-// ─── project.json: серверы и задействованные агенты текущего проекта ──────────
+// ─── project.json: серверы текущего проекта ──────────────────────────────────
 
-/** Файл проекта: задействованные агенты + серверы; неизвестные поля сохраняем. */
+/** Файл проекта: реестр серверов для ssh; неизвестные поля сохраняем. */
 export interface ProjectFile {
-  /** Агенты, задействованные в этом проекте (id из домашней команды) */
-  agents?: string[];
   hosts?: Record<string, ManagerHostSpec>;
   [key: string]: unknown;
 }

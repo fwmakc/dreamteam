@@ -45,6 +45,11 @@ function check(name: string, cond: boolean, detail?: string): void {
 const dir = mkdtempSync(join(tmpdir(), 'dt-manager-'));
 const cfgFile = join(dir, 'manager.json');
 const agentsFile = join(dir, 'agents.json');
+// реестр провайдеров для правок команды (как App.providers)
+const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
+  ['openai', null],
+  ['claude', null],
+]);
 
 // --- loadManagerConfig ---
 {
@@ -194,14 +199,14 @@ const agentsFile = join(dir, 'agents.json');
     userName: 'Хозяин',
     history: [{ authorId: 'user', authorName: 'Хозяин', text: 'привет', ts: 1 }],
     request: '@менеджер, позови Глеба',
-    projects: [{ id: 'shop', hosts: ['prod', 'staging'], agents: ['gleb'] }],
+    projects: [{ id: 'shop', hosts: ['prod', 'staging'] }],
     operations: [{ cmd: '/session new', help: 'новый разговор' }, { cmd: '/session open', args: '<номер>', help: 'открыть разговор' }],
   });
   check('стейт: ростер с провайдером и temp', input.includes('katya — Катя (дизайнер), провайдер: claude, temp 0.3'), input);
   check('стейт: тула агента в ростере', input.includes('тула: files, look') && input.includes('тула нет'), input);
   check('стейт: состав чата', input.includes('В этом чате: katya'));
   check('стейт: список разговоров с номерами и текущим', input.includes('1. Текущий — 4 сообщ. (текущий)') && input.includes('2. Прошлый — 9 сообщ.'), input);
-  check('стейт: проект с серверами и назначенцами', input.includes('shop: серверы prod, staging; агенты: gleb'), input);
+  check('стейт: проект с серверами', input.includes('- shop: серверы prod, staging'), input);
   check('стейт: операции манифеста с аргументами', input.includes('/session open <номер>'), input);
   check('стейт: просьба руководителя', input.includes('Просьба руководителя: «@менеджер, позови Глеба»'));
   check('стейт: имя и краткое содержание разговора', input.includes('имя: «Текущий»') && input.includes('Краткое содержание разговора:'), input.slice(-400));
@@ -213,7 +218,7 @@ const agentsFile = join(dir, 'agents.json');
 
   const report = addTeamAgent(agentsFile, {
     id: 'katya', name: 'Катя', role: 'дизайнер', tools: { files: {}, shell: null }, temperature: 0.4,
-  });
+  }, providers);
   check('team.add: отчёт с именем и ролью', report.includes('Катя') && report.includes('дизайнер'), report);
 
   const agents = loadTeam(agentsFile);
@@ -234,40 +239,50 @@ const agentsFile = join(dir, 'agents.json');
 
   const before = readFileSync(agentsFile, 'utf8');
   let threw = '';
-  try { addTeamAgent(agentsFile, { id: 'katya', name: 'Дубль' }); } catch (e) { threw = (e as Error).message; }
+  try { addTeamAgent(agentsFile, { id: 'katya', name: 'Дубль' }, providers); } catch (e) { threw = (e as Error).message; }
   check('team.add: дубликат id — ошибка', threw.includes('уже есть'), threw);
   check('team.add: неудачная правка файл не меняла', readFileSync(agentsFile, 'utf8') === before);
 
   threw = '';
-  try { addTeamAgent(agentsFile, { id: 'zina', name: 'Зина', tools: ['files'] as unknown as AgentTools }); } catch (e) { threw = (e as Error).message; }
+  try { addTeamAgent(agentsFile, { id: 'zina', name: 'Зина', tools: ['files'] as unknown as AgentTools }, providers); } catch (e) { threw = (e as Error).message; }
   check('team.add: массив tools — ошибка с подсказкой', threw.includes('массивов больше нет'), threw);
   check('team.add: отказ из-за tools файл не менял', readFileSync(agentsFile, 'utf8') === before);
 
   threw = '';
-  try { addTeamAgent(agentsFile, { id: 'кривой id', name: 'X' }); } catch (e) { threw = (e as Error).message; }
+  try { addTeamAgent(agentsFile, { id: 'кривой id', name: 'X' }, providers); } catch (e) { threw = (e as Error).message; }
   check('team.add: id с пробелами — ошибка', threw.includes('id'), threw);
   threw = '';
-  try { addTeamAgent(agentsFile, { id: 'ok', name: '' }); } catch (e) { threw = (e as Error).message; }
+  try { addTeamAgent(agentsFile, { id: 'ok', name: '' }, providers); } catch (e) { threw = (e as Error).message; }
   check('team.add: без имени — ошибка', threw.includes('name') || threw.includes('имя'), threw);
+  threw = '';
+  try { addTeamAgent(agentsFile, { id: 'mira', name: 'Мира', provider: 'основной' }, providers); } catch (e) { threw = (e as Error).message; }
+  check('team.add: чужой провайдер — отказ со списком', threw.includes('неизвестный провайдер «основной»') && threw.includes('openai'), threw);
+  check('team.add: отказ из-за провайдера файл не менял', readFileSync(agentsFile, 'utf8') === before);
+  addTeamAgent(agentsFile, { id: 'mira', name: 'Мира', provider: 'claude' }, providers);
+  check('team.add: существующий провайдер записан', loadTeam(agentsFile).find((a) => a.id === 'mira')?.provider === 'claude');
 }
 {
-  const report = updateTeamAgent(agentsFile, 'gleb', { role: 'ведущий разработчик', provider: 'openai', temperature: 0.1 });
+  const report = updateTeamAgent(agentsFile, 'gleb', { role: 'ведущий разработчик', provider: 'openai', temperature: 0.1 }, providers);
   check('team.update: отчёт перечисляет правки', report.includes('ведущий разработчик') && report.includes('openai') && report.includes('temperature=0.1'), report);
   const agents = loadTeam(agentsFile);
   const gleb = agents.find((a) => a.id === 'gleb');
   check('team.update: роль/провайдер/temp применились', gleb?.role === 'ведущий разработчик' && gleb?.provider === 'openai' && gleb?.temperature === 0.1, JSON.stringify(gleb));
   check('team.update: остальные поля целы', gleb?.prompt === 'Ты — Глеб.' && gleb?.emoji === '💾');
-  check('team.update: loadTeam по-прежнему валиден', agents.length === 2);
+  check('team.update: loadTeam по-прежнему валиден', agents.length === 3);
 
+  const before2 = readFileSync(agentsFile, 'utf8');
   let threw = '';
-  try { updateTeamAgent(agentsFile, 'никого', { role: 'x' }); } catch (e) { threw = (e as Error).message; }
+  try { updateTeamAgent(agentsFile, 'никого', { role: 'x' }, providers); } catch (e) { threw = (e as Error).message; }
   check('team.update: чужой id — ошибка', threw.includes('никого'), threw);
   threw = '';
-  try { updateTeamAgent(agentsFile, 'gleb', { projects: ['x'] } as never); } catch (e) { threw = (e as Error).message; }
+  try { updateTeamAgent(agentsFile, 'gleb', { projects: ['x'] } as never, providers); } catch (e) { threw = (e as Error).message; }
   check('team.update: вне белого списка — ошибка «не понятно»', threw.includes('не понятно'), threw);
   threw = '';
-  try { updateTeamAgent(agentsFile, 'gleb', {}); } catch (e) { threw = (e as Error).message; }
+  try { updateTeamAgent(agentsFile, 'gleb', {} , providers); } catch (e) { threw = (e as Error).message; }
   check('team.update: пустые fields — ошибка', threw.includes('не понятно'), threw);
+  threw = '';
+  try { updateTeamAgent(agentsFile, 'gleb', { provider: 'основной' }, providers); } catch (e) { threw = (e as Error).message; }
+  check('team.update: чужой провайдер — отказ, файл цел', threw.includes('неизвестный провайдер «основной»') && readFileSync(agentsFile, 'utf8') === before2, threw);
 }
 
 // --- tool.grant: включение тула и карточки, свои тула — только существующие ---
@@ -314,14 +329,13 @@ const agentsFile = join(dir, 'agents.json');
   const projFile = join(dir, 'project.json');
   writeFileSync(
     projFile,
-    JSON.stringify({ agents: ['katya'], hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 22 } }, note: 'пометка' }, null, 2) + '\n',
+    JSON.stringify({ hosts: { prod: { host: '203.0.113.10', user: 'deploy', port: 22 } }, note: 'пометка' }, null, 2) + '\n',
   );
 
   const report = addProjectHosts(projFile, { staging: { host: 'stg.example.com', dir: '/srv/app' } });
   check('project.host add: отчёт', report.includes('staging'), report);
   check('project.host add: loadProjectFile видит серверы', loadProjectFile(projFile).hosts?.staging?.dir === '/srv/app');
   check('project.host add: чужие поля корня сохранены', (JSON.parse(readFileSync(projFile, 'utf8')) as { note: string }).note === 'пометка');
-  check('project.host add: агенты проекта не тронуты', (loadProjectFile(projFile).agents ?? []).includes('katya'));
 
   const before = readFileSync(projFile, 'utf8');
   let threw = '';
@@ -350,7 +364,7 @@ const agentsFile = join(dir, 'agents.json');
 {
   writeFileSync(agentsFile, JSON.stringify({ agents: [{ id: 'gleb', name: 'Глеб', color: 'green', prompt: 'x' }], note: 'не трогать' }, null, 2) + '\n');
   check('легаси: loadTeam читает обёртку', loadTeam(agentsFile).length === 1);
-  addTeamAgent(agentsFile, { id: 'katya', name: 'Катя' });
+  addTeamAgent(agentsFile, { id: 'katya', name: 'Катя' }, providers);
   const legacy = JSON.parse(readFileSync(agentsFile, 'utf8'));
   check('легаси: правка сохранила обёртку и поля корня', Array.isArray(legacy.agents) && legacy.agents.length === 2 && legacy.note === 'не трогать', JSON.stringify(legacy).slice(0, 120));
 }
@@ -360,7 +374,7 @@ const agentsFile = join(dir, 'agents.json');
   const projFile = join(dir, 'project.json');
   writeFileSync(
     projFile,
-    JSON.stringify({ agents: ['y'], hosts: { prod: { user: 'deploy', host: '203.0.113.10', port: 22 }, staging: { host: 'stg.example.com' } } }),
+    JSON.stringify({ hosts: { prod: { user: 'deploy', host: '203.0.113.10', port: 22 }, staging: { host: 'stg.example.com' } } }),
   );
   const projects = loadProjects(projFile, 'myproj');
   const project = projects.get('myproj');

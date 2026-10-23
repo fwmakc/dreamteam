@@ -76,9 +76,9 @@ export interface Agent {
   temperature?: number;
   /** Инструменты-карточки {"shell": {…} или null} (поле tools в agents.json) */
   tools?: AgentTools;
-  /** Проекты из config/projects.json — агенту доступны и папка проекта, и его серверы */
+  /** Проекты (ярлыки из project.json) — агенту доступны и папка проекта, и его серверы */
   projects?: string[];
-  /** Проект по умолчанию (id из config/projects.json) или путь — куда идут блоки без префикса */
+  /** Проект по умолчанию (ярлык name из project.json) или путь — куда идут блоки без префикса */
   workspace?: string;
   /** Чем агент смотрит картинки (```look): id провайдера с "vision": true; по умолчанию — его же провайдер */
   vision?: string;
@@ -199,11 +199,9 @@ export type ManagerAction =
   | { op: 'session.rename'; title: string }
   /** Включить тул агенту / обновить его карточку (tools в agents.json) */
   | { op: 'tool.grant'; agent: string; tool: string; card?: unknown }
-  /** Новый проект в projects.json: хотя бы один сервер обязателен */
-  | { op: 'project.add'; id: string; hosts: Record<string, ManagerHostSpec> }
-  | { op: 'project.host.add'; project: string; name: string } & ManagerHostSpec;
+  | { op: 'project.host.add'; project?: string; name: string } & ManagerHostSpec;
 
-/** Сервер в действиях менеджера (project.add / project.host.add) */
+/** Сервер в действии менеджера (project.host.add) */
 export interface ManagerHostSpec {
   host: string;
   user?: string;
@@ -212,11 +210,10 @@ export interface ManagerHostSpec {
   dir?: string;
 }
 
-/** Проект для блока состояния менеджера: id, имена серверов, кто назначен */
+/** Проект для блока состояния менеджера: id и имена серверов */
 export interface ManagerProjectInfo {
   id: string;
   hosts: string[];
-  agents: string[];
 }
 
 /** Разобранный ответ менеджера: текст для человека + действия */

@@ -60,7 +60,7 @@ j('user.json', { name: 'Босс', role: 'руководитель команд�
 // команда — вещь машины: менеджер и команда в доме
 j('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
 // проект — только свой project.json (серверы и задействованные агенты)
-pj('project.json', { name: 'dreamteam', agents: [], hosts: { dev: { host: '192.0.2.1' } } });
+pj('project.json', { name: 'dreamteam', hosts: { dev: { host: '192.0.2.1' } } });
 // команда — копия боевой (фикстура в репозитории): имена и роли важны для
 // сценария, провайдеры сажаем на mock
 const team = JSON.parse(readFileSync('.dreamteam/agents.json', 'utf8')) as Array<Record<string, unknown>>;

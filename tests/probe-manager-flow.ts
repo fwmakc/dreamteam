@@ -44,7 +44,7 @@ process.chdir(base); // рабочая папка инструментов — �
 
 writeFileSync(
   join(home, 'providers.json'),
-  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
+  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' }, claude: { adapter: 'mock' } } }, null, 2) + '\n',
 );
 // язык общения задаём до старта: ensureHome не перезаписывает существующий settings
 writeFileSync(
@@ -97,8 +97,8 @@ const stub: Presenter = {
 
 const { app } = await bootstrapApp();
 const engine = new Engine(app, stub);
-// провайдер менеджера из скаффолд-конфига — mock; подменяем на скриптовый
-app.providers.get('mock')!.provider = fakeProvider;
+// все провайдеры дома (mock и claude) — под одним скриптовым LLM
+for (const p of app.providers.values()) p.provider = fakeProvider;
 const signal = () => new AbortController().signal;
 
 /** Ход менеджера: заготовленный ответ + просьба руководителя. */
@@ -135,7 +135,7 @@ function lastManagerMessage(): string {
     { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'Ты — Катя.', provider: 'claude', temperature: 0.3, tools: { files: {}, look: {} } },
     { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'Ты — Глеб.', projects: ['shop'] },
   ], null, 2) + '\n');
-  writeFileSync(projectsFile, JSON.stringify({ name: 'shop', agents: ['katya'], hosts: { prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } } }, null, 2) + '\n');
+  writeFileSync(projectsFile, JSON.stringify({ name: 'shop', hosts: { prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } } }, null, 2) + '\n');
   for (let i = 1; i <= 14; i++) {
     app.session.messages.push({ authorId: 'user', authorName: 'Хозяин', text: `строка ${i}`, ts: i });
   }
@@ -148,8 +148,8 @@ function lastManagerMessage(): string {
     req.user?.includes('- katya — Катя (дизайнер), провайдер: claude, temp 0.3; тула: files, look') ?? false, req.user);
   check('снимок: агент без тула — пометка', req.user?.includes('- gleb — Глеб (разработчик), провайдер: основной; тула нет') ?? false, req.user);
   check('снимок: состав чата — только позванные', req.user?.includes('В этом чате: katya') ?? false, req.user);
-  check('снимок: проект — серверы и назначенцы',
-    req.user?.includes('- shop: серверы prod, staging; агенты: gleb') ?? false, req.user);
+  check('снимок: проект — серверы',
+    req.user?.includes('- shop: серверы prod, staging') ?? false, req.user);
   const historyBlock = req.user?.slice(req.user.indexOf('Последние сообщения'), req.user.indexOf('Просьба руководителя')) ?? '';
   const historyLines = historyBlock.split('\n').filter((l) => l.includes(': ')).length;
   check('снимок: окно истории — ровно 12 сообщений', historyLines === 12, `${historyLines}: ${historyBlock.slice(0, 160)}`);
@@ -161,7 +161,7 @@ function lastManagerMessage(): string {
   for (const op of [
     'team.add', 'team.update', 'chat.add', 'chat.remove',
     'session.list', 'session.open', 'session.new', 'session.delete',
-    'tool.grant', 'project.add', 'project.host.add',
+    'tool.grant', 'project.host.add',
   ]) {
     check(`проектирование: промт объявляет ${op}`, MANAGER_PROMPT.includes(op));
   }

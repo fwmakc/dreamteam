@@ -189,14 +189,12 @@ function projectListText(app: App): string[] {
   const project = loadProjectFile(PROJECT_FILE);
   const lines: string[] = [''];
   const hosts = Object.entries(project.hosts ?? {}) as [string, { host: string; user?: string; port?: number }][];
-  const agents = project.agents ?? [];
-  if (hosts.length === 0 && agents.length === 0) {
+  if (hosts.length === 0) {
     return ['Проект пуст — серверы: /project host add <имя>=[пользователь@]хост[:порт]'];
   }
   for (const [name, h] of hosts) {
     lines.push(`• ${name}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`);
   }
-  if (agents.length > 0) lines.push(`задействованные агенты: ${agents.join(', ')}`);
   lines.push('');
   return lines;
 }
@@ -410,10 +408,10 @@ export const OPERATIONS: OpSpec[] = [
     ],
     title: 'новый участник',
     help: 'дефолты как у менеджера: эмодзи 🤖, белый цвет, автопромпт',
-    run: async (_engine, rest) => {
+    run: async (engine, rest) => {
       const [id, name, ...roleParts] = rest;
       if (!id || !name) return ['Синтаксис: /team add <id> <Имя> [роль]'];
-      return [addTeamAgent(AGENTS_FILE, { id, name, role: roleParts.join(' ') || undefined })];
+      return [addTeamAgent(AGENTS_FILE, { id, name, role: roleParts.join(' ') || undefined }, engine.app.providers)];
     },
   },
   {
@@ -424,7 +422,7 @@ export const OPERATIONS: OpSpec[] = [
     ],
     title: 'править участника',
     help: 'поля: name, role, emoji, color, description, prompt, provider, temperature',
-    run: async (_engine, rest) => {
+    run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
         return [
@@ -437,7 +435,7 @@ export const OPERATIONS: OpSpec[] = [
       // поля агента в нижнем регистре (белый список updateTeamAgent точный)
       const fields: Record<string, string | number> = {};
       for (const [k, v] of Object.entries(parsed)) fields[k.toLowerCase()] = v;
-      return [updateTeamAgent(AGENTS_FILE, id, fields)];
+      return [updateTeamAgent(AGENTS_FILE, id, fields, engine.app.providers)];
     },
   },
   {

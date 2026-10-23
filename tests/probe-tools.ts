@@ -489,11 +489,11 @@ const tctx: ToolContext = {
   );
   const host = loadProjects(file, 'myproj').get('myproj')!.hosts.get('prod')!;
   check('loadProjects: пароль и папка хоста дошли', host.password === 'p @ w' && host.dir === '/var/www/app', JSON.stringify(host));
-  writeFileSync(file, JSON.stringify({ agents: [], hosts: { prod: { host: 'h', password: 5 } } }));
+  writeFileSync(file, JSON.stringify({ hosts: { prod: { host: 'h', password: 5 } } }));
   let threw = '';
   try { loadProjects(file, 'myproj'); } catch (e) { threw = (e as Error).message; }
   check('loadProjects: кривой password — отказ', threw.includes('"password"'), threw);
-  writeFileSync(file, JSON.stringify({ agents: [], hosts: { prod: { host: 'h', dir: '  ' } } }));
+  writeFileSync(file, JSON.stringify({ hosts: { prod: { host: 'h', dir: '  ' } } }));
   threw = '';
   try { loadProjects(file, 'myproj'); } catch (e) { threw = (e as Error).message; }
   check('loadProjects: пустой dir — отказ', threw.includes('"dir"'), threw);

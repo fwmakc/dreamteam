@@ -324,10 +324,9 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     try {
       const project = loadProjectFile(PROJECT_FILE);
       const hosts = project.hosts ?? {};
-      const agents = project.agents ?? [];
       // пустой проект = блока в снимке нет
-      if (Object.keys(hosts).length === 0 && agents.length === 0) return [];
-      return [{ id: basename(WORKSPACE), hosts, agents }];
+      if (Object.keys(hosts).length === 0) return [];
+      return [{ id: basename(WORKSPACE), hosts }];
     } catch {
       return [];
     }
@@ -539,7 +538,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text };
       }
       case 'team.add': {
-        const report = addTeamAgent(AGENTS_FILE, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined });
+        const report = addTeamAgent(AGENTS_FILE, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined }, engine.app.providers);
         broadcastState();
         return { text: report };
       }
@@ -549,7 +548,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text: report };
       }
       case 'team.update': {
-        const report = updateTeamAgent(AGENTS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>);
+        const report = updateTeamAgent(AGENTS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>, engine.app.providers);
         broadcastState();
         return { text: report };
       }

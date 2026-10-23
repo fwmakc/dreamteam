@@ -45,7 +45,7 @@ j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, 
 j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
 // команда — в доме; проект — только project.json (серверы + задействованные)
 j('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
-pj('project.json', { name: 'dreamteam', agents: [], hosts: { dev: { host: '192.0.2.1' } } });
+pj('project.json', { name: 'dreamteam', hosts: { dev: { host: '192.0.2.1' } } });
 const team = JSON.parse(readFileSync('.dreamteam/agents.json', 'utf8')) as Array<Record<string, unknown>>;
 for (const a of team) {
   if (a.provider) a.provider = 'mock';
