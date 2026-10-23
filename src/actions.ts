@@ -832,7 +832,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '',
       '<текст письма>',
       '```',
-      'mail работает с ящиками из mail.json в служебной папке проекта .dreamteam (настроил хозяин): list/find — проверка почты, ' +
+      'mail работает с ящиками из mails.json в служебной папке проекта .dreamteam (настроил хозяин): list/find — проверка почты, ' +
         'read — письмо целиком (вложения сохраняются в mail/), send — отправка с вложениями.',
     );
   }

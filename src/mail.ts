@@ -1,14 +1,14 @@
 /**
- * Почта: несколько ящиков из mail.json в служебной папке проекта (.dreamteam)
+ * Почта: несколько ящиков из mails.json в служебной папке проекта (.dreamteam)
  * — приём (IMAP) и отправка (SMTP). Секреты живут в проекте, не в карточках
  * агентов: карточка тула ничего не знает о паролях.
  *
  *   { "личное": { "user": "я@yandex.ru", "password": "пароль приложения",
- *                 "host": "imap.yandex.ru", "smtpHost": "smtp.yandex.ru" },
- *     "работа": { "user": "…", "password": "…", "host": "imap.corp.ru", "smtpHost": "smtp.corp.ru" } }
+ *                 "imap": "imap.yandex.ru", "smtp": "smtp.yandex.ru" },
+ *     "работа": { "user": "…", "password": "…", "imap": "imap.corp.ru", "smtp": "smtp.corp.ru" } }
  *
- * Всё явно: host (сервер входящей почты, IMAP) и smtpHost (исходящей, SMTP)
- * обязательны; порты 993/465 — дефолт, переопределяются полями port/smtpPort.
+ * Всё явно: imap (сервер входящей почты) и smtp (исходящей) обязательны;
+ * порты 993/465 — дефолт, переопределяются полями port/smtpPort.
  * Пароли — «пароли приложений» почтовых провайдеров (обычный пароль от
  * веб-почты не подойдёт). Хосты популярных провайдеров — в README, раздел
  * «Почта».
@@ -27,15 +27,15 @@ import dns from 'node:dns';
 import { promisify } from 'node:util';
 import { MAIL_FILE } from './paths.js';
 
-const ACCOUNT_FIELDS = ['user', 'password', 'host', 'smtpHost', 'port', 'smtpPort', 'tlsNoVerify'];
+const ACCOUNT_FIELDS = ['user', 'password', 'imap', 'smtp', 'port', 'smtpPort', 'tlsNoVerify'];
 
 export interface MailAccount {
   user: string;
   password: string;
   /** Сервер входящей почты (IMAP). */
-  host: string;
+  imap: string;
   /** Сервер исходящей почты (SMTP). */
-  smtpHost: string;
+  smtp: string;
   port?: number;
   smtpPort?: number;
   /** Не сверять имя сервера с сертификатом (хостинги с чужим сертификатом). */
@@ -48,13 +48,13 @@ export interface MailEndpoints {
   smtp: { host: string; port: number; secure: boolean };
 }
 
-/** Читает и валидирует mail.json проекта (.dreamteam); нет файла — отказ с примером. */
+/** Читает и валидирует mails.json проекта (.dreamteam); нет файла — отказ с примером. */
 export function loadAccounts(file = MAIL_FILE): Record<string, MailAccount> {
   if (!existsSync(file)) {
     throw new Error(
       `нет файла ${file} — опишите ящики, например:\n` +
-      '{ "личное": { "user": "я@yandex.ru", "password": "пароль приложения", "host": "imap.yandex.ru", "smtpHost": "smtp.yandex.ru" } }\n' +
-      'host — сервер входящей почты (IMAP), smtpHost — исходящей (SMTP)',
+      '{ "личное": { "user": "я@yandex.ru", "password": "пароль приложения", "imap": "imap.yandex.ru", "smtp": "smtp.yandex.ru" } }\n' +
+      'imap — сервер входящей почты, smtp — исходящей',
     );
   }
   let raw: unknown;
@@ -83,10 +83,10 @@ function readAccount(name: string, raw: Record<string, unknown>, file: string): 
   }
   const user = String(raw.user ?? '').trim();
   const password = String(raw.password ?? '');
-  const host = String(raw.host ?? '').trim();
-  const smtpHost = String(raw.smtpHost ?? '').trim();
+  const imap = String(raw.imap ?? '').trim();
+  const smtp = String(raw.smtp ?? '').trim();
   if (!user || !password) throw new Error(`${file}: ящик «${name}» — нужны "user" и "password" (пароль приложения от провайдера почты)`);
-  if (!host || !smtpHost) throw new Error(`${file}: ящик «${name}» — нужны адреса серверов: "host" (IMAP) и "smtpHost" (SMTP)`);
+  if (!imap || !smtp) throw new Error(`${file}: ящик «${name}» — нужны адреса серверов: "imap" (входящая почта) и "smtp" (исходящая)`);
   for (const key of ['port', 'smtpPort'] as const) {
     if (raw[key] !== undefined && (!Number.isInteger(raw[key]) || (raw[key] as number) < 1 || (raw[key] as number) > 65535)) {
       throw new Error(`${file}: ящик «${name}» — "${key}" должен быть целым числом 1…65535`);
@@ -95,7 +95,7 @@ function readAccount(name: string, raw: Record<string, unknown>, file: string): 
   if (raw.tlsNoVerify !== undefined && typeof raw.tlsNoVerify !== 'boolean') {
     throw new Error(`${file}: ящик «${name}» — "tlsNoVerify" должен быть true или false`);
   }
-  const acc: MailAccount = { user, password, host, smtpHost };
+  const acc: MailAccount = { user, password, imap, smtp };
   if (raw.port !== undefined) acc.port = raw.port as number;
   if (raw.smtpPort !== undefined) acc.smtpPort = raw.smtpPort as number;
   if (raw.tlsNoVerify !== undefined) acc.tlsNoVerify = raw.tlsNoVerify as boolean;
@@ -105,8 +105,8 @@ function readAccount(name: string, raw: Record<string, unknown>, file: string): 
 /** Адреса IMAP/SMTP: явные хосты, порты 993/465 с переопределением. */
 export function resolveEndpoints(acc: MailAccount): MailEndpoints {
   return {
-    imap: { host: acc.host, port: acc.port ?? 993, secure: (acc.port ?? 993) === 993 },
-    smtp: { host: acc.smtpHost, port: acc.smtpPort ?? 465, secure: (acc.smtpPort ?? 465) === 465 },
+    imap: { host: acc.imap, port: acc.port ?? 993, secure: (acc.port ?? 993) === 993 },
+    smtp: { host: acc.smtp, port: acc.smtpPort ?? 465, secure: (acc.smtpPort ?? 465) === 465 },
   };
 }
 
@@ -138,7 +138,7 @@ async function withImap<T>(acc: MailAccount, mailBox: string, fn: (client: impor
   try {
     await client.connect();
   } catch (err) {
-    throw new Error(`ящик ${acc.user} (${ep.imap.host}) недоступен: ${err instanceof Error ? err.message : err} — проверьте mail.json (нужен пароль приложения)`);
+    throw new Error(`ящик ${acc.user} (${ep.imap.host}) недоступен: ${err instanceof Error ? err.message : err} — проверьте mails.json (нужен пароль приложения)`);
   }
   try {
     const box = await client.mailboxOpen(mailBox);
@@ -275,12 +275,12 @@ export async function sendMail(acc: MailAccount, args: SendArgs): Promise<string
   }
 }
 
-/** Пример mail.json — для отказа без файла и документации. */
+/** Пример mails.json — для отказа без файла и документации. */
 export function mailConfigHint(): string {
   return JSON.stringify(
     {
-      личное: { user: 'я@yandex.ru', password: 'пароль-приложения', host: 'imap.yandex.ru', smtpHost: 'smtp.yandex.ru' },
-      работа: { user: 'я@corp.ru', password: '…', host: 'imap.corp.ru', smtpHost: 'smtp.corp.ru' },
+      личное: { user: 'я@yandex.ru', password: 'пароль-приложения', imap: 'imap.yandex.ru', smtp: 'smtp.yandex.ru' },
+      работа: { user: 'я@corp.ru', password: '…', imap: 'imap.corp.ru', smtp: 'smtp.corp.ru' },
     },
     null,
     2,

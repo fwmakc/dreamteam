@@ -1,5 +1,5 @@
 /**
- * Тул «mail»: электронная почта по ящикам из mail.json проекта (папка
+ * Тул «mail»: электронная почта по ящикам из mails.json проекта (папка
  * .dreamteam, ```mail подкоманда).
  *
  *   boxes                   — настроенные ящики (без паролей);
@@ -67,7 +67,7 @@ export default (config: ToolConfig): Tool => {
 
   return {
     desc:
-      'Почта (ящики настроены в mail.json проекта, папка .dreamteam): ```mail boxes · list [ящик] [N] · find <ящик> <текст> · ' +
+      'Почта (ящики настроены в mails.json проекта, папка .dreamteam): ```mail boxes · list [ящик] [N] · find <ящик> <текст> · ' +
       'read <ящик> <uid> (вложения сохранятся в mail/) · send <ящик> (в теле шапка кому:/тема:/файлы:, ' +
       'потом пустая строка и текст письма).',
     check(body): ToolVerdict {
@@ -89,7 +89,7 @@ export default (config: ToolConfig): Tool => {
               const ep = resolveEndpoints(acc);
               return `${name} — ${acc.user} (imap: ${ep.imap.host}, smtp: ${ep.smtp.host})`;
             })
-            .join('\n') || `ящиков нет — заполните mail.json в папке .dreamteam проекта, например:\n${mailConfigHint()}`;
+            .join('\n') || `ящиков нет — заполните mails.json в папке .dreamteam проекта, например:\n${mailConfigHint()}`;
         }
         case 'list': {
           const n = Math.min(Math.max(Number(rest[1] ?? 10) || 10, 1), 50);

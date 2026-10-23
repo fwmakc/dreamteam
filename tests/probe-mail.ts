@@ -1,6 +1,6 @@
 /**
  * Проба тула «mail» — офлайн: реальных серверов не касаемся.
- *   конфиг mail.json проекта (служебная папка .dreamteam): нет файла, битые
+ *   конфиг mails.json проекта (служебная папка .dreamteam): нет файла, битые
  *   поля, пресеты, custom;
  *   boxes — имена и хосты, пароли не светятся; выбор ящика при нескольких;
  *   check(): чтение — allow, send — ask, ерунда — deny;
@@ -28,7 +28,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 }
 
 const cwd = mkdtempSync(join(tmpdir(), 'dt-mail-cwd-'));
-const mailFile = join(proj, 'mail.json');
+const mailFile = join(proj, 'mails.json');
 const { default: makeTool } = await import('../src/tools/mail/mail.js');
 const { resolveEndpoints, loadAccounts } = await import('../src/mail.js');
 
@@ -44,25 +44,25 @@ const errOf = async (body: string): Promise<string> => {
   }
 };
 
-// ─── нет mail.json ───────────────────────────────────────────────────────────
+// ─── нет mails.json ──────────────────────────────────────────────────────────
 {
   const msg = await errOf('boxes');
-  check('нет mail.json — отказ с примером', msg.includes('mail.json') && msg.includes('imap.yandex.ru') && msg.includes('smtpHost'), msg.slice(0, 160));
+  check('нет mails.json — отказ с примером', msg.includes('mails.json') && msg.includes('imap.yandex.ru') && msg.includes('smtp'), msg.slice(0, 160));
 }
 
 // ─── битый конфиг: каждое поле со своей ошибкой ──────────────────────────────
 {
-  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'yandex', user: 'x@x.ru', password: 'p', host: 'imap.x.ru', smtpHost: 'smtp.x.ru' } }));
+  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'yandex', user: 'x@x.ru', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru' } }));
   check('поле preset больше не знает — отказ', (await errOf('boxes')).includes('неизвестные поля "preset"'));
   writeFileSync(mailFile, JSON.stringify({ a: { user: 'x@x.ru' } }));
-  check('нет password/host/smtpHost — сначала user/password', (await errOf('boxes')).includes('"user" и "password"'));
+  check('нет password/imap/smtp — сначала user/password', (await errOf('boxes')).includes('"user" и "password"'));
   writeFileSync(mailFile, JSON.stringify({ a: { user: 'x@corp.ru', password: 'p' } }));
-  check('без host/smtpHost — отказ', (await errOf('boxes')).includes('"host" (IMAP) и "smtpHost"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', host: 'imap.x.ru', smtpHost: 'smtp.x.ru', fromName: 'Я' } }));
+  check('без imap/smtp — отказ', (await errOf('boxes')).includes('"imap" (входящая почта) и "smtp"'));
+  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru', fromName: 'Я' } }));
   check('лишнее поле в ящике', (await errOf('boxes')).includes('неизвестные поля "fromName"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', host: 'imap.x.ru', smtpHost: 'smtp.x.ru', port: 'девятьсот' } }));
+  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru', port: 'девятьсот' } }));
   check('порт не число', (await errOf('boxes')).includes('"port"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', host: 'imap.x.ru', smtpHost: 'smtp.x.ru', tlsNoVerify: 'конечно' } }));
+  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru', tlsNoVerify: 'конечно' } }));
   check('tlsNoVerify не булево — отказ', (await errOf('boxes')).includes('"tlsNoVerify" должен быть true или false'));
   writeFileSync(mailFile, 'это не json');
   check('битый json', (await errOf('boxes')).includes('кривой JSON'));
@@ -71,8 +71,8 @@ const errOf = async (body: string): Promise<string> => {
 // ─── валидный конфиг: два ящика ──────────────────────────────────────────────
 {
   writeFileSync(mailFile, JSON.stringify({
-    личное: { user: 'я@yandex.ru', password: 'секрет-1', host: 'imap.yandex.ru', smtpHost: 'smtp.yandex.ru' },
-    работа: { user: 'я@corp.ru', password: 'секрет-2', host: 'imap.corp.ru', smtpHost: 'smtp.corp.ru', smtpPort: 587, tlsNoVerify: true },
+    личное: { user: 'я@yandex.ru', password: 'секрет-1', imap: 'imap.yandex.ru', smtp: 'smtp.yandex.ru' },
+    работа: { user: 'я@corp.ru', password: 'секрет-2', imap: 'imap.corp.ru', smtp: 'smtp.corp.ru', smtpPort: 587, tlsNoVerify: true },
   }));
   const boxes = await run('boxes');
   check('boxes: оба ящика с хостами', boxes.includes('личное — я@yandex.ru (imap: imap.yandex.ru') && boxes.includes('smtp.corp.ru'), boxes);

@@ -7,7 +7,7 @@
  *    профиль, команда (агенты, менеджер, тула), расписание, общая память.
  *    Команда — свойство машины: симулятор команды настраивается один раз.
  *  - проект (DT_PROJECT, по умолчанию <cwd>/.dreamteam): ВСЁ про конкретный
- *    проект — hosts.json (ssh-серверы), почта и боты проекта (mail.json,
+ *    проект — hosts.json (ssh-серверы), почта и боты проекта (mails.json,
  *    messengers.json), переписка (sessions/, transcripts/). Файлы работы
  *    тулов — в текущей папке (WORKSPACE).
  *
@@ -49,7 +49,7 @@ export const MEMORY_FILE = join(DT_HOME, 'memory.json');
 /** ssh-серверы проекта (тул ssh): { "prod": { "host": "…", … } }. */
 export const HOSTS_FILE = join(DT_PROJECT, 'hosts.json');
 /** Ящики тула mail — секреты проекта. */
-export const MAIL_FILE = join(DT_PROJECT, 'mail.json');
+export const MAIL_FILE = join(DT_PROJECT, 'mails.json');
 /** Токены ботов telegram/max — секреты проекта. */
 export const MESSENGERS_FILE = join(DT_PROJECT, 'messengers.json');
 export const SESSIONS_DIR = join(DT_PROJECT, 'sessions');

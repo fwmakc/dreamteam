@@ -263,7 +263,7 @@ export function ensureProject(defaultProvider: string, projectDir: string = DT_P
   mkdirSync(projectDir, { recursive: true });
   writeFileSync(join(projectDir, 'hosts.json'), JSON.stringify(readScaffold(join('project', 'hosts.json')), null, 2) + '\n');
   const notes = [
-    `создал ${projectDir} (hosts.json: ssh-серверы проекта; почта и боты — mail.json/messengers.json, когда понадобятся)`,
+    `создал ${projectDir} (hosts.json: ssh-серверы проекта; почта и боты — mails.json/messengers.json, когда понадобятся)`,
   ];
   const gi = gitignoreNotice(dirname(projectDir));
   if (gi) notes.push(gi);
