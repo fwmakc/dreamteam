@@ -805,6 +805,21 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
         '(фильтр — подстрока в адресе). JavaScript не исполняется; если страница пустая, она рисуется скриптами.',
     );
   }
+  if (ids.includes('mail')) {
+    lines.push(
+      '```mail list личное 10',
+      '```mail read личное 42',
+      '```mail send личное',
+      'кому: адрес@example.com',
+      'тема: Паспорта',
+      'файлы: паспорта.xlsx',
+      '',
+      '<текст письма>',
+      '```',
+      'mail работает с ящиками из ~/.dreamteam/mail.json (настроил хозяин): list/find — проверка почты, ' +
+        'read — письмо целиком (вложения сохраняются в mail/), send — отправка с вложениями.',
+    );
+  }
   for (const id of ids.filter((t) => !(BUILTIN_TOOL_IDS as readonly string[]).includes(t))) {
     const tool = customTools?.get(id);
     lines.push(
