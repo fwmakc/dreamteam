@@ -776,6 +776,17 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
         'пути придут в результате; прежде чем рассказывать, что получилось, посмотри файлы через look.',
     );
   }
+  if (ids.includes('docs')) {
+    lines.push(
+      '```docs read файл.pdf',
+      '```docs tables таблица.xlsx',
+      '```docs write отчёт.docx',
+      '<текст документа: абзацы построчно или markdown/TSV/CSV-таблица для xlsx/ods>',
+      '```',
+      'docs читает (read, tables) и пишет (write) pdf/docx/xlsx/csv/odt/ods в твоей рабочей папке; ' +
+        'append дописывает абзацы в конец существующего docx; convert pdf файл.doc перекодирует формат.',
+    );
+  }
   for (const id of ids.filter((t) => !(BUILTIN_TOOL_IDS as readonly string[]).includes(t))) {
     const tool = customTools?.get(id);
     lines.push(
