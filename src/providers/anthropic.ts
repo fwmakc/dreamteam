@@ -11,7 +11,7 @@ const API_VERSION = '2023-06-01';
  * endpoint /v1/messages, заголовок x-api-key, отдельное поле system,
  * обязательный max_tokens, свой формат SSE-событий.
  *
- * Конфиг: apiKeyEnv (по умолчанию ANTHROPIC_API_KEY), model, baseUrl
+ * Конфиг: apiKey (ключ из кабинета, прямо в карточке), model, baseUrl
  * (по умолчанию https://api.anthropic.com), maxTokens.
  */
 export const anthropicFactory: ProviderFactory = (
@@ -19,11 +19,10 @@ export const anthropicFactory: ProviderFactory = (
   config: ProviderConfig,
 ): LLMProvider => {
   const baseUrl = String(config.baseUrl ?? 'https://api.anthropic.com').replace(/\/+$/, '');
-  const apiKeyEnv = config.apiKeyEnv ? String(config.apiKeyEnv) : 'ANTHROPIC_API_KEY';
-  const apiKey = process.env[apiKeyEnv];
+  const apiKey = config.apiKey ? String(config.apiKey) : undefined;
   if (!apiKey) {
     throw new ConfigurationError(
-      `не задана переменная окружения ${apiKeyEnv} (провайдер «${id}»)`,
+      `в карточке провайдера «${id}» нет "apiKey" — впиши ключ из кабинета в providers.json`,
     );
   }
   const model = String(config.model ?? 'claude-sonnet-4-5');

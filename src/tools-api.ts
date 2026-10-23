@@ -129,7 +129,7 @@ export interface CommandRules {
 }
 
 /** Подстановки и перенаправления: в таком теле первые слова больше не описывают происходящее.
- *  % — раскрытие переменных cmd.exe (иначе `echo %DREAMTEAM_API_KEY%` слил бы ключи молча). */
+ *  % — раскрытие переменных cmd.exe (иначе `echo %TOKEN%` слил бы секрет молча). */
 export const SUBST = /[$()<>`%]/;
 
 const toks = (s: string): string[] => s.trim().split(/\s+/);

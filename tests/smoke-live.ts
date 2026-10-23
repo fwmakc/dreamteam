@@ -6,15 +6,14 @@
  *   npm run smoke:live
  *
  * Требования:
- *  - в ~/.dreamteam/.env лежит ключ провайдера;
  *  - в ~/.dreamteam/providers.json основной провайдер — настоящий
- *    (не «mock»), например GLM (Z.ai, Coding Plan):
+ *    (не «mock») и с ключом в карточке, например GLM (Z.ai, Coding Plan):
  *
  *      "glm": {
  *        "adapter": "openai-compatible",
  *        "baseUrl": "https://api.z.ai/api/coding/paas/v4",
  *        "model": "glm-4.6",
- *        "apiKeyEnv": "GLM_API_KEY"
+ *        "apiKey": "ваш_ключ"
  *      }
  *
  *    (обычный ключ z.ai без Coding Plan — baseUrl "https://api.z.ai/api/paas/v4")

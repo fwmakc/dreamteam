@@ -4,8 +4,9 @@
  * settings/user/providers + sessions/ + transcripts/ для дома;
  * session.json + agents.json + settings.json для сессии.
  *
- * Секреты сознательно не переносятся: .env в архив не попадает — ключи
- * остаются на машине (имена переменных переносятся в providers.json).
+ * Секреты сознательно не переносятся: .env в архив не попадает, а из
+ * providers.json при упаковке вырезаются ключи карточек (apiKey, clientId,
+ * clientSecret) — после импорта их вписывают заново, отчёт об этом напомнит.
  *
  * Импорт дома: настройки/профиль/провайдеры заменяются, разговоры вливаются
  * по id (совпавшие — заменяются). Импорт сессии: разговор разворачивается
@@ -38,12 +39,31 @@ export interface TransferEntry {
 
 const HOME_FILES = ['settings.json', 'user.json', 'providers.json', 'agents.json', 'manager.json'] as const;
 
-/** Записи домашнего слоя: настройки, профиль, провайдеры и КОМАНДА (без .env с ключами и tools/). */
+/** Секретные поля карточек провайдеров: в архив не включаются. */
+const PROVIDER_SECRET_FIELDS = ['apiKey', 'clientId', 'clientSecret'] as const;
+
+/**
+ * providers.json без секретов: конфиг (адаптер, модель, baseUrl) едет,
+ * ключи остаются на машине.
+ */
+function providersWithoutSecrets(): Buffer {
+  const raw = JSON.parse(readFileSync(join(DT_HOME, 'providers.json'), 'utf8')) as {
+    providers?: Record<string, Record<string, unknown>>;
+  };
+  for (const card of Object.values(raw.providers ?? {})) {
+    if (!card || typeof card !== 'object') continue;
+    for (const f of PROVIDER_SECRET_FIELDS) delete card[f];
+  }
+  return Buffer.from(`${JSON.stringify(raw, null, 2)}\n`);
+}
+
+/** Записи домашнего слоя: настройки, профиль, провайдеры (карточки без ключей), команда и тула; .env не переносится. */
 export function homeEntries(): TransferEntry[] {
   const out: TransferEntry[] = [];
   for (const f of HOME_FILES) {
     const p = join(DT_HOME, f);
-    if (existsSync(p)) out.push({ rel: f, data: readFileSync(p) });
+    if (!existsSync(p)) continue;
+    out.push({ rel: f, data: f === 'providers.json' ? providersWithoutSecrets() : readFileSync(p) });
   }
   for (const name of readdirSync(TOOLS_DIR)) {
     const p = join(TOOLS_DIR, name);
@@ -107,13 +127,16 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
   } catch {
     // память необязательна
   }
-  // провайдеры: перечитываем и обновляем карту приложения (ключи остаются в .env)
+  // провайдеры: перечитываем и обновляем карту приложения
   try {
     const loaded = loadProviders(PROVIDERS_FILE);
     for (const [k, v] of loaded.providers) app.providers.set(k, v);
     for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
     app.defaultProviderId = loaded.defaultId;
     report.push('провайдеры перечитаны');
+    if (entries.some((x) => x.rel === 'providers.json')) {
+      report.push('ключи провайдеров в архив не входят — впиши "apiKey" в карточки providers.json');
+    }
   } catch (err) {
     report.push(`провайдеры не перечитались (${err instanceof Error ? err.message : err})`);
   }

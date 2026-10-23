@@ -1,11 +1,12 @@
 /**
  * Проверка первого запуска (без TUI и LLM):
  *  - runWizard: выбор провайдера, параметры, ключ (не эхоится в вывод),
- *    запись providers.json и ~/.dreamteam/.env (DREAMTEAM_API_KEY);
+ *    запись providers.json (ключ прямо в карточке, поле "apiKey");
  *  - ensureLayers: пустой дом + пустой проект → wizard, настройки с дефолтами,
  *    .dreamteam (пустая команда, менеджер на дефолтном провайдере, пустые
  *    серверы, tools/); существующие слои не трогаются;
  *  - не-TTY без providers.json — внятный отказ, а не тихий mock;
+ *  - migrateProviderEnvKeys: одноразовый перенос ключей из .env в карточки;
  *  - gitignoreNotice: git без .gitignore / без строки / уже скрыто / без git.
  *
  * Все функции принимают явные пути (дом/проект) — каждый сценарий в своём
@@ -57,7 +58,6 @@ const {
   ensureProject,
   defaultProviderId,
   gitignoreNotice,
-  PROVIDER_KEY_ENV,
 } = await import('../src/wizard.js');
 
 // --- ensureLayers на пустых слоях: wizard (mock) + настройки + скаффолдинг проекта ---
@@ -80,14 +80,15 @@ const {
     return typeof p.hosts === 'object' && p.hosts !== null;
   })());
 
-  // --- .env создаётся из примера: закомментированные переменные, права 600 ---
+  // --- .env создаётся из примера: переменные для команд/serve, права 600 ---
   const envFile = join(home, '.env');
   const envMode = (await import('node:fs')).statSync(envFile).mode & 0o777;
   check('env: создан из примера', existsSync(envFile));
-  check('env: ключи в примере закомментированы', !/^DREAMTEAM_API_KEY=/m.test(readFileSync(envFile, 'utf8')) && readFileSync(envFile, 'utf8').includes('# DREAMTEAM_API_KEY='));
-  check('env: порт и адрес примера на месте', readFileSync(envFile, 'utf8').includes('# PORT=8080') && readFileSync(envFile, 'utf8').includes('# HOST=127.0.0.1'));
+  const envText0 = readFileSync(envFile, 'utf8');
+  check('env: ключей моделей в примере нет, есть подсказка про apiKey', !/^OPENAI_API_KEY=|^ANTHROPIC_API_KEY=|^GIGA_API_KEY=|^DREAMTEAM_API_KEY=/m.test(envText0) && envText0.includes('"apiKey"'), envText0);
+  check('env: порт и адрес примера на месте', envText0.includes('# PORT=8080') && envText0.includes('# HOST=127.0.0.1'));
   check('env: права только у владельца (POSIX)', process.platform === 'win32' || envMode === 0o600, envMode.toString(8));
-  check('env: мастер создал токен доступа TOKEN', /^TOKEN=.+/m.test(readFileSync(envFile, 'utf8')));
+  check('env: мастер создал токен доступа TOKEN', /^TOKEN=.+/m.test(envText0));
 
   // --- скелеты конфигов: настоящие JSON-файлы в пакете, валидны по загрузчикам ---
   {
@@ -117,44 +118,76 @@ const {
   check('повтор: настройки не тронуты', readFileSync(join(home, 'settings.json'), 'utf8') === before);
 }
 
-// --- openai-compatible: baseUrl/модель/ключ; ключ не эхоится и попадает в .env ---
+// --- openai-compatible: baseUrl/модель/ключ; ключ не эхоится и лежит в карточке ---
 {
-  delete process.env[PROVIDER_KEY_ENV];
   const home = join(root, 'h2');
   const proj = join(root, 'p2', '.dreamteam');
   const { io, out } = makeIo(['1', 'https://api.test/v1', 'test-model', 'секрет-ключ-42'], true);
   const notes = await ensureLayers(io, home, proj);
-  const providers = JSON.parse(readFileSync(join(home, 'providers.json'), 'utf8'));
+  const providersFile = readFileSync(join(home, 'providers.json'), 'utf8');
+  const providers = JSON.parse(providersFile);
   const main = providers.providers.main;
   check('openai-совместимый: id main, дефолт', providers.default === 'main' && main.adapter === 'openai-compatible', JSON.stringify(providers));
   check('openai-совместимый: baseUrl и модель', main.baseUrl === 'https://api.test/v1' && main.model === 'test-model', JSON.stringify(main));
-  check('openai-совместимый: ключ через переменную окружения', main.apiKeyEnv === PROVIDER_KEY_ENV, JSON.stringify(main));
-  check('ключ не попал в providers.json', !readFileSync(join(home, 'providers.json'), 'utf8').includes('секрет-ключ-42'));
+  check('openai-совместимый: ключ прямо в карточке', main.apiKey === 'секрет-ключ-42' && !('apiKeyEnv' in main), JSON.stringify(main));
   check('ключ не эхоится в выводе мастера', !out().includes('секрет-ключ-42'), out());
-  check('мастер: заметка, куда лёг ключ', notes.some((n) => n.includes('.env')), notes.join(' | '));
+  check('мастер: заметка, куда лёг ключ', notes.some((n) => n.includes('"apiKey"')), notes.join(' | '));
   const envText = readFileSync(join(home, '.env'), 'utf8');
-  check('.env дома: DREAMTEAM_API_KEY=ключ', envText.includes(`${PROVIDER_KEY_ENV}=секрет-ключ-42`), envText);
-  check('переменная окружения выставлена сразу (без перезапуска)', process.env[PROVIDER_KEY_ENV] === 'секрет-ключ-42');
+  check('ключ в .env не дублируется', !envText.includes('секрет-ключ-42'), envText);
   check('менеджер в доме: на main', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).provider === 'main');
-  check('проект: в .env проекта ключ не дублируется', !existsSync(join(proj, '.env')));
+  check('проект: .env не создаётся', !existsSync(join(proj, '.env')));
 }
 
 // --- обязательный ключ: пустой ввод переспрашивается (anthropic/gigachat) ---
 {
-  delete process.env[PROVIDER_KEY_ENV];
   const home = join(root, 'h3');
   const { io, out } = makeIo(['3', '', 'giga-ключ'], true);
   await runWizard(io, home);
   const providers = JSON.parse(readFileSync(join(home, 'providers.json'), 'utf8'));
-  check('gigachat: keyEnv + повтор вопроса при пустом вводе', providers.providers.gigachat.keyEnv === PROVIDER_KEY_ENV && out().includes('без ключа GigaChat'), JSON.stringify(providers));
-  check('gigachat: ключ в .env', readFileSync(join(home, '.env'), 'utf8').includes('giga-ключ'));
+  check('gigachat: apiKey + повтор вопроса при пустом вводе', providers.providers.gigachat.apiKey === 'giga-ключ' && out().includes('без ключа GigaChat'), JSON.stringify(providers));
 
   const home4 = join(root, 'h4');
   const { io: io4, out: out4 } = makeIo(['2', '', '', '', 'claude-ключ'], true);
   await runWizard(io4, home4);
   const p4 = JSON.parse(readFileSync(join(home4, 'providers.json'), 'utf8'));
-  check('anthropic: два отказа ключа — два повтора', p4.providers.claude.model === 'claude-sonnet-4-5' && (out4().match(/без ключа Claude/g) ?? []).length === 2, out4());
-  check('anthropic: ключ в .env', readFileSync(join(home4, '.env'), 'utf8').includes('claude-ключ'));
+  check('anthropic: два отказа ключа — два повтора', p4.providers.claude.model === 'claude-sonnet-4-5' && p4.providers.claude.apiKey === 'claude-ключ' && (out4().match(/без ключа Claude/g) ?? []).length === 2, out4());
+}
+
+// --- миграция: ключи из окружения переезжают в карточки (одноразово) ---
+{
+  const { migrateProviderEnvKeys } = await import('../src/providers/registry.js');
+  const home = join(root, 'h7');
+  mkdirSync(home, { recursive: true });
+  const file = join(home, 'providers.json');
+  writeFileSync(file, JSON.stringify({
+    default: 'main',
+    providers: {
+      main: { adapter: 'openai-compatible', baseUrl: 'https://api.test/v1', model: 'm', apiKeyEnv: 'DT_TEST_KEY' },
+      claude: { adapter: 'anthropic', model: 'claude-sonnet-4-5' }, // старое умолчание ANTHROPIC_API_KEY
+      giga: { adapter: 'gigachat', keyEnv: 'DT_TEST_GIGA' },
+      img: { adapter: 'openai-images', baseUrl: 'https://api.test/v1', model: 'd', apiKeyEnv: 'DT_TEST_UNSET' },
+      fresh: { adapter: 'openai-compatible', baseUrl: 'https://api.test/v1', model: 'm', apiKey: 'уже-в-карточке' },
+    },
+  }, null, 2) + '\n');
+  process.env.DT_TEST_KEY = 'ключ-из-env';
+  process.env.DT_TEST_GIGA = 'giga-из-env';
+  const savedAnthropic = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'claude-из-env';
+
+  const notes = migrateProviderEnvKeys(file);
+  const raw = JSON.parse(readFileSync(file, 'utf8')) as { providers: Record<string, Record<string, unknown>> };
+  check('миграция: openai — значение вместо имени', raw.providers.main.apiKey === 'ключ-из-env' && !('apiKeyEnv' in raw.providers.main), JSON.stringify(raw.providers.main));
+  check('миграция: anthropic без имени — старое умолчание ANTHROPIC_API_KEY', raw.providers.claude.apiKey === 'claude-из-env', JSON.stringify(raw.providers.claude));
+  check('миграция: gigachat keyEnv → apiKey', raw.providers.giga.apiKey === 'giga-из-env' && !('keyEnv' in raw.providers.giga), JSON.stringify(raw.providers.giga));
+  check('миграция: unset-переменная — прослойка удалена, ключа нет', !('apiKeyEnv' in raw.providers.img) && !('apiKey' in raw.providers.img), JSON.stringify(raw.providers.img));
+  check('миграция: карточка с ключом не тронута', raw.providers.fresh.apiKey === 'уже-в-карточке', JSON.stringify(raw.providers.fresh));
+  check('миграция: заметка о переносе', notes.some((n) => n.includes('«main»')) && notes.some((n) => n.includes('«giga»')), notes.join(' | '));
+  check('миграция: повторный запуск — ничего не меняет', migrateProviderEnvKeys(file).length === 0);
+
+  delete process.env.DT_TEST_KEY;
+  delete process.env.DT_TEST_GIGA;
+  if (savedAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = savedAnthropic;
 }
 
 // --- не-TTY без providers.json — честный отказ, а не тихий mock ---
@@ -203,7 +236,6 @@ const {
   check('существующий проект: не трогается', ensureProject('mock', proj).length === 0);
 }
 
-delete process.env[PROVIDER_KEY_ENV];
 rmSync(root, { recursive: true, force: true });
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);

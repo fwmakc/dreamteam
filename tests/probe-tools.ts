@@ -292,7 +292,7 @@ const tctx: ToolContext = {
   check('shell дефолт: find -delete — вопрос', shell.check(readCmd('find . -name "*.tmp" -delete'), { cwd: root }) === 'ask');
   check('shell дефолт: подстановка — вопрос', shell.check('echo $(cat .env)') === 'ask');
   check('shell дефолт: вывод в файл — вопрос', shell.check('echo hi > out.txt') === 'ask');
-  check('shell дефолт: %переменная% cmd — вопрос', shell.check('echo %DREAMTEAM_API_KEY%') === 'ask');
+  check('shell дефолт: %переменная% cmd — вопрос', shell.check('echo %ANY_SECRET%') === 'ask');
   const esc = shell.check(readCmd('type ../outside.txt'), { cwd: root });
   check('shell дефолт: «..» вне папки — отказ с обоснованием', typeof esc === 'object' && esc.deny.includes('вне рабочей папки'), JSON.stringify(esc));
   check('shell дефолт: листинг выше папки — отказ', typeof shell.check(readCmd('dir ..'), { cwd: root }) === 'object');

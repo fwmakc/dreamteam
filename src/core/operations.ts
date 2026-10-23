@@ -498,11 +498,11 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: true },
     ],
     title: 'новый провайдер',
-    help: 'adapter обязателен; дальше model, baseUrl, apiKeyEnv и свой ключ адаптера',
+    help: 'adapter обязателен; дальше model, baseUrl, apiKey и свой ключ адаптера',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return ['Синтаксис: /provider add <id> adapter=openai-compatible model=… baseUrl=… apiKeyEnv=…'];
+        return ['Синтаксис: /provider add <id> adapter=openai-compatible model=… baseUrl=… apiKey=…'];
       }
       const config = parsePairs(pairs);
       if (Array.isArray(config)) return config;
@@ -520,11 +520,11 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: true },
     ],
     title: 'править провайдера',
-    help: 'adapter, model, baseUrl, apiKeyEnv, maxTokens, temperature; пустое значение убирает поле',
+    help: 'adapter, model, baseUrl, apiKey, maxTokens, temperature; пустое значение убирает поле',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return ['Синтаксис: /provider update <id> модель=… baseUrl=… apiKeyEnv=… adapter=…'];
+        return ['Синтаксис: /provider update <id> model=… baseUrl=… apiKey=… adapter=…'];
       }
       const parsed = parsePairs(pairs);
       if (Array.isArray(parsed)) return parsed;

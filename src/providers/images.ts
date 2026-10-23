@@ -121,11 +121,7 @@ export const openAiImagesFactory: ImageAdapterFactory = (id, config: ProviderCon
   if (!model) {
     throw new Error(`не задана модель (image-провайдер «${id}»)`);
   }
-  const apiKeyEnv = config.apiKeyEnv ? String(config.apiKeyEnv) : undefined;
-  const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : undefined;
-  if (apiKeyEnv && !apiKey) {
-    throw new Error(`не задана переменная окружения ${apiKeyEnv} (image-провайдер «${id}»)`);
-  }
+  const apiKey = config.apiKey ? String(config.apiKey) : undefined;
   return {
     id,
     kind: 'openai-images',

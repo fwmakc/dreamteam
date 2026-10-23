@@ -1,7 +1,7 @@
 /**
  * Импорт-экспорт: дом и отдельная сессия.
- *  - экспорт дома: настройки/профиль/провайдеры + разговоры и транскрипты,
- *    .env (секреты) — не включается;
+ *  - экспорт дома: настройки/профиль/провайдеры + разговоры и транскрипты;
+ *    .env и ключи карточек провайдеров (apiKey…) — не включаются;
  *  - импорт дома: настройки/провайдеры заменяются, разговоры вливаются по id;
  *  - экспорт/импорт одной сессии: разговор как новый (новый id), агенты
  *    вливаются по id (новые добавляются, совпавшие не трогаются);
@@ -36,7 +36,7 @@ process.chdir(base);
 
 writeFileSync(
   join(home, 'providers.json'),
-  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
+  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock', apiKey: 'СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА' } } }, null, 2) + '\n',
 );
 writeFileSync(join(home, '.env'), 'DREAMTEAM_API_KEY=СЕКРЕТ-НЕ-ПЕРЕНОСИТЬ\n');
 writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Хозяин', role: 'босс' }, null, 2) + '\n');
@@ -99,6 +99,10 @@ app.store.save(s2);
     entries.some((e) => e.rel === 'agents.json') && entries.some((e) => e.rel === 'manager.json')
       && !entries.some((e) => e.rel.startsWith('sessions/')));
   check('экспорт дома: .env с секретами не включён', !entries.some((e) => e.rel.includes('.env')));
+  const provEntry = entries.find((e) => e.rel === 'providers.json');
+  const provText = provEntry ? provEntry.data.toString('utf8') : '';
+  check('экспорт дома: карточка провайдера без ключа, конфиг на месте',
+    provText.includes('"adapter": "mock"') && !provText.includes('СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА'), provText);
   const zip = packEntriesZip(entries);
   const back = readZipEntries(zip);
   check('экспорт дома: zip roundtrip без потерь', back.length === entries.length);
@@ -119,6 +123,7 @@ app.store.save(s2);
   check('импорт дома: настройки заменены из архива', settings.width === 200 && settings.language === 'english', JSON.stringify(settings));
   check('импорт дома: разговоры не трогаются (они в проекте)', app.store.list().length >= 1);
   check('импорт дома: app.providers жив', app.providers.get('mock') !== undefined);
+  check('импорт дома: напоминание вписать ключи', report.includes('"apiKey"'), report);
 }
 
 // ── экспорт сессии: разговор + агенты + настройки ────────────────────────────

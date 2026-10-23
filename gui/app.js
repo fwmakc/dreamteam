@@ -233,7 +233,7 @@
       { key: 'adapter', label: 'Адаптер (openai-compatible / anthropic / gigachat)', value: 'openai-compatible' },
       { key: 'baseUrl', label: 'baseUrl' },
       { key: 'model', label: 'Модель' },
-      { key: 'apiKeyEnv', label: 'Имя переменной с ключом' },
+      { key: 'apiKey', label: 'Ключ API (можно пусто — для локальных API)' },
     ], (v) => {
       rpc('provider.add', { id: v.id, config: v })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
@@ -764,7 +764,7 @@
       { key: 'adapter', label: 'Адаптер (openai-compatible / anthropic / gigachat / mock)', value: p.kind },
       { key: 'model', label: 'Модель', value: p.model ?? '' },
       { key: 'baseUrl', label: 'baseUrl (пусто — не менять)', value: p.baseUrl ?? '' },
-      { key: 'apiKeyEnv', label: 'Имя переменной с ключом (пусто — не менять)', value: p.apiKeyEnv ?? '' },
+      { key: 'apiKey', label: 'Ключ API (пусто — не менять)', value: '' },
     ], (v) => {
       const fields = {};
       for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = val;

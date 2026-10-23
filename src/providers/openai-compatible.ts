@@ -10,7 +10,7 @@ const REQUEST_TIMEOUT_MS = 120_000;
  * Z.ai (GLM), OpenAI, OpenRouter, DeepSeek, Ollama, LM Studio и т.д.
  *
  * Конфиг: baseUrl (обязателен, вместе с /v1 или /v4), model,
- * apiKeyEnv (имя переменной окружения с ключом; для локальных API можно опустить),
+ * apiKey (ключ прямо в карточке; для локальных API можно опустить),
  * maxTokens, temperature (необязательно).
  */
 export const openAiCompatibleFactory: ProviderFactory = (
@@ -25,13 +25,7 @@ export const openAiCompatibleFactory: ProviderFactory = (
   if (!model) {
     throw new ConfigurationError(`не задана модель (провайдер «${id}»)`);
   }
-  const apiKeyEnv = config.apiKeyEnv ? String(config.apiKeyEnv) : undefined;
-  const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : undefined;
-  if (apiKeyEnv && !apiKey) {
-    throw new ConfigurationError(
-      `не задана переменная окружения ${apiKeyEnv} (провайдер «${id}»)`,
-    );
-  }
+  const apiKey = config.apiKey ? String(config.apiKey) : undefined;
   const defaultMaxTokens = num(config.maxTokens);
   const defaultTemperature = num(config.temperature) ?? 0.7;
 

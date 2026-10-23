@@ -3,8 +3,8 @@
  *
  * Дома (DT_HOME) обязателен только providers.json — без него команде нечем
  * говорить. Нет файла → мастер в обычном терминале (до TUI): тип провайдера,
- * параметры, ключ (ввод не отображается) — ключ пишется в ~/.dreamteam/.env
- * под именем DREAMTEAM_API_KEY, конфиг — в providers.json. Остальное добирается
+ * параметры, ключ (ввод не отображается) — ключ сохраняется прямо в карточке
+ * провайдера в providers.json. Остальное добирается
  * само: settings.json с дефолтами, в проекте — .dreamteam с пустой командой,
  * менеджером на дефолтном провайдере и пустым реестром серверов.
  *
@@ -20,9 +20,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 import { DT_HOME, DT_PROJECT, WORKSPACE } from './paths.js';
-
-/** Имя переменной окружения с ключом провайдера в ~/.dreamteam/.env */
-export const PROVIDER_KEY_ENV = 'DREAMTEAM_API_KEY';
 
 /** Куда мастер читает вопросы и пишет ответы (в пробах — потоки, не TTY). */
 export interface WizardIo {
@@ -116,7 +113,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
       const model = await ask('  Модель [gpt-4o-mini]: ') || 'gpt-4o-mini';
       key = await askSecret('  Ключ API (ввод скрыт; Enter — пропустить, если API локальный): ');
       entry = { adapter: 'openai-compatible', baseUrl, model };
-      if (key) entry.apiKeyEnv = PROVIDER_KEY_ENV;
+      if (key) entry.apiKey = key;
     } else if (pick === '2') {
       id = 'claude';
       const model = await ask('  Модель [claude-sonnet-4-5]: ') || 'claude-sonnet-4-5';
@@ -125,7 +122,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
         if (key) break;
         io.output.write(pc.yellow('  без ключа Claude отвечать не сможет — возьми его в кабинете Anthropic\n'));
       }
-      entry = { adapter: 'anthropic', model, apiKeyEnv: PROVIDER_KEY_ENV };
+      entry = { adapter: 'anthropic', model, apiKey: key };
     } else if (pick === '3') {
       id = 'gigachat';
       for (;;) {
@@ -133,7 +130,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
         if (key) break;
         io.output.write(pc.yellow('  без ключа GigaChat отвечать не сможет\n'));
       }
-      entry = { adapter: 'gigachat', keyEnv: PROVIDER_KEY_ENV };
+      entry = { adapter: 'gigachat', apiKey: key };
     } else {
       id = 'mock';
       entry = { adapter: 'mock' };
@@ -143,9 +140,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
     writeFileSync(providersFile, JSON.stringify({ default: id, providers: { [id]: entry } }, null, 2) + '\n');
     notes.push(`создал ${providersFile} (провайдер «${id}» по умолчанию)`);
     if (key) {
-      writeEnvKey(envFile, PROVIDER_KEY_ENV, key);
-      process.env[PROVIDER_KEY_ENV] = key; // чтобы провайдер заработал без перезапуска
-      notes.push(`ключ сохранил в ${envFile} (${PROVIDER_KEY_ENV})`);
+      notes.push(`ключ сохранил в ${providersFile} (поле "apiKey")`);
     } else {
       notes.push(`ключ не указан — провайдер будет работать в mock-режиме`);
     }
@@ -238,12 +233,12 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     notes.push(`создал ${toolsDir} (полка для своих тулов)`);
   }
   if (!existsSync(envFile)) {
-    // пример со всеми переменными (ключи закомментированы): мастер допишет
-    // настоящий ключ и токен поверх, остальное разбирается руками.
+    // пример со всеми переменными: мастер допишет токен serve поверх,
+    // остальное (свои переменные для команд) разбирается руками.
     // До wizard: его дописки должны лечь в файл с примерами
     mkdirSync(homeDir, { recursive: true });
     writeFileSync(envFile, readFileSync(join(SCAFFOLD_DIR, 'home', 'env.example'), 'utf8'), { mode: 0o600 });
-    notes.push(`создал ${envFile} из примера (env.example) — впиши ключи`);
+    notes.push(`создал ${envFile} из примера (env.example) — переменные для команд и serve`);
   }
   if (!existsSync(providersFile)) {
     if (!io.isTTY) {

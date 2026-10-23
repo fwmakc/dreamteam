@@ -109,7 +109,6 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       kind: s.provider.kind,
       model: s.provider.model,
       baseUrl: s.config?.baseUrl ? String(s.config.baseUrl) : undefined,
-      apiKeyEnv: s.config?.apiKeyEnv ? String(s.config.apiKeyEnv) : undefined,
       ok: s.ok,
       note: s.note,
       vision: s.vision,

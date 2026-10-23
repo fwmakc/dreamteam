@@ -66,8 +66,8 @@ function postStream(
  * 5. Российские TLS-сертификаты: опция caCertPath (путь к корневому сертификату
  *    Минцифры) или insecureTLS: true для быстрой проверки (небезопасно).
  *
- * Конфиг: keyEnv (по умолчанию GIGA_API_KEY — ключ из кабинета, готовая Basic-строка)
- * Либо clientIdEnv + clientSecretEnv — тогда Basic строится из пары.
+ * Конфиг: apiKey (ключ из кабинета, готовая Basic-строка — прямо в карточке)
+ * Либо пара clientId + clientSecret — тогда Basic строится из неё.
  * scope (по умолчанию GIGACHAT_API_PERS), model (по умолчанию GigaChat),
  * authUrl / baseUrl — endpoints, caCertPath, insecureTLS, maxTokens.
  */
@@ -86,27 +86,17 @@ export const gigachatFactory: ProviderFactory = (
   const defaultMaxTokens = num(config.maxTokens) ?? 1024;
 
   // --- авторизация: либо готовый ключ из кабинета, либо пара id/secret ---
-  const clientIdEnv = config.clientIdEnv ? String(config.clientIdEnv) : undefined;
-  const clientSecretEnv = config.clientSecretEnv
-    ? String(config.clientSecretEnv)
-    : undefined;
-  const keyEnv = config.keyEnv ? String(config.keyEnv) : 'GIGA_API_KEY';
+  const clientId = config.clientId ? String(config.clientId) : undefined;
+  const clientSecret = config.clientSecret ? String(config.clientSecret) : undefined;
 
   let basicAuth: string;
-  if (clientIdEnv && clientSecretEnv) {
-    const clientId = process.env[clientIdEnv];
-    const clientSecret = process.env[clientSecretEnv];
-    if (!clientId || !clientSecret) {
-      throw new ConfigurationError(
-        `нужны переменные окружения ${clientIdEnv} и ${clientSecretEnv} (провайдер «${id}»)`,
-      );
-    }
+  if (clientId && clientSecret) {
     basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
   } else {
-    const key = process.env[keyEnv];
+    const key = config.apiKey ? String(config.apiKey) : undefined;
     if (!key) {
       throw new ConfigurationError(
-        `не задана переменная окружения ${keyEnv} (провайдер «${id}»)`,
+        `в карточке провайдера «${id}» нет "apiKey" (или пары "clientId"/"clientSecret") — впиши ключ из кабинета в providers.json`,
       );
     }
     // Ключ из личного кабинета GigaChat — это уже base64(client_id:secret)
