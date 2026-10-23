@@ -1,6 +1,7 @@
 /**
  * Мессенджеры: Telegram и MAX — общая механика для тулов `telegram` и `max`.
- * Токены живут в ~/.dreamteam/messengers.json (секреты в доме, не в карточках):
+ * Токены живут в messengers.json в служебной папке проекта (.dreamteam),
+ * не в карточках агентов:
  *
  *   { "telegram": { "token": "123456:ABC-DEF…" },
  *     "max":      { "token": "…" },
@@ -17,9 +18,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { DT_HOME } from './paths.js';
-
-export const MESSENGERS_FILE = join(DT_HOME, 'messengers.json');
+import { MESSENGERS_FILE } from './paths.js';
 
 export const TELEGRAM_API = 'https://api.telegram.org';
 export const MAX_API = 'https://platform-api2.max.ru';

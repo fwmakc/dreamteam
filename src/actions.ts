@@ -101,14 +101,14 @@ export function loadToolsConfig(settingsFile: string, projectsFile: string, work
 
 /** Читает project.json (один проект — текущая папка); нет файла или битые поля — внятная ошибка. */
 export function loadProjects(file: string, projectId?: string): Map<string, ProjectEntry> {
-  let raw: { name?: unknown; hosts?: Record<string, unknown>; agents?: unknown };
+  let raw: { name?: unknown; hosts?: Record<string, unknown> };
   try {
     raw = JSON.parse(readFileSync(file, 'utf8')) as { hosts?: Record<string, unknown> };
   } catch (err) {
     throw new Error(`не удалось прочитать ${file}: ${err instanceof Error ? err.message : err}`);
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.hosts !== 'object' || raw.hosts === null) {
-    throw new Error(`${file}: ожидается объект { "name": "…", "agents": [ … ], "hosts": { … } }`);
+    throw new Error(`${file}: ожидается объект { "name": "…", "hosts": { … } }`);
   }
   const id = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : (projectId ?? 'project');
   const hosts = new Map<string, HostConfig>();
@@ -837,7 +837,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '',
       '<текст письма>',
       '```',
-      'mail работает с ящиками из ~/.dreamteam/mail.json (настроил хозяин): list/find — проверка почты, ' +
+      'mail работает с ящиками из mail.json в служебной папке проекта .dreamteam (настроил хозяин): list/find — проверка почты, ' +
         'read — письмо целиком (вложения сохраняются в mail/), send — отправка с вложениями.',
     );
   }
@@ -849,7 +849,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '',
       '<текст сообщения>',
       '```',
-      'telegram — бот из ~/.dreamteam/messengers.json (токен задал хозяин): list — чаты и chat_id, ' +
+      'telegram — бот из messengers.json в служебной папке проекта .dreamteam (токен задал хозяин): list — чаты и chat_id, ' +
         'in — входящие, send — сообщение в чат (файлы — вложением).',
     );
   }
@@ -861,7 +861,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '',
       '<текст сообщения>',
       '```',
-      'max — бот мессенджера MAX (токен в ~/.dreamteam/messengers.json): chats — чаты и chat_id, ' +
+      'max — бот мессенджера MAX (токен в messengers.json проекта, папка .dreamteam): chats — чаты и chat_id, ' +
         'in — входящие, send — сообщение в чат или user:<user_id> (файлы — вложением).',
     );
   }

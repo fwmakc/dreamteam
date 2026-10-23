@@ -1,6 +1,6 @@
 /**
- * Тул «max»: бот мессенджера MAX, токен — в ~/.dreamteam/messengers.json
- * (```max подкоманда). API: platform-api2.max.ru, заголовок Authorization.
+ * Тул «max»: бот мессенджера MAX, токен — в messengers.json проекта (папка
+ * .dreamteam, ```max подкоманда). API: platform-api2.max.ru, заголовок Authorization.
  *
  *   me             — кто я (имя и user_id бота);
  *   chats          — чаты бота (chat_id + название);
@@ -41,7 +41,7 @@ export default (config: ToolConfig): Tool => {
 
   return {
     desc:
-      'Бот MAX (токен в ~/.dreamteam/messengers.json): ```max me · chats · in [N] · ' +
+      'Бот MAX (токен в messengers.json проекта, папка .dreamteam): ```max me · chats · in [N] · ' +
       'send <chat_id|user:user_id> (в теле текст, строка «файлы: путь1, путь2» в начале — вложения). ' +
       'chat_id берите из «chats».',
     check(body): ToolVerdict {

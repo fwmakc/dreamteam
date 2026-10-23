@@ -1,6 +1,6 @@
 /**
- * Тул «telegram»: бот Telegram, токен — в ~/.dreamteam/messengers.json
- * (```telegram подкоманда).
+ * Тул «telegram»: бот Telegram, токен — в messengers.json проекта (папка
+ * .dreamteam, ```telegram подкоманда).
  *
  *   list            — чаты, откуда боту писали (chat_id + имя), из getUpdates;
  *   in [N]          — последние N (10) входящих сообщений;
@@ -65,7 +65,7 @@ export default (config: ToolConfig): Tool => {
 
   return {
     desc:
-      'Telegram-бот (токен в ~/.dreamteam/messengers.json): ```telegram list · in [N] · ' +
+      'Telegram-бот (токен в messengers.json проекта, папка .dreamteam): ```telegram list · in [N] · ' +
       'send <chat_id> (в теле текст, строка «файлы: путь1, путь2» в начале — вложения). ' +
       'chat_id берите из «list».',
     check(body): ToolVerdict {

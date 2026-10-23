@@ -1,7 +1,7 @@
 /**
- * Почта: несколько ящиков из ~/.dreamteam/mail.json — приём (IMAP) и отправка
- * (SMTP). Секреты живут в доме, не в карточках агентов: карточка тула ничего
- * не знает о паролях.
+ * Почта: несколько ящиков из mail.json в служебной папке проекта (.dreamteam)
+ * — приём (IMAP) и отправка (SMTP). Секреты живут в проекте, не в карточках
+ * агентов: карточка тула ничего не знает о паролях.
  *
  *   { "личное": { "preset": "yandex", "user": "…@yandex.ru", "password": "пароль приложения" },
  *     "работа": { "preset": "custom", "user": "…", "password": "…", "host": "imap.corp.ru", "smtpHost": "smtp.corp.ru" } }
@@ -23,9 +23,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import dns from 'node:dns';
 import { promisify } from 'node:util';
-import { DT_HOME } from './paths.js';
-
-export const MAIL_FILE = join(DT_HOME, 'mail.json');
+import { MAIL_FILE } from './paths.js';
 
 const PRESETS: Record<string, { imap: string; smtp: string }> = {
   yandex: { imap: 'imap.yandex.ru', smtp: 'smtp.yandex.ru' },
@@ -53,7 +51,7 @@ export interface MailEndpoints {
   smtp: { host: string; port: number; secure: boolean };
 }
 
-/** Читает и валидирует ~/.dreamteam/mail.json; нет файла — отказ с примером. */
+/** Читает и валидирует mail.json проекта (.dreamteam); нет файла — отказ с примером. */
 export function loadAccounts(file = MAIL_FILE): Record<string, MailAccount> {
   if (!existsSync(file)) {
     throw new Error(

@@ -1,6 +1,7 @@
 /**
  * Проба тулов «telegram» и «max» — офлайн: оба API подменяются локальными
- * mock-серверами через "api" в ~/.dreamteam/messengers.json.
+ * mock-серверами через "api" в messengers.json проекта (служебная папка
+ * .dreamteam).
  *   конфиг: нет файла, пустой токен, лишние поля, кривой json, нет блока;
  *   telegram: list/in из getUpdates, send текстом и файлом (sendDocument),
  *     ошибки API (ok:false) и неверный токен;
@@ -14,9 +15,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http from 'node:http';
 
-// DT_HOME читается при импорте paths — подменяем до загрузки модулей
+// DT_HOME и DT_PROJECT читаются при импорте paths — подменяем до загрузки модулей
 const home = mkdtempSync(join(tmpdir(), 'dt-msg-home-'));
 process.env.DT_HOME = home;
+const proj = mkdtempSync(join(tmpdir(), 'dt-msg-proj-'));
+process.env.DT_PROJECT = proj;
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -96,7 +99,7 @@ await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 const port = (server.address() as { port: number }).port;
 
 // ─── конфиг и импорты ────────────────────────────────────────────────────────
-const messengersFile = join(home, 'messengers.json');
+const messengersFile = join(proj, 'messengers.json');
 const goodConfig = {
   telegram: { token: 'TESTTOKEN' },
   max: { token: 'MAXTOKEN' },
@@ -243,3 +246,4 @@ process.exitCode = fails === 0 ? 0 : 1;
 const { rmTemp } = await import('./rm-tmp.js');
 rmTemp(cwd);
 rmTemp(home);
+rmTemp(proj);

@@ -1,6 +1,7 @@
 /**
  * Проба тула «mail» — офлайн: реальных серверов не касаемся.
- *   конфиг ~/.dreamteam/mail.json: нет файла, битые поля, пресеты, custom;
+ *   конфиг mail.json проекта (служебная папка .dreamteam): нет файла, битые
+ *   поля, пресеты, custom;
  *   boxes — имена и хосты, пароли не светятся; выбор ящика при нескольких;
  *   check(): чтение — allow, send — ask, ерунда — deny;
  *   send: шапка кому:/тема:/файлы:, пустое тело, пути наружу и секреты;
@@ -11,9 +12,11 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// DT_HOME читается при импорте paths — подменяем до загрузки модулей
+// DT_HOME и DT_PROJECT читаются при импорте paths — подменяем до загрузки модулей
 const home = mkdtempSync(join(tmpdir(), 'dt-mail-home-'));
 process.env.DT_HOME = home;
+const proj = mkdtempSync(join(tmpdir(), 'dt-mail-proj-'));
+process.env.DT_PROJECT = proj;
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -25,7 +28,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 }
 
 const cwd = mkdtempSync(join(tmpdir(), 'dt-mail-cwd-'));
-const mailFile = join(home, 'mail.json');
+const mailFile = join(proj, 'mail.json');
 const { default: makeTool } = await import('../src/tools/mail/mail.js');
 const { resolveEndpoints, loadAccounts } = await import('../src/mail.js');
 
@@ -120,3 +123,4 @@ process.exitCode = fails === 0 ? 0 : 1;
 const { rmTemp } = await import('./rm-tmp.js');
 rmTemp(cwd);
 rmTemp(home);
+rmTemp(proj);
