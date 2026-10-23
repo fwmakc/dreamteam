@@ -186,6 +186,57 @@
     if (e.key === 'Enter') submitForm();
   });
 
+  // ── контекстное меню (правая кнопка) и подтверждение удаления ─
+  // двойной клик в интерфейсе не используется: одиночный клик — основное
+  // действие записи, правая кнопка — меню «Изменить»/«Удалить».
+  const ctxOverlay = document.createElement('div');
+  ctxOverlay.className = 'ctx-overlay hidden';
+  const ctxMenu = document.createElement('div');
+  ctxMenu.className = 'ctx-menu hidden';
+  document.body.appendChild(ctxOverlay);
+  document.body.appendChild(ctxMenu);
+  ctxOverlay.addEventListener('click', closeCtx);
+  ctxOverlay.addEventListener('contextmenu', (e) => { e.preventDefault(); closeCtx(); });
+  function closeCtx() {
+    ctxOverlay.classList.add('hidden');
+    ctxMenu.classList.add('hidden');
+    ctxMenu.innerHTML = '';
+  }
+  function openCtx(e, items) {
+    e.preventDefault();
+    e.stopPropagation();
+    ctxMenu.innerHTML = '';
+    for (const it of items) {
+      const b = document.createElement('button');
+      b.textContent = it.label;
+      b.onclick = () => { closeCtx(); it.fn(); };
+      ctxMenu.appendChild(b);
+    }
+    ctxOverlay.classList.remove('hidden');
+    ctxMenu.classList.remove('hidden');
+    const r = ctxMenu.getBoundingClientRect();
+    ctxMenu.style.left = Math.max(4, Math.min(e.clientX, window.innerWidth - r.width - 8)) + 'px';
+    ctxMenu.style.top = Math.max(4, Math.min(e.clientY, window.innerHeight - r.height - 8)) + 'px';
+  }
+
+  let delFn = null;
+  function askDelete(subject, fn) {
+    $('del-subject').textContent = subject;
+    delFn = fn;
+    $('del-modal').classList.remove('hidden');
+  }
+  function answerDelete(yes) {
+    const fn = delFn;
+    $('del-modal').classList.add('hidden');
+    delFn = null;
+    if (yes && fn) fn();
+  }
+  $('del-yes').onclick = () => answerDelete(true);
+  $('del-no').onclick = () => answerDelete(false);
+  $('del-modal').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') answerDelete(false);
+  });
+
   // ── агенты: создать/удалить/настроить ─────────────────────────
   function openAgentCreate() {
     openForm('Новый агент', [
@@ -219,11 +270,11 @@
     });
   }
   function agentDelete(a) {
-    if (confirm(`Удалить агента ${a.name}? История останется, но он исчезнет из команды.`)) {
+    askDelete(`агент «${a.name}»`, () => {
       rpc('team.delete', { id: a.id })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
-    }
+    });
   }
 
   // ── провайдеры: создать/удалить ───────────────────────────────
@@ -242,11 +293,11 @@
   }
   function providerDelete(p) {
     if (p.isDefault) return;
-    if (confirm(`Удалить провайдера ${p.id}?`)) {
+    askDelete(`провайдер «${p.id}»`, () => {
       rpc('provider.delete', { id: p.id })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
-    }
+    });
   }
 
   // ── расписание: список задач, добавить/удалить/вкл-выкл ───────
@@ -270,12 +321,23 @@
         `<span class="meta">${t.intervalMinutes} мин</span>` +
         `<span>${esc(t.message.slice(0, 40))}</span>` +
         '<span class="del" title="Удалить задачу">✕</span>';
-      li.title = `${t.message} — каждые ${t.intervalMinutes} мин`;
+      li.title = `${t.message} — каждые ${t.intervalMinutes} мин · клик — пауза/пуск · правая кнопка — удалить`;
       li.querySelector('.del').onclick = (e) => {
         e.stopPropagation();
-        rpc('schedule.delete', { id: t.id })
-          .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+        askDelete(`задача «${t.message.slice(0, 40)}»`, () => {
+          rpc('schedule.delete', { id: t.id })
+            .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+        });
       };
+      li.oncontextmenu = (e) => openCtx(e, [
+        { label: t.enabled ? 'Пауза' : 'Запустить', fn: () => rpc('schedule.toggle', { id: t.id }) },
+        { label: 'Удалить', fn: () => {
+          askDelete(`задача «${t.message.slice(0, 40)}»`, () => {
+            rpc('schedule.delete', { id: t.id })
+              .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+          });
+        } },
+      ]);
       li.onclick = () => rpc('schedule.toggle', { id: t.id });
       scheduleListEl.appendChild(li);
     }
@@ -357,9 +419,11 @@
     });
   }
   function projectHostDelete(p, h) {
-    rpc('project.host.delete', { name: h.name })
-      .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
-      .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    askDelete(`сервер «${h.name}» проекта «${p.id}»`, () => {
+      rpc('project.host.delete', { name: h.name })
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+    });
   }
 
   function showAuthForm(errorText) {
@@ -653,40 +717,37 @@
       li.onclick = (e) => {
         if (e.target.classList.contains('del')) {
           e.stopPropagation();
-          if (confirm(`Удалить разговор «${s.title}»? Действие необратимо.`)) {
-            rpc('session.delete', { n: i + 1 })
-              .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
-              .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
-          }
+          if (!roundActive) deleteSession(i + 1, s.title);
           return;
         }
         if (!roundActive) rpc('session.open', { n: i + 1 }).catch(() => {});
       };
-      li.ondblclick = () => {
-        if (roundActive) return;
-        openForm(`Переименовать «${esc(s.title)}»`, [
-          { key: 'name', label: 'Новое имя (пусто — менеджер придумает)', value: s.title },
-        ], (v) => {
-          rpc('session.open', { n: i + 1 })
-            .then(() => rpc('session.rename', { name: v.name }))
-            .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
-            .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
-        });
-      };
+      li.oncontextmenu = (e) => openCtx(e, [
+        {
+          label: 'Переименовать',
+          fn: () => {
+            if (roundActive) return;
+            openForm(`Переименовать «${esc(s.title)}»`, [
+              { key: 'name', label: 'Новое имя (пусто — менеджер придумает)', value: s.title },
+            ], (v) => {
+              rpc('session.open', { n: i + 1 })
+                .then(() => rpc('session.rename', { name: v.name }))
+                .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+                .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+            });
+          },
+        },
+        { label: 'Удалить', fn: () => { if (!roundActive) deleteSession(i + 1, s.title); } },
+      ]);
       sessionsEl.appendChild(li);
     });
   }
 
-  /** Разделяет одиночный и двойной клик: одиночный срабатывает через 250 мс. */
-  function onCliDbl(el, singleFn, dblFn) {
-    let timer = null;
-    el.addEventListener('click', () => {
-      if (timer) { clearTimeout(timer); timer = null; return; }
-      timer = setTimeout(() => { timer = null; singleFn(); }, 250);
-    });
-    el.addEventListener('dblclick', () => {
-      if (timer) { clearTimeout(timer); timer = null; }
-      dblFn();
+  function deleteSession(n, title) {
+    askDelete(`разговор «${title}»`, () => {
+      rpc('session.delete', { n })
+        .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
+        .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
   }
 
@@ -695,7 +756,7 @@
 
     for (const a of state.team ?? []) {
       const li = document.createElement('li');
-      li.title = `${a.inChat ? 'Вывести из чата' : 'Позвать в чат'} · двойной клик — настройки`;
+      li.title = `${a.inChat ? 'Вывести из чата' : 'Позвать в чат'} · правая кнопка — изменить/удалить`;
       li.innerHTML =
         `<div class="content">` +
         `<div class="sess-main"><span>${esc(a.emoji)} ${esc(a.name)}</span>` +
@@ -714,16 +775,10 @@
         e.stopPropagation();
         if (!roundActive) agentDelete(a);
       };
-      onCliDbl(li,
-        () => {
-          if (roundActive) return;
-          const method = a.inChat ? 'chat.remove' : 'chat.add';
-          rpc(method, { name: a.name })
-            .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
-            .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
-        },
-        () => openAgentSettings(a),
-      );
+      li.oncontextmenu = (e) => openCtx(e, [
+        { label: 'Изменить', fn: () => openAgentSettings(a) },
+        { label: 'Удалить', fn: () => { if (!roundActive) agentDelete(a); } },
+      ]);
       teamEl.appendChild(li);
     }
   }
@@ -733,7 +788,7 @@
     for (const p of state.providers ?? []) {
       const li = document.createElement('li');
       li.title = (p.isDefault ? 'Провайдер по умолчанию' : 'Сделать основным (для агентов)')
-        + (p.isDefault ? '' : ' · двойной клик — настройки');
+        + (p.isDefault ? '' : ' · клик — сделать основным · правая кнопка — изменить/удалить');
       li.innerHTML =
         `<div class="content">` +
         `<div class="sess-main"><span>${p.ok ? '●' : '○'} ${esc(p.id)}</span>` +
@@ -742,14 +797,16 @@
         `</div>` +
         (p.isDefault ? '' : '<span class="del" title="Удалить провайдера">✕</span>');
       if (!p.ok) li.title += ` · проблема: ${p.note ?? ''}`;
-      onCliDbl(li,
-        () => {
-          if (roundActive || p.isDefault) return;
-          rpc('provider.set', { id: p.id })
-            .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
-        },
-        () => openProviderSettings(p),
-      );
+      li.onclick = () => {
+        if (roundActive || p.isDefault) return;
+        rpc('provider.set', { id: p.id })
+          .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
+      };
+      li.oncontextmenu = (e) => {
+        const items = [{ label: 'Изменить', fn: () => openProviderSettings(p) }];
+        if (!p.isDefault) items.push({ label: 'Удалить', fn: () => { if (!roundActive) providerDelete(p); } });
+        openCtx(e, items);
+      };
       const del = li.querySelector('.del');
       if (del) del.onclick = (e) => {
         e.stopPropagation();
@@ -780,7 +837,10 @@
     for (const p of projects ?? []) {
       for (const h of p.hosts ?? []) {
         const li = document.createElement('li');
-        li.title = 'Двойной клик — удалить проект целиком · ✕ — удалить сервер';
+        li.title = '✕ — удалить сервер · ＋ — добавить сервер · правая кнопка — удалить сервер';
+        li.oncontextmenu = (e) => openCtx(e, [
+          { label: 'Удалить сервер', fn: () => { if (!roundActive) projectHostDelete(p, h); } },
+        ]);
         li.innerHTML =
           `<span>${esc(p.id)}</span><span class="meta">${esc(h.name)}: ${esc(h.host)}</span>` +
           '<span class="del" title="Добавить сервер в проект">＋</span>' +

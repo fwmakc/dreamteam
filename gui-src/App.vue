@@ -73,12 +73,58 @@ watch(
   () => nextTick(scrollDown),
 );
 
-// ── разделение одиночного и двойного клика (250 мс) ──────────────────────────
-const cliTimers = new Map<string, ReturnType<typeof setTimeout>>();
-function onCliDbl(key: string, single: () => void, dbl: () => void): void {
-  const t = cliTimers.get(key);
-  if (t) { clearTimeout(t); cliTimers.delete(key); dbl(); return; }
-  cliTimers.set(key, setTimeout(() => { cliTimers.delete(key); single(); }, 250));
+// ── контекстное меню (правая кнопка) и подтверждение удаления ────────────────
+// двойной клик в интерфейсе не используется: одиночный клик — основное
+// действие записи, правая кнопка — меню «Изменить»/«Удалить».
+type CtxItem = { label: string; fn: () => void };
+const ctx = reactive({ show: false, x: 0, y: 0, items: [] as CtxItem[] });
+function openCtx(e: MouseEvent, items: CtxItem[]): void {
+  ctx.x = Math.min(e.clientX, window.innerWidth - 180);
+  ctx.y = Math.min(e.clientY, window.innerHeight - items.length * 36 - 12);
+  ctx.items = items;
+  ctx.show = true;
+}
+function closeCtx(): void { ctx.show = false; }
+function runCtx(it: CtxItem): void { closeCtx(); it.fn(); }
+
+const delConfirm = reactive({ show: false, subject: '', fn: null as null | (() => void) });
+function askDelete(subject: string, fn: () => void): void {
+  delConfirm.subject = subject;
+  delConfirm.fn = fn;
+  delConfirm.show = true;
+}
+function answerDelete(yes: boolean): void {
+  const fn = delConfirm.fn;
+  delConfirm.show = false;
+  delConfirm.fn = null;
+  if (yes && fn) fn();
+}
+
+function ctxTeam(e: MouseEvent, a: AgentInfo): void {
+  openCtx(e, [
+    { label: 'Изменить', fn: () => openAgentSettings(a) },
+    { label: 'Удалить', fn: () => delAgent(a) },
+  ]);
+}
+function ctxProvider(e: MouseEvent, p: ProviderInfo): void {
+  const items: CtxItem[] = [{ label: 'Изменить', fn: () => openProviderSettings(p) }];
+  if (!p.isDefault) items.push({ label: 'Удалить', fn: () => delProvider(p) });
+  openCtx(e, items);
+}
+function ctxSession(e: MouseEvent, i: number, title: string): void {
+  openCtx(e, [
+    { label: 'Переименовать', fn: () => openSessionRename(i) },
+    { label: 'Удалить', fn: () => deleteSession(i, title) },
+  ]);
+}
+function ctxSchedule(e: MouseEvent, t: ScheduleTaskInfo): void {
+  openCtx(e, [
+    { label: t.enabled ? 'Пауза' : 'Запустить', fn: () => scheduleToggle(t) },
+    { label: 'Удалить', fn: () => scheduleDelete(t) },
+  ]);
+}
+function ctxHost(e: MouseEvent, p: ProjectInfo, h: ProjectHost): void {
+  openCtx(e, [{ label: 'Удалить', fn: () => projectHostDelete(p, h) }]);
 }
 
 // ── модальная форма: поля [{key,label,value,placeholder?}] ───────────────────
@@ -145,8 +191,7 @@ function openAgentSettings(a: AgentInfo): void {
   });
 }
 function agentDelete(a: AgentInfo): void {
-  if (!window.confirm(`Удалить агента ${a.name}? История останется, но он исчезнет из команды.`)) return;
-  rpcReport(rpc('team.delete', { id: a.id }));
+  askDelete(`агент «${a.name}»`, () => rpcReport(rpc('team.delete', { id: a.id })));
 }
 function toggleChat(a: AgentInfo): void {
   if (roundActive.value) return;
@@ -168,8 +213,7 @@ function providerCreate(): void {
 }
 function providerDelete(p: ProviderInfo): void {
   if (p.isDefault) return;
-  if (!window.confirm(`Удалить провайдера ${p.id}?`)) return;
-  rpcReport(rpc('provider.delete', { id: p.id }));
+  askDelete(`провайдер «${p.id}»`, () => rpcReport(rpc('provider.delete', { id: p.id })));
 }
 function setProvider(p: ProviderInfo): void {
   if (roundActive.value || p.isDefault) return;
@@ -252,7 +296,7 @@ function projectHostAdd(p: ProjectInfo): void {
 }
 function projectHostDelete(p: ProjectInfo, h: ProjectHost): void {
   if (roundActive.value) return;
-  rpcReport(rpc('project.host.delete', { name: h.name }));
+  askDelete(`сервер «${h.name}» проекта «${p.id}»`, () => rpcReport(rpc('project.host.delete', { name: h.name })));
 }
 
 // ── расписание ───────────────────────────────────────────────────────────────
@@ -277,7 +321,8 @@ function scheduleToggle(t: ScheduleTaskInfo): void {
   rpc('schedule.toggle', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 function scheduleDelete(t: ScheduleTaskInfo): void {
-  rpc('schedule.delete', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
+  askDelete(`задача «${t.message.slice(0, 40)}»`, () =>
+    rpc('schedule.delete', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`)));
 }
 
 // ── сессии ───────────────────────────────────────────────────────────────────
@@ -301,8 +346,7 @@ function openSession(i: number): void {
   if (!roundActive.value) rpc('session.open', { n: i }).catch(() => {});
 }
 function deleteSession(i: number, title: string): void {
-  if (!window.confirm(`Удалить разговор «${title}»? Действие необратимо.`)) return;
-  rpcReport(rpc('session.delete', { n: i }));
+  askDelete(`разговор «${title}»`, () => rpcReport(rpc('session.delete', { n: i })));
 }
 
 // ── сворачивание секций (localStorage) ───────────────────────────────────────
@@ -676,7 +720,7 @@ onMounted(connectWs);
             :class="{ active: s.id === currentSessionId }"
             :title="`${s.title}\nid: ${s.id}\nсообщений: ${s.count}\nсоздан: ${fmtDate(s.createdAt)}\nпоследнее сообщение: ${fmtDate(s.updatedAt)}`"
             @click="openSession(i + 1)"
-            @dblclick="openSessionRename(i + 1)"
+            @contextmenu.prevent="ctxSession($event, i + 1, s.title)"
           >
             <div class="content">
               <div class="sess-main"><span>{{ s.title }}</span></div>
@@ -702,8 +746,9 @@ onMounted(connectWs);
           <li
             v-for="a in team"
             :key="a.id"
-            :title="`${a.inChat ? 'Вывести из чата' : 'Позвать в чат'} · двойной клик — настройки`"
-            @click="onCliDbl('team:' + a.id, () => toggleChat(a), () => openAgentSettings(a))"
+            :title="`${a.inChat ? 'Вывести из чата' : 'Позвать в чат'} · правая кнопка — изменить/удалить`"
+            @click="toggleChat(a)"
+            @contextmenu.prevent="ctxTeam($event, a)"
           >
             <div class="content">
               <div class="sess-main">
@@ -728,9 +773,10 @@ onMounted(connectWs);
             v-for="p in providers"
             :key="p.id"
             :title="(p.isDefault ? 'Провайдер по умолчанию' : 'Сделать основным (для агентов)')
-              + (p.isDefault ? '' : ' · клик — сделать основным')
+              + (p.isDefault ? '' : ' · клик — сделать основным · правая кнопка — изменить/удалить')
               + (p.ok ? '' : ` · проблема: ${p.note ?? ''}`)"
-            @click="onCliDbl('provider:' + p.id, () => setProvider(p), () => openProviderSettings(p))"
+            @click="setProvider(p)"
+            @contextmenu.prevent="ctxProvider($event, p)"
           >
             <div class="content">
               <div class="sess-main">
@@ -757,8 +803,9 @@ onMounted(connectWs);
           <li
             v-for="t in scheduleTasks"
             :key="t.id"
-            :title="`${t.message} — каждые ${t.intervalMinutes} мин`"
+            :title="`${t.message} — каждые ${t.intervalMinutes} мин · клик — пауза/пуск · правая кнопка — удалить`"
             @click="scheduleToggle(t)"
+            @contextmenu.prevent="ctxSchedule($event, t)"
           >
             <span class="tag" :class="{ in: t.enabled }">{{ t.enabled ? '▶' : '⏸' }}</span>
             <span class="meta">{{ t.intervalMinutes }} мин</span>
@@ -778,7 +825,8 @@ onMounted(connectWs);
           <li
             v-for="ph in projects.flatMap((p) => (p.hosts ?? []).map((h) => ({ p, h })))"
             :key="ph.p.id + ':' + ph.h.name"
-            title="✕ — удалить сервер · ＋ — добавить сервер"
+            title="✕ — удалить сервер · ＋ — добавить сервер · правая кнопка — удалить"
+            @contextmenu.prevent="ctxHost($event, ph.p, ph.h)"
           >
             <span>{{ ph.p.id }}</span><span class="meta">{{ ph.h.name }}: {{ ph.h.host }}</span>
             <span class="del" title="Добавить сервер в проект" @click.stop="projectHostAdd(ph.p)">＋</span>
@@ -909,6 +957,26 @@ onMounted(connectWs);
       <div class="row">
         <button @click="submitForm">Сохранить</button>
         <button @click="closeForm">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── контекстное меню (правая кнопка) ───────────────────────────────────── -->
+  <template v-if="ctx.show">
+    <div class="ctx-overlay" @click="closeCtx" @contextmenu.prevent="closeCtx"></div>
+    <div class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }">
+      <button v-for="(it, i) in ctx.items" :key="i" @click="runCtx(it)">{{ it.label }}</button>
+    </div>
+  </template>
+
+  <!-- ── подтверждение удаления ──────────────────────────────────────────────── -->
+  <div v-if="delConfirm.show" id="modal" @click.self="answerDelete(false)">
+    <div class="modal-box">
+      <h2>Вы точно хотите удалить запись?</h2>
+      <p class="confirm-subject">{{ delConfirm.subject }}</p>
+      <div class="row">
+        <button class="bad" @click="answerDelete(true)">Да</button>
+        <button @click="answerDelete(false)">Нет</button>
       </div>
     </div>
   </div>
