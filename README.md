@@ -210,13 +210,12 @@ ANTHROPIC_API_KEY=ваш_ключ
 | `provider.set <id>` | `/provider set glm` | сменить основного провайдера |
 | `provider.add <id> поле=знач…` | `/provider add glm adapter=openai-compatible …` | новый провайдер (adapter обязателен) |
 | `provider.update <id> поле=знач…` | `/provider update glm model=glm-4.6` | править карточку существующего (adapter, model, baseUrl, apiKeyEnv, maxTokens, temperature) |
+| `provider.delete <id>` | `/provider delete glm` | удалить провайдера; основной не удалить — сначала `/provider set` другого |
 | `profile.show` / `profile.set` | `/profile set Имя; роль; о себе` | как вас видит команда (user.json) |
 | `memory.show [кого\|shared]` | `/memory show Юрист` | что помнит участник; `shared` — общая память |
 | `project.list` | `/project` | реестр серверов (project.json) |
-| `project.add …` | `/project add web; prod: deploy@10.0.0.1:2202` | проект с серверами (без паролей — остались бы в транскрипте) |
-| `project.host.add <проект> <имя=хост>` | `/project host add web backup=10.0.0.2` | сервер в существующий проект |
-| `project.host.delete <проект> <имя>` | `/project host delete web backup` | убрать сервер |
-| `project.delete <id>` | `/project delete web` | удалить проект целиком |
+| `project.host.add <имя=хост>` | `/project host add backup=deploy@10.0.0.2` | сервер в текущий проект; формат хоста [пользователь@]хост[:порт] |
+| `project.host.delete <имя>` | `/project host delete backup` | убрать сервер из текущего проекта |
 | `schedule.list` | `/schedule` | задачи, которые serve запускает сам |
 | `schedule.add <задание> [минуты]` | `/schedule add «планёрка» 60` | новая задача; интервал по умолчанию 10 минут |
 | `schedule.toggle <id>` / `schedule.delete <id>` | `/schedule toggle task-…` | пауза и удаление задачи |
@@ -512,8 +511,10 @@ Ctrl+U — стереть строку, Ctrl+W или Alt+Backspace — стер
 
 **Реестр серверов.** `.dreamteam/project.json` — серверы текущего проекта
 для ssh (файл создаётся скаффолдом). Проект один — папка, где запущено
-приложение; серверы добавляются руками или через менеджера («добавь сервер
-prod — deploy@203.0.113.10»):
+приложение; серверы добавляются командой
+`/project host add prod=deploy@203.0.113.10`, через менеджера («добавь
+сервер prod — deploy@203.0.113.10») или руками; убираются
+`/project host delete prod`:
 
 ```json
 {
@@ -854,6 +855,7 @@ qwen2-vl-2b --profile bk-sdm up -d` (самая лёгкая пара, ~3 ГБ R
 
 - `@session` (без номера) показывает список других разговоров; выберите номер
   или нажмите Enter для отмены. `@session N` прикладывает разговор сразу.
+  `!session` — полный синоним `@session`.
 - Для приложенного разговора LLM строит **конспект** (решения, аргументы,
   названия, незакрытые вопросы) — не весь текст целиком, чтобы не раздувать
   контекст.
@@ -877,7 +879,7 @@ qwen2-vl-2b --profile bk-sdm up -d` (самая лёгкая пара, ~3 ГБ R
 Ты > @менеджер позови Катю в этот чат
 Ты > @менеджер покажи разговоры и открой второй
 Ты > @менеджер включи Паше тул git и разреши ему commit
-Ты > @менеджер заведи проект infra: сервер router — admin@192.168.1.1
+Ты > @менеджер добавь сервер router — admin@192.168.1.1
 ```
 
 Менеджер выполняет просьбу и отчитывается строками `✓ …` прямо в чате.
@@ -925,7 +927,9 @@ helpers). Менеджер нужен для всего, что командам
 (red/green/yellow/blue/magenta/cyan/white/gray), `prompt` (персона),
 опционально `provider` и `temperature`; доступы к реальным действиям — `tools`,
 `projects`, `workspace`, глаза и руки — `vision` и `image` (см. «Инструменты»
-и «Зрение и картинки»).
+и «Зрение и картинки»). Поле `provider` — только существующий id из
+`providers.json`: команды `/team add|update`, веб-оболочка и менеджер отвергнут
+чужой id со списком доступных, а не запишут мусор в конфиг.
 
 **Добавить новый API** — реализуйте интерфейс в одном файле:
 

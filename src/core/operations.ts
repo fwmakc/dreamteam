@@ -590,17 +590,16 @@ export const OPERATIONS: OpSpec[] = [
   // проекты
   {
     name: 'project.list', implicit: true, title: 'проекты',
-    help: 'реестр серверов (projects.json)',
+    help: 'реестр серверов (project.json)',
     run: async (engine) => projectListText(engine.app),
   },
   {
     name: 'project.host.add',
     args: [
-      { name: 'проект', required: true },
       { name: 'имя=хост', required: true },
     ],
     title: 'добавить сервер',
-    help: 'в существующий проект; формат хоста [пользователь@]хост[:порт]',
+    help: 'в текущий проект; формат хоста [пользователь@]хост[:порт]',
     run: async (_engine, rest) => {
       const body = rest.join(' ');
       const eq = body.indexOf('=');
