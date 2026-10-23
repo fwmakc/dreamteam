@@ -820,6 +820,30 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
         'read — письмо целиком (вложения сохраняются в mail/), send — отправка с вложениями.',
     );
   }
+  if (ids.includes('telegram')) {
+    lines.push(
+      '```telegram list',
+      '```telegram send 123456789',
+      'файлы: отчёт.pdf',
+      '',
+      '<текст сообщения>',
+      '```',
+      'telegram — бот из ~/.dreamteam/messengers.json (токен задал хозяин): list — чаты и chat_id, ' +
+        'in — входящие, send — сообщение в чат (файлы — вложением).',
+    );
+  }
+  if (ids.includes('max')) {
+    lines.push(
+      '```max chats',
+      '```max send 987654321',
+      'файлы: отчёт.xlsx',
+      '',
+      '<текст сообщения>',
+      '```',
+      'max — бот мессенджера MAX (токен в ~/.dreamteam/messengers.json): chats — чаты и chat_id, ' +
+        'in — входящие, send — сообщение в чат или user:<user_id> (файлы — вложением).',
+    );
+  }
   for (const id of ids.filter((t) => !(BUILTIN_TOOL_IDS as readonly string[]).includes(t))) {
     const tool = customTools?.get(id);
     lines.push(

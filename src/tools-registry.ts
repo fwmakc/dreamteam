@@ -34,6 +34,8 @@ import docsTool from './tools/docs.js';
 import ocrTool from './tools/ocr.js';
 import webTool from './tools/web.js';
 import mailTool from './tools/mail.js';
+import telegramTool from './tools/telegram.js';
+import maxTool from './tools/max.js';
 import type { Agent } from './types.js';
 
 const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
@@ -48,6 +50,8 @@ const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
   ocr: ocrTool,
   web: webTool,
   mail: mailTool,
+  telegram: telegramTool,
+  max: maxTool,
 };
 
 /** Проверяет, что объект правда тул; иначе — внятная ошибка с именем тула. */

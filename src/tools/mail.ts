@@ -55,7 +55,7 @@ function parseSend(text: string): { to?: string; subject?: string; files?: strin
 }
 
 /** Путь внутри рабочей папки, не секретный; иначе — отказ. */
-function attachmentPath(cwd: string, rel: string): string {
+export function attachmentPath(cwd: string, rel: string): string {
   if (SENSITIVE.test(rel)) throw new Error(`«${rel}» похоже на секретный файл — отправлять его нельзя`);
   const abs = safePath(cwd, rel);
   if (!abs) throw new Error(`файл «${rel}» вне рабочей папки — вкладываю только свои файлы`);
