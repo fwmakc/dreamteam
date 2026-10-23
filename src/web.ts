@@ -97,11 +97,17 @@ export function extractArticle(html: string, baseUrl: string): string {
 }
 
 /** Абсолютные http(s)-ссылки страницы в порядке появления, без повторов. */
-export function extractLinks(html: string, baseUrl: string): string[] {
+/** Ссылка страницы: адрес + текст (названия разделов/статей видны без чтения страницы). */
+export interface LinkRef {
+  url: string;
+  text: string;
+}
+
+export function extractLinks(html: string, baseUrl: string): LinkRef[] {
   const $ = load(html);
   const base = new URL(baseUrl);
   const seen = new Set<string>();
-  const out: string[] = [];
+  const out: LinkRef[] = [];
   for (const el of $('a[href]').toArray()) {
     const href = $(el).attr('href') ?? '';
     let abs: URL;
@@ -121,7 +127,8 @@ export function extractLinks(html: string, baseUrl: string): string[] {
     } catch {
       /* кривые проценты — отдаём как есть */
     }
-    out.push(shown);
+    const text = $(el).text().replace(/\s+/g, ' ').trim().slice(0, 80);
+    out.push({ url: shown, text });
     if (out.length >= MAX_LINKS) break;
   }
   return out;

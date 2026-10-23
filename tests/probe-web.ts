@@ -75,9 +75,12 @@ const checkV = (body: string) => {
 
   const links = await tool.run(`links http://127.0.0.1:${localPort}/`, bareCtx());
   check('links: ссылки страницы', links.includes('/раздел/правила') && links.includes('/раздел/формы') && links.includes('example.com'), links);
+  check('links: тексты ссылок рядом с адресами', links.includes('Правила —') && links.includes('Формы —'), links);
 
   const filtered = await tool.run(`links http://127.0.0.1:${localPort}/ формы`, bareCtx());
   check('links: фильтр-подстрока', filtered.includes('/раздел/формы') && !filtered.includes('/раздел/правила'), filtered);
+  const byTitle = await tool.run(`links http://127.0.0.1:${localPort}/ правила`, bareCtx());
+  check('links: фильтр по названию ссылки', byTitle.includes('/раздел/правила') && !byTitle.includes('/раздел/формы'), byTitle);
 
   const final = await tool.run(`read http://127.0.0.1:${localPort}/final`, bareCtx());
   check('read: локальная страница', final.includes('Финальная страница'), final.slice(0, 120));

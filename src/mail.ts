@@ -11,11 +11,18 @@
  * custom можно переопределить полями port/smtpPort. Пароли — «пароли
  * приложений» почтовых провайдеров (обычный пароль от веб-почты не подойдёт).
  *
+ * Если почтовик хостера отдаёт сертификат не на имя сервера (типично для
+ * mail.на-хостинге.ru с панелью webhost1 и т.п.), соединение не проходит
+ * проверку имени. Поле "tlsNoVerify": true отключает сверку имени — шифрование
+ * остаётся, но подмену сервера это уже не ловит: включать осознанно.
+ *
  * Чтение: последние N писем (конверты), поиск подстрокой по теме/отправителю
  * в последних 200, письмо целиком с сохранением вложений в рабочую папку.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import dns from 'node:dns';
+import { promisify } from 'node:util';
 import { DT_HOME } from './paths.js';
 
 export const MAIL_FILE = join(DT_HOME, 'mail.json');
@@ -26,7 +33,7 @@ const PRESETS: Record<string, { imap: string; smtp: string }> = {
   mailru: { imap: 'imap.mail.ru', smtp: 'smtp.mail.ru' },
 };
 
-const ACCOUNT_FIELDS = ['preset', 'user', 'password', 'host', 'smtpHost', 'port', 'smtpPort'];
+const ACCOUNT_FIELDS = ['preset', 'user', 'password', 'host', 'smtpHost', 'port', 'smtpPort', 'tlsNoVerify'];
 
 export interface MailAccount {
   preset: string;
@@ -36,6 +43,8 @@ export interface MailAccount {
   smtpHost?: string;
   port?: number;
   smtpPort?: number;
+  /** Не сверять имя сервера с сертификатом (хостинги с чужим сертификатом). */
+  tlsNoVerify?: boolean;
 }
 
 /** Конечные точки ящика: что давать IMAP/SMTP-клиентам. */
@@ -92,6 +101,9 @@ function readAccount(name: string, raw: Record<string, unknown>, file: string): 
       throw new Error(`${file}: ящик «${name}» — "${key}" должен быть целым числом 1…65535`);
     }
   }
+  if (raw.tlsNoVerify !== undefined && typeof raw.tlsNoVerify !== 'boolean') {
+    throw new Error(`${file}: ящик «${name}» — "tlsNoVerify" должен быть true или false`);
+  }
   return { ...raw, preset, user, password } as MailAccount;
 }
 
@@ -127,7 +139,14 @@ export function pickAccount(accounts: Record<string, MailAccount>, name?: string
 async function withImap<T>(acc: MailAccount, mailBox: string, fn: (client: import('imapflow').ImapFlow, exists: number) => Promise<T>): Promise<T> {
   const { ImapFlow } = await import('imapflow');
   const ep = resolveEndpoints(acc);
-  const client = new ImapFlow({ host: ep.imap.host, port: ep.imap.port, secure: ep.imap.secure, auth: { user: acc.user, pass: acc.password }, logger: false });
+  const client = new ImapFlow({
+    host: ep.imap.host,
+    port: ep.imap.port,
+    secure: ep.imap.secure,
+    auth: { user: acc.user, pass: acc.password },
+    tls: { rejectUnauthorized: !acc.tlsNoVerify },
+    logger: false,
+  });
   try {
     await client.connect();
   } catch (err) {
@@ -239,11 +258,20 @@ export interface SendArgs {
 export async function sendMail(acc: MailAccount, args: SendArgs): Promise<string> {
   const nodemailer = await import('nodemailer');
   const ep = resolveEndpoints(acc);
+  // nodemailer резолвит хост прямыми DNS-запросами (resolve4/6), а они в части
+  // сетей (VPN, корпоративные фильтры) не ходят, хотя системный резолвер
+  // работает. Резолвим сами; не вышло — оставляем имя, пусть nodemailer
+  // пробует сам. servername сохраняет имя сервера в TLS (SNI и сверка серта).
+  let host = ep.smtp.host;
+  try {
+    host = (await promisify(dns.lookup)(ep.smtp.host)).address;
+  } catch { /* оставляем имя хоста */ }
   const transport = nodemailer.createTransport({
-    host: ep.smtp.host,
+    host,
     port: ep.smtp.port,
     secure: ep.smtp.secure,
     auth: { user: acc.user, pass: acc.password },
+    tls: { rejectUnauthorized: !acc.tlsNoVerify, servername: ep.smtp.host },
   });
   try {
     const info = await transport.sendMail({

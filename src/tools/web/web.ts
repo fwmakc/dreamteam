@@ -3,8 +3,10 @@
  *
  *   read <url>            — страница текстом (статья через readability,
  *                           иначе заголовок + блоки текста);
- *   links <url> [фильтр]  — абсолютные ссылки страницы; фильтр — подстрока
- *                           в адресе (навигация по разделам сайта).
+ *   links <url> [фильтр]  — ссылки страницы с их текстами («Глава 9. Сделки —
+ *                           https://…»): названия разделов видны сразу, без
+ *                           чтения каждой страницы; фильтр — подстрока адреса
+ *                           или названия.
  *
  * Белый список — карточка "sites": ["wikipedia.org", "github.com"]; домен
  * покрывает свои поддомены. Пустой список = читать некуда: check() отказывает
@@ -54,7 +56,8 @@ export default (config: ToolConfig): Tool => {
 
   return {
     desc:
-      'Чтение разрешённых сайтов: ```web read https://… (страница текстом) · web links https://… [фильтр] (ссылки страницы). ' +
+      'Чтение разрешённых сайтов: ```web read https://… (страница текстом) · web links https://… [фильтр] ' +
+      '(ссылки страницы с их текстами — «Глава 9. Сделки — https://…»; фильтр ищет в адресе и в названии). ' +
       'Список доменов задаёт хозяин в карточке "sites"; JS не исполняется, динамические страницы могут отдавать пустоту.',
     check(body): ToolVerdict {
       const { sub, rest } = parseHead(body);
@@ -75,10 +78,10 @@ export default (config: ToolConfig): Tool => {
       const { html } = await fetchPage(g.url, checkRedirect);
       if (sub === 'read') return `${g.url.href}\n\n${extractArticle(html, g.url.href)}`;
       let links = extractLinks(html, g.url.href);
-      const filter = rest[1];
-      if (filter) links = links.filter((l) => l.includes(filter));
-      if (links.length === 0) return 'ссылок не нашлось' + (filter ? ` с «${filter}»` : '');
-      return links.map((l) => `- ${l}`).join('\n');
+      const filter = rest[1]?.toLowerCase();
+      if (filter) links = links.filter((l) => l.url.toLowerCase().includes(filter) || l.text.toLowerCase().includes(filter));
+      if (links.length === 0) return 'ссылок не нашлось' + (filter ? ` с «${rest[1]}»` : '');
+      return links.map((l) => `- ${l.text || '(без названия)'} — ${l.url}`).join('\n');
     },
   };
 };

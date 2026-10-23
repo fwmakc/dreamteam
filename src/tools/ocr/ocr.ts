@@ -57,6 +57,7 @@ export default (config: ToolConfig): Tool => {
     desc:
       'OCR — распознавание текста и таблиц со сканов: ```ocr text скан.png · text скан.pdf 1-3 · ' +
       'text сканы.docx (картинки из документа) · tables скан.jpg (таблицы → markdown, «csv» — вторым словом). ' +
+      'Имя файла с пробелами — в кавычках: text "скан ДДУ.pdf" 1-3. ' +
       'Языки rus+eng; таблицы восстанавливаются по координатам слов, выравнивание сложных макетов лучше перепроверить.',
     check: () => 'allow',
     async run(body: string, ctx: ToolRunContext) {

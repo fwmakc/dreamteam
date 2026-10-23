@@ -139,7 +139,7 @@ export async function collectImages(file: string, opts: { dpi?: number; pages?: 
     if (skipped.length > 0) console.error(`  ⚠ пропущены неподдерживаемые картинки: ${skipped.join(', ')}`);
     return images;
   }
-  throw new Error('поддерживаю картинки png/jpg/jpeg/bmp/webp, pdf (страницы рендерятся) и docx (картинки из word/media)');
+  throw new Error('поддерживаю картинки png/jpg/jpeg/bmp/webp, pdf (страницы рендерятся) и docx (картинки из word/media); имя файла с пробелами берите в кавычки: text "скан ДДУ.pdf" 1-3');
 }
 
 // ─── Распознавание: один воркер на партию картинок ──────────────────────────

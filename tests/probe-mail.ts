@@ -59,6 +59,8 @@ const errOf = async (body: string): Promise<string> => {
   check('лишнее поле в ящике', (await errOf('boxes')).includes('неизвестные поля "fromName"'));
   writeFileSync(mailFile, JSON.stringify({ a: { preset: 'gmail', user: 'x', password: 'p', port: 'девятьсот' } }));
   check('порт не число', (await errOf('boxes')).includes('"port"'));
+  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'gmail', user: 'x', password: 'p', tlsNoVerify: 'конечно' } }));
+  check('tlsNoVerify не булево — отказ', (await errOf('boxes')).includes('"tlsNoVerify" должен быть true или false'));
   writeFileSync(mailFile, 'это не json');
   check('битый json', (await errOf('boxes')).includes('кривой JSON'));
 }
@@ -67,7 +69,7 @@ const errOf = async (body: string): Promise<string> => {
 {
   writeFileSync(mailFile, JSON.stringify({
     личное: { preset: 'yandex', user: 'я@yandex.ru', password: 'секрет-1' },
-    работа: { preset: 'custom', user: 'я@corp.ru', password: 'секрет-2', host: 'imap.corp.ru', smtpHost: 'smtp.corp.ru', smtpPort: 587 },
+    работа: { preset: 'custom', user: 'я@corp.ru', password: 'секрет-2', host: 'imap.corp.ru', smtpHost: 'smtp.corp.ru', smtpPort: 587, tlsNoVerify: true },
   }));
   const boxes = await run('boxes');
   check('boxes: оба ящика с хостами', boxes.includes('личное — я@yandex.ru (imap: imap.yandex.ru') && boxes.includes('smtp.corp.ru'), boxes);

@@ -30,6 +30,8 @@
     "probe:ocr": "tsx tests/probe-ocr.ts",
     "probe:web": "tsx tests/probe-web.ts",
     "probe:mail": "tsx tests/probe-mail.ts",
+    "probe:toolloop": "tsx tests/probe-toolloop.ts",
+    "scenario:live": "tsx tests/scenarios-live.ts",
     "probe:msg": "tsx tests/probe-messengers.ts",
     "probe:gui": "tsx tests/probe-gui.ts",
     "probe:scenario-gui": "tsx tests/probe-gui-scenario.ts",

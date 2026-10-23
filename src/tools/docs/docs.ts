@@ -52,7 +52,7 @@ function parseHead(body: string): { sub: string; rest: string[]; text: string } 
 
 function syntax(): string {
   return 'подкоманды: read <файл> · tables <файл> · write <файл> (тело — текст/таблица) · ' +
-    'append <файл> (тело — абзацы для docx) · convert <цель> <файл>';
+    'append <файл> (тело — абзацы для docx) · convert <цель> <файл> — имя файла с пробелами берите в кавычки';
 }
 
 /** Путь внутри рабочей папки; наружу — отказ. */
@@ -83,6 +83,7 @@ export default (config: ToolConfig): Tool => {
     desc:
       'Документы: ```docs read договор.pdf · tables таблица.xlsx · write отчёт.docx (тело — текст) · ' +
       'append договор.docx (тело — дописываемые абзацы) · convert pdf файл.doc. ' +
+      'Имя файла с пробелами — в кавычках: read "иск по квартире.docx". ' +
       'pdf/docx/xlsx/csv/odt/ods — нативно; .doc/.xls и создание odt/ods — нужен мост soffice (docker/soffice).',
     check: () => 'allow',
     async run(body, ctx: ToolRunContext) {

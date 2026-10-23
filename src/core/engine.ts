@@ -100,8 +100,11 @@ const TOOL_FOLLOW_FOCUS =
   'Результаты твоих действий — в истории от «⚙ инструменты». Продолжай: следующий шаг или краткий итог. ' +
   'Опирайся только на эти результаты, ничего не додумывай.';
 
-/** Максимум циклов «ответ с действиями → результаты → продолжение» на один ответ агента. */
-const MAX_TOOL_ITERATIONS = 3;
+/** Максимум циклов «ответ с действиями → результаты → продолжение» на один ответ агента.
+ *  Реальная работа шире трёх шагов: дерево ссылок сайта (раздел → глава → статья),
+ *  ретраи после отказа, многофайловые задачи — раньше агенты просто не доезжали
+ *  до записи результата. */
+const MAX_TOOL_ITERATIONS = 16;
 
 /** Приложение — конспект другого разговора, подшитый в текущий через @session */
 export function isSessionRef(m: ChatMessage): boolean {
@@ -1098,10 +1101,13 @@ export class Engine {
       this.presenter.notice(`  ⚠ тула не собраны: ${err instanceof Error ? err.message : err}`);
       return;
     }
-    const customIds = [...this.userTools.keys()];
+    // виды тул-блоков, которые движок исполняет, — ровно тула агента: у него
+    // есть встроенные (files, docs, ocr, …), у файлов-тулов имена из tools/;
+    // чужой блок остаётся текстом, гейт checkPermission его бы всё равно не пустил
+    const toolIds = [...toolset.keys()];
     let text = firstText;
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS && !signal.aborted; iteration++) {
-      const actions = parseActions(text, customIds);
+      const actions = parseActions(text, toolIds);
       if (actions.length === 0) break;
       const results: string[] = [];
       for (const action of actions) {
