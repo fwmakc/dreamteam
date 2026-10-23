@@ -9,3 +9,4 @@ workspace/
 .dreamteam/
 gui-dist/
 *.tgz
+__pycache__/

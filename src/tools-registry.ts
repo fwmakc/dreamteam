@@ -30,6 +30,7 @@ import archTool from './tools/arch.js';
 import sshTool from './tools/ssh.js';
 import lookTool from './tools/look.js';
 import imageTool from './tools/image.js';
+import docsTool from './tools/docs.js';
 import type { Agent } from './types.js';
 
 const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
@@ -40,6 +41,7 @@ const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
   ssh: sshTool,
   look: lookTool,
   image: imageTool,
+  docs: docsTool,
 };
 
 /** Проверяет, что объект правда тул; иначе — внятная ошибка с именем тула. */

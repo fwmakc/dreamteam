@@ -177,6 +177,15 @@ services:
               count: all
               capabilities: [gpu]
 
+  # ─── Документы: мост LibreOffice для тула docs (чтение doc/xls, запись odt/ods) ───
+
+  soffice:
+    profiles: ["soffice"]
+    build: ./soffice
+    ports: ["8200:8200"]
+    environment:
+      SOFFICE_TIMEOUT: "120"
+
 volumes:
   llama-cache:
   hf-cache:
