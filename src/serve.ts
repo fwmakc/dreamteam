@@ -444,7 +444,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         activeAbort?.();
         return;
       case 'export_home': {
-        const data = packEntriesZip(homeEntries());
+        const data = packEntriesZip(homeEntries(app));
         ws.send(JSON.stringify({ type: 'export_data', name: `dt-home-${stamp()}.zip`, dataB64: data.toString('base64') }));
         return;
       }

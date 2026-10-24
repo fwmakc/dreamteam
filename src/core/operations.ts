@@ -301,7 +301,7 @@ function parseHostSpec(spec: string): ManagerHostSpec {
 function exportZip(engine: Engine, n: number | undefined): string[] {
   const app = engine.app;
   const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-  const entries = n !== undefined ? sessionEntries(app, n) : homeEntries();
+  const entries = n !== undefined ? sessionEntries(app, n) : homeEntries(app);
   const file = join(process.cwd(), n !== undefined ? `dt-session-${app.store.list()[n - 1].id}.zip` : `dt-home-${ts}.zip`);
   writeFileSync(file, packEntriesZip(entries));
   return [`Экспорт: ${file} (${entries.length} записей${n !== undefined ? '' : ', включая ключи провайдеров — хранить как пароль'})`];

@@ -1,16 +1,19 @@
 /**
  * Импорт-экспорт: упаковка/разбор zip-переносов для домашних настроек и
  * отдельных разговоров. Формат — обычный zip (adm-zip, как в тулe arch):
- * settings/user/providers + sessions/ + transcripts/ для дома;
- * session.json + agents.json + settings.json для сессии.
+ * дом — settings/user/providers + agents/manager + tools/ + sessions/ (все
+ * разговоры текущего проекта); сессия — session.json + agents.json.
  *
  * Экспорт — снимок дома для переезда на другую машину: настройки, команда,
- * провайдеры вместе с ключами карточек (apiKey…). Не переносится только .env:
- * это настройки самой машины (TOKEN, PORT, HOST для serve), на новом месте
- * дом создаст его из примера.
+ * провайдеры вместе с ключами карточек (apiKey…) и все разговоры текущего
+ * проекта. Не переносится только .env: это настройки самой машины (TOKEN,
+ * PORT, HOST для serve), на новом месте дом создаст его из примера.
+ * Транскрипты в архив не пакуются — это производный кэш, они перегенерируются
+ * из session.json при первом же сохранении.
  *
- * Импорт дома: настройки/профиль/провайдеры заменяются, разговоры вливаются
- * по id (совпавшие — заменяются). Импорт сессии: разговор разворачивается
+ * Импорт дома: настройки/профиль/провайдеры/менеджер заменяются, разговоры
+ * вливаются в текущий проект по id (совпавшие — заменяются, открытый
+ * разговор перечитывается с диска). Импорт сессии: разговор разворачивается
  * КАК НОВАЯ сессия (новый id — ничего не перетирается), агенты вливаются
  * по id (новые добавляются, совпавшие не трогаются).
  */
@@ -23,13 +26,13 @@ import { loadTeamMemory } from '../memory.js';
 import {
   AGENTS_FILE,
   DT_HOME,
+  MANAGER_FILE,
   MEMORY_FILE,
   PROVIDERS_FILE,
-  SETTINGS_FILE,
   TOOLS_DIR,
   USER_FILE,
 } from '../paths.js';
-import { mergeTeamAgents } from '../manager.js';
+import { loadManagerConfig, mergeTeamAgents } from '../manager.js';
 import type { App } from './engine.js';
 import type { Agent, Session } from '../types.js';
 
@@ -39,22 +42,30 @@ export interface TransferEntry {
 }
 
 const HOME_FILES = ['settings.json', 'user.json', 'providers.json', 'agents.json', 'manager.json'] as const;
+/** id разговора — метка времени; из архива путь строится только из такого id (zip-slip мимо). */
+const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 
-/** Записи домашнего слоя: настройки, профиль, провайдеры (с ключами карточек), команда и тула; .env — вещь машины. */
-export function homeEntries(): TransferEntry[] {
+/** Записи домашнего слоя + все разговоры текущего проекта; .env — вещь машины. */
+export function homeEntries(app: App): TransferEntry[] {
   const out: TransferEntry[] = [];
   for (const f of HOME_FILES) {
     const p = join(DT_HOME, f);
     if (existsSync(p)) out.push({ rel: f, data: readFileSync(p) });
   }
-  for (const name of readdirSync(TOOLS_DIR)) {
-    const p = join(TOOLS_DIR, name);
-    if (existsSync(p) && statSync(p).isFile()) out.push({ rel: `tools/${name}`, data: readFileSync(p) });
+  if (existsSync(TOOLS_DIR)) {
+    for (const name of readdirSync(TOOLS_DIR)) {
+      const p = join(TOOLS_DIR, name);
+      if (existsSync(p) && statSync(p).isFile()) out.push({ rel: `tools/${name}`, data: readFileSync(p) });
+    }
+  }
+  for (const meta of app.store.list()) {
+    const s = app.store.load(meta.id);
+    if (s && SESSION_ID_RE.test(s.id)) out.push({ rel: `sessions/${s.id}.json`, data: Buffer.from(JSON.stringify(s, null, 2) + '\n') });
   }
   return out;
 }
 
-/** Записи одной сессии: разговор, состав команды проекта, настройки. */
+/** Записи одной сессии: разговор + состав команды (для влива участников при импорте). */
 export function sessionEntries(app: App, n: number): TransferEntry[] {
   const meta = app.store.list()[n - 1];
   if (!meta) throw new Error(`не нашёл разговор №${n} — см. /sessions`);
@@ -62,7 +73,6 @@ export function sessionEntries(app: App, n: number): TransferEntry[] {
   if (!s) throw new Error(`разговор №${n} не читается`);
   const out: TransferEntry[] = [{ rel: 'session.json', data: Buffer.from(JSON.stringify(s, null, 2) + '\n') }];
   if (existsSync(AGENTS_FILE)) out.push({ rel: 'agents.json', data: readFileSync(AGENTS_FILE) });
-  if (existsSync(SETTINGS_FILE)) out.push({ rel: 'settings.json', data: readFileSync(SETTINGS_FILE) });
   return out;
 }
 
@@ -103,21 +113,55 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     tools++;
   }
   if (tools > 0) report.push(`тулов влито: ${tools}`);
-  // после замены команды перечитываем её — агенты в текущем разговоре могли измениться
+  // после замены команды перечитываем память команды
   try {
     app.memory = loadTeamMemory(MEMORY_FILE);
   } catch {
     // память необязательна
   }
   // провайдеры: перечитываем и обновляем карту приложения (ключи теперь в карточках)
+  let providerIds: Iterable<string> = [];
   try {
     const loaded = loadProviders(PROVIDERS_FILE);
     for (const [k, v] of loaded.providers) app.providers.set(k, v);
     for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
     app.defaultProviderId = loaded.defaultId;
+    providerIds = loaded.providers.keys();
     report.push('провайдеры перечитаны');
   } catch (err) {
     report.push(`провайдеры не перечитались (${err instanceof Error ? err.message : err})`);
+  }
+  // manager.json заменён — менеджер в памяти перечитываем сразу, иначе он до
+  // перезапуска живёт со старым именем и провайдером из прежнего дома
+  try {
+    app.mgr = loadManagerConfig(MANAGER_FILE, providerIds);
+  } catch (err) {
+    report.push(`менеджер не перечитался (${err instanceof Error ? err.message : err})`);
+  }
+  // разговоры текущего проекта: влив по id, совпавшие заменяются. Транскрипты
+  // перегенерируются при сохранении. Кривые записи пропускаем молча (в отчёте — счёт).
+  let sessions = 0;
+  let reopened = false;
+  for (const e of entries) {
+    if (!e.rel.startsWith('sessions/') || !e.rel.endsWith('.json')) continue;
+    try {
+      const s = JSON.parse(e.data.toString('utf8')) as Session;
+      if (!s || typeof s.id !== 'string' || !SESSION_ID_RE.test(s.id) || !Array.isArray(s.messages)) continue;
+      reopened = reopened || s.id === app.session.id;
+      app.store.save({ ...s, updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : Date.now() });
+      sessions++;
+    } catch {
+      // мусорная запись — не разговор; в дом ей не место
+    }
+  }
+  if (sessions > 0) {
+    report.push(`разговоров влито: ${sessions}`);
+    if (reopened) {
+      // в архиве был текущий открытый разговор: перечитываем с диска, чтобы
+      // память не затёрла влитые данные при следующем сохранении
+      const fresh = app.store.load(app.session.id);
+      if (fresh) app.session = fresh;
+    }
   }
   return `Импорт дома выполнен: ${report.join('; ')}`;
 }
