@@ -250,10 +250,11 @@ function check(name: string, cond: boolean, detail?: string): void {
   check('team delete: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
 }
 
-// ── проекты: add/host add/host delete/delete/list ────────────────────────────
+// ── проекты: обзор/list/host add/host delete/delete ──────────────────────────
 {
   let lines = await run(engine, '/project');
-  check('project: обзор пустого — подсказка', lines[0]?.includes('Проект пуст') ?? false);
+  check('project: обзор — текущий проект', lines.some((l) => l.includes('← текущий')) ?? false);
+  check('project: обзор пустого — подсказка про серверы', lines.some((l) => l.includes('host add')) ?? false);
 
   lines = await run(engine, '/project host add prod=deploy@10.0.0.1:2202');
   check('project host add: отчёт ✓', lines[0]?.includes('prod') ?? false);

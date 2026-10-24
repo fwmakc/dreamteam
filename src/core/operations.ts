@@ -35,7 +35,8 @@ import {
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from '../providers/registry.js';
 import { resolveEndpoints } from '../mail.js';
 import { agentToolIds } from '../tools-api.js';
-import { AGENTS_FILE, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR } from '../paths.js';
+import { AGENTS_FILE, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, PROJECTS_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
+import { loadProjectRegistry, projectLabel } from './projects.js';
 import { loadSettings } from '../settings.js';
 import { chatTeam, isSessionRef, type App, type Engine } from './engine.js';
 import { loadSchedule, saveSchedule } from './schedule.js';
@@ -45,7 +46,7 @@ import {
   homeEntries,
   packEntriesZip,
   readZipEntries,
-  sessionEntries,
+  sessionEntriesById,
 } from './transfer.js';
 import type { Agent, ManagerHostSpec } from '../types.js';
 
@@ -194,14 +195,23 @@ function memoryText(app: App, arg: string): string[] {
 
 function projectListText(app: App): string[] {
   void app;
-  const registry = loadHostsFile(HOSTS_FILE);
-  const lines: string[] = [''];
-  const hosts = Object.entries(registry) as [string, { host: string; user?: string; port?: number }][];
+  // реестр проектов машины: текущий — всегда первым, даже если его ещё не записали
+  const known = loadProjectRegistry(PROJECTS_FILE).projects.filter((p) => p.path !== WORKSPACE);
+  const lines = [
+    '',
+    'Проекты (смена: /project open <имя|путь>):',
+    `• ${projectLabel(WORKSPACE)} — ${WORKSPACE} ← текущий`,
+    ...known.map((p) => `• ${p.name} — ${p.path}`),
+  ];
+  // серверы текущего проекта (hosts.json)
+  const hosts = Object.entries(loadHostsFile(HOSTS_FILE)) as [string, { host: string; user?: string; port?: number }][];
+  lines.push('Серверы проекта (hosts.json):');
   if (hosts.length === 0) {
-    return ['Проект пуст — серверы: /project host add <имя>=[пользователь@]хост[:порт]'];
-  }
-  for (const [name, h] of hosts) {
-    lines.push(`• ${name}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`);
+    lines.push('  пусто — /project host add <имя>=[пользователь@]хост[:порт]');
+  } else {
+    for (const [name, h] of hosts) {
+      lines.push(`  • ${name}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`);
+    }
   }
   lines.push('');
   return lines;
@@ -297,14 +307,26 @@ function parseHostSpec(spec: string): ManagerHostSpec {
   return out;
 }
 
-/** Экспорт: zip в рабочей папке. Номер — один разговор, без — весь дом. */
-function exportZip(engine: Engine, n: number | undefined): string[] {
+/** Экспорт дома: zip в рабочей папке. */
+function exportHomeZip(engine: Engine): string[] {
   const app = engine.app;
   const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-  const entries = n !== undefined ? sessionEntries(app, n) : homeEntries(app);
-  const file = join(process.cwd(), n !== undefined ? `dt-session-${app.store.list()[n - 1].id}.zip` : `dt-home-${ts}.zip`);
+  const entries = homeEntries(app);
+  const file = join(WORKSPACE, `dt-home-${ts}.zip`);
   writeFileSync(file, packEntriesZip(entries));
-  return [`Экспорт: ${file} (${entries.length} записей${n !== undefined ? '' : ', включая ключи провайдеров — хранить как пароль'})`];
+  return [`Экспорт: ${file} (${entries.length} записей, включая ключи провайдеров — хранить как пароль)`];
+}
+
+/** Экспорт разговора: номер резолвится в id один раз — архив и его имя
+ *  всегда про один и тот же разговор, даже если список живёт своей жизнью. */
+function exportSessionZip(engine: Engine, n: number | undefined): string[] {
+  const app = engine.app;
+  const id = n === undefined ? app.session.id : app.store.list()[n - 1]?.id;
+  if (!id) return [n === undefined ? 'Разговоров нет — экспортировать нечего.' : `Не нашёл разговор №${n} — см. /sessions`];
+  const entries = sessionEntriesById(app, id);
+  const file = join(WORKSPACE, `dt-session-${id}.zip`);
+  writeFileSync(file, packEntriesZip(entries));
+  return [`Экспорт: ${file} (${entries.length} записей)`];
 }
 
 // ── манифест ─────────────────────────────────────────────────────────────────
@@ -366,10 +388,8 @@ export const OPERATIONS: OpSpec[] = [
     help: 'архив разговора в zip; без номера — текущий',
     run: async (engine, rest) => {
       const n = Number.parseInt(rest[0] ?? '', 10);
-      const current = engine.app.store.list().findIndex((s) => s.id === engine.app.session.id) + 1;
-      const num = Number.isInteger(n) && n > 0 ? n : current;
-      if (num <= 0) return ['Разговоров нет — экспортировать нечего.'];
-      return exportZip(engine, num);
+      // без номера — текущий разговор (по id, не по позиции в списке)
+      return Number.isInteger(n) && n > 0 ? exportSessionZip(engine, n) : exportSessionZip(engine, undefined);
     },
   },
   {
@@ -390,14 +410,14 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'home.export', title: 'экспорт дома',
-    help: 'снимок дома для переезда: настройки, провайдеры с ключами и все разговоры; .env (TOKEN/PORT) — вещь машины',
-    run: async (engine) => exportZip(engine, undefined),
+    help: 'снимок дома для переезда: настройки, провайдеры с ключами, память, расписание и все разговоры; .env (TOKEN/PORT) — вещь машины',
+    run: async (engine) => exportHomeZip(engine),
   },
   {
     name: 'home.import',
     args: [{ name: 'файл.zip', required: true }],
     title: 'импорт дома',
-    help: 'настройки/профиль заменяются, разговоры вливаются по id; с подтверждением',
+    help: 'настройки/профиль/память/расписание заменяются, разговоры вливаются по id; с подтверждением',
     run: async (engine, rest) => {
       const file = rest.join(' ');
       if (!file) return ['Синтаксис: /home import <файл.zip>'];
@@ -405,7 +425,7 @@ export const OPERATIONS: OpSpec[] = [
       const entries = readZipEntries(readFileSync(file));
       const ok = await engine.confirmAction(
         'Импортировать домашние настройки из этого архива?',
-        'Настройки/профиль/провайдеры заменяются; разговоры вливаются по id. Ключи (.env) не переносятся.',
+        'Настройки/профиль/провайдеры, память команды и расписание заменяются; разговоры вливаются по id. Ключи (.env) не переносятся.',
       );
       if (!ok) return ['Импорт дома отменён.'];
       return [applyHomeImport(engine.app, entries)];
@@ -625,8 +645,41 @@ export const OPERATIONS: OpSpec[] = [
   // проекты
   {
     name: 'project.list', implicit: true, title: 'проекты',
-    help: 'реестр серверов (hosts.json)',
+    help: 'известные проекты и серверы текущего; смена — /project open',
     run: async (engine) => projectListText(engine.app),
+  },
+  {
+    name: 'project.open',
+    args: [{ name: 'имя|путь', required: true, hint: 'projects' }],
+    title: 'открыть проект',
+    help: 'сменить рабочую папку и разговоры, не выходя из приложения',
+    run: async (engine, rest) => {
+      const arg = rest.join(' ').trim();
+      if (!arg) return ['Синтаксис: /project open <имя|путь> (список — /project)'];
+      return [engine.switchProject(arg)];
+    },
+  },
+  {
+    name: 'project.add',
+    args: [{ name: 'путь', required: true }],
+    title: 'запомнить проект',
+    help: 'добавить папку в реестр проектов, не переключаясь',
+    run: async (engine, rest) => {
+      const arg = rest.join(' ').trim();
+      if (!arg) return ['Синтаксис: /project add <путь>'];
+      return [engine.addProject(arg)];
+    },
+  },
+  {
+    name: 'project.remove',
+    args: [{ name: 'имя|путь', required: true, hint: 'projects' }],
+    title: 'забыть проект',
+    help: 'убрать из реестра (файлы не трогаются); текущий не забыть',
+    run: async (engine, rest) => {
+      const arg = rest.join(' ').trim();
+      if (!arg) return ['Синтаксис: /project remove <имя|путь>'];
+      return [engine.removeProject(arg)];
+    },
   },
   {
     name: 'project.host.add',

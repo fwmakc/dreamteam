@@ -39,6 +39,7 @@ import {
 import { buildToolset, loadUserTools } from '../tools-registry.js';
 import { operationHints, runOperationText } from './operations.js';
 import { writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
 import {
   AGENTS_FILE,
@@ -46,11 +47,17 @@ import {
   MAIL_FILE,
   MEMORY_FILE,
   MESSENGERS_FILE,
+  PROJECTS_FILE,
+  PROVIDERS_FILE,
+  SESSIONS_DIR,
   SETTINGS_FILE,
   TOOLS_DIR,
   USER_FILE,
   WORKSPACE,
+  setProjectRoot,
 } from '../paths.js';
+import { defaultProviderId, ensureProject } from '../wizard.js';
+import { forgetProject, loadProjectRegistry, projectLabel, rememberProject, resolveProjectDir } from './projects.js';
 import { planTurns, type PlanResult } from '../orchestrator.js';
 import { compressIfNeeded, contextSlice } from '../compress.js';
 import {
@@ -374,6 +381,7 @@ export class Engine {
     signal?: AbortSignal,
     userName = 'Пользователь',
     quiet = false,
+    store: SessionStore = this.app.store,
   ): Promise<string | null> {
     const provider = this.defaultProvider();
     if (session.digest && session.digestAtCount !== undefined
@@ -420,7 +428,7 @@ export class Engine {
       }
       session.digest = digest;
       session.digestAtCount = session.messages.length;
-      this.app.store.save(session);
+      store.save(session);
       return digest;
     } catch (err) {
       if (signal?.aborted) return null; // прервано (Esc) — сообщение об этом ниже
@@ -676,6 +684,11 @@ export class Engine {
                 hosts: [...p.hosts.keys()],
                 agents: fullTeam.filter((a) => a.projects?.includes(id)).map((a) => a.id),
               })),
+              knownProjects: loadProjectRegistry(PROJECTS_FILE).projects.map((p) => ({
+                name: p.name,
+                path: p.path,
+                current: p.path === WORKSPACE,
+              })),
               operations: operationHints(),
             }),
           },
@@ -761,6 +774,16 @@ export class Engine {
         return grantTool(AGENTS_FILE, action.agent, action.tool, action.card, TOOLS_DIR);
       case 'project.host.add':
         return addProjectHosts(HOSTS_FILE, { [String(action.name ?? 'main')]: action });
+      case 'project.open': {
+        // смена проекта — после сохранения реплики менеджера в СТАРУЮ сессию:
+        // разговор принадлежит своему проекту
+        const target = this.resolveProjectDir(String(action.path ?? ''));
+        if (resolve(target) === WORKSPACE) return 'Этот проект и так открыт.';
+        pendingSwitches.push(() => {
+          this.applyProjectSwitch(target);
+        });
+        return `✓ Переключаюсь на проект «${projectLabel(target)}» (${target})`;
+      }
       case 'mail.add': {
         // op и name — поля действия, не ящика: в spec не идут (валидация строга к лишним полям)
         const { op, name, ...spec } = action;
@@ -835,6 +858,57 @@ export class Engine {
     if (meta.id === this.app.session.id) return 'Текущий разговор удалить нельзя — сначала откройте другой.';
     this.app.store.delete(meta.id);
     return `Разговор «${meta.title}» удалён.`;
+  }
+
+  // ── проекты: переключение и реестр ─────────────────────────────────────
+
+  /** Аргумент /project open и действия менеджера: путь или имя из реестра. */
+  resolveProjectDir(arg: string): string {
+    return resolveProjectDir(arg, WORKSPACE, loadProjectRegistry(PROJECTS_FILE));
+  }
+
+  /** Сменить проект: /project open, project.open через WS и от менеджера. */
+  switchProject(arg: string): string {
+    return this.applyProjectSwitch(this.resolveProjectDir(arg));
+  }
+
+  /** Применить смену проекта: скаффолд .dreamteam, слой путей, реестр, магазин
+   *  разговоров. Итоги старого разговора вливаются в общую память ДО подмены
+   *  хранилища: фоновое вливание должно писать в проект, где разговор жил. */
+  applyProjectSwitch(dir: string): string {
+    const target = resolve(dir);
+    if (target === WORKSPACE) return `Этот проект уже открыт: ${WORKSPACE}`;
+    // папка может быть новой — скаффолдим .dreamteam, как при первом запуске
+    const notes = ensureProject(defaultProviderId(PROVIDERS_FILE), join(target, '.dreamteam'));
+    this.queueFlush(this.app.session, this.app.store);
+    setProjectRoot(target);
+    this.app.store = new SessionStore(SESSIONS_DIR);
+    const list = this.app.store.list();
+    this.app.session = list.length > 0 ? this.app.store.load(list[0].id) ?? this.app.store.create() : this.app.store.create();
+    rememberProject(PROJECTS_FILE, target, true);
+    for (const note of notes) this.presenter.notice('  ' + note);
+    this.presenter.notice(`  Проект: ${WORKSPACE}`);
+    this.presenter.notice(`  Открыт разговор «${this.app.session.title}» (${this.app.session.messages.length} сообщ.)`);
+    this.presenter.sessionOpened(this.app.session);
+    return `✓ Проект: ${WORKSPACE}`;
+  }
+
+  /** Запомнить папку проекта в реестре без переключения (/project add). */
+  addProject(arg: string): string {
+    const dir = this.resolveProjectDir(arg);
+    const known = loadProjectRegistry(PROJECTS_FILE).projects.some((p) => p.path === resolve(dir));
+    rememberProject(PROJECTS_FILE, dir, false);
+    const label = projectLabel(dir);
+    return known
+      ? `Проект «${label}» уже в реестре (${dir}).`
+      : `✓ Проект «${label}» запомнил: ${dir}. Открыть: /project open ${label}`;
+  }
+
+  /** Забыть проект в реестре (/project remove); текущий не забывается. */
+  removeProject(arg: string): string {
+    const dir = this.resolveProjectDir(arg);
+    forgetProject(PROJECTS_FILE, dir, WORKSPACE);
+    return `✓ Проект «${projectLabel(dir)}» забыт — файлы в ${dir} не тронуты.`;
   }
 
   /**
@@ -1353,6 +1427,7 @@ export class Engine {
   async flushChatMemory(
     target: Session = this.app.session,
     opts: { quiet?: boolean; onlyIfFreshDigest?: boolean } = {},
+    store: SessionStore = this.app.store,
   ): Promise<void> {
     const session = target;
     const quiet = opts.quiet ?? false;
@@ -1367,12 +1442,12 @@ export class Engine {
 
     const digest = fresh && session.digest
       ? session.digest
-      : await this.getSessionDigest(session, AbortSignal.timeout(60_000), this.app.profile.name, quiet);
+      : await this.getSessionDigest(session, AbortSignal.timeout(60_000), this.app.profile.name, quiet, store);
     if (!digest) return;
 
     appendChatToLog(this.app.memory, session.title, digest);
     session.digestInLog = true;
-    this.app.store.save(session);
+    store.save(session);
     try {
       if (!quiet) this.presenter.notice('  Сохраняю итоги разговора в общую память команды…');
       this.app.memory.shared = await mergeShared(this.app.memory.shared, session.title, digest, this.defaultProvider());
@@ -1383,9 +1458,11 @@ export class Engine {
     }
   }
 
-  private queueFlush(session: Session): void {
+  /** Вливание — в хранилище, где живёт разговор: при смене проекта магазин
+   *  подменяется, и фоновая задача не должна писать в чужой проект. */
+  private queueFlush(session: Session, store: SessionStore = this.app.store): void {
     this.flushChain = this.flushChain
-      .then(() => this.flushChatMemory(session, { quiet: true }))
+      .then(() => this.flushChatMemory(session, { quiet: true }, store))
       .catch(() => {
         // фоновое вливание не критично: конспект не помечен как влитый и повторится при следующем закрытии
       });

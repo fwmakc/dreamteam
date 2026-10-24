@@ -52,6 +52,13 @@ export interface ProjectInfo {
   hosts: ProjectHost[];
 }
 
+/** Проект из реестра машины (projects.json в доме) — для переключения */
+export interface ProjectRecordInfo {
+  path: string;
+  name: string;
+  lastOpened?: number;
+}
+
 export interface ScheduleTaskInfo {
   id: string;
   message: string;
@@ -78,6 +85,10 @@ export interface StateSnapshot {
   images: { id: string; ok: boolean; note?: string }[];
   profile: { name: string; role?: string; about?: string };
   projects: ProjectInfo[];
+  /** текущий проект (папка запуска serve) */
+  project?: { path: string; name: string };
+  /** известные проекты машины — клик = переключение (rpc project.open) */
+  knownProjects?: ProjectRecordInfo[];
   auto: { mode: boolean; left: number };
   settings: { width: number; language: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string };
   completion: { operations: OpHint[] };

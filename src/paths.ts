@@ -29,11 +29,29 @@ export const APP_VERSION = (JSON.parse(readFileSync(join(APP_ROOT, 'package.json
 /** Дом: ключи, настройки, профиль, команда целиком. */
 export const DT_HOME = process.env.DT_HOME ? resolve(process.env.DT_HOME) : join(homedir(), '.dreamteam');
 
-/** Служебная папка проекта (.dreamteam): hosts.json, почта, переписка. */
-export const DT_PROJECT = process.env.DT_PROJECT ? resolve(process.env.DT_PROJECT) : join(resolve(process.cwd()), '.dreamteam');
+/** Дом: реестр проектов машины — какие папки открывали и где текущий. */
+export const PROJECTS_FILE = join(DT_HOME, 'projects.json');
 
-/** Рабочая папка инструментов: всегда текущая папка (проект = где запущено). */
-export const WORKSPACE = resolve(process.cwd());
+/** Служебная папка проекта (.dreamteam): hosts.json, почта, переписка.
+ *  Проект можно сменить на ходу (/project open) — эти пути пересчитывает
+ *  setProjectRoot(); импортёры (named imports) видят обновления — живые
+ *  привязки ESM-модулей. До первой смены значения совпадают с DT_HOME/DT_PROJECT
+ *  из окружения, поэтому пробники продолжают работать без изменений. */
+export let DT_PROJECT = process.env.DT_PROJECT ? resolve(process.env.DT_PROJECT) : join(resolve(process.cwd()), '.dreamteam');
+
+/** Рабочая папка инструментов: папка проекта (меняется вместе с ним). */
+export let WORKSPACE = resolve(process.cwd());
+
+/** Сменить проект: рабочая папка → её .dreamteam → все проектные пути.
+ *  Env DT_PROJECT с этого момента игнорируется — явная смена важнее. */
+export function setProjectRoot(workspaceDir: string): void {
+  WORKSPACE = resolve(workspaceDir);
+  DT_PROJECT = join(WORKSPACE, '.dreamteam');
+  HOSTS_FILE = join(DT_PROJECT, 'hosts.json');
+  MAIL_FILE = join(DT_PROJECT, 'mails.json');
+  MESSENGERS_FILE = join(DT_PROJECT, 'messengers.json');
+  SESSIONS_DIR = join(DT_PROJECT, 'sessions');
+}
 
 /** Файлы дом-слоя: машина и команда. */
 export const PROVIDERS_FILE = join(DT_HOME, 'providers.json');
@@ -45,11 +63,11 @@ export const TOOLS_DIR = join(DT_HOME, 'tools');
 export const SCHEDULE_FILE = join(DT_HOME, 'schedule.json');
 export const MEMORY_FILE = join(DT_HOME, 'memory.json');
 
-/** Файлы проект-слоя: конкретный проект. */
+/** Файлы проект-слоя: конкретный проект (пересчитываются setProjectRoot). */
 /** ssh-серверы проекта (тул ssh): { "prod": { "host": "…", … } }. */
-export const HOSTS_FILE = join(DT_PROJECT, 'hosts.json');
+export let HOSTS_FILE = join(DT_PROJECT, 'hosts.json');
 /** Ящики тула mail — секреты проекта. */
-export const MAIL_FILE = join(DT_PROJECT, 'mails.json');
+export let MAIL_FILE = join(DT_PROJECT, 'mails.json');
 /** Токены ботов telegram/max — секреты проекта. */
-export const MESSENGERS_FILE = join(DT_PROJECT, 'messengers.json');
-export const SESSIONS_DIR = join(DT_PROJECT, 'sessions');
+export let MESSENGERS_FILE = join(DT_PROJECT, 'messengers.json');
+export let SESSIONS_DIR = join(DT_PROJECT, 'sessions');

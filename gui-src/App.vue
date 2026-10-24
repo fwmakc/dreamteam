@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue';
 import type {
-  AgentInfo, ChatMessage, OpHint, ProjectHost, ProjectInfo,
+  AgentInfo, ChatMessage, OpHint, ProjectHost, ProjectInfo, ProjectRecordInfo,
   ProviderInfo, ScheduleTaskInfo, SessionMeta,
 } from './types';
 import {
@@ -18,6 +18,8 @@ const team = computed(() => (snapshot.team ?? []) as AgentInfo[]);
 const teamError = computed(() => snapshot.teamError ?? null);
 const providers = computed(() => (snapshot.providers ?? []) as ProviderInfo[]);
 const projects = computed(() => (snapshot.projects ?? []) as ProjectInfo[]);
+const currentProject = computed(() => snapshot.project);
+const knownProjects = computed(() => (snapshot.knownProjects ?? []) as ProjectRecordInfo[]);
 const scheduleTasks = computed(() => (snapshot.scheduleTasks ?? []) as ScheduleTaskInfo[]);
 const manager = computed(() => snapshot.manager);
 const commands = computed(() => (snapshot.completion?.operations ?? []) as OpHint[]);
@@ -279,9 +281,24 @@ function openManagerForm(): void {
 }
 
 // ── проекты ──────────────────────────────────────────────────────────────────
+/** Открыть другой проект: папка на диске — смена рабочей папки и разговоров. */
+function openProjectForm(): void {
+  if (roundActive.value) return;
+  openForm('Открыть проект', [
+    { key: 'path', label: 'Путь к папке проекта (или имя из списка)' },
+  ], (v) => {
+    const path = String(v.path ?? '').trim();
+    if (path) rpcReport(rpc('project.open', { path }));
+  });
+}
+function switchProject(p: ProjectRecordInfo): void {
+  if (roundActive.value) return;
+  if (currentProject.value && p.path === currentProject.value.path) return;
+  rpcReport(rpc('project.open', { path: p.path }));
+}
+/** Первый сервер проекта (когда список серверов ещё пуст). */
 function projectAdd(): void {
-  openForm('Новый проект', [
-    { key: 'id', label: 'id проекта (латиница)' },
+  openForm('Новый сервер проекта', [
     { key: 'hostName', label: 'Имя сервера (напр. prod)' },
     { key: 'host', label: 'Хост (адрес)' },
     { key: 'user', label: 'Пользователь (можно пропустить)' },
@@ -823,9 +840,22 @@ onMounted(connectWs);
         <div class="side-head" @click="toggleSec('projects')">
           <span class="sec-toggle" title="Свернуть/развернуть">▾</span>
           <span class="sec-name">Проекты</span>
-          <button class="sec-add" title="Новый проект" @click.stop="projectAdd">＋</button>
+          <button class="sec-add" title="Открыть проект (папка)" @click.stop="openProjectForm">📂</button>
+          <button class="sec-add" title="Новый сервер проекта" @click.stop="projectAdd">＋</button>
         </div>
         <ul id="projects">
+          <li class="proj-current" data-project-current title="Текущий проект — папка, где запущен сервер">
+            <span>📁 {{ currentProject?.name ?? '—' }}</span><span class="meta">{{ currentProject?.path }}</span>
+          </li>
+          <li
+            v-for="p in knownProjects.filter((k) => k.path !== currentProject?.path)"
+            :key="p.path"
+            class="proj-row"
+            :title="p.path + ' — переключиться'"
+            @click.stop="switchProject(p)"
+          >
+            <span>{{ p.name }}</span><span class="meta">{{ p.path }}</span>
+          </li>
           <li
             v-for="ph in projects.flatMap((p) => (p.hosts ?? []).map((h) => ({ p, h })))"
             :key="ph.p.id + ':' + ph.h.name"

@@ -36,8 +36,9 @@ export class SessionStore {
     return session;
   }
 
-  save(session: Session): void {
-    session.updatedAt = Date.now();
+  /** touch: false — не освежать дату правки (влив разговора из архива). */
+  save(session: Session, opts: { touch?: boolean } = {}): void {
+    if (opts.touch !== false) session.updatedAt = Date.now();
     writeFileSync(this.file(session.id), JSON.stringify(session, null, 2), 'utf8');
     this.writeTranscript(session);
   }

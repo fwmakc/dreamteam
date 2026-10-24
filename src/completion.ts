@@ -15,6 +15,9 @@ export interface CompletionContext {
   providerIds(): string[];
   /** Имя менеджера переговорки (~/.dreamteam/manager.json) — первый пункт всплывашки @ */
   managerName(): string;
+  /** Имена известных проектов (реестр projects.json) — для /project open|remove.
+   *  Опционально: старые вызовы и пробы без реестра подсказывать не обязаны. */
+  projectNames?(): string[];
 }
 
 function commonPrefix(items: string[]): string {
@@ -71,6 +74,8 @@ function argValues(op: OpSpec, argPos: number, ctx: CompletionContext): string[]
       return [...ctx.chatAgents().map((_, i) => String(i + 1)), ...ctx.chatAgents().map((a) => a.name)];
     case 'providers':
       return ctx.providerIds();
+    case 'projects':
+      return ctx.projectNames?.() ?? [];
     default:
       return [];
   }
@@ -237,6 +242,7 @@ function valueRows(op: OpSpec, argPos: number, ctx: CompletionContext): string[]
   if (arg.hint === 'team') values = [...ctx.teamNames(), 'shared'];
   else if (arg.hint === 'chat') values = ctx.chatAgents().map((a) => a.name);
   else if (arg.hint === 'providers') values = ctx.providerIds();
+  else if (arg.hint === 'projects') values = ctx.projectNames?.() ?? [];
   if (values === null) return [];
   return [
     `  ${operationCommand(op)} ${pc.dim(operationArgs(op))}:`,

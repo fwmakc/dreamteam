@@ -295,6 +295,21 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 #sidebar li .del:hover { color: var(--bad); }
 #sidebar li.static { cursor: default; }
 #sidebar li.static:hover { background: none; }
+/* проекты: текущий и известные (переключение кликом) */
+#sidebar li.proj-current { cursor: default; color: var(--accent); }
+#sidebar li.proj-current:hover { background: none; }
+#sidebar li.proj-current .meta,
+#sidebar li.proj-row .meta {
+  margin-left: auto;
+  font-size: 10px;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+#sidebar li.proj-row:hover { background: var(--panel2); }
 #sidebar .tag {
   font-size: 10px;
   border: 1px solid var(--border);

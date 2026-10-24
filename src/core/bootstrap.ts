@@ -12,13 +12,16 @@ import {
   DT_HOME,
   MANAGER_FILE,
   MEMORY_FILE,
+  PROJECTS_FILE,
   PROVIDERS_FILE,
   SESSIONS_DIR,
   SETTINGS_FILE,
   TOOLS_DIR,
   USER_FILE,
+  WORKSPACE,
 } from '../paths.js';
 import { ensureLayers } from '../wizard.js';
+import { rememberProject } from './projects.js';
 import { loadProviders, loadImageProviders } from '../providers/registry.js';
 import { loadTeamMemory } from '../memory.js';
 import { printDim, printError } from '../ui.js';
@@ -64,5 +67,12 @@ export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> 
     profile: loadUserProfile(USER_FILE),
     memory: loadTeamMemory(MEMORY_FILE),
   };
+  // реестр проектов: папка старта — текущий проект (смена — /project open).
+  // Не критично для старта: сломанный реестр не должен мешать работе.
+  try {
+    rememberProject(PROJECTS_FILE, WORKSPACE, true);
+  } catch {
+    // ignore
+  }
   return { app, ui };
 }

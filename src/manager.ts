@@ -136,9 +136,10 @@ export const MANAGER_PROMPT =
   '- {"op":"team.add","id":"логин-латиницей","name":"Имя","role":"роль","prompt":"системный промпт от первого лица","emoji":"🎯","color":"blue","temperature":0.5,"provider":"id-провайдера","tools":{"shell":{},"files":null}} — tools: объект-карточки, имя тула → настройки (объект или null = по умолчанию)\n' +
   '- {"op":"team.update","id":"id_участника","fields":{"role":"...","prompt":"...","provider":"...","temperature":0.3,"name":"...","emoji":"...","color":"...","description":"..."}}\n' +
   '- {"op":"chat.add","who":"имя или id"} / {"op":"chat.remove","who":"имя или id"} — позвать или вывести из текущего чата\n' +
-  '- {"op":"session.list"} — показать разговоры; {"op":"session.open","n":2} — открыть №2; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","n":3} — удалить №3 (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (когда просят придумать имя — опирайся на краткое содержание или начало разговора)\n' +
+  '- {"op":"session.list"} — показать разговоры; {"op":"session.open","n":2} — открыть №2; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","n":3} — удалить №3 (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (имя — по краткому содержанию)\n' +
   '- {"op":"tool.grant","agent":"id_участника","tool":"files","card":{"allow":["git *"]}} — включить тул агенту или обновить его карточку; card можно опустить (настройки по умолчанию). Встроенные: files, shell, git, arch, ssh, look, image; свои — имя файла из tools/ (включить можно только существующий, код тулов пишет человек)\n' +
-  '- {"op":"project.host.add","name":"prod","host":"203.0.113.10","user":"deploy","port":22,"dir":"/srv/app"} — сервер в текущий проект (password лучше не передавать в переписке — пусть человек впишет сам)\n' +
+   '- {"op":"project.host.add","name":"prod","host":"203.0.113.10","user":"deploy","port":22,"dir":"/srv/app"} — сервер в текущий проект (password лучше не передавать в переписке — пусть человек впишет сам)\n' +
+   '- {"op":"project.open","path":"путь или имя"} — сменить проект: рабочая папка и разговоры\n' +
   '- {"op":"mail.add","name":"ящик","user":"робот@corp.ru","password":"пароль-приложения","imap":"imap.corp.ru","smtp":"smtp.corp.ru","smtpPort":587} — ящик в mails.json (tlsNoVerify — опционально)\n' +
   '- {"op":"mail.remove","name":"ящик"}; {"op":"messenger.add","key":"telegram","token":"123456:ABC…"} / {"op":"messenger.remove","key":"max"} — токены ботов в messengers.json (key: telegram|max)\n' +
   'Делай только те действия, о которых попросили. Если изменение не требуется — ответь одним текстом, без JSON.';
@@ -160,6 +161,8 @@ export interface ManagerContext {
   request: string;
   /** Серверы из hosts.json текущего проекта (для тула ssh) */
   projects?: ManagerProjectInfo[];
+  /** Известные проекты машины (реестр projects.json) — имена для project.open */
+  knownProjects?: { name: string; path: string; current?: boolean }[];
   /** Операции руководителя — из манифеста (operations.ts), как в /help */
   operations?: { cmd: string; args?: string; help: string }[];
 }
@@ -189,6 +192,9 @@ export function managerStateInput(ctx: ManagerContext): string {
     .filter((p) => p.hosts.length > 0) // пустой проект — блока нет
     .map((p) => `- ${p.id}: серверы ${p.hosts.length > 0 ? p.hosts.join(', ') : 'нет'}`)
     .join('\n');
+  const known = (ctx.knownProjects ?? [])
+    .map((p) => `- ${p.name} — ${p.path}${p.current ? ' (текущий)' : ''}`)
+    .join('\n');
   const ops = (ctx.operations ?? []).map((c) => `${c.cmd}${c.args ? ` ${c.args}` : ''} — ${c.help}`).join('\n');
   const history = ctx.history.length
     ? `\nПоследние сообщения:\n${ctx.history.map((m) => `${m.authorName}: ${m.text}`).join('\n')}\n`
@@ -197,6 +203,7 @@ export function managerStateInput(ctx: ManagerContext): string {
     `Текущее состояние.\nКоманда:\n${roster}\nВ этом чате: ${inChat}\n` +
     `Разговоры (номер — это n для session.*):\n${sessions || '- нет'}\n` +
     (projects ? `Проекты (реестр серверов для ssh):\n${projects}\n` : '') +
+    (known ? `Известные проекты (для project.open):\n${known}\n` : '') +
     `Текущий разговор: ${ctx.currentSessionId} (имя: «${ctx.sessionTitle}»)\n` +
     (ctx.digest ? `Краткое содержание разговора:\n${ctx.digest}\n` : '') +
     `Руководитель: ${ctx.userName}\n` +
@@ -217,6 +224,7 @@ const MANAGER_OPS = new Set([
   'session.rename',
   'tool.grant',
   'project.host.add',
+  'project.open',
   'mail.add',
   'mail.remove',
   'messenger.add',
@@ -245,6 +253,8 @@ function isManagerAction(a: unknown): a is ManagerAction {
       return typeof o.agent === 'string' && typeof o.tool === 'string';
     case 'project.host.add':
       return typeof o.name === 'string' && typeof o.host === 'string';
+    case 'project.open':
+      return typeof o.path === 'string' && !!o.path.trim();
     case 'mail.add':
       return (
         typeof o.name === 'string' &&

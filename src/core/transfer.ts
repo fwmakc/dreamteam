@@ -1,8 +1,10 @@
 /**
  * Импорт-экспорт: упаковка/разбор zip-переносов для домашних настроек и
  * отдельных разговоров. Формат — обычный zip (adm-zip, как в тулe arch):
- * дом — settings/user/providers + agents/manager + tools/ + sessions/ (все
- * разговоры текущего проекта); сессия — session.json + agents.json.
+ * дом — settings/user/providers + agents/manager + память/расписание +
+ * tools/ + sessions/ (все разговоры текущего проекта); сессия — session.json
+ * + карточки участников (agents.json, и только они — архив сессии уезжает
+ * к чужим людям).
  *
  * Экспорт — снимок дома для переезда на другую машину: настройки, команда,
  * провайдеры вместе с ключами карточек (apiKey…) и все разговоры текущего
@@ -14,8 +16,9 @@
  * Импорт дома: настройки/профиль/провайдеры/менеджер заменяются, разговоры
  * вливаются в текущий проект по id (совпавшие — заменяются, открытый
  * разговор перечитывается с диска). Импорт сессии: разговор разворачивается
- * КАК НОВАЯ сессия (новый id — ничего не перетирается), агенты вливаются
- * по id (новые добавляются, совпавшие не трогаются).
+ * КАК НОВАЯ сессия (новый id — ничего не перетирается), участники вливаются
+ * по id (новые добавляются, совпавшие не трогаются); дата создания
+ * сохраняется, digestInLog сбрасывается — памяти команды в архиве сессии нет.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,7 +44,7 @@ export interface TransferEntry {
   data: Buffer;
 }
 
-const HOME_FILES = ['settings.json', 'user.json', 'providers.json', 'agents.json', 'manager.json'] as const;
+const HOME_FILES = ['settings.json', 'user.json', 'providers.json', 'agents.json', 'manager.json', 'memory.json', 'schedule.json'] as const;
 /** id разговора — метка времени; из архива путь строится только из такого id (zip-slip мимо). */
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -65,15 +68,31 @@ export function homeEntries(app: App): TransferEntry[] {
   return out;
 }
 
-/** Записи одной сессии: разговор + состав команды (для влива участников при импорте). */
+/** Участники разговора без служебных id (manager/user) — только они ездят в архиве. */
+function participantIds(s: Session): Set<string> {
+  return new Set((s.participants ?? []).filter((id) => id !== 'manager' && id !== 'user'));
+}
+
+/** Записи одной сессии: разговор + карточки участников (для влива при импорте).
+ *  Всей команды машины в архиве нет — карточки только у участников разговора. */
+export function sessionEntriesById(app: App, id: string): TransferEntry[] {
+  const s = app.store.load(id);
+  if (!s) throw new Error(`разговор «${id}» не читается`);
+  const out: TransferEntry[] = [{ rel: 'session.json', data: Buffer.from(JSON.stringify(s, null, 2) + '\n') }];
+  const wanted = participantIds(s);
+  if (wanted.size === 0 || !existsSync(AGENTS_FILE)) return out;
+  const team = JSON.parse(readFileSync(AGENTS_FILE, 'utf8')) as Agent[];
+  const cards = team.filter((a) => wanted.has(a.id));
+  if (cards.length > 0) out.push({ rel: 'agents.json', data: Buffer.from(JSON.stringify(cards, null, 2) + '\n') });
+  return out;
+}
+
+/** Записи одной сессии по номеру списка (свежие сверху). Номер резолвится один
+ *  раз — архив и его имя всегда про один и тот же разговор. */
 export function sessionEntries(app: App, n: number): TransferEntry[] {
   const meta = app.store.list()[n - 1];
   if (!meta) throw new Error(`не нашёл разговор №${n} — см. /sessions`);
-  const s = app.store.load(meta.id);
-  if (!s) throw new Error(`разговор №${n} не читается`);
-  const out: TransferEntry[] = [{ rel: 'session.json', data: Buffer.from(JSON.stringify(s, null, 2) + '\n') }];
-  if (existsSync(AGENTS_FILE)) out.push({ rel: 'agents.json', data: readFileSync(AGENTS_FILE) });
-  return out;
+  return sessionEntriesById(app, meta.id);
 }
 
 export function packEntriesZip(entries: TransferEntry[]): Buffer {
@@ -148,7 +167,8 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
       const s = JSON.parse(e.data.toString('utf8')) as Session;
       if (!s || typeof s.id !== 'string' || !SESSION_ID_RE.test(s.id) || !Array.isArray(s.messages)) continue;
       reopened = reopened || s.id === app.session.id;
-      app.store.save({ ...s, updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : Date.now() });
+      // дата из архива — данные разговора, а не машины: сохраняем как есть
+      app.store.save({ ...s, updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : Date.now() }, { touch: false });
       sessions++;
     } catch {
       // мусорная запись — не разговор; в дом ей не место
@@ -166,19 +186,39 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
   return `Импорт дома выполнен: ${report.join('; ')}`;
 }
 
-/** Импорт сессии: разговор как новый (новый id), агенты вливаются по id. */
+/**
+ * Импорт сессии: разговор как новый (новый id — ничего не перетирается).
+ * Из команды архива вливаются ТОЛЬКО участники разговора (participants):
+ * agents.json в архиве — вся команда чужой машины, вливать её целиком
+ * в локальную команду нельзя.
+ */
 export function applySessionImport(app: App, entries: TransferEntry[]): string {
   const report: string[] = [];
   const sessionEntry = entries.find((x) => x.rel === 'session.json');
   if (!sessionEntry) throw new Error('в архиве нет session.json — это не экспорт сессии');
 
-  const imported = JSON.parse(sessionEntry.data.toString('utf8')) as Session;
+  let imported: Session;
+  try {
+    imported = JSON.parse(sessionEntry.data.toString('utf8')) as Session;
+  } catch {
+    // битый JSON — тот же честный отказ, что и JSON неправильной формы
+    throw new Error('session.json в архиве не похож на разговор — импорт отменён');
+  }
+  if (!imported || typeof imported !== 'object'
+      || !Array.isArray(imported.messages)
+      || typeof imported.title !== 'string') {
+    throw new Error('session.json в архиве не похож на разговор — импорт отменён');
+  }
   const created = app.store.create();
+  const now = Date.now();
   const newSession: Session = {
     ...imported,
     id: created.id,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    // «как новый» — только id; дата создания это данные разговора, а не машины
+    createdAt: typeof imported.createdAt === 'number' ? imported.createdAt : now,
+    updatedAt: now,
+    // памяти команды в архиве сессии нет — «итоги уже в логе» здесь ложный флаг
+    digestInLog: false,
   };
   app.store.save(newSession);
   const list = app.store.list();
@@ -186,12 +226,16 @@ export function applySessionImport(app: App, entries: TransferEntry[]): string {
   report.push(`разговор импортирован как №${pos} («${newSession.title}»)`);
 
   const agentsEntry = entries.find((x) => x.rel === 'agents.json');
-  if (agentsEntry) {
-    const incoming = JSON.parse(agentsEntry.data.toString('utf8')) as Agent[];
-    const file = AGENTS_FILE;
-    const added = mergeTeamAgents(file, incoming);
-    void loadTeam(file); // валидность после записи
-    report.push(`агентов добавлено: ${added}`);
+  const wanted = participantIds(imported);
+  if (agentsEntry && wanted.size > 0) {
+    const wholeTeam = JSON.parse(agentsEntry.data.toString('utf8')) as Agent[];
+    // только участники разговора — не вся команда машины-экспортёра
+    const incoming = wholeTeam.filter((a) => wanted.has(a.id));
+    const added = mergeTeamAgents(AGENTS_FILE, incoming);
+    void loadTeam(AGENTS_FILE); // валидность после записи
+    report.push(`участников влито: ${added}`);
+  } else if (wanted.size === 0) {
+    report.push('состав разговора не указан — команда не менялась');
   }
   return `Импорт сессии выполнен: ${report.join('; ')}`;
 }

@@ -398,8 +398,10 @@ const client = await makeClient(handle.port);
     check(
       'state: ключи верхнего уровня',
       JSON.stringify(Object.keys(st).sort()) ===
-        JSON.stringify(['auto', 'completion', 'images', 'manager', 'memory', 'profile', 'projects', 'providers', 'session', 'sessions', 'settings', 'team', 'teamError']),
+        JSON.stringify(['auto', 'completion', 'images', 'knownProjects', 'manager', 'memory', 'profile', 'project', 'projects', 'providers', 'session', 'sessions', 'settings', 'team', 'teamError']),
     );
+    const proj = st.project as { name?: unknown; path?: unknown } | undefined;
+    check('state: проект — path+name, известные проекты — реестр', Boolean(proj) && typeof proj!.path === 'string' && typeof proj!.name === 'string' && Array.isArray(st.knownProjects) && (st.knownProjects as Record<string, unknown>[]).every((p) => typeof p.path === 'string' && typeof p.name === 'string'));
     const sess = st.session as Record<string, unknown>;
     check('state: session = id+title+messages', JSON.stringify(Object.keys(sess).sort()) === JSON.stringify(['id', 'messages', 'title']));
     const msg = (sess.messages as { authorId: string; text: string; ts: number }[])[0];

@@ -200,6 +200,8 @@ export type ManagerAction =
   /** Включить тул агенту / обновить его карточку (tools в agents.json) */
   | { op: 'tool.grant'; agent: string; tool: string; card?: unknown }
   | { op: 'project.host.add'; project?: string; name: string } & ManagerHostSpec
+  /** Сменить проект: путь к папке или имя из реестра (/project open) */
+  | { op: 'project.open'; path: string }
   /** Ящик в mails.json проекта (поля как в конфиге тула mail) */
   | { op: 'mail.add'; name: string; user: string; password: string; imap: string; smtp: string; port?: number; smtpPort?: number; tlsNoVerify?: boolean }
   /** Убрать ящик из mails.json проекта */

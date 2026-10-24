@@ -190,7 +190,7 @@ export function gitignoreNotice(projectDir: string = WORKSPACE): string | null {
   try {
     lines = readFileSync(gi, 'utf8').split(/\r?\n/);
   } catch {
-    return `в проекте git, но нет .gitignore — добавь строку «.dreamteam/»: в projects.json бывают пароли серверов`;
+    return `в проекте git, но нет .gitignore — добавь строку «.dreamteam/»: в hosts.json бывают пароли серверов`;
   }
   const ignored = lines.some((l) => {
     const t = l.trim().replace(/\/+$/, '');
@@ -198,7 +198,7 @@ export function gitignoreNotice(projectDir: string = WORKSPACE): string | null {
   });
   return ignored
     ? null
-    : `в .dreamteam бывают пароли серверов (projects.json), а git её не игнорирует — добавь в .gitignore строку «.dreamteam/»`;
+    : `в .dreamteam бывают пароли серверов (hosts.json), а git её не игнорирует — добавь в .gitignore строку «.dreamteam/»`;
 }
 
 /** Каталог скелетов конфигов рядом с src/ — как gui/, едет с пакетом. */

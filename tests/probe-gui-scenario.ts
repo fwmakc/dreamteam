@@ -191,6 +191,15 @@ try {
     exported.title === 'Юридический вопрос' &&
     (exported.participants ?? []).includes('yurist') &&
     exported.messages.length === msgs.length);
+  const inZip = JSON.parse(zip.readAsText('agents.json')) as Array<{ id: string }>;
+  check('6: в архиве только участники — юрист едет, чужие агенты нет',
+    inZip.some((a) => a.id === 'yurist') && inZip.every((a) => (exported.participants ?? []).includes(a.id)),
+    JSON.stringify(inZip.map((a) => a.id)));
+
+  // кривой номер — честная ошибка клиенту, сервер жив (catch на WS-обработчике)
+  client.send({ type: 'export_session', n: 999 });
+  const err6 = await client.next<{ text: string }>((m) => m.type === 'error');
+  check('6: кривой номер — ошибка клиенту, сервер жив', String(err6.text).includes('не нашёл'), String(err6.text));
 
   // ── 7. удалить агента и сессию ───────────────────────────────────────────
   client.send({ type: 'rpc', id: rpcId(), method: 'session.open', args: { n: 2 } }); // уходим из удаляемого
