@@ -11,7 +11,7 @@ const SYSTEM = `Ты — модератор совещания. Сожми ис�
 
 /** Сообщения, которые ещё отправляются в LLM целиком (после границы сжатия). */
 export function contextSlice(session: Session): ChatMessage[] {
-  return session.messages.slice(session.compressedUpTo ?? 0);
+  return session.messages.slice(Math.max(0, session.compressedUpTo ?? 0));
 }
 
 /**
@@ -28,6 +28,7 @@ export async function compressIfNeeded(
   userName = 'Пользователь',
 ): Promise<boolean> {
   const keepFrom = session.messages.length - KEEP_RECENT;
+  if (keepFrom <= 0) return false; // разговор короче окна: сжимать нечего
   const from = session.compressedUpTo ?? 0;
   const skipped = session.messages.slice(from, keepFrom);
   if (skipped.length < COMPRESS_BATCH) return false;

@@ -35,6 +35,8 @@ let opened = 0;
 const sink: TurnSink = { delta() {}, done() {} };
 const stub: Presenter = {
   notice(text) { notices.push(text); },
+  // события чата (реплики менеджера в хронике) показываются как заметки
+  service(text) { notices.push(text); },
   error(text) { errors.push(text); },
   turnHeader(_agent: SpeakerRef) {},
   busy(_label: string) { return { stop() {} }; },
@@ -70,8 +72,8 @@ app.store.save(app.session);
 
 const run = (_e: unknown, line: string): Promise<string[]> => runOperationText(engine, line);
 let failed = 0;
-function check(name: string, cond: boolean): void {
-  console.log((cond ? '  ok  ' : '  FAIL ') + name);
+function check(name: string, cond: boolean, detail?: string): void {
+  console.log((cond ? '  ok  ' : '  FAIL ') + name + (cond || !detail ? '' : ` — ${detail.slice(0, 300)}`));
   if (!cond) failed++;
 }
 
@@ -119,16 +121,26 @@ function check(name: string, cond: boolean): void {
 
 // ── чат: add/remove ──────────────────────────────────────────────────────────
 {
+  // событие чата — реплика менеджера в хронике разговора, а не заметка
+  const chronicle = () => app.session.messages.at(-1)?.text ?? '';
   let lines = await run(engine, '/chat add');
   check('chat add: без аргумента — подсказка', lines[0]?.includes('Кого позвать?') ?? false);
   lines = await run(engine, '/chat add Тест');
-  check('chat add: отчёт о вызове', lines[0]?.includes('присоединился') ?? false);
+  check(
+    'chat add: событие — реплика менеджера в хронике',
+    lines.length === 0 && chronicle().includes('присоединился'),
+    `lines=${JSON.stringify(lines)} last=${JSON.stringify(chronicle())}`,
+  );
+  check(
+    'chat add: автор события — менеджер-модератор',
+    app.session.messages.at(-1)?.authorId === MANAGER_ID && app.session.messages.at(-1)?.authorRole === 'менеджер переговорки',
+  );
   lines = await run(engine, '/chat add Тест');
-  check('chat add: повтор — уже в чате', lines[0]?.includes('уже в чате') ?? false);
+  check('chat add: повтор — уже в чате (без события)', lines[0]?.includes('уже в чате') ?? false);
   lines = await run(engine, '/chat add 2');
-  check('chat add: по номеру из /team', lines[0]?.includes('Глеб') ?? false);
+  check('chat add: по номеру из /team', lines.length === 0 && chronicle().includes('Глеб'));
   lines = await run(engine, '/chat remove Тест');
-  check('chat remove: отчёт о выводе', lines[0]?.includes('покинул') ?? false);
+  check('chat remove: событие — реплика в хронике', lines.length === 0 && chronicle().includes('покинул'));
   lines = await run(engine, '/chat add Никто');
   check('chat add: неизвестный — внятный отказ', lines[0]?.includes('Нет участника «Никто»') ?? false);
 }
@@ -403,14 +415,20 @@ function check(name: string, cond: boolean): void {
   check('алиас /q — тоже отклонён', q[0]?.includes('терминала') ?? false);
 }
 
-// ── перехват в handleMessage: команда исполняется, но не пишется в историю ──
+// ── перехват в handleMessage: команда исполняется, сам текст не пишется ──────
 {
   app.session.participants = [MANAGER_ID];
   app.store.save(app.session);
   const before = app.session.messages.length;
   await engine.handleMessage('/chat add Тест', new AbortController().signal);
-  check('handleMessage: /chat add исполнен', notices.some((t) => t.includes('присоединился')) ?? false);
-  check('handleMessage: команда не в истории', app.session.messages.length === before);
+  check('handleMessage: /chat add исполнен (строка через presenter.service)', notices.some((t) => t.includes('присоединился')) ?? false);
+  const msgs = app.session.messages;
+  check(
+    'handleMessage: событие чата — в хронике репликой менеджера',
+    msgs.length === before + 1 && msgs.at(-1)?.authorId === MANAGER_ID && (msgs.at(-1)?.text.includes('присоединился') ?? false),
+    `before=${before} after=${msgs.length} last=${JSON.stringify(msgs.at(-1))}`,
+  );
+  check('handleMessage: текст команды в историю не попал', !msgs.some((m) => m.authorId === 'user' && m.text.startsWith('/chat')));
 }
 
 console.log(failed === 0 ? '\nВсе проверки прошли' : `\nFAIL: ${failed}`);

@@ -196,6 +196,10 @@ export class ServerPresenter implements Presenter {
     this.send({ type: 'notice', text });
   }
 
+  /** Событие чата уже записано в хронику разговора — клиенты получат реплику
+   *  менеджера со свежим state; отдельное событие не нужно. */
+  service(_text: string): void {}
+
   error(text: string): void {
     this.send({ type: 'error', text });
   }
@@ -539,9 +543,11 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         const name = String(args.name ?? '').trim();
         if (!name) throw new Error(`${method}: жду имя участника`);
         const team = engine.team();
-        const text = method === 'chat.add' ? engine.addToChat(name, team) : engine.removeFromChat(name, team);
+        const res = method === 'chat.add' ? engine.addToChat(name, team) : engine.removeFromChat(name, team);
+        // событие чата — репликой менеджера в хронологии; уйдёт с этим же state
+        if (res.changed) engine.serviceLine(res.text);
         broadcastState();
-        return { text };
+        return { text: res.text };
       }
       case 'team.add': {
         const report = addTeamAgent(AGENTS_FILE, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined }, engine.app.providers);

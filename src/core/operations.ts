@@ -239,7 +239,13 @@ function chatChangeText(engine: Engine, arg: string, verb: string): string[] {
   } catch {
     return [`agents.json недоступен — ${verb} никого не получится.`];
   }
-  return [verb === 'позвать' ? engine.addToChat(arg, fullTeam) : engine.removeFromChat(arg, fullTeam)];
+  const res = verb === 'позвать' ? engine.addToChat(arg, fullTeam) : engine.removeFromChat(arg, fullTeam);
+  // событие чата ядро уже записал в хронику репликой менеджера — заметкой не дублируем
+  if (res.changed) {
+    engine.serviceLine(res.text);
+    return [];
+  }
+  return [res.text];
 }
 
 /** Разбор `поле=значение` в словарь; temperature — числом. Ключи сохраняют регистр. */

@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Session } from '../src/types.js';
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -106,6 +107,30 @@ const lastAgent = [...app.session.messages].reverse().find((m) => m.authorId ===
 check('агент договорился после результата тула', (lastAgent?.text ?? '').includes('Готово'), (lastAgent?.text ?? '').slice(0, 120));
 check('было два обращения к провайдеру (ход + договорачка)', calls === 2, `вызовов: ${calls}`);
 check('без ошибок провайдера', errors.length === 0, errors.join(' | ').slice(0, 200));
+
+// ── окно контекста: короткий разговор не сжимается, длинный — по замыслу ─────
+// Регрессия: keepFrom = length - KEEP_RECENT уходил в минус на коротких
+// разговорах, slice(0, -N) сжимал хвост истории, compressedUpTo становился
+// отрицательным и contextSlice оставлял LLM только последние сообщения.
+{
+  const { compressIfNeeded, contextSlice } = await import('../src/compress.js');
+  const { MockProvider } = await import('../src/providers/mock.js');
+  const mk = (n: number): Session =>
+    ({
+      id: 's', title: 's', count: n,
+      messages: Array.from({ length: n }, (_, i) => ({ authorId: i % 2 ? 'user' : 'a', authorName: 'Кто', text: `сообщение ${i}`, ts: i })),
+    }) as unknown as Session;
+  const mp = new MockProvider('mock');
+  const short = mk(12);
+  check('окно: разговор короче KEEP_RECENT не сжимается', (await compressIfNeeded(short, mp, undefined, 'Хозяин')) === false);
+  check('окно: контекст короткого — вся история', contextSlice(short).length === 12);
+  short.compressedUpTo = -4; // испорченная граница из старой версии — не должна резать хвост
+  check('окно: отрицательная граница — контекст не пустеет', contextSlice(short).length === 12);
+  const long = mk(30);
+  await compressIfNeeded(long, mp, undefined, 'Хозяин');
+  check('окно: длинный сжат — граница после KEEP_RECENT', long.compressedUpTo === 14, `compressedUpTo=${long.compressedUpTo}`);
+  check('окно: контекст длинного — KEEP_RECENT последних', contextSlice(long).length === 16);
+}
 
 process.chdir(tmpdir());
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);

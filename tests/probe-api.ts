@@ -122,7 +122,11 @@ function makeClient(port: number): Promise<{
               } catch (e) {
                 health = `fetch упал: ${e instanceof Error ? e.message : e}`;
               }
-              throw new Error(`state №${n} не пришёл за ${ms} мс (health=${health}, states=${states}, ws=${ws.readyState}, сессий=${JSON.stringify((lastState?.state as { sessions?: unknown[] })?.sessions?.length)} сообщ=${JSON.stringify((lastState?.state as { session?: { messages?: unknown[] } })?.session?.messages?.length)}, след: ${trace.join(',')})`);
+              const tail = queue.slice(-8).map((e) => {
+                const brief = JSON.stringify({ ...e, state: undefined }) ?? '';
+                return `${String(e.type)}:${brief.length > 220 ? `${brief.slice(0, 220)}…` : brief}`;
+              });
+              throw new Error(`state №${n} не пришёл за ${ms} мс (health=${health}, states=${states}, ws=${ws.readyState}, сессий=${JSON.stringify((lastState?.state as { sessions?: unknown[] })?.sessions?.length)} сообщ=${JSON.stringify((lastState?.state as { session?: { messages?: unknown[] } })?.session?.messages?.length)}, след: ${trace.join(',')}), хвост: ${tail.join(' | ')})`);
             }
             await new Promise((r) => setTimeout(r, 50));
           }
@@ -174,7 +178,13 @@ const client = await makeClient(handle.port);
   const first = await client.next((m) => m.type === 'state');
   const st0 = first.state as { session?: unknown; team?: unknown[]; teamError?: string | null; providers?: { id: string; isDefault: boolean }[] };
   check('ws: первичный state пришёл', Boolean(st0.session));
-  check('ws: команда пуста (консьерж-старт)', Array.isArray(st0.team) && st0.team.length === 0);
+  const st0team = (st0.team ?? []) as { id: string }[];
+  check('ws: стартовая команда — пять агентов', st0team.length === 5, JSON.stringify(st0team.map((a) => a.id)));
+  check(
+    'ws: ids стартовой команды',
+    ['analyst', 'secretary', 'developer', 'designer', 'writer'].every((id) => st0team.some((a) => a.id === id)),
+    JSON.stringify(st0team.map((a) => a.id)),
+  );
   check('ws: нет agents.json — без ошибки в state', st0.teamError == null);
   check('ws: провайдер mock — основной', (st0.providers ?? []).some((p) => p.id === 'mock' && p.isDefault));
 
@@ -211,9 +221,16 @@ const client = await makeClient(handle.port);
   // chat.add менеджером (обращение явное: в чате уже есть Тест — без @ раунд ушёл бы модератору)
   client.send({ type: 'user_message', text: '!менеджер, позови Теста в чат' });
   const joined = await client.next(
-    (m) => m.type === 'notice' && String(m.text).includes('присоединился к чат'),
+    (m) =>
+      m.type === 'state' &&
+      (m.state as { session: { messages: { authorId: string; text: string }[] } }).session.messages.some(
+        (mm) => mm.authorId === 'manager' && mm.text.includes('присоединился к чат'),
+      ),
   );
-  check('ws: chat.add исполнен', String(joined.text).includes('Тест'));
+  check(
+    'ws: chat.add исполнен — событием в хронике, не заметкой',
+    Boolean(joined),
+  );
 
   // статус команды — менеджер отвечает без действий
   client.send({ type: 'user_message', text: '@менеджер, дай статус команды' });
@@ -283,17 +300,32 @@ const client = await makeClient(handle.port);
   check('rpc: session.new — разговор сменился', Boolean(sess2.id));
   check('rpc: session.new — новый разговор пуст, кроме приветствия', sess2.messages.length === 1);
 
-  // rpc: состав чата туда-обратно
+  // rpc: состав чата туда-обратно; state берём свежим rpc-снимком —
+  // в очереди могут висеть state-события прошлых раундов
   client.send({ type: 'rpc', id: 'r3', method: 'chat.add', args: { name: 'Тест' } });
   const add = await client.next((m) => m.type === 'rpc_result' && m.id === 'r3');
   check('rpc: chat.add — текст отчёта', String((add.result as { text: string }).text).includes('присоединился'));
-  const st3 = await client.next((m) => m.type === 'state');
-  const team3 = (st3.state as { team: { id: string; inChat: boolean }[] }).team;
-  check('rpc: в chat.add после — inChat true', team3.some((a) => a.id === 'test_probe' && a.inChat));
+  client.send({ type: 'rpc', id: 'snap1', method: 'state' });
+  const snap1 = await client.next((m) => m.type === 'rpc_result' && m.id === 'snap1');
+  const after3 = snap1.result as { team: { id: string; inChat: boolean }[]; session: { messages: { authorId: string; text: string }[] } };
+  check('rpc: после chat.add — inChat true', after3.team.some((a) => a.id === 'test_probe' && a.inChat));
+  check(
+    'rpc: событие chat.add — реплика менеджера в хронике',
+    after3.session.messages.at(-1)?.authorId === 'manager' && (after3.session.messages.at(-1)?.text.includes('присоединился') ?? false),
+    JSON.stringify(after3.session.messages.at(-1)),
+  );
 
   client.send({ type: 'rpc', id: 'r4', method: 'chat.remove', args: { name: 'Тест' } });
   const rem = await client.next((m) => m.type === 'rpc_result' && m.id === 'r4');
   check('rpc: chat.remove — текст отчёта', String((rem.result as { text: string }).text).includes('покинул'));
+  client.send({ type: 'rpc', id: 'snap2', method: 'state' });
+  const snap2 = await client.next((m) => m.type === 'rpc_result' && m.id === 'snap2');
+  const after4 = snap2.result as { session: { messages: { authorId: string; text: string }[] } };
+  check(
+    'rpc: событие chat.remove — реплика менеджера в хронике',
+    after4.session.messages.at(-1)?.authorId === 'manager' && (after4.session.messages.at(-1)?.text.includes('покинул') ?? false),
+    JSON.stringify(after4.session.messages.at(-1)),
+  );
 
   // rpc: user_set — профиль через форму настроек (обе оболочки ходят rpc-методом)
   client.send({ type: 'rpc', id: 'r9', method: 'profile.set', args: { name: 'Профиль', role: 'тест' } });

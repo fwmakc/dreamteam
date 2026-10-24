@@ -228,8 +228,12 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
   const agentsFile = join(homeDir, 'agents.json');
   if (!existsSync(agentsFile)) {
     mkdirSync(homeDir, { recursive: true });
-    writeFileSync(agentsFile, JSON.stringify(readScaffold(join('home', 'agents.json')), null, 2) + '\n');
-    notes.push(`создал ${agentsFile} (пустая команда — менеджер позовёт и настроит)`);
+    const roster = readScaffold(join('home', 'agents.json'));
+    writeFileSync(agentsFile, JSON.stringify(roster, null, 2) + '\n');
+    const names = Array.isArray(roster)
+      ? roster.map((a) => (typeof a === 'object' && a !== null && 'name' in a ? String((a as { name: unknown }).name) : '')).filter(Boolean)
+      : [];
+    notes.push(`создал ${agentsFile} (${names.length > 0 ? `стартовая команда: ${names.join(', ')}` : 'пустая команда — менеджер позовёт и настроит'})`);
   }
   const toolsDir = join(homeDir, 'tools');
   if (!existsSync(toolsDir)) {

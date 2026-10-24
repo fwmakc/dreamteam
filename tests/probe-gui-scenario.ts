@@ -117,8 +117,11 @@ let rpc = 0;
 const rpcId = () => `c${++rpc}`;
 
 try {
-  const st0 = await client.awaitState<{ sessions: unknown[]; team: unknown[] }>((s) => Array.isArray(s.sessions));
-  check('старт: один разговор, пустая команда', st0.sessions.length === 1 && st0.team.length === 0);
+  const st0 = await client.awaitState<{ sessions: unknown[]; team: { id: string }[] }>((s) => Array.isArray(s.sessions));
+  const START_IDS = ['analyst', 'secretary', 'developer', 'designer', 'writer'];
+  check('старт: один разговор, стартовая пятёрка в команде',
+    st0.sessions.length === 1 && st0.team.length === 5 && START_IDS.every((id) => st0.team.some((a) => a.id === id)),
+    JSON.stringify(st0.team.map((a) => a.id)));
   check('старт: файл сессии на диске', readSessions().length === 1);
 
   // ── 1. новая сессия ──────────────────────────────────────────────────────

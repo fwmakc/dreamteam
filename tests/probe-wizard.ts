@@ -3,8 +3,8 @@
  *  - runWizard: выбор провайдера, параметры, ключ (не эхоится в вывод),
  *    запись providers.json (ключ прямо в карточке, поле "apiKey");
  *  - ensureLayers: пустой дом + пустой проект → wizard, настройки с дефолтами,
- *    .dreamteam (пустая команда, менеджер на дефолтном провайдере, пустые
- *    серверы, tools/); существующие слои не трогаются;
+ *    .dreamteam (стартовая команда из скаффолда, менеджер на дефолтном
+ *    провайдере, пустые серверы, tools/); существующие слои не трогаются;
  *  - не-TTY без providers.json — внятный отказ, а не тихий mock;
  *  - gitignoreNotice: git без .gitignore / без строки / уже скрыто / без git.
  *
@@ -71,7 +71,10 @@ const {
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('настройки: созданы с дефолтами', settings.width === 100 && settings.screen === true, JSON.stringify(settings));
   check('настройки: язык по умолчанию из скелета', settings.language === 'русский', JSON.stringify(settings));
-  check('команда: пустая в доме', readFileSync(join(home, 'agents.json'), 'utf8').trim() === '[]');
+  check('команда: стартовая пятёрка в доме', (() => {
+    const team = JSON.parse(readFileSync(join(home, 'agents.json'), 'utf8')) as { id: string }[];
+    return ['analyst', 'secretary', 'developer', 'designer', 'writer'].every((id) => team.some((a) => a.id === id));
+  })());
   check('команда: менеджер в доме на дефолтном провайдере', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).provider === 'mock');
   check('команда: полка тулов в доме', existsSync(join(home, 'tools')));
   check('проект: hosts.json — пустой реестр серверов', (() => {
@@ -106,8 +109,11 @@ const {
     check('скелет: home/settings.json валиден по loadSettings', (() => {
       try { return loadSettings(join(SCAFFOLD_DIR, 'home', 'settings.json'), 0).language === 'русский'; } catch { return false; }
     })());
-    check('скелет: home/agents.json валиден по loadTeam', (() => {
-      try { return loadTeam(join(SCAFFOLD_DIR, 'home', 'agents.json')).length === 0; } catch { return false; }
+    check('скелет: home/agents.json валиден по loadTeam, стартовая пятёрка', (() => {
+      try {
+        const team = loadTeam(join(SCAFFOLD_DIR, 'home', 'agents.json'));
+        return ['analyst', 'secretary', 'developer', 'designer', 'writer'].every((id) => team.some((a) => a.id === id));
+      } catch { return false; }
     })());
     check('скелет: project/hosts.json валиден по loadHosts', (() => {
       try { return loadHosts(join(SCAFFOLD_DIR, 'project', 'hosts.json')).size === 0; } catch { return false; }

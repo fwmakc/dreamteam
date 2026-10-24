@@ -117,6 +117,12 @@ export function isSessionRef(m: ChatMessage): boolean {
   return m.authorId === 'session-ref';
 }
 
+/** Отчёт действия, которое уже записано в хронику чата репликой менеджера:
+ *  в сводку раунда и журнал уведомлений его дублировать не нужно. */
+class ChatEvent {
+  constructor(readonly text: string) {}
+}
+
 export interface App {
   store: SessionStore;
   session: Session;
@@ -701,24 +707,28 @@ export class Engine {
     const reports: string[] = [];
     const pendingSwitches: (() => Promise<void> | void)[] = [];
     for (const action of reply.actions) {
-      let report: string;
+      let step: string | ChatEvent;
       try {
-        report = await this.execManagerAction(action, fullTeam, pendingSwitches);
+        step = await this.execManagerAction(action, fullTeam, pendingSwitches);
       } catch (err) {
-        report = `✗ ${err instanceof Error ? err.message : err}`;
+        step = `✗ ${err instanceof Error ? err.message : err}`;
       }
-      reports.push(report);
-      this.presenter.notice('  ' + report);
+      if (step instanceof ChatEvent) continue; // событие чата уже в хронологии репликой менеджера
+      reports.push(step);
+      this.presenter.notice('  ' + step);
     }
 
-    session.messages.push({
-      authorId: MANAGER_ID,
-      authorName: agent.name,
-      authorRole: MANAGER_ROLE,
-      text: [reply.say, ...reports].filter(Boolean).join('\n\n'),
-      ts: Date.now(),
-    });
-    store.save(session);
+    const summary = [reply.say, ...reports].filter(Boolean).join('\n\n');
+    if (summary) {
+      session.messages.push({
+        authorId: MANAGER_ID,
+        authorName: agent.name,
+        authorRole: MANAGER_ROLE,
+        text: summary,
+        ts: Date.now(),
+      });
+      store.save(session);
+    }
     for (const apply of pendingSwitches) await apply();
   }
 
@@ -727,16 +737,24 @@ export class Engine {
     action: ManagerAction,
     fullTeam: Agent[],
     pendingSwitches: (() => Promise<void> | void)[],
-  ): Promise<string> {
+  ): Promise<string | ChatEvent> {
     switch (action.op) {
       case 'team.add':
         return addTeamAgent(AGENTS_FILE, action, this.app.providers);
       case 'team.update':
         return updateTeamAgent(AGENTS_FILE, action.id, action.fields, this.app.providers);
-      case 'chat.add':
-        return this.addToChat(action.who, fullTeam);
-      case 'chat.remove':
-        return this.removeFromChat(action.who, fullTeam);
+      case 'chat.add': {
+        const res = this.addToChat(action.who, fullTeam);
+        if (!res.changed) return res.text;
+        this.serviceLine(res.text);
+        return new ChatEvent(res.text);
+      }
+      case 'chat.remove': {
+        const res = this.removeFromChat(action.who, fullTeam);
+        if (!res.changed) return res.text;
+        this.serviceLine(res.text);
+        return new ChatEvent(res.text);
+      }
       case 'session.rename':
         return this.renameSession(String(action.title ?? ''));
       case 'tool.grant':
@@ -898,25 +916,43 @@ export class Engine {
     this.presenter.sessionOpened(loaded);
   }
 
-  /** Позвать участника в текущий чат: общее для /add и действия менеджера chat.add. */
-  addToChat(arg: string, fullTeam: Agent[]): string {
+  /** Служебное сообщение о событии чата: идёт в общую хронологию разговора
+   *  (session.messages), автор — менеджер (модератор беседы), а не журнал
+   *  уведомлений. GUI получит реплику с ближайшим state; терминалу строка
+   *  показывается живьём через presenter.service. */
+  serviceLine(text: string): void {
+    const mgr = managerAsAgent(this.app.mgr);
+    this.app.session.messages.push({
+      authorId: mgr.id,
+      authorName: mgr.name,
+      authorRole: mgr.role,
+      text,
+      ts: Date.now(),
+    });
+    this.app.store.save(this.app.session);
+    this.presenter.service?.(text);
+  }
+
+  /** Позвать участника в текущий чат: общее для /add и действия менеджера chat.add.
+   *  changed — состав чата реально поменялся (только тогда это событие хроники). */
+  addToChat(arg: string, fullTeam: Agent[]): { text: string; changed: boolean } {
     const agent = findAgentByArg(fullTeam, arg);
-    if (!agent) return `Нет участника «${arg}» — см. /team`;
+    if (!agent) return { text: `Нет участника «${arg}» — см. /team`, changed: false };
     if (chatTeam(this.app.session, fullTeam).some((a) => a.id === agent.id)) {
-      return `${agent.emoji} ${agent.name} уже в чате.`;
+      return { text: `${agent.emoji} ${agent.name} уже в чате.`, changed: false };
     }
     this.app.session.participants ??= fullTeam.map((a) => a.id);
     if (!this.app.session.participants.includes(agent.id)) this.app.session.participants.push(agent.id);
     this.app.store.save(this.app.session);
-    return `${agent.emoji} ${agent.name} присоединился к чату.`;
+    return { text: `${agent.emoji} ${agent.name} присоединился к чату.`, changed: true };
   }
 
   /** Вывести участника из чата: общее для /out и действия менеджера chat.remove. */
-  removeFromChat(arg: string, fullTeam: Agent[]): string {
+  removeFromChat(arg: string, fullTeam: Agent[]): { text: string; changed: boolean } {
     const kicked = findAgentByArg(fullTeam, arg);
-    if (!kicked) return `Нет участника «${arg}» — см. /team`;
+    if (!kicked) return { text: `Нет участника «${arg}» — см. /team`, changed: false };
     if (!chatTeam(this.app.session, fullTeam).some((a) => a.id === kicked.id)) {
-      return `${kicked.emoji} ${kicked.name} и так не в этом чате.`;
+      return { text: `${kicked.emoji} ${kicked.name} и так не в этом чате.`, changed: false };
     }
     // материализуем явный список, иначе выгон «вернул» бы всю команду
     this.app.session.participants ??= fullTeam.map((a) => a.id);
@@ -926,10 +962,12 @@ export class Engine {
     this.app.session.participants = rest.some((id) => byId.has(id)) ? rest : [MANAGER_ID];
     this.app.store.save(this.app.session);
     const alone = this.app.session.participants.length === 1 && this.app.session.participants[0] === MANAGER_ID;
-    return (
-      `${kicked.emoji} ${kicked.name} покинул(а) чат. Реплики останутся в истории.` +
-      (alone ? ' Кроме менеджера в чате никого — попросите его позвать кого-нибудь.' : '')
-    );
+    return {
+      text:
+        `${kicked.emoji} ${kicked.name} покинул(а) чат. Реплики останутся в истории.` +
+        (alone ? ' Кроме менеджера в чате никого — попросите его позвать кого-нибудь.' : ''),
+      changed: true,
+    };
   }
 
   /** Смена основного провайдера агентов; false — нет такого id. */

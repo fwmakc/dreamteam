@@ -287,6 +287,11 @@ class CliPresenter implements Presenter {
     printDim(text);
   }
 
+  /** Событие чата уже в истории разговора; в терминале показываем строку живьём. */
+  service(text: string): void {
+    printDim('  ' + text);
+  }
+
   error(text: string): void {
     printError(text);
   }

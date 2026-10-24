@@ -196,7 +196,9 @@ function agentDelete(a: AgentInfo): void {
 }
 function toggleChat(a: AgentInfo): void {
   if (roundActive.value) return;
-  rpcReport(rpc(a.inChat ? 'chat.remove' : 'chat.add', { name: a.name }));
+  // событие чата придёт репликой менеджера в ленте (со state) — журнал не дублируем
+  rpc(a.inChat ? 'chat.remove' : 'chat.add', { name: a.name })
+    .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 function delAgent(a: AgentInfo): void {
   if (!roundActive.value) agentDelete(a);

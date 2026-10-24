@@ -217,8 +217,19 @@ function lastManagerMessage(): string {
   );
   check('состав: Глеб позван', app.session.participants?.includes('gleb') ?? false, JSON.stringify(app.session.participants));
   check('состав: Катя выведена', !app.session.participants?.includes('katya'), JSON.stringify(app.session.participants));
-  const msg = lastManagerMessage();
-  check('состав: два отчёта подряд (эмодзи агента, без ✓)', msg.includes('💾 Глеб присоединился к чату.') && msg.includes('Катя покинул(а) чат.'), msg.slice(-160));
+  // события чата теперь отдельные реплики менеджера в хронике, say — отдельной сводкой
+  const mine = app.session.messages.filter((m) => m.authorId === 'manager');
+  check(
+    'состав: позвание — отдельная реплика менеджера',
+    mine.at(-3)?.text.includes('💾 Глеб присоединился к чату.') ?? false,
+    JSON.stringify(mine.slice(-3).map((m) => m.text)),
+  );
+  check(
+    'состав: вывод — отдельная реплика менеджера',
+    mine.at(-2)?.text.includes('Катя покинул(а) чат.') ?? false,
+    JSON.stringify(mine.slice(-2).map((m) => m.text)),
+  );
+  check('состав: say без продублированных отчётов', lastManagerMessage().trim() === 'Меняю состав.', lastManagerMessage());
 }
 
 // session.list + session.open: реплика менеджера остаётся в СТАРОМ разговоре

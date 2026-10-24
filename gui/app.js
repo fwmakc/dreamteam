@@ -768,15 +768,15 @@
       li.innerHTML =
         `<div class="content">` +
         `<div class="sess-main"><span>${esc(a.emoji)} ${esc(a.name)}</span>` +
-        `<span class="tag ${a.inChat ? 'in' : ''}">${a.inChat ? 'в чате' : '＋ чat'}</span></div>` +
+        `<span class="tag ${a.inChat ? 'in' : ''}">${a.inChat ? 'в чате' : '＋ чат'}</span></div>` +
         `<div class="sub">${esc(a.role ?? '')}</div>` +
         `</div>` +
         '<span class="del" title="Удалить агента">✕</span>';
       li.onclick = () => {
         if (roundActive) return;
         const method = a.inChat ? 'chat.remove' : 'chat.add';
+        // событие чата придёт репликой менеджера в ленте (со state) — журнал не дублируем
         rpc(method, { name: a.name })
-          .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
           .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
       };
       li.querySelector('.del').onclick = (e) => {
