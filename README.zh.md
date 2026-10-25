@@ -641,36 +641,32 @@ You > @manager add the router server — admin@192.168.1.1
 
 **更换团队** — 编辑 `~/.dreamteam/agents.json`（即时生效）：字段 `id`、`name`、`emoji`、`role`、`description`、`color`（red/green/yellow/blue/magenta/cyan/white/gray）、`prompt`（人设），可选 `provider` 和 `temperature`；真实动作的权限 — `tools`、`projects`、`workspace`，眼睛和双手 — `vision` 和 `image`（见“工具”与“视觉与图片”）。`provider` 字段只能是 `providers.json` 里存在的 id：`/team add|update` 命令、网页外壳和经理都会拒绝陌生的 id 并给出可用列表，而不是把垃圾写进配置。
 
-**接入新 API** — 在一个文件里实现接口：
+**接入新 API — 一个文件，无需 fork。** 把适配器放进家目录的架子
+`~/.dreamteam/providers/`：文件名即适配器 id，`providers.json` 里的服务商卡片用 `"adapter": "<id>"` 引用它。架子在首次启动时创建；代码在启动时加载 — 文件损坏或与内置适配器（含 image-）重名，都会在启动时给出明确错误：
 
 ```ts
-// src/providers/my-api.ts
-import type { ProviderConfig, ProviderFactory } from './types.js';
+// ~/.dreamteam/providers/my-api.ts
+// npm 安装后用 'dreamteam/src/providers/types.js';
+// 仓库克隆里用 '../src/providers/types.js'
+import type { LLMProvider, ProviderConfig } from 'dreamteam/src/providers/types.js';
 
-export const myApiFactory: ProviderFactory = (id, config) => ({
+export default (id: string, config: ProviderConfig): LLMProvider => ({
   id,
   kind: 'my-api',
   model: String(config.model ?? 'default'),
   async *stream(req) {
-    // call your API and yield the answer in pieces
-    yield 'answer ';
-    yield 'in parts';
+    // 调用你的 API，分片产出回答
+    yield '回答 ';
+    yield '分片';
   },
 });
 ```
 
-并在 `src/providers/registry.ts` 里注册：
-
-```ts
-import { myApiFactory } from './my-api.js';
-
-const adapters = {
-  ...,
-  'my-api': myApiFactory,
-};
+```json
+{ "my": { "adapter": "my-api", "model": "任意" } }
 ```
 
-之后在 `providers.json` 里以 `{ "adapter": "my-api", ... }` 描述该服务商即可。
+对 OpenAI 风格的 API 通常不需要自定义适配器 — 内置 `openai-compatible` 已通过 `baseUrl` 覆盖它们。功能完整的内置示例是 `gigachat`：OAuth 令牌周期与 TLS 证书（见「Sber GigaChat」）。要让适配器随包发布，在 `src/providers/` 实现同一接口并在 `src/providers/registry.ts` 注册。
 
 ## 检查
 

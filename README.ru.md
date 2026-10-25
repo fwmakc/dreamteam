@@ -1118,37 +1118,39 @@ helpers). Менеджер нужен для всего, что командам
 `providers.json`: команды `/team add|update`, веб-оболочка и менеджер отвергнут
 чужой id со списком доступных, а не запишут мусор в конфиг.
 
-**Добавить новый API** — реализуйте интерфейс в одном файле:
+**Добавить новый API — файлом, без форка.** Положите адаптер на полку дома
+`~/.dreamteam/providers/`: имя файла становится именем адаптера, карточка провайдера в
+`providers.json` ссылается на него полем "adapter": "<id>". Полка создаётся при
+первом запуске; код подхватывается при старте — битый файл или имя, занятое
+встроенным адаптером (включая image-), роняют старт с внятной ошибкой:
 
 ```ts
-// src/providers/my-api.ts
-import type { ProviderConfig, ProviderFactory } from './types.js';
+// ~/.dreamteam/providers/my-api.ts
+// при установке из npm — 'dreamteam/src/providers/types.js';
+// в клоне репозитория — '../src/providers/types.js'
+import type { LLMProvider, ProviderConfig } from 'dreamteam/src/providers/types.js';
 
-export const myApiFactory: ProviderFactory = (id, config) => ({
+export default (id: string, config: ProviderConfig): LLMProvider => ({
   id,
   kind: 'my-api',
   model: String(config.model ?? 'default'),
   async *stream(req) {
-    // обращаетесь к своему API и отдаёте ответ по кусочкам
+    // вызовите свой API и отдайте ответ по частям
     yield 'ответ ';
-    yield 'частями';
+    yield 'по частям';
   },
 });
 ```
 
-и зарегистрируйте его в `src/providers/registry.ts`:
-
-```ts
-import { myApiFactory } from './my-api.js';
-
-const adapters = {
-  ...,
-  'my-api': myApiFactory,
-};
+```json
+{ "my": { "adapter": "my-api", "model": "любой" } }
 ```
 
-После этого провайдер описывается в `providers.json` как
-`{ "adapter": "my-api", ... }`.
+Для API в стиле OpenAI свой адаптер почти не нужен — встроенный
+`openai-compatible` покрывает их через `baseUrl`. Развёрнутый встроенный пример —
+`gigachat`: цикл OAuth-токенов и TLS-сертификаты (см. «Sber GigaChat»). Чтобы
+адаптер ехал в пакете, реализуйте тот же интерфейс в `src/providers/` и
+зарегистрируйте его в `src/providers/registry.ts`.
 
 ## Проверки
 

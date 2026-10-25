@@ -13,6 +13,7 @@ import {
   MANAGER_FILE,
   MEMORY_FILE,
   PROJECTS_FILE,
+  PROVIDERS_DIR,
   PROVIDERS_FILE,
   SESSIONS_DIR,
   SETTINGS_FILE,
@@ -23,7 +24,7 @@ import {
 import { ensureLayers } from '../wizard.js';
 import { rememberProject } from './projects.js';
 import { applyLocale, preloadLocale } from '../i18n.js';
-import { loadProviders, loadImageProviders } from '../providers/registry.js';
+import { loadProviders, loadImageProviders, loadUserAdapters, setUserAdapters } from '../providers/registry.js';
 import { loadTeamMemory } from '../memory.js';
 import { printDim, printError } from '../ui.js';
 import type { App } from './engine.js';
@@ -53,6 +54,9 @@ export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> 
   // громкая ошибка со списком доступных (до старта оболочки)
   applyLocale(ui.ui, DT_HOME);
   const store = new SessionStore(SESSIONS_DIR);
+  // кастомные адаптеры провайдеров: providers/<id>.ts в доме. До loadProviders:
+  // битый файл или коллизия со встроенным именем — громкая ошибка до старта
+  setUserAdapters(await loadUserAdapters(PROVIDERS_DIR));
   const loaded = loadProviders(PROVIDERS_FILE);
   const images = loadImageProviders(PROVIDERS_FILE);
   // менеджер переговорки: обязательный конфиг, неизвестный провайдер — падение до старта оболочки

@@ -554,4 +554,5 @@ export const en: Record<string, string> = {
   'вступают в силу со следующего раунда; запись с валидацией и откатом': 'take effect from the next round; written with validation and rollback',
   'его провайдер, имя и температура': 'its provider, name and temperature',
   'provider, temperature, name, emoji, color': 'provider, temperature, name, emoji, color',
+  'создал {file} (полка своих адаптеров провайдеров: <id>.ts — export default фабрика (id, config) => LLMProvider)': 'created {file} (a shelf for your own provider adapters: <id>.ts — export default a (id, config) => LLMProvider factory)',
 };

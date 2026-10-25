@@ -1164,13 +1164,20 @@ and "Vision and images"). The `provider` field — only an existing id from
 will reject a foreign id with the list of available ones instead of writing
 garbage into the config.
 
-**Add a new API** — implement the interface in one file:
+**Add a new API — a file, no fork.** Drop an adapter into the home shelf
+`~/.dreamteam/providers/`: the file name becomes the adapter id, and a provider card in
+`providers.json` references it with "adapter": "<id>". The shelf is scaffolded on first
+launch; the code loads at startup — a broken file or a name colliding with a
+built-in adapter (including the image ones) fails the startup with a clear
+error:
 
 ```ts
-// src/providers/my-api.ts
-import type { ProviderConfig, ProviderFactory } from './types.js';
+// ~/.dreamteam/providers/my-api.ts
+// when installed from npm — 'dreamteam/src/providers/types.js';
+// in a repo clone — '../src/providers/types.js'
+import type { LLMProvider, ProviderConfig } from 'dreamteam/src/providers/types.js';
 
-export const myApiFactory: ProviderFactory = (id, config) => ({
+export default (id: string, config: ProviderConfig): LLMProvider => ({
   id,
   kind: 'my-api',
   model: String(config.model ?? 'default'),
@@ -1182,19 +1189,15 @@ export const myApiFactory: ProviderFactory = (id, config) => ({
 });
 ```
 
-and register it in `src/providers/registry.ts`:
-
-```ts
-import { myApiFactory } from './my-api.js';
-
-const adapters = {
-  ...,
-  'my-api': myApiFactory,
-};
+```json
+{ "my": { "adapter": "my-api", "model": "any" } }
 ```
 
-After that the provider is described in `providers.json` as
-`{ "adapter": "my-api", ... }`.
+For OpenAI-style APIs you rarely need a custom adapter — the built-in
+`openai-compatible` already covers them via `baseUrl`. A full-featured built-in
+example is `gigachat`: the OAuth token cycle and TLS certificates (see
+"Sber GigaChat"). To ship an adapter inside the package, implement the same
+interface in `src/providers/` and register it in `src/providers/registry.ts`.
 
 ## Checks
 

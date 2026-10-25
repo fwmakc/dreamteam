@@ -261,6 +261,12 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     mkdirSync(toolsDir, { recursive: true });
     notes.push(tf('создал {file} (полка для своих тулов)', { file: toolsDir }));
   }
+  // полка кастомных адаптеров провайдеров: providers/<id>.ts — как tools/, только адаптеры
+  const providersDir = join(homeDir, 'providers');
+  if (!existsSync(providersDir)) {
+    mkdirSync(providersDir, { recursive: true });
+    notes.push(tf('создал {file} (полка своих адаптеров провайдеров: <id>.ts — export default фабрика (id, config) => LLMProvider)', { file: providersDir }));
+  }
   // полка своих языков: lang/<id>.json — как tools/, только переводы
   const langDir = join(homeDir, 'lang');
   if (!existsSync(langDir)) {

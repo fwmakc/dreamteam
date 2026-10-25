@@ -3,6 +3,18 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow
 semver while pre-1.0 (breaking changes may land in minors).
 
+## [0.0.6] — 2026-10-25
+
+### Added
+
+- **Custom provider adapters** — the same shelf pattern as custom tools: put a
+  `~/.dreamteam/providers/<id>.ts` file exporting a `(id, config) => LLMProvider`
+  factory and reference it from a provider card with `"adapter": "<id>"`.
+  Loaded at startup: a broken file or a name colliding with a built-in adapter
+  (including image adapters) fails loudly; the shelf is scaffolded on first
+  launch; `/provider add|update` accepts custom adapters and lists them among
+  the available ones. New probe: `probe-providers`.
+
 ## [0.0.5] — 2026-10-25
 
 ### Added

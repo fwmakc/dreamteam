@@ -554,4 +554,5 @@ export const zh: Record<string, string> = {
   'вступают в силу со следующего раунда; запись с валидацией и откатом': '自下一轮生效；写入带校验和回滚',
   'его провайдер, имя и температура': '它的服务商、名字和温度',
   'provider, temperature, name, emoji, color': 'provider、temperature、name、emoji、color',
+  'создал {file} (полка своих адаптеров провайдеров: <id>.ts — export default фабрика (id, config) => LLMProvider)': '已创建 {file}（自定义服务商适配器架子：<id>.ts — export default 一个 (id, config) => LLMProvider 工厂）',
 };

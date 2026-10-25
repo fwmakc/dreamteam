@@ -1,4 +1,6 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ImageProvider, LLMProvider } from '../types.js';
 import type { ProviderConfig, ProviderFactory, ProvidersFile } from './types.js';
 import { openAiCompatibleFactory } from './openai-compatible.js';
@@ -9,8 +11,12 @@ import { imageAdapters } from './images.js';
 import { t, tf } from '../i18n.js';
 
 /**
- * Реестр адаптеров. Свой API = файл в src/providers/, реализующий
- * интерфейс LLMProvider, + одна строка здесь.
+ * Реестр адаптеров. Встроенные — файл в src/providers/ + одна строка ниже.
+ * Кастомные — без правки пакета: файл providers/<id>.ts в доме
+ * (~/.dreamteam/providers/), export default — фабрика (id, config) => LLMProvider;
+ * имя файла становится именем адаптера, карточка в providers.json ссылается
+ * на него полем "adapter". Загрузка — при старте приложения: битый файл или
+ * коллизия со встроенным именем — громкая ошибка до старта оболочки.
  */
 const adapters: Record<string, ProviderFactory> = {
   'openai-compatible': openAiCompatibleFactory,
@@ -18,6 +24,55 @@ const adapters: Record<string, ProviderFactory> = {
   gigachat: gigachatFactory,
   mock: mockFactory,
 };
+
+/** Кастомные адаптеры из providers/ дома (заполняет bootstrap до loadProviders). */
+let userAdapters: Map<string, ProviderFactory> = new Map();
+
+export function setUserAdapters(map: Map<string, ProviderFactory>): void {
+  userAdapters = map;
+}
+
+function resolveAdapter(name: string): ProviderFactory | undefined {
+  return adapters[name] ?? userAdapters.get(name);
+}
+
+function adapterIds(): string[] {
+  return [...Object.keys(adapters), ...userAdapters.keys()];
+}
+
+/**
+ * Читает кастомные адаптеры из providers/ дома: имя файла (без .ts/.js) — имя
+ * адаптера. Папки может не быть — тогда кастомных нет; кривое имя, коллизия
+ * со встроенным адаптером (включая image-) или файл без export default —
+ * ошибка с путём (fail-fast, как у остальных конфигов).
+ */
+export async function loadUserAdapters(dir: string): Promise<Map<string, ProviderFactory>> {
+  const map = new Map<string, ProviderFactory>();
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return map;
+  }
+  for (const name of names.filter((f) => f.endsWith('.ts') || f.endsWith('.js'))) {
+    const id = name.replace(/\.(ts|js)$/, '');
+    if (!PROVIDER_ID_RE.test(id)) {
+      throw new Error(`providers/${name}: «${id}» — id адаптера: строчные буквы/цифры/-/_ от 2 символов`);
+    }
+    if (id in adapters || id in imageAdapters) {
+      throw new Error(`providers/${name}: «${id}» — имя занято встроенным адаптером, переименуйте файл`);
+    }
+    const url = pathToFileURL(join(dir, name)).href;
+    const mod = (await import(`${url}?v=${Date.now()}-${Math.random().toString(36).slice(2)}`)) as {
+      default?: unknown;
+    };
+    if (typeof mod.default !== 'function') {
+      throw new Error(`providers/${name}: нужен export default — фабрика (id, config) => LLMProvider`);
+    }
+    map.set(id, mod.default as ProviderFactory);
+  }
+  return map;
+}
 
 export function registerAdapter(name: string, factory: ProviderFactory): void {
   adapters[name] = factory;
@@ -60,7 +115,7 @@ export function loadProviders(file: string): LoadedProviders {
   for (const [pid, cfg] of Object.entries(raw.providers ?? {})) {
     const adapterName = String(cfg?.adapter ?? '');
     if (adapterName in imageAdapters) continue; // это image-провайдер, не LLM — берёт loadImageProviders
-    const factory = adapters[adapterName];
+    const factory = resolveAdapter(adapterName);
     if (!factory) {
       const reason = `неизвестный адаптер «${adapterName}»`;
       providers.set(pid, {
@@ -146,8 +201,8 @@ export function addProviderConfig(
   }
   const adapter = String(config.adapter ?? '').trim();
   if (adapter === '') throw new Error('не указан adapter');
-  if (!(adapter in adapters)) {
-    throw new Error(`адаптер «${adapter}» неизвестен — доступны: ${Object.keys(adapters).join(', ')}`);
+  if (!resolveAdapter(adapter)) {
+    throw new Error(`адаптер «${adapter}» неизвестен — доступны: ${adapterIds().join(', ')} (свой — файл providers/<id>.ts в доме)`);
   }
   const raw = readProvidersFile(file);
   if (raw.providers[pid] !== undefined) throw new Error(`провайдер «${pid}» уже есть`);
@@ -183,8 +238,8 @@ export function updateProviderConfig(
     if (!['adapter', 'model', 'baseUrl', 'apiKey', 'clientId', 'clientSecret', 'maxTokens', 'temperature', 'vision', 'note'].includes(key)) continue;
     if (key === 'adapter') {
       const adapter = String(value ?? '').trim();
-      if (!(adapter in adapters)) {
-        throw new Error(`адаптер «${adapter}» неизвестен — доступны: ${Object.keys(adapters).join(', ')}`);
+      if (!resolveAdapter(adapter)) {
+        throw new Error(`адаптер «${adapter}» неизвестен — доступны: ${adapterIds().join(', ')} (свой — файл providers/<id>.ts в доме)`);
       }
       merged.adapter = adapter;
     } else if (value === '' || value === undefined) {

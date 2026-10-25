@@ -60,6 +60,8 @@ export const USER_FILE = join(DT_HOME, 'user.json');
 export const AGENTS_FILE = join(DT_HOME, 'agents.json');
 export const MANAGER_FILE = join(DT_HOME, 'manager.json');
 export const TOOLS_DIR = join(DT_HOME, 'tools');
+/** Полка кастомных адаптеров провайдеров: providers/<id>.ts — export default фабрика. */
+export const PROVIDERS_DIR = join(DT_HOME, 'providers');
 export const SCHEDULE_FILE = join(DT_HOME, 'schedule.json');
 export const MEMORY_FILE = join(DT_HOME, 'memory.json');
 
