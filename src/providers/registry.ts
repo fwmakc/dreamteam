@@ -6,6 +6,7 @@ import { anthropicFactory } from './anthropic.js';
 import { gigachatFactory } from './gigachat.js';
 import { mockFactory, unconfiguredProvider } from './mock.js';
 import { imageAdapters } from './images.js';
+import { t, tf } from '../i18n.js';
 
 /**
  * Реестр адаптеров. Свой API = файл в src/providers/, реализующий
@@ -152,7 +153,7 @@ export function addProviderConfig(
   if (raw.providers[pid] !== undefined) throw new Error(`провайдер «${pid}» уже есть`);
   raw.providers[pid] = { adapter, ...config } as ProviderConfig;
   writeFileProviders(file, raw);
-  return `✓ провайдер «${pid}» (${adapter}) добавлен`;
+  return tf('✓ провайдер «{id}» ({adapter}) добавлен', { id: pid, adapter });
 }
 
 /** Удаляет провайдера; защищённые id (основной, менеджерский) не трогаются. */
@@ -164,7 +165,7 @@ export function removeProviderConfig(file: string, id: string, protectedIds: str
   }
   delete raw.providers[id];
   writeFileProviders(file, raw);
-  return `✓ провайдер «${id}» удалён`;
+  return tf('✓ провайдер «{id}» удалён', { id });
 }
 
 /** Правка карточки существующего провайдера по белому списку полей; валидация+откат общие. */
@@ -196,7 +197,7 @@ export function updateProviderConfig(
   if (changes.length === 0) throw new Error('не понятно, что менять — в полях нет узнаваемых имён');
   raw.providers[pid] = merged as ProviderConfig;
   writeFileProviders(file, raw);
-  return `✓ провайдер «${pid}»: ${changes.join(', ')}`;
+  return tf('✓ провайдер «{id}»: {changes}', { id: pid, changes: changes.join(', ') });
 }
 
 /** Запись providers.json: tmp → валидация loadProviders → rename (откат при ошибке). */

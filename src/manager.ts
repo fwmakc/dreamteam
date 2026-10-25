@@ -15,6 +15,7 @@ import type {
 import { loadTeam, MENTION_TRIGGERS } from './agents.js';
 import { readAccount, type MailAccount } from './mail.js';
 import { agentToolIds, BUILTIN_TOOL_IDS, normalizeAgentTools, TOOL_ID_RE } from './tools-api.js';
+import { t, tf } from './i18n.js';
 
 export const MANAGER_ID = 'manager';
 export const MANAGER_ROLE = 'менеджер переговорки';
@@ -66,7 +67,7 @@ export function updateManagerConfig(
     throw err;
   }
   renameSync(tmp, file);
-  return `✓ менеджер: ${changes.join(', ')}`;
+  return tf('✓ менеджер: {changes}', { changes: changes.join(', ') });
 }
 
 export function loadManagerConfig(file: string, knownProviderIds: Iterable<string>): ManagerConfig {
@@ -386,7 +387,7 @@ export function addTeamAgent(file: string, data: ManagerNewAgent, providers: Rea
   if (data.tools !== undefined) agent.tools = normalizeAgentTools(id, data.tools);
   agents.push(agent);
   writeTeamFile(file, root);
-  return `✓ ${name} (id «${id}», роль «${role}») добавлен в команду`;
+  return tf('✓ {name} (id «{id}», роль «{role}») добавлен в команду', { name, id, role });
 }
 
 /** Импорт: вливает входящих агентов по id — новых добавляет, совпавших не трогает.
@@ -415,7 +416,7 @@ export function removeTeamAgent(file: string, id: string): string {
   const gone = agents[idx] as Agent;
   agents.splice(idx, 1);
   writeTeamFile(file, root);
-  return `✓ ${gone.emoji} ${gone.name} (id «${fid}») удалён из команды`;
+  return tf('✓ {emoji} {name} (id «{id}») удалён из команды', { emoji: gone.emoji, name: gone.name, id: fid });
 }
 
 /** team.update: правка полей участника по белому списку. */
@@ -444,7 +445,7 @@ export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateF
   }
   if (changes.length === 0) throw new Error('не понятно, что менять — в fields нет узнаваемых полей');
   writeTeamFile(file, root);
-  return `✓ ${agent.name}: ${changes.join(', ')}`;
+  return tf('✓ {name}: {changes}', { name: agent.name, changes: changes.join(', ') });
 }
 
 // ─── tool.grant: тулы участников (agents.json); файлы в tools/ менеджер не пишет ──
@@ -477,8 +478,8 @@ export function grantTool(file: string, agentId: string, tool: string, card?: un
   agent.tools = { ...(agent.tools ?? {}), [tid]: normalized as Record<string, unknown> };
   writeTeamFile(file, root);
   return had
-    ? `✓ ${agent.name}: карточку тула «${tid}» обновил`
-    : `✓ ${agent.name}: тул «${tid}» включён`;
+    ? tf('✓ {name}: карточку тула «{tool}» обновил', { name: agent.name, tool: tid })
+    : tf('✓ {name}: тул «{tool}» включён', { name: agent.name, tool: tid });
 }
 
 // ─── hosts.json: серверы текущего проекта ────────────────────────────────────
@@ -548,7 +549,7 @@ export function addProjectHosts(
     added.push(hid);
   }
   saveHostsFile(file, registry);
-  return `✓ сервер(а) добавлены в проект: ${added.join(', ')}`;
+  return tf('✓ сервер(а) добавлены в проект: {list}', { list: added.join(', ') });
 }
 
 /** project host delete: убрать сервер из hosts.json. */
@@ -560,7 +561,7 @@ export function removeProjectHost(file: string, name: string): string {
   }
   delete registry[hid];
   saveHostsFile(file, registry);
-  return `✓ сервер «${hid}» убран из проекта`;
+  return tf('✓ сервер «{id}» убран из проекта', { id: hid });
 }
 
 // ─── mails.json: ящики проекта ───────────────────────────────────────────────
@@ -603,7 +604,7 @@ export function addMailAccount(file: string, name: string, spec: unknown): strin
   }
   mails[box] = acc;
   saveMailsFile(file, mails);
-  return `✓ ящик «${box}» добавлен (${acc.user} — imap ${acc.imap}, smtp ${acc.smtp})`;
+  return tf('✓ ящик «{box}» добавлен ({user} — imap {imap}, smtp {smtp})', { box, user: acc.user, imap: acc.imap, smtp: acc.smtp });
 }
 
 /** mail remove: убрать ящик из mails.json. */
@@ -615,7 +616,7 @@ export function removeMailAccount(file: string, name: string): string {
   }
   delete mails[box];
   saveMailsFile(file, mails);
-  return `✓ ящик «${box}» убран`;
+  return tf('✓ ящик «{box}» убран', { box });
 }
 
 // ─── messengers.json: боты telegram/max ──────────────────────────────────────
@@ -654,7 +655,7 @@ export function addMessengerBot(file: string, key: string, token: string): strin
   }
   cfg[k] = { token: tok };
   saveMessengersFile(file, cfg);
-  return `✓ токен бота «${k}» сохранён в messengers.json`;
+  return tf('✓ токен бота «{key}» сохранён в messengers.json', { key: k });
 }
 
 /** messenger remove: убрать бота из messengers.json. */
@@ -669,5 +670,5 @@ export function removeMessengerBot(file: string, key: string): string {
   }
   delete cfg[k];
   saveMessengersFile(file, cfg);
-  return `✓ бот «${k}» убран из messengers.json`;
+  return tf('✓ бот «{key}» убран из messengers.json', { key: k });
 }

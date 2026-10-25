@@ -13,6 +13,9 @@ export interface SettingsConfig {
   /** Язык общения команды: попадает в системные промты как есть
    *  («russian», «ru-RU», «русский» — нейросети поймут любую запись) */
   language: string;
+  /** Язык интерфейса (en, ru, zh или свой из ~/.dreamteam/lang/<id>.json);
+   *  отсутствует поле — русский (интерфейс старых установок) */
+  ui: string;
   /** Автоответ в автономном режиме: отправляется вместо ожидания человека */
   autoMessage: string;
   /** Максимальное число отвечающих за раунд (0 — без ограничения) */
@@ -64,6 +67,12 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   if (language !== undefined && (typeof language !== 'string' || language.trim() === '')) {
     throw new Error(`${file}: поле "language" — непустая строка («russian», «ru-RU», «русский» — как угодно)`);
   }
+  // язык интерфейса: тип проверяем здесь, существование локали — applyLocale
+  // (нужен дом, чтобы увидеть lang/<id>.json); пусто — русский (старые установки)
+  const ui = raw.ui;
+  if (ui !== undefined && (typeof ui !== 'string' || ui.trim() === '')) {
+    throw new Error(`${file}: поле "ui" — непустая строка: en, ru, zh или id из ~/.dreamteam/lang/`);
+  }
   const autoMessage = raw.autoMessage;
   if (autoMessage !== undefined && (typeof autoMessage !== 'string' || autoMessage.trim() === '')) {
     throw new Error(`${file}: поле "autoMessage" — непустая строка`);
@@ -75,6 +84,7 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   return {
     width: termCols > 0 ? Math.min(width, termCols) : width,
     language: typeof language === 'string' ? language.trim() : 'русский',
+    ui: typeof ui === 'string' ? ui.trim() : 'ru',
     autoMessage: typeof autoMessage === 'string' ? autoMessage.trim() : 'Решите вопрос на своё усмотрение.',
     maxTurns: typeof maxTurns === 'number' ? maxTurns : 3,
     margin: typeof margin === 'number' ? margin : 2,

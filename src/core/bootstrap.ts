@@ -22,6 +22,7 @@ import {
 } from '../paths.js';
 import { ensureLayers } from '../wizard.js';
 import { rememberProject } from './projects.js';
+import { applyLocale, preloadLocale } from '../i18n.js';
 import { loadProviders, loadImageProviders } from '../providers/registry.js';
 import { loadTeamMemory } from '../memory.js';
 import { printDim, printError } from '../ui.js';
@@ -37,6 +38,8 @@ export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> 
   // PORT, HOST. Ровно один .env, в доме: ни корень проекта, ни папка установки
   // не читаются (не надо гадать, откуда взялась переменная)
   dotenv.config({ path: join(DT_HOME, '.env') });
+  // язык интерфейса — до мастера и заметок: settings.json уже может существовать
+  preloadLocale(SETTINGS_FILE, DT_HOME);
   // первый запуск: wizard (нет провайдеров) и скаффолдинг .dreamteam в проекте
   try {
     for (const note of await ensureLayers()) console.log(pc.dim(`  ${note}`));
@@ -46,6 +49,9 @@ export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> 
   }
   // настройки читаем до всего вывода: ошибка конфига видна в обычном терминале
   const ui = loadSettings(SETTINGS_FILE, process.stdout.columns || 0);
+  // авторитетное применение языка: неизвестный id или битый lang/<id>.json —
+  // громкая ошибка со списком доступных (до старта оболочки)
+  applyLocale(ui.ui, DT_HOME);
   const store = new SessionStore(SESSIONS_DIR);
   const loaded = loadProviders(PROVIDERS_FILE);
   const images = loadImageProviders(PROVIDERS_FILE);

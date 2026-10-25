@@ -35,6 +35,7 @@ import {
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from '../providers/registry.js';
 import { resolveEndpoints } from '../mail.js';
 import { agentToolIds } from '../tools-api.js';
+import { t, tf, applyLocale } from '../i18n.js';
 import { AGENTS_FILE, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, PROJECTS_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
 import { loadProjectRegistry, projectLabel } from './projects.js';
 import { loadSettings } from '../settings.js';
@@ -74,13 +75,13 @@ export interface OpSpec {
 
 function sessionsText(app: App): string[] {
   const list = app.store.list();
-  if (list.length === 0) return ['Разговоров пока нет.'];
+  if (list.length === 0) return [t('Разговоров пока нет.')];
   const fmt = (ts: number) => new Date(ts).toLocaleString('ru-RU');
-  const lines = ['', 'Разговоры (свежие сверху):'];
+  const lines = ['', t('Разговоры (свежие сверху):')];
   list.forEach((s, i) => {
-    const cur = s.id === app.session.id ? ' ← текущий' : '';
-    lines.push(`${i + 1}. ${s.title} — ${s.count} сообщ.${cur}`);
-    lines.push(`   создан ${fmt(s.createdAt)} · последнее сообщение ${fmt(s.updatedAt)} · id ${s.id}`);
+    const cur = s.id === app.session.id ? t(' ← текущий') : '';
+    lines.push(`${i + 1}. ${s.title} — ${t(`сообщ.:`)} ${s.count}${cur}`);
+    lines.push(`   ${t('создан')} ${fmt(s.createdAt)} · ${t('последнее сообщение')} ${fmt(s.updatedAt)} · id ${s.id}`);
   });
   lines.push('');
   return lines;
@@ -91,23 +92,24 @@ function teamText(app: App): string[] {
   try {
     fullTeam = loadTeam(AGENTS_FILE);
   } catch {
-    return ['agents.json недоступен.'];
+    return [t('agents.json недоступен.')];
   }
   const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
   const lines = [
-    `${app.mgr.emoji} ${app.mgr.name} — менеджер переговорки: консьерж и шлюз настроек ` +
-    `[провайдер: ${app.mgr.provider}]`,
+    tf('{emoji} {name} — менеджер переговорки: консьерж и шлюз настроек [провайдер: {provider}]', {
+      emoji: app.mgr.emoji, name: app.mgr.name, provider: app.mgr.provider,
+    }),
   ];
   fullTeam.forEach((a, i) => {
     const tools = agentToolIds(a);
     const marks = [
-      tools.length > 0 ? `тулы: ${tools.join(', ')}` : '',
-      a.provider ? `провайдер: ${a.provider}` : '',
+      tools.length > 0 ? tf('тулы: {list}', { list: tools.join(', ') }) : '',
+      a.provider ? tf('провайдер: {id}', { id: a.provider }) : '',
     ].filter(Boolean);
     lines.push(
       `${i + 1}. ${a.emoji} ${a.name} — ${a.role}${a.description ? ': ' + a.description : ''}` +
       (marks.length > 0 ? ` [${marks.join(' · ')}]` : '') +
-      (inChat.has(a.id) ? '' : ` · не в этом чате (/chat add ${a.name})`),
+      (inChat.has(a.id) ? '' : ` · ${t('не в этом чате')} (/chat add ${a.name})`),
     );
   });
   return lines;
@@ -116,16 +118,16 @@ function teamText(app: App): string[] {
 function providersText(app: App): string[] {
   const lines: string[] = [];
   for (const [id, s] of app.providers) {
-    const state = s.ok ? '✓ готов' : `✗ ${s.note ?? 'не настроен'}`;
+    const state = s.ok ? t('✓ готов') : `✗ ${s.note ?? t('не настроен')}`;
     lines.push(
       `• ${id} (${s.provider.kind}, ${s.provider.model}) ${state}` +
-      (s.vision ? ' ◉ зрение' : '') +
-      (id === app.defaultProviderId ? ' ★ основной' : '') +
-      (id === app.mgr.provider ? ' 🛎 менеджер' : ''),
+      (s.vision ? ` ${t('◉ зрение')}` : '') +
+      (id === app.defaultProviderId ? ` ${t('★ основной')}` : '') +
+      (id === app.mgr.provider ? ` ${t('🛎 менеджер')}` : ''),
     );
   }
   for (const [id, s] of app.images) {
-    lines.push(`  картинки: ${id} ${s.ok ? '✓ готов' : `✗ ${s.note ?? 'не настроен'}`}`);
+    lines.push(`  ${t('картинки:')} ${id} ${s.ok ? t('✓ готов') : `✗ ${s.note ?? t('не настроен')}`}`);
   }
   return lines;
 }
@@ -134,13 +136,13 @@ function historyText(app: App, nStr?: string): string[] {
   const n = Number.parseInt(nStr ?? '', 10);
   const all = app.session.messages;
   const shown = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
-  if (shown.length === 0) return ['Разговор пуст.'];
-  const lines = [`Разговор «${app.session.title}» — показано ${shown.length} из ${all.length} сообщений:`, ''];
+  if (shown.length === 0) return [t('Разговор пуст.')];
+  const lines = [tf('Разговор «{title}» — показано {shown} из {all} сообщений:', { title: app.session.title, shown: shown.length, all: all.length }), ''];
   for (const m of shown) {
     const who = m.authorId === 'user'
-      ? 'Вы'
+      ? t('Вы')
       : m.authorId === 'tool'
-        ? '⚙ инструменты'
+        ? t('⚙ инструменты')
         : isSessionRef(m)
           ? `📎 ${m.authorName}`
           : `${m.authorName}${m.authorRole ? ` (${m.authorRole})` : ''}`;
@@ -159,37 +161,37 @@ function memoryText(app: App, arg: string): string[] {
   }
   if (arg === 'shared') {
     if (!app.memory.shared) {
-      return ['Общая память пока пуста — заполняется при закрытии разговоров (/session new, /exit).'];
+      return [t('Общая память пока пуста — заполняется при закрытии разговоров (/session new, /exit).')];
     }
-    return ['', 'Общая память команды:', ...app.memory.shared.split('\n'), ''];
+    return ['', t('Общая память команды:'), ...app.memory.shared.split('\n'), ''];
   }
   if (!arg) {
     const withMem = memTeam.filter((a) => app.session.memories?.[a.id]);
     return [
-      'Чья память: /memory show <имя> (например, /memory show Глеб), /memory show shared — общая.',
+      t('Чья память: /memory show <имя> (например, /memory show Глеб), /memory show shared — общая.'),
       withMem.length > 0
-        ? `Уже помнят что-то: ${withMem.map((a) => a.name).join(', ')}`
-        : 'Пока никто не «осмыслил» разговор (память обновляется примерно раз в 12 сообщений).',
+        ? tf('Уже помнят что-то: {names}', { names: withMem.map((a) => a.name).join(', ') })
+        : t('Пока никто не «осмыслил» разговор (память обновляется примерно раз в 12 сообщений).'),
     ];
   }
   const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
   const who = memTeam.find((a) => norm(a.name) === norm(arg) || a.id === norm(arg));
-  if (!who) return [`Нет участника «${arg}» — см. /team`];
+  if (!who) return [tf('Нет участника «{name}» — см. /team', { name: arg })];
   const mine = app.session.memories?.[who.id];
   const glob = app.memory.agents[who.id];
   const lines = [
     '',
-    `Что ${who.name} помнит в разговоре «${app.session.title}»:`,
-    `Задача: ${mine?.task ?? '—'}`,
-    `Отношение к вам: ${mine?.towardUser ?? '—'}`,
+    tf('Что {name} помнит в разговоре «{title}»:', { name: who.name, title: app.session.title }),
+    `${t('Задача:')} ${mine?.task ?? '—'}`,
+    `${t('Отношение к вам:')} ${mine?.towardUser ?? '—'}`,
   ];
   if (mine?.ties && Object.keys(mine.ties).length > 0) {
     const byId = new Map(memTeam.map((a) => [a.id, a.name] as const));
     for (const [id, note] of Object.entries(mine.ties)) lines.push(`${byId.get(id) ?? id}: ${note}`);
   } else {
-    lines.push('Коллеги: —');
+    lines.push(`${t('Коллеги:')} —`);
   }
-  lines.push(`Из других разговоров: ${glob?.otherChats ?? '—'}`, '');
+  lines.push(`${t('Из других разговоров:')} ${glob?.otherChats ?? '—'}`, '');
   return lines;
 }
 
@@ -199,15 +201,15 @@ function projectListText(app: App): string[] {
   const known = loadProjectRegistry(PROJECTS_FILE).projects.filter((p) => p.path !== WORKSPACE);
   const lines = [
     '',
-    'Проекты (смена: /project open <имя|путь>):',
-    `• ${projectLabel(WORKSPACE)} — ${WORKSPACE} ← текущий`,
-    ...known.map((p) => `• ${p.name} — ${p.path}`),
+    t('Проекты (смена: /project open <имя|путь>):'),
+    tf('• {name} — {path} ← текущий', { name: projectLabel(WORKSPACE), path: WORKSPACE }),
+    ...known.map((p) => tf('• {name} — {path}', { name: p.name, path: p.path })),
   ];
   // серверы текущего проекта (hosts.json)
   const hosts = Object.entries(loadHostsFile(HOSTS_FILE)) as [string, { host: string; user?: string; port?: number }][];
-  lines.push('Серверы проекта (hosts.json):');
+  lines.push(t('Серверы проекта (hosts.json):'));
   if (hosts.length === 0) {
-    lines.push('  пусто — /project host add <имя>=[пользователь@]хост[:порт]');
+    lines.push(t('  пусто — /project host add <имя>=[пользователь@]хост[:порт]'));
   } else {
     for (const [name, h] of hosts) {
       lines.push(`  • ${name}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`);
@@ -227,7 +229,7 @@ function parseMailSpec(pairs: string[]): Record<string, unknown> | string {
         out.tlsNoVerify = true;
         continue;
       }
-      return `Синтаксис: пары поле=значение (например user=я@yandex.ru); «${pair}» — без "="`;
+      return tf('Синтаксис: пары поле=значение (например user=я@yandex.ru); «{pair}» — без "="', { pair });
     }
     out[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
   }
@@ -242,12 +244,12 @@ function parseMailSpec(pairs: string[]): Record<string, unknown> | string {
 
 /** /chat add и /chat remove: пустой аргумент и недоступный agents.json. */
 function chatChangeText(engine: Engine, arg: string, verb: string): string[] {
-  if (!arg) return [`Кого ${verb}? /chat ${verb === 'позвать' ? 'add' : 'remove'} <имя или номер> (список — /team)`];
+  if (!arg) return [tf('Кого {verb}? /chat {cmd} <имя или номер> (список — /team)', { verb, cmd: verb === 'позвать' ? 'add' : 'remove' })];
   let fullTeam: Agent[];
   try {
     fullTeam = loadTeam(AGENTS_FILE);
   } catch {
-    return [`agents.json недоступен — ${verb} никого не получится.`];
+    return [tf('agents.json недоступен — {verb} никого не получится.', { verb })];
   }
   const res = verb === 'позвать' ? engine.addToChat(arg, fullTeam) : engine.removeFromChat(arg, fullTeam);
   // событие чата ядро уже записал в хронику репликой менеджера — заметкой не дублируем
@@ -263,13 +265,13 @@ function parsePairs(pairs: string[]): Record<string, string | number> | string[]
   const out: Record<string, string | number> = {};
   for (const pair of pairs) {
     const eq = pair.indexOf('=');
-    if (eq === -1) return [`Поле без значения: «${pair}» — жду поле=значение`];
+    if (eq === -1) return [tf('Поле без значения: «{pair}» — жду поле=значение', { pair })];
     const key = pair.slice(0, eq);
     const value = pair.slice(eq + 1);
-    if (!value) return [`Пустое значение у поля «${key}»`];
+    if (!value) return [tf('Пустое значение у поля «{key}»', { key })];
     if (key.toLowerCase() === 'temperature') {
       const num = Number(value);
-      if (!Number.isFinite(num)) return [`temperature — жду числом, а не «${value}»`];
+      if (!Number.isFinite(num)) return [tf('temperature — жду числом, а не «{value}»', { value })];
       out[key] = num;
     } else {
       out[key] = value;
@@ -300,7 +302,7 @@ function parseHostSpec(spec: string): ManagerHostSpec {
       rest = rest.slice(0, colon);
     }
   }
-  if (!rest) throw new Error(`в «${spec}» нет адреса хоста`);
+  if (!rest) throw new Error(tf('в «{spec}» нет адреса хоста', { spec }));
   const out: ManagerHostSpec = { host: rest };
   if (user) out.user = user;
   if (port !== undefined) out.port = port;
@@ -314,7 +316,7 @@ function exportHomeZip(engine: Engine): string[] {
   const entries = homeEntries(app);
   const file = join(WORKSPACE, `dt-home-${ts}.zip`);
   writeFileSync(file, packEntriesZip(entries));
-  return [`Экспорт: ${file} (${entries.length} записей, включая ключи провайдеров — хранить как пароль)`];
+  return [tf('Экспорт: {file} ({n} записей, включая ключи провайдеров — хранить как пароль)', { file, n: entries.length })];
 }
 
 /** Экспорт разговора: номер резолвится в id один раз — архив и его имя
@@ -322,11 +324,11 @@ function exportHomeZip(engine: Engine): string[] {
 function exportSessionZip(engine: Engine, n: number | undefined): string[] {
   const app = engine.app;
   const id = n === undefined ? app.session.id : app.store.list()[n - 1]?.id;
-  if (!id) return [n === undefined ? 'Разговоров нет — экспортировать нечего.' : `Не нашёл разговор №${n} — см. /sessions`];
+  if (!id) return [n === undefined ? t('Разговоров нет — экспортировать нечего.') : tf('Не нашёл разговор №{n} — см. /sessions', { n })];
   const entries = sessionEntriesById(app, id);
   const file = join(WORKSPACE, `dt-session-${id}.zip`);
   writeFileSync(file, packEntriesZip(entries));
-  return [`Экспорт: ${file} (${entries.length} записей)`];
+  return [tf('Экспорт: {file} ({n} записей)', { file, n: entries.length })];
 }
 
 // ── манифест ─────────────────────────────────────────────────────────────────
@@ -363,7 +365,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'текущий удалить нельзя — сначала откройте другой',
     run: async (engine, rest) => {
       const n = Number.parseInt(rest[0] ?? '', 10);
-      if (!Number.isInteger(n) || n <= 0) return [`Не нашёл разговор №${rest[0] ?? ''} — см. /sessions`];
+      if (!Number.isInteger(n) || n <= 0) return [tf('Не нашёл разговор №{n} — см. /sessions', { n: rest[0] ?? '' })];
       return [engine.deleteSession(n)];
     },
   },
@@ -399,11 +401,11 @@ export const OPERATIONS: OpSpec[] = [
     help: 'вернуть разговор из архива (вливается как новый)',
     run: async (engine, rest) => {
       const file = rest.join(' ');
-      if (!file) return ['Синтаксис: /session import <файл.zip>'];
-      if (!existsSync(file)) return [`Файла «${file}» нет`];
+      if (!file) return [t('Синтаксис: /session import <файл.zip>')];
+      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
       const entries = readZipEntries(readFileSync(file));
       if (!entries.some((e) => e.rel === 'session.json')) {
-        return ['В архиве нет session.json — это архив дома? Тогда: /home import <файл>'];
+        return [t('В архиве нет session.json — это архив дома? Тогда: /home import <файл>')];
       }
       return [await applySessionImport(engine.app, entries)];
     },
@@ -420,14 +422,14 @@ export const OPERATIONS: OpSpec[] = [
     help: 'настройки/профиль/память/расписание заменяются, разговоры вливаются по id; с подтверждением',
     run: async (engine, rest) => {
       const file = rest.join(' ');
-      if (!file) return ['Синтаксис: /home import <файл.zip>'];
-      if (!existsSync(file)) return [`Файла «${file}» нет`];
+      if (!file) return [t('Синтаксис: /home import <файл.zip>')];
+      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
       const entries = readZipEntries(readFileSync(file));
       const ok = await engine.confirmAction(
-        'Импортировать домашние настройки из этого архива?',
-        'Настройки/профиль/провайдеры, память команды и расписание заменяются; разговоры вливаются по id. Ключи (.env) не переносятся.',
+        t('Импортировать домашние настройки из этого архива?'),
+        t('Настройки/профиль/провайдеры, память команды и расписание заменяются; разговоры вливаются по id. Ключи (.env) не переносятся.'),
       );
-      if (!ok) return ['Импорт дома отменён.'];
+      if (!ok) return [t('Импорт дома отменён.')];
       return [applyHomeImport(engine.app, entries)];
     },
   },
@@ -465,7 +467,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'дефолты как у менеджера: эмодзи 🤖, белый цвет, автопромпт',
     run: async (engine, rest) => {
       const [id, name, ...roleParts] = rest;
-      if (!id || !name) return ['Синтаксис: /team add <id> <Имя> [роль]'];
+      if (!id || !name) return [t('Синтаксис: /team add <id> <Имя> [роль]')];
       return [addTeamAgent(AGENTS_FILE, { id, name, role: roleParts.join(' ') || undefined }, engine.app.providers)];
     },
   },
@@ -481,8 +483,8 @@ export const OPERATIONS: OpSpec[] = [
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
         return [
-          'Синтаксис: /team update <id> поле=значение…',
-          'Поля: name, role, emoji, color, description, prompt, provider, temperature',
+          t('Синтаксис: /team update <id> поле=значение…'),
+          t('Поля: name, role, emoji, color, description, prompt, provider, temperature'),
         ];
       }
       const parsed = parsePairs(pairs);
@@ -501,7 +503,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (_engine, rest) => {
       // «keks, volt, gosha» и «keks volt gosha» — одно и то же: запятые — разделители
       const ids = rest.flatMap((t) => t.split(',')).map((s) => s.trim()).filter(Boolean);
-      if (ids.length === 0) return ['Синтаксис: /team delete <id> [id…] — id через пробел или запятую'];
+      if (ids.length === 0) return [t('Синтаксис: /team delete <id> [id…] — id через пробел или запятую')];
       const lines: string[] = [];
       for (const id of ids) {
         try {
@@ -523,7 +525,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'встроенные files/shell/ssh/look/image или свой из tools/',
     run: async (_engine, rest) => {
       const [who, tool] = rest;
-      if (!who || !tool) return ['Синтаксис: /team grant <агент> <тул> (files, shell, ssh, look, image или свой из tools/)'];
+      if (!who || !tool) return [t('Синтаксис: /team grant <агент> <тул> (files, shell, ssh, look, image или свой из tools/)')];
       return [grantTool(AGENTS_FILE, who, tool, undefined, TOOLS_DIR)];
     },
   },
@@ -542,8 +544,8 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine, rest) => {
       const id = rest[0] ?? '';
       return engine.setProvider(id)
-        ? [`Основной провайдер: ${id}`]
-        : [`Нет провайдера «${id}». Доступны: ${[...engine.app.providers.keys()].join(', ')}`];
+        ? [tf('Основной провайдер: {id}', { id })]
+        : [tf('Нет провайдера «{id}». Доступны: {list}', { id, list: [...engine.app.providers.keys()].join(', ') })];
     },
   },
   {
@@ -557,7 +559,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return ['Синтаксис: /provider add <id> adapter=openai-compatible model=… baseUrl=… apiKey=…'];
+        return [t('Синтаксис: /provider add <id> adapter=openai-compatible model=… baseUrl=… apiKey=…')];
       }
       const config = parsePairs(pairs);
       if (Array.isArray(config)) return config;
@@ -579,7 +581,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return ['Синтаксис: /provider update <id> model=… baseUrl=… apiKey=… adapter=…'];
+        return [t('Синтаксис: /provider update <id> model=… baseUrl=… apiKey=… adapter=…')];
       }
       const parsed = parsePairs(pairs);
       if (Array.isArray(parsed)) return parsed;
@@ -602,7 +604,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'основной не удалить — сначала /provider set другого',
     run: async (engine, rest) => {
       const id = rest[0] ?? '';
-      if (!id) return ['Синтаксис: /provider delete <id>'];
+      if (!id) return [t('Синтаксис: /provider delete <id>')];
       const report = removeProviderConfig(PROVIDERS_FILE, id, []);
       const loaded = loadProviders(PROVIDERS_FILE);
       for (const [k, v] of loaded.providers) engine.app.providers.set(k, v);
@@ -618,8 +620,12 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine) => {
       const p = engine.app.profile;
       return [
-        `Вы: ${p.name}${p.role ? ' — ' + p.role : ''}${p.about ? ' — ' + p.about : ''}`,
-        'Представиться: /profile set Имя; роль; пара слов о себе',
+        tf('Вы: {name}{role}{about}', {
+          name: p.name,
+          role: p.role ? ` — ${p.role}` : '',
+          about: p.about ? ` — ${p.about}` : '',
+        }),
+        t('Представиться: /profile set Имя; роль; пара слов о себе'),
       ];
     },
   },
@@ -630,7 +636,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'разделитель — точка с запятой',
     run: async (engine, rest) => {
       const parts = rest.join(' ').split(';').map((s) => s.trim()).filter(Boolean);
-      if (parts.length === 0) return ['Синтаксис: /profile set Имя; роль; о себе'];
+      if (parts.length === 0) return [t('Синтаксис: /profile set Имя; роль; о себе')];
       return [await engine.setProfile(parts[0], parts[1], parts[2])];
     },
   },
@@ -655,7 +661,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'сменить рабочую папку и разговоры, не выходя из приложения',
     run: async (engine, rest) => {
       const arg = rest.join(' ').trim();
-      if (!arg) return ['Синтаксис: /project open <имя|путь> (список — /project)'];
+      if (!arg) return [t('Синтаксис: /project open <имя|путь> (список — /project)')];
       return [engine.switchProject(arg)];
     },
   },
@@ -666,7 +672,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'добавить папку в реестр проектов, не переключаясь',
     run: async (engine, rest) => {
       const arg = rest.join(' ').trim();
-      if (!arg) return ['Синтаксис: /project add <путь>'];
+      if (!arg) return [t('Синтаксис: /project add <путь>')];
       return [engine.addProject(arg)];
     },
   },
@@ -677,7 +683,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'убрать из реестра (файлы не трогаются); текущий не забыть',
     run: async (engine, rest) => {
       const arg = rest.join(' ').trim();
-      if (!arg) return ['Синтаксис: /project remove <имя|путь>'];
+      if (!arg) return [t('Синтаксис: /project remove <имя|путь>')];
       return [engine.removeProject(arg)];
     },
   },
@@ -692,11 +698,11 @@ export const OPERATIONS: OpSpec[] = [
       const body = rest.join(' ');
       const eq = body.indexOf('=');
       if (!body || eq === -1) {
-        return ['Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]'];
+        return [t('Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]')];
       }
       const name = body.slice(0, eq).trim();
       const spec = body.slice(eq + 1).trim();
-      if (!name || !spec) return ['Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]'];
+      if (!name || !spec) return [t('Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]')];
       return [addProjectHosts(HOSTS_FILE, { [name]: parseHostSpec(spec) })];
     },
   },
@@ -707,7 +713,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'из текущего проекта',
     run: async (_engine, rest) => {
       const [name] = rest;
-      if (!name) return ['Синтаксис: /project host delete <имя>'];
+      if (!name) return [t('Синтаксис: /project host delete <имя>')];
       return [removeProjectHost(HOSTS_FILE, name)];
     },
   },
@@ -720,14 +726,14 @@ export const OPERATIONS: OpSpec[] = [
       const mails = loadMailsFile(MAIL_FILE);
       const names = Object.keys(mails);
       if (names.length === 0) {
-        return ['Ящиков нет — /mail add <имя> user=… password=… imap=… smtp=… или попросите менеджера'];
+        return [t('Ящиков нет — /mail add <имя> user=… password=… imap=… smtp=… или попросите менеджера')];
       }
       return [
         '',
-        'Ящики:',
+        t('Ящики:'),
         ...Object.entries(mails).map(([n, a]) => {
           const ep = resolveEndpoints(a);
-          return `• ${n}: ${a.user} — imap ${ep.imap.host}:${ep.imap.port}, smtp ${ep.smtp.host}:${ep.smtp.port}${a.tlsNoVerify ? ' (без сверки сертификата)' : ''}`;
+          return `• ${n}: ${a.user} — imap ${ep.imap.host}:${ep.imap.port}, smtp ${ep.smtp.host}:${ep.smtp.port}${a.tlsNoVerify ? ` ${t('(без сверки сертификата)')}` : ''}`;
         }),
         '',
       ];
@@ -744,7 +750,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (_engine, rest) => {
       const [name, ...pairs] = rest;
       if (!name || pairs.length === 0) {
-        return ['Синтаксис: /mail add <имя> user=… password=… imap=… smtp=… [port=…] [smtpPort=…] [tlsNoVerify]'];
+        return [t('Синтаксис: /mail add <имя> user=… password=… imap=… smtp=… [port=…] [smtpPort=…] [tlsNoVerify]')];
       }
       const spec = parseMailSpec(pairs);
       if (typeof spec === 'string') return [spec];
@@ -758,7 +764,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'из mails.json проекта',
     run: async (_engine, rest) => {
       const [name] = rest;
-      if (!name) return ['Синтаксис: /mail remove <имя>'];
+      if (!name) return [t('Синтаксис: /mail remove <имя>')];
       return [removeMailAccount(MAIL_FILE, name)];
     },
   },
@@ -767,9 +773,9 @@ export const OPERATIONS: OpSpec[] = [
     help: 'токены ботов (messengers.json)',
     run: async () => {
       const cfg = loadMessengersFile(MESSENGERS_FILE);
-      const rows = (['telegram', 'max'] as const).filter((k) => cfg[k] !== undefined).map((k) => `• ${k}: токен сохранён`);
-      if (rows.length === 0) return ['Ботов нет — /messenger add <telegram|max> <токен> или попросите менеджера'];
-      return ['', 'Боты:', ...rows, ''];
+      const rows = (['telegram', 'max'] as const).filter((k) => cfg[k] !== undefined).map((k) => `• ${k}: ${t('токен сохранён')}`);
+      if (rows.length === 0) return [t('Ботов нет — /messenger add <telegram|max> <токен> или попросите менеджера')];
+      return ['', t('Боты:'), ...rows, ''];
     },
   },
   {
@@ -782,7 +788,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'в messengers.json проекта; Telegram — @BotFather, MAX — dev.max.ru',
     run: async (_engine, rest) => {
       const [key, token] = rest;
-      if (!key || !token) return ['Синтаксис: /messenger add <telegram|max> <токен>'];
+      if (!key || !token) return [t('Синтаксис: /messenger add <telegram|max> <токен>')];
       return [addMessengerBot(MESSENGERS_FILE, key, token)];
     },
   },
@@ -793,7 +799,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'из messengers.json проекта',
     run: async (_engine, rest) => {
       const [key] = rest;
-      if (!key) return ['Синтаксис: /messenger remove <telegram|max>'];
+      if (!key) return [t('Синтаксис: /messenger remove <telegram|max>')];
       return [removeMessengerBot(MESSENGERS_FILE, key)];
     },
   },
@@ -803,11 +809,11 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine) => {
       const tasks = loadSchedule(scheduleDir());
       void engine;
-      if (tasks.length === 0) return ['Задач нет — /schedule add <задание> [минуты]'];
+      if (tasks.length === 0) return [t('Задач нет — /schedule add <задание> [минуты]')];
       return [
         '',
-        'Расписание:',
-        ...tasks.map((t) => `${t.enabled ? '▶' : '⏸'} ${t.message.slice(0, 60)} — каждые ${t.intervalMinutes} мин [${t.id}]`),
+        t('Расписание:'),
+        ...tasks.map((t2) => `${t2.enabled ? '▶' : '⏸'} ${t2.message.slice(0, 60)} — ${tf('каждые {n} мин', { n: t2.intervalMinutes })} [${t2.id}]`),
         '',
       ];
     },
@@ -821,18 +827,18 @@ export const OPERATIONS: OpSpec[] = [
     title: 'новая задача',
     help: 'текст уйдёт в чат как сообщение руководителя; интервал по умолчанию 10 минут',
     run: async (_engine, rest) => {
-      if (rest.length === 0) return ['Синтаксис: /schedule add <задание> [минуты]'];
+      if (rest.length === 0) return [t('Синтаксис: /schedule add <задание> [минуты]')];
       const last = rest[rest.length - 1];
       const minutes = Number.parseInt(last, 10);
       const every = Number.isInteger(minutes) && minutes > 0 ? minutes : 10;
       const message = (Number.isInteger(minutes) && minutes > 0 ? rest.slice(0, -1) : rest).join(' ');
-      if (!message) return ['Синтаксис: /schedule add <задание> [минуты]'];
+      if (!message) return [t('Синтаксис: /schedule add <задание> [минуты]')];
       const dir = scheduleDir();
       const tasks = loadSchedule(dir);
       const id = `task-${Date.now().toString(36)}`;
       tasks.push({ id, message, intervalMinutes: every, enabled: true });
       saveSchedule(dir, tasks);
-      return [`✓ Задача «${message.slice(0, 60)}» каждые ${every} мин [${id}]`];
+      return [tf('✓ Задача «{msg}» каждые {n} мин [{id}]', { msg: message.slice(0, 60), n: every, id })];
     },
   },
   {
@@ -842,14 +848,14 @@ export const OPERATIONS: OpSpec[] = [
     help: 'пауза и возврат без удаления',
     run: async (_engine, rest) => {
       const id = rest[0];
-      if (!id) return ['Синтаксис: /schedule toggle <id>'];
+      if (!id) return [t('Синтаксис: /schedule toggle <id>')];
       const dir = scheduleDir();
       const tasks = loadSchedule(dir);
-      const task = tasks.find((t) => t.id === id);
-      if (!task) return [`Нет задачи «${id}» — см. /schedule`];
+      const task = tasks.find((t2) => t2.id === id);
+      if (!task) return [tf('Нет задачи «{id}» — см. /schedule', { id })];
       task.enabled = !task.enabled;
       saveSchedule(dir, tasks);
-      return [`${task.enabled ? '▶ Включена' : '⏸ Выключена'}: ${task.message.slice(0, 60)}`];
+      return [tf('{state}: {msg}', { state: task.enabled ? t('▶ Включена') : t('⏸ Выключена'), msg: task.message.slice(0, 60) })];
     },
   },
   {
@@ -859,11 +865,11 @@ export const OPERATIONS: OpSpec[] = [
     help: 'полностью',
     run: async (_engine, rest) => {
       const id = rest[0];
-      if (!id) return ['Синтаксис: /schedule delete <id>'];
+      if (!id) return [t('Синтаксис: /schedule delete <id>')];
       const dir = scheduleDir();
-      const tasks = loadSchedule(dir).filter((t) => t.id !== id);
+      const tasks = loadSchedule(dir).filter((t2) => t2.id !== id);
       saveSchedule(dir, tasks);
-      return [`Удалено: задач осталось ${tasks.length}`];
+      return [tf('Удалено: задач осталось {n}', { n: tasks.length })];
     },
   },
 
@@ -876,7 +882,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine, rest) => {
       const turns = Math.min(Math.max(Number.parseInt(rest[0] ?? '', 10) || 10, 1), 50);
       engine.setAutoMode(true, turns);
-      return [`🤖 автономный режим: до ${turns} ходов без вашего участия. Остановить — /auto off или ⏹.`];
+      return [tf('🤖 автономный режим: до {n} ходов без вашего участия. Остановить — /auto off или ⏹.', { n: turns })];
     },
   },
   {
@@ -884,7 +890,7 @@ export const OPERATIONS: OpSpec[] = [
     help: 'вернуть руководителя в разговор',
     run: async (engine) => {
       engine.setAutoMode(false, 0);
-      return ['🤖 автономный режим выключен.'];
+      return [t('🤖 автономный режим выключен.')];
     },
   },
 
@@ -895,9 +901,9 @@ export const OPERATIONS: OpSpec[] = [
       const s = loadSettings(SETTINGS_FILE, 0);
       return [
         '',
-        'Настройки (settings.json):',
+        t('Настройки (settings.json):'),
         ...Object.entries(s).map(([k, v]) => `    ${k} = ${String(v)}`),
-        'Поменять: /settings set поле=значение (например, /settings set maxTurns=2)',
+        t('Поменять: /settings set поле=значение (например, /settings set maxTurns=2 или /settings set ui=en)'),
         '',
       ];
     },
@@ -908,7 +914,7 @@ export const OPERATIONS: OpSpec[] = [
     title: 'поменять настройки',
     help: 'вступают в силу со следующего раунда; запись с валидацией и откатом',
     run: async (_engine, rest) => {
-      if (rest.length === 0) return ['Синтаксис: /settings set поле=значение… (см. /settings)'];
+      if (rest.length === 0) return [t('Синтаксис: /settings set поле=значение… (см. /settings)')];
       const parsed = parsePairs(rest);
       if (Array.isArray(parsed)) return parsed;
       // настройки типизированы: числа и булевы приводим сразу
@@ -924,7 +930,9 @@ export const OPERATIONS: OpSpec[] = [
       writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
       loadSettings(tmp, 0); // валидация
       renameSync(tmp, SETTINGS_FILE);
-      return ['✓ Настройки обновлены (язык и лимиты — со следующего раунда)'];
+      // язык интерфейса вступает в силу сразу (остальное — со следующего раунда)
+      if (typeof fields.ui === 'string') applyLocale(fields.ui, DT_HOME);
+      return [t('✓ Настройки обновлены (язык и лимиты — со следующего раунда)')];
     },
   },
   {
@@ -932,9 +940,9 @@ export const OPERATIONS: OpSpec[] = [
     help: 'его провайдер, имя и температура',
     run: async (engine) => [
       '',
-      `Менеджер: ${engine.app.mgr.emoji} ${engine.app.mgr.name}`,
-      `    провайдер: ${engine.app.mgr.provider} · температура: ${engine.app.mgr.temperature ?? '—'}`,
-      'Поменять: /manager set provider=… temperature=… name=… emoji=… color=…',
+      tf('Менеджер: {emoji} {name}', { emoji: engine.app.mgr.emoji, name: engine.app.mgr.name }),
+      `    ${t('провайдер:')} ${engine.app.mgr.provider} · ${t('температура:')} ${engine.app.mgr.temperature ?? '—'}`,
+      t('Поменять: /manager set provider=… temperature=… name=… emoji=… color=…'),
       '',
     ],
   },
@@ -944,7 +952,7 @@ export const OPERATIONS: OpSpec[] = [
     title: 'настроить менеджера',
     help: 'provider, temperature, name, emoji, color',
     run: async (engine, rest) => {
-      if (rest.length === 0) return ['Синтаксис: /manager set provider=… temperature=… name=… emoji=… color=…'];
+      if (rest.length === 0) return [t('Синтаксис: /manager set provider=… temperature=… name=… emoji=… color=…')];
       const fields = parsePairs(rest);
       if (Array.isArray(fields)) return fields;
       const known = [...engine.app.providers.keys()];
@@ -989,7 +997,7 @@ export function operationHints(): OpHint[] {
   return OPERATIONS.map((op) => {
     const cmd = operationCommand(op);
     const args = operationArgs(op);
-    return { cmd, args: args || undefined, help: op.title };
+    return { cmd, args: args || undefined, help: t(op.title) };
   });
 }
 
@@ -1008,7 +1016,7 @@ export async function runOperationText(
   const [group, second, ...rest] = tokens;
   if (group === 'help') return helpLines();
   if (group === 'exit' || group === 'quit' || group === 'q') {
-    return ['/exit — команда терминала. В веб-оболочке просто закройте страницу.'];
+    return [t('/exit — команда терминала. В веб-оболочке просто закройте страницу.')];
   }
   // трёхсловные имена (project host add) важнее двухсловных: ищем с хвоста
   const explicit3 = second && rest.length > 0 ? byName.get(`${group}.${second}.${rest[0].toLowerCase()}`) : undefined;
@@ -1027,13 +1035,13 @@ export async function runOperationText(
   const near = groups.find((g) => g.startsWith(group.toLowerCase()));
   return [
     near
-      ? `Не понял «/${group}${second ? ' ' + second : ''}». Есть группа /${near} — /help покажет её операции.`
-      : 'Неизвестная команда. /help — список операций.',
+      ? tf('Не понял «/{cmd}». Есть группа /{near} — /help покажет её операции.', { cmd: `${group}${second ? ' ' + second : ''}`, near })
+      : t('Неизвестная команда. /help — список операций.'),
   ];
 }
 
 function helpLines(): string[] {
-  const lines = ['Операции (это же — имена rpc и подсказки GUI):'];
+  const lines = [t('Операции (это же — имена rpc и подсказки GUI):')];
   let group = '';
   for (const op of OPERATIONS) {
     const g = op.name.split('.')[0];
@@ -1042,12 +1050,12 @@ function helpLines(): string[] {
       lines.push('');
     }
     const label = (operationCommand(op) + (op.args ? ' ' + operationArgs(op) : '')).padEnd(24);
-    lines.push(`    ${label} — ${op.help}`);
+    lines.push(`    ${label} — ${t(op.help)}`);
   }
   lines.push(
     '',
-    '  @имя или !имя — обратиться к участнику; @менеджер — к менеджеру переговорки;',
-    '  @session N — приложить конспект другого разговора.',
+    t('  @имя или !имя — обратиться к участнику; @менеджер — к менеджеру переговорки;'),
+    t('  @session N — приложить конспект другого разговора.'),
   );
   return lines;
 }

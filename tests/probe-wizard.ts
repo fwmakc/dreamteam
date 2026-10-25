@@ -63,7 +63,7 @@ const {
 {
   const home = join(root, 'h1');
   const proj = join(root, 'p1', '.dreamteam');
-  const { io, out } = makeIo(['4'], true);
+  const { io, out } = makeIo(['ru', '4'], true);
   const notes = await ensureLayers(io, home, proj);
   const providers = JSON.parse(readFileSync(join(home, 'providers.json'), 'utf8'));
   check('wizard mock: default=mock, адаптер mock', providers.default === 'mock' && providers.providers.mock.adapter === 'mock', JSON.stringify(providers));
@@ -71,6 +71,7 @@ const {
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('настройки: созданы с дефолтами', settings.width === 100 && settings.screen === true, JSON.stringify(settings));
   check('настройки: язык по умолчанию из скелета', settings.language === 'русский', JSON.stringify(settings));
+  check('настройки: язык интерфейса из ответа мастера', settings.ui === 'ru', JSON.stringify(settings));
   check('команда: стартовая пятёрка в доме', (() => {
     const team = JSON.parse(readFileSync(join(home, 'agents.json'), 'utf8')) as { id: string }[];
     return ['analyst', 'secretary', 'developer', 'designer', 'writer'].every((id) => team.some((a) => a.id === id));
@@ -109,6 +110,9 @@ const {
     check('скелет: home/settings.json валиден по loadSettings', (() => {
       try { return loadSettings(join(SCAFFOLD_DIR, 'home', 'settings.json'), 0).language === 'русский'; } catch { return false; }
     })());
+    check('скелет: интерфейс по умолчанию английский (ui:"en")', (() => {
+      try { return JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'home', 'settings.json'), 'utf8')).ui === 'en'; } catch { return false; }
+    })());
     check('скелет: home/agents.json валиден по loadTeam, стартовая пятёрка', (() => {
       try {
         const team = loadTeam(join(SCAFFOLD_DIR, 'home', 'agents.json'));
@@ -142,7 +146,7 @@ const {
 {
   const home = join(root, 'h2');
   const proj = join(root, 'p2', '.dreamteam');
-  const { io, out } = makeIo(['1', 'https://api.test/v1', 'test-model', 'секрет-ключ-42'], true);
+  const { io, out } = makeIo(['ru', '1', 'https://api.test/v1', 'test-model', 'секрет-ключ-42'], true);
   const notes = await ensureLayers(io, home, proj);
   const providersFile = readFileSync(join(home, 'providers.json'), 'utf8');
   const providers = JSON.parse(providersFile);
@@ -161,13 +165,13 @@ const {
 // --- обязательный ключ: пустой ввод переспрашивается (anthropic/gigachat) ---
 {
   const home = join(root, 'h3');
-  const { io, out } = makeIo(['3', '', 'giga-ключ'], true);
+  const { io, out } = makeIo(['ru', '3', '', 'giga-ключ'], true);
   await runWizard(io, home);
   const providers = JSON.parse(readFileSync(join(home, 'providers.json'), 'utf8'));
   check('gigachat: apiKey + повтор вопроса при пустом вводе', providers.providers.gigachat.apiKey === 'giga-ключ' && out().includes('без ключа GigaChat'), JSON.stringify(providers));
 
   const home4 = join(root, 'h4');
-  const { io: io4, out: out4 } = makeIo(['2', '', '', '', 'claude-ключ'], true);
+  const { io: io4, out: out4 } = makeIo(['ru', '2', '', '', '', 'claude-ключ'], true);
   await runWizard(io4, home4);
   const p4 = JSON.parse(readFileSync(join(home4, 'providers.json'), 'utf8'));
   check('anthropic: два отказа ключа — два повтора', p4.providers.claude.model === 'claude-sonnet-4-5' && p4.providers.claude.apiKey === 'claude-ключ' && (out4().match(/без ключа Claude/g) ?? []).length === 2, out4());

@@ -4,6 +4,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path
 import type { Agent, ImageProvider, LLMProvider } from './types.js';
 import { agentToolIds, BUILTIN_TOOL_IDS, type Tool } from './tools-api.js';
 import { loadSettings } from './settings.js';
+import { t, tf } from './i18n.js';
 
 /**
  * Инструменты агентов: текстовый протокол поверх обычного ответа модели.
@@ -268,16 +269,16 @@ function splitTarget(s: string): { target?: string; rest: string } {
 /** Короткая строка для подтверждения и для отчёта об отказе. */
 export function describeAction(a: Action): string {
   const at = (t?: string) => (t ? `[${t}] ` : '');
-  if (a.kind === 'file') return `${at(a.project)}файл ${a.path} (${a.content.length} символов)`;
-  if (a.kind === 'run') return `${at(a.project)}команда: ${a.command.replace(/\s+/g, ' ').slice(0, 140)}`;
-  if (a.kind === 'tool') return `${at(a.project)}тул «${a.tool}»: ${a.command.replace(/\s+/g, ' ').slice(0, 140)}`;
-  if (a.kind === 'look') return `${at(a.project)}смотреть картинку: ${a.path || '(путь не указан)'}`;
+  if (a.kind === 'file') return `${at(a.project)}${tf('файл {path} ({n} символов)', { path: a.path, n: a.content.length })}`;
+  if (a.kind === 'run') return `${at(a.project)}${tf('команда: {cmd}', { cmd: a.command.replace(/\s+/g, ' ').slice(0, 140) })}`;
+  if (a.kind === 'tool') return `${at(a.project)}${tf('тул «{tool}»: {cmd}', { tool: a.tool, cmd: a.command.replace(/\s+/g, ' ').slice(0, 140) })}`;
+  if (a.kind === 'look') return `${at(a.project)}${tf('смотреть картинку: {path}', { path: a.path || t('(путь не указан)') })}`;
   if (a.kind === 'image') {
     const p = a.params;
-    const refs = p.refs?.length ? `, референсы: ${p.refs.length}` : '';
-    return `${at(a.project)}генерация: ${p.n ?? 1} × ${p.size ?? '512x512'}, «${p.prompt.replace(/\s+/g, ' ').slice(0, 100)}»${refs}`;
+    const refs = p.refs?.length ? tf(', референсы: {n}', { n: p.refs.length }) : '';
+    return `${at(a.project)}${tf('генерация: {n} × {size}, «{prompt}»', { n: p.n ?? 1, size: p.size ?? '512x512', prompt: p.prompt.replace(/\s+/g, ' ').slice(0, 100) })}${refs}`;
   }
-  return `${at(a.host)}команда на сервере: ${a.command.replace(/\s+/g, ' ').slice(0, 140)}`;
+  return `${at(a.host)}${tf('команда на сервере: {cmd}', { cmd: a.command.replace(/\s+/g, ' ').slice(0, 140) })}`;
 }
 
 /**

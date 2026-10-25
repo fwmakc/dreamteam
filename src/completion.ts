@@ -1,5 +1,6 @@
 import pc from 'picocolors';
 import { OPERATIONS, findOperation, operationCommand, operationArgs, type OpSpec } from './core/operations.js';
+import { t, tf } from './i18n.js';
 
 // канонический список операций живёт в ядре (src/core/operations.ts) — отсюда
 // им пользуются терминальные подсказки; /help и сервер отдают тот же список
@@ -157,7 +158,7 @@ function sessionRows(ctx: CompletionContext, fragment: string): string[] {
     .map((s, i) => ({ n: String(i + 1), title: s.title }))
     .filter((x) => x.n.startsWith(fragment));
   if (hits.length === 0) {
-    return [pc.dim(`  нет разговора №${fragment || '…'} — см. /sessions`)];
+    return [pc.dim(tf('  нет разговора №{n} — см. /sessions', { n: fragment || '…' }))];
   }
   return hits
     .slice(0, 8)
@@ -181,7 +182,7 @@ export function hintRowsFor(line: string, ctx: CompletionContext): string[] | nu
 
 function usageRow(op: OpSpec): string {
   const args = operationArgs(op);
-  return `  ${operationCommand(op)}${args ? ' ' + pc.dim(args) : ''}  ${pc.dim('— ' + op.help)}`;
+  return `  ${operationCommand(op)}${args ? ' ' + pc.dim(args) : ''}  ${pc.dim('— ' + t(op.help))}`;
 }
 
 function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | null {
@@ -194,15 +195,15 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
   if (parts.length === 1 && !trailing) {
     const prefix = body.toLowerCase();
     const matches = OPERATIONS.filter((o) => operationCommand(o).slice(1).startsWith(prefix));
-    if (matches.length === 0) return [pc.dim('  нет такой команды — см. /help')];
+    if (matches.length === 0) return [pc.dim(t('  нет такой команды — см. /help'))];
     const rows = matches.slice(0, PANEL_MAX).map(usageRow);
-    if (matches.length > PANEL_MAX) rows.push(pc.dim(`  … ещё ${matches.length - PANEL_MAX} — уточните ввод`));
+    if (matches.length > PANEL_MAX) rows.push(pc.dim(tf('  … ещё {n} — уточните ввод', { n: matches.length - PANEL_MAX })));
     return rows;
   }
 
   const group = (parts[0] ?? '').toLowerCase();
   const groupExists = OPERATIONS.some((o) => o.name.startsWith(group + '.'));
-  if (!groupExists) return [pc.dim('  нет такой группы — см. /help')];
+  if (!groupExists) return [pc.dim(t('  нет такой группы — см. /help'))];
   const verbs = verbsOf(group);
   const implicitOp = OPERATIONS.find((o) => o.name.startsWith(group + '.') && o.implicit);
 
@@ -210,23 +211,23 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
   if (parts.length === 1 && trailing) {
     if (implicitOp && verbs.length === 0) return [usageRow(implicitOp), ...valueRows(implicitOp, 0, ctx)];
     return [
-      pc.dim(`  /${group} <глагол>:`),
+      pc.dim(tf('  /{group} <{verb}>:', { group, verb: t('глагол') })),
       pc.dim('    ' + verbs.slice(0, PANEL_MAX).join('   ')),
     ];
   }
   // завершаем глагол
   if (parts.length === 2 && !trailing) {
     const hits = verbs.filter((v) => v.startsWith(parts[1].toLowerCase()) && v !== parts[1].toLowerCase());
-    if (hits.length === 0) return [pc.dim('  нет такого глагола — см. /help')];
+    if (hits.length === 0) return [pc.dim(t('  нет такого глагола — см. /help'))];
     return [
-      pc.dim(`  /${group} <глагол>:`),
+      pc.dim(tf('  /{group} <{verb}>:', { group, verb: t('глагол') })),
       pc.dim('    ' + hits.slice(0, PANEL_MAX).join('   ')),
     ];
   }
 
   const explicit = parts[1] ? findOperation(`${group}.${parts[1].toLowerCase()}`) : undefined;
   const op = explicit ?? implicitOp;
-  if (!op) return [pc.dim('  нет такой команды — см. /help')];
+  if (!op) return [pc.dim(t('  нет такой команды — см. /help'))];
   const hasVerb = Boolean(explicit);
   const argPos = Math.max(0, parts.length - (hasVerb ? 2 : 1) + (trailing ? 1 : 0) - 1);
   return [usageRow(op), ...valueRows(op, argPos, ctx)];
@@ -296,7 +297,7 @@ interface MentionItem {
 }
 
 /** @session — спец-упоминание: приложить конспект другого разговора */
-const SESSION_ITEM: MentionItem = { label: 'session', hint: 'конспект другого разговора' };
+const SESSION_ITEM: MentionItem = { label: 'session' };
 
 const normName = (s: string): string => s.toLowerCase().replace(/ё/g, 'е');
 
@@ -311,9 +312,9 @@ const MENTION_MAX_WIDTH = 52;
 
 function mentionItems(ctx: CompletionContext): MentionItem[] {
   return [
-    { label: ctx.managerName(), hint: 'менеджер переговорки' },
+    { label: ctx.managerName(), hint: t('менеджер переговорки') },
     ...ctx.chatAgents().map((a) => ({ label: a.name, hint: a.role })),
-    SESSION_ITEM,
+    { label: SESSION_ITEM.label, hint: t('конспект другого разговора') },
   ];
 }
 

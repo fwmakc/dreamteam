@@ -6,6 +6,7 @@
  */
 import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
+import { t, tf } from '../i18n.js';
 
 /** Один проект в реестре: папка на диске + короткое имя. */
 export interface ProjectRecord {
@@ -74,12 +75,12 @@ export function rememberProject(file: string, dir: string, makeCurrent: boolean)
 export function forgetProject(file: string, dir: string, currentWorkspace: string): void {
   const path = resolve(dir);
   if (path === resolve(currentWorkspace)) {
-    throw new Error(`проект «${projectLabel(path)}» открыт сейчас — сначала переключитесь на другой (/project open)`);
+    throw new Error(tf('проект «{label}» открыт сейчас — сначала переключитесь на другой (/project open)', { label: projectLabel(path) }));
   }
   const reg = loadProjectRegistry(file);
   const before = reg.projects.length;
   reg.projects = reg.projects.filter((p) => p.path !== path);
-  if (reg.projects.length === before) throw new Error(`проекта «${dir}» нет в реестре — см. /project`);
+  if (reg.projects.length === before) throw new Error(tf('проекта «{dir}» нет в реестре — см. /project', { dir }));
   if (reg.current === path) delete reg.current;
   saveRegistry(file, reg);
 }
@@ -91,7 +92,7 @@ export function forgetProject(file: string, dir: string, currentWorkspace: strin
  */
 export function resolveProjectDir(arg: string, from: string, registry: ProjectRegistry): string {
   const raw = arg.trim().replace(/^["']|["']$/g, '');
-  if (!raw) throw new Error('укажите папку проекта: /project open <имя|путь> (список — /project)');
+  if (!raw) throw new Error(t('укажите папку проекта: /project open <имя|путь> (список — /project)'));
   const candidates: string[] = [];
   if (isAbsolute(raw)) candidates.push(resolve(raw));
   else {
@@ -104,5 +105,5 @@ export function resolveProjectDir(arg: string, from: string, registry: ProjectRe
   for (const dir of candidates) {
     if (existsSync(dir) && statSync(dir).isDirectory()) return dir;
   }
-  throw new Error(`нет папки проекта «${raw}» — укажите путь или имя из /project`);
+  throw new Error(tf('нет папки проекта «{raw}» — укажите путь или имя из /project', { raw }));
 }

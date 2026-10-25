@@ -26,7 +26,14 @@ const commands = computed(() => (snapshot.completion?.operations ?? []) as OpHin
 const autoMode = computed(() => Boolean(snapshot.auto?.mode));
 const autoLeft = computed(() => snapshot.auto?.left ?? 0);
 const statusVisible = computed(() => roundActive.value || busyCount.value > 0);
-const busyText = computed(() => busyLabel.value || (roundActive.value ? 'раунд идёт…' : ''));
+const busyText = computed(() => busyLabel.value || (roundActive.value ? tr('раунд идёт…') : ''));
+
+// ── перевод интерфейса: словарь приходит в снапшоте (snapshot.ui.strings) ────
+function tr(s: string, vars?: Record<string, string | number>): string {
+  let out = snapshot.ui?.strings?.[s] ?? s;
+  if (vars) for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(String(v));
+  return out;
+}
 
 watchEffect(() => {
   const def = providers.value.find((p) => p.isDefault);
@@ -105,29 +112,29 @@ function answerDelete(yes: boolean): void {
 
 function ctxTeam(e: MouseEvent, a: AgentInfo): void {
   openCtx(e, [
-    { label: 'Изменить', fn: () => openAgentSettings(a) },
-    { label: 'Удалить', fn: () => delAgent(a) },
+    { label: tr('Изменить'), fn: () => openAgentSettings(a) },
+    { label: tr('Удалить'), fn: () => delAgent(a) },
   ]);
 }
 function ctxProvider(e: MouseEvent, p: ProviderInfo): void {
-  const items: CtxItem[] = [{ label: 'Изменить', fn: () => openProviderSettings(p) }];
-  if (!p.isDefault) items.push({ label: 'Удалить', fn: () => delProvider(p) });
+  const items: CtxItem[] = [{ label: tr('Изменить'), fn: () => openProviderSettings(p) }];
+  if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => delProvider(p) });
   openCtx(e, items);
 }
 function ctxSession(e: MouseEvent, i: number, title: string): void {
   openCtx(e, [
-    { label: 'Переименовать', fn: () => openSessionRename(i) },
-    { label: 'Удалить', fn: () => deleteSession(i, title) },
+    { label: tr('Переименовать'), fn: () => openSessionRename(i) },
+    { label: tr('Удалить'), fn: () => deleteSession(i, title) },
   ]);
 }
 function ctxSchedule(e: MouseEvent, t: ScheduleTaskInfo): void {
   openCtx(e, [
-    { label: t.enabled ? 'Пауза' : 'Запустить', fn: () => scheduleToggle(t) },
-    { label: 'Удалить', fn: () => scheduleDelete(t) },
+    { label: tr(t.enabled ? 'Пауза' : 'Запустить'), fn: () => scheduleToggle(t) },
+    { label: tr('Удалить'), fn: () => scheduleDelete(t) },
   ]);
 }
 function ctxHost(e: MouseEvent, p: ProjectInfo, h: ProjectHost): void {
-  openCtx(e, [{ label: 'Удалить', fn: () => projectHostDelete(p, h) }]);
+  openCtx(e, [{ label: tr('Удалить'), fn: () => projectHostDelete(p, h) }]);
 }
 
 // ── модальная форма: поля [{key,label,value,placeholder?}] ───────────────────
@@ -168,19 +175,19 @@ function rpcReport(p: Promise<{ text: string }>): void {
     .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 function openAgentCreate(): void {
-  openForm('Новый агент', [
-    { key: 'id', label: 'id (латиница, цифры, -/_)' },
-    { key: 'name', label: 'Имя' },
-    { key: 'role', label: 'Роль (можно пропустить)' },
+  openForm(tr('Новый агент'), [
+    { key: 'id', label: tr('id (латиница, цифры, -/_)') },
+    { key: 'name', label: tr('Имя') },
+    { key: 'role', label: tr('Роль (можно пропустить)') },
   ], (v) => rpcReport(rpc('team.add', v)));
 }
 function openAgentSettings(a: AgentInfo): void {
-  openForm(`Настройки агента ${a.name}`, [
-    { key: 'role', label: 'Роль', value: a.role ?? '' },
-    { key: 'provider', label: 'Провайдер', value: a.provider ?? '' },
-    { key: 'temperature', label: 'Температура (0–2)', value: a.temperature != null ? String(a.temperature) : '' },
-    { key: 'prompt', label: 'Промпт', value: a.prompt ?? '' },
-    { key: 'tools', label: `Тулы через запятую (есть: ${(a.tools ?? []).join(', ') || 'нет'})` },
+  openForm(tr('Настройки агента {name}', { name: a.name }), [
+    { key: 'role', label: tr('Роль'), value: a.role ?? '' },
+    { key: 'provider', label: tr('Провайдер'), value: a.provider ?? '' },
+    { key: 'temperature', label: tr('Температура (0–2)'), value: a.temperature != null ? String(a.temperature) : '' },
+    { key: 'prompt', label: tr('Промпт'), value: a.prompt ?? '' },
+    { key: 'tools', label: tr('Тулы через запятую (есть: {list})', { list: (a.tools ?? []).join(', ') || tr('нет') }) },
   ], (v) => {
     const fields: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) if (val !== '' && k !== 'tools') fields[k] = k === 'temperature' ? Number(val) : val;
@@ -208,12 +215,12 @@ function delAgent(a: AgentInfo): void {
 
 // ── провайдеры: создать/удалить/настроить ────────────────────────────────────
 function providerCreate(): void {
-  openForm('Новый провайдер', [
-    { key: 'id', label: 'id (латиница)' },
-    { key: 'adapter', label: 'Адаптер (openai-compatible / anthropic / gigachat)', value: 'openai-compatible' },
+  openForm(tr('Новый провайдер'), [
+    { key: 'id', label: tr('id (латиница)') },
+    { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat)'), value: 'openai-compatible' },
     { key: 'baseUrl', label: 'baseUrl' },
-    { key: 'model', label: 'Модель' },
-    { key: 'apiKeyEnv', label: 'Имя переменной с ключом' },
+    { key: 'model', label: tr('Модель') },
+    { key: 'apiKeyEnv', label: tr('Имя переменной с ключом') },
   ], (v) => rpcReport(rpc('provider.add', { id: v.id, config: v })));
 }
 function providerDelete(p: ProviderInfo): void {
@@ -228,11 +235,11 @@ function delProvider(p: ProviderInfo): void {
   if (!roundActive.value) providerDelete(p);
 }
 function openProviderSettings(p: ProviderInfo): void {
-  openForm(`Провайдер ${p.id}`, [
-    { key: 'adapter', label: 'Адаптер (openai-compatible / anthropic / gigachat / mock)', value: p.kind },
-    { key: 'model', label: 'Модель', value: p.model ?? '' },
-    { key: 'baseUrl', label: 'baseUrl (пусто — не менять)', value: p.baseUrl ?? '' },
-    { key: 'apiKeyEnv', label: 'Имя переменной с ключом (пусто — не менять)', value: p.apiKeyEnv ?? '' },
+  openForm(tr('Провайдер {id}', { id: p.id }), [
+    { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat / mock)'), value: p.kind },
+    { key: 'model', label: tr('Модель'), value: p.model ?? '' },
+    { key: 'baseUrl', label: tr('baseUrl (пусто — не менять)'), value: p.baseUrl ?? '' },
+    { key: 'apiKeyEnv', label: tr('Имя переменной с ключом (пусто — не менять)'), value: p.apiKeyEnv ?? '' },
   ], (v) => {
     const fields: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = val;
@@ -244,35 +251,36 @@ function openProviderSettings(p: ProviderInfo): void {
 function openSettingsForm(): void {
   const st = snapshot.settings;
   if (!st) return;
-  openForm('Настройки', [
-    { key: 'language', label: 'Язык общения (russian / ru-RU / english…)', value: st.language ?? '' },
-    { key: 'autoMessage', label: 'Автоответ в автономном режиме', value: st.autoMessage ?? '' },
-    { key: 'width', label: 'Ширина экрана (40–500)', value: st.width != null ? String(st.width) : '' },
+  openForm(tr('Настройки'), [
+    { key: 'language', label: tr('Язык общения (russian / ru-RU / english…)'), value: st.language ?? '' },
+    { key: 'autoMessage', label: tr('Автоответ в автономном режиме'), value: st.autoMessage ?? '' },
+    { key: 'ui', label: tr('Язык интерфейса (ru / en / zh / свой из ~/.dreamteam/lang)'), value: snapshot.ui?.id ?? '' },
+    { key: 'width', label: tr('Ширина экрана (40–500)'), value: st.width != null ? String(st.width) : '' },
   ], (v) => {
     const patch: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' ? Number(val) : val;
     rpc('settings.set', { patch })
-      .then(() => addFeed('notice', '· настройки сохранены'))
+      .then(() => addFeed('notice', `· ${tr('настройки сохранены')}`))
       .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
   });
 }
 function openUserProfileForm(): void {
   const p = profile.value;
   if (!p) return;
-  openForm('Пользователь', [
-    { key: 'name', label: 'Имя', value: p.name ?? '' },
-    { key: 'role', label: 'Роль', value: p.role ?? '' },
-    { key: 'about', label: 'О себе', value: p.about ?? '' },
+  openForm(tr('Пользователь'), [
+    { key: 'name', label: tr('Имя'), value: p.name ?? '' },
+    { key: 'role', label: tr('Роль'), value: p.role ?? '' },
+    { key: 'about', label: tr('О себе'), value: p.about ?? '' },
   ], (v) => rpcReport(rpc('profile.set', v)));
 }
 function openManagerForm(): void {
   const mgr = manager.value;
   if (!mgr) return;
-  openForm('Менеджер переговорки', [
-    { key: 'name', label: 'Имя', value: mgr.name ?? '' },
-    { key: 'emoji', label: 'Эмодзи', value: mgr.emoji ?? '' },
-    { key: 'color', label: 'Цвет (yellow/cyan/…)', value: mgr.color ?? '' },
-    { key: 'temperature', label: 'Температура (0–2)', value: mgr.temperature != null ? String(mgr.temperature) : '' },
+  openForm(tr('Менеджер переговорки'), [
+    { key: 'name', label: tr('Имя'), value: mgr.name ?? '' },
+    { key: 'emoji', label: 'Emoji', value: mgr.emoji ?? '' },
+    { key: 'color', label: tr('Цвет (yellow/cyan/…)'), value: mgr.color ?? '' },
+    { key: 'temperature', label: tr('Температура (0–2)'), value: mgr.temperature != null ? String(mgr.temperature) : '' },
   ], (v) => {
     const fields: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
@@ -284,8 +292,8 @@ function openManagerForm(): void {
 /** Открыть другой проект: папка на диске — смена рабочей папки и разговоров. */
 function openProjectForm(): void {
   if (roundActive.value) return;
-  openForm('Открыть проект', [
-    { key: 'path', label: 'Путь к папке проекта (или имя из списка)' },
+  openForm(tr('Открыть проект'), [
+    { key: 'path', label: tr('Путь к папке проекта (или имя из списка)') },
   ], (v) => {
     const path = String(v.path ?? '').trim();
     if (path) rpcReport(rpc('project.open', { path }));
@@ -298,25 +306,25 @@ function switchProject(p: ProjectRecordInfo): void {
 }
 /** Первый сервер проекта (когда список серверов ещё пуст). */
 function projectAdd(): void {
-  openForm('Новый сервер проекта', [
-    { key: 'hostName', label: 'Имя сервера (напр. prod)' },
-    { key: 'host', label: 'Хост (адрес)' },
-    { key: 'user', label: 'Пользователь (можно пропустить)' },
-    { key: 'port', label: 'Порт (можно пропустить)' },
+  openForm(tr('Новый сервер проекта'), [
+    { key: 'hostName', label: tr('Имя сервера (напр. prod)') },
+    { key: 'host', label: tr('Хост (адрес)') },
+    { key: 'user', label: tr('Пользователь (можно пропустить)') },
+    { key: 'port', label: tr('Порт (можно пропустить)') },
   ], (v) => rpcReport(rpc('project.host.add', v)));
 }
 function projectHostAdd(p: ProjectInfo): void {
   if (roundActive.value) return;
-  openForm(`Сервер проекта «${p.id}»`, [
-    { key: 'hostName', label: 'Имя сервера (напр. prod)' },
-    { key: 'host', label: 'Хост (адрес)' },
-    { key: 'user', label: 'Пользователь (можно пропустить)' },
-    { key: 'port', label: 'Порт (можно пропустить)' },
+  openForm(tr('Сервер проекта «{id}»', { id: p.id }), [
+    { key: 'hostName', label: tr('Имя сервера (напр. prod)') },
+    { key: 'host', label: tr('Хост (адрес)') },
+    { key: 'user', label: tr('Пользователь (можно пропустить)') },
+    { key: 'port', label: tr('Порт (можно пропустить)') },
   ], (v) => rpcReport(rpc('project.host.add', { id: p.id, ...v })));
 }
 function projectHostDelete(p: ProjectInfo, h: ProjectHost): void {
   if (roundActive.value) return;
-  askDelete(`сервер «${h.name}» проекта «${p.id}»`, () => rpcReport(rpc('project.host.delete', { name: h.name })));
+  askDelete(tr('сервер «{name}» проекта «{id}»', { name: h.name, id: p.id }), () => rpcReport(rpc('project.host.delete', { name: h.name })));
 }
 
 // ── расписание ───────────────────────────────────────────────────────────────
@@ -328,9 +336,9 @@ function refreshSchedule(): Promise<void> {
 function openScheduleForm(fromSection: boolean): void {
   if (roundActive.value) return;
   if (fromSection) void refreshSchedule();
-  openForm('Задача по расписанию', [
-    { key: 'message', label: 'Задание (уйдёт в чат как сообщение)' },
-    { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
+  openForm(tr('Задача по расписанию'), [
+    { key: 'message', label: tr('Задание (уйдёт в чат как сообщение)') },
+    { key: 'intervalMinutes', label: tr('Каждые N минут'), value: '10' },
   ], (v) => {
     rpc('schedule.add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
       .then(() => { if (fromSection) void refreshSchedule(); })
@@ -341,7 +349,7 @@ function scheduleToggle(t: ScheduleTaskInfo): void {
   rpc('schedule.toggle', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 function scheduleDelete(t: ScheduleTaskInfo): void {
-  askDelete(`задача «${t.message.slice(0, 40)}»`, () =>
+  askDelete(tr('задача «{msg}»', { msg: t.message.slice(0, 40) }), () =>
     rpc('schedule.delete', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`)));
 }
 
@@ -350,8 +358,8 @@ function openSessionRename(i: number): void {
   if (roundActive.value) return;
   const meta = sessions.value[i - 1];
   if (!meta) return;
-  openForm(`Переименовать «${meta.title}»`, [
-    { key: 'name', label: 'Новое имя (пусто — менеджер придумает)', value: meta.title },
+  openForm(tr('Переименовать «{title}»', { title: meta.title }), [
+    { key: 'name', label: tr('Новое имя (пусто — менеджер придумает)'), value: meta.title },
   ], (v) => {
     // session.rename правит ТЕКУЩИЙ разговор — сначала открываем выбранный
     rpcReport(rpc('session.open', { n: i }).then(() => rpc('session.rename', { name: v.name })));
@@ -366,7 +374,7 @@ function openSession(i: number): void {
   if (!roundActive.value) rpc('session.open', { n: i }).catch(() => {});
 }
 function deleteSession(i: number, title: string): void {
-  askDelete(`разговор «${title}»`, () => rpcReport(rpc('session.delete', { n: i })));
+  askDelete(tr('разговор «{title}»', { title }), () => rpcReport(rpc('session.delete', { n: i })));
 }
 
 // ── сворачивание секций (localStorage) ───────────────────────────────────────
@@ -400,7 +408,7 @@ async function onImportFile(e: Event): Promise<void> {
   try {
     const b64 = await fileToBase64(f);
     send({ type: importKind === 'home' ? 'import_home' : 'import_session', dataB64: b64 });
-    addFeed('notice', `· Импорт ${importKind === 'home' ? 'настроек' : 'разговора'} из ${f.name}…`);
+    addFeed('notice', `· ${tr(importKind === 'home' ? 'Импорт настроек из {file}…' : 'Импорт разговора из {file}…', { file: f.name })}`);
   } catch (err) {
     addFeed('error', `✗ ${(err as Error).message}`);
   }
@@ -426,8 +434,8 @@ async function onAttachFile(e: Event): Promise<void> {
   try {
     const b64 = await fileToBase64(f);
     roundActive.value = true;
-    send({ type: 'file', name: f.name, dataB64: b64, text: `посмотрите файл ${f.name}` });
-    addFeed('notice', `· 📎 ${f.name} (${f.size} Б) — отправлен команде`);
+    send({ type: 'file', name: f.name, dataB64: b64, text: tr('посмотрите файл {file}', { file: f.name }) });
+    addFeed('notice', `· 📎 ${f.name} (${f.size} ${tr('Б')}) — ${tr('отправлен команде')}`);
   } catch (err) {
     addFeed('error', `✗ ${(err as Error).message}`);
   }
@@ -470,7 +478,7 @@ function sendUserMessage(): void {
     // команда: исполняет ядро, отчёты придут notice-событиями в журнал
     send({ type: 'command', text });
   } else {
-    messages.push({ authorId: 'user', authorName: profile.value?.name ?? 'Вы', text, ts: Date.now() });
+    messages.push({ authorId: 'user', authorName: profile.value?.name ?? tr('Вы'), text, ts: Date.now() });
     send({ type: 'user_message', text });
   }
 }
@@ -499,10 +507,10 @@ type CompletionData = NonNullable<typeof completionData.value>;
 
 function mentionItems(d: CompletionData): HintItem[] {
   return [
-    { label: d.managerName, hint: 'менеджер переговорки', insert: d.managerName + ' ' },
+    { label: d.managerName, hint: tr('менеджер переговорки'), insert: d.managerName + ' ' },
     ...d.team.filter((a) => a.inChat)
       .map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
-    { label: 'session', hint: 'конспект другого разговора', insert: 'session ' },
+    { label: 'session', hint: tr('конспект другого разговора'), insert: 'session ' },
   ];
 }
 
@@ -608,7 +616,7 @@ function argHintItems(op: OpHint, argPos: number, d: CompletionData): HintItem[]
   if (argName === 'кого|shared') {
     return [
       ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
-      { label: 'shared', hint: 'общая память', insert: 'shared ' },
+      { label: 'shared', hint: tr('общая память'), insert: 'shared ' },
     ];
   }
   if (argName === 'id' && op.cmd.startsWith('/provider')) {
@@ -683,40 +691,40 @@ onMounted(connectWs);
     <span
       v-if="profile?.name"
       class="badge clickable"
-      :title="`${profile.name}${profile.role ? ` · ${profile.role}` : ''} — клик: настройки`"
+      :title="`${profile.name}${profile.role ? ` · ${profile.role}` : ''} — ${tr('клик: настройки')}`"
       @click="openUserProfileForm()"
     >👤 {{ profile.name }}</span>
     <span
       v-if="manager?.name"
       class="badge clickable"
-      :title="`${manager.name} (${manager.provider}) — клик: настройки менеджера`"
+      :title="`${manager.name} (${manager.provider}) — ${tr('клик: настройки менеджера')}`"
       @click="openManagerForm()"
     >{{ manager.emoji ?? '🛎' }} {{ manager.name }}</span>
-    <button class="tb-btn" title="Настройки" @click="openSettingsForm()">⚙</button>
-    <button class="tb-btn" title="Экспорт дома (настройки + история, без .env)" @click="exportHome">⬇</button>
-    <button class="tb-btn" title="Импорт дома из zip" @click="pickImport('home')">⬆</button>
+    <button class="tb-btn" :title="tr('Настройки')" @click="openSettingsForm()">⚙</button>
+    <button class="tb-btn" :title="tr('Экспорт дома (настройки + история, без .env)')" @click="exportHome">⬇</button>
+    <button class="tb-btn" :title="tr('Импорт дома из zip')" @click="pickImport('home')">⬆</button>
     <input ref="importFileEl" type="file" accept=".zip" class="hidden" @change="onImportFile">
     <span class="spacer"></span>
     <span class="conn" :class="{ on: conn === 'on', off: conn !== 'on' }">
-      {{ conn === 'on' ? 'на связи' : conn === 'off' ? 'отключено — переподключаюсь…' : 'подключение…' }}
+      {{ conn === 'on' ? tr('на связи') : conn === 'off' ? tr('отключено — переподключаюсь…') : tr('подключение…') }}
     </span>
-    <button v-if="logoutVisible" class="tb-btn" title="Забыть токен доступа на этом устройстве" @click="logout">Выйти</button>
+    <button v-if="logoutVisible" class="tb-btn" :title="tr('Забыть токен доступа на этом устройстве')" @click="logout">{{ tr('Выйти') }}</button>
   </header>
 
   <!-- ── доступ по токену ────────────────────────────────────────────────── -->
   <div v-if="authNeeded" id="auth">
     <div class="auth-box">
-      <h2>Доступ к Dream Team</h2>
-      <p class="dim">Введите токен доступа (TOKEN из ~/.dreamteam/.env сервера).</p>
+      <h2>{{ tr('Доступ к Dream Team') }}</h2>
+      <p class="dim">{{ tr('Введите токен доступа (TOKEN из ~/.dreamteam/.env сервера).') }}</p>
       <input
         v-model="authToken"
         type="password"
-        placeholder="токен"
+        :placeholder="tr('токен')"
         autocomplete="current-password"
         @keydown.enter="doAuth"
       >
       <div v-if="authError" class="errline">{{ authError }}</div>
-      <button @click="doAuth">Войти</button>
+      <button @click="doAuth">{{ tr('Войти') }}</button>
     </div>
   </div>
 
@@ -725,31 +733,31 @@ onMounted(connectWs);
     <aside id="sidebar">
       <section class="side-sec" :class="{ collapsed: collapsed.has('sessions') }" data-sec="sessions">
         <div class="side-head" @click="toggleSec('sessions')">
-          <span class="sec-toggle" title="Свернуть/развернуть">▾</span>
-          <span class="sec-name">Сессии</span>
-          <button class="sec-add" title="Новый разговор" @click.stop="newSession">＋</button>
+          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <span class="sec-name">{{ tr('Сессии') }}</span>
+          <button class="sec-add" :title="tr('Новый разговор')" @click.stop="newSession">＋</button>
         </div>
         <div class="sec-btns">
-          <button title="Экспорт текущего разговора в zip" @click="exportSession">⬇ сессия</button>
-          <button title="Импорт разговора из zip" @click="pickImport('session')">⬆ импорт</button>
+          <button :title="tr('Экспорт текущего разговора в zip')" @click="exportSession">⬇ {{ tr('сессия') }}</button>
+          <button :title="tr('Импорт разговора из zip')" @click="pickImport('session')">⬆ {{ tr('импорт') }}</button>
         </div>
         <ul id="sessions">
           <li
             v-for="(s, i) in sessions"
             :key="s.id"
             :class="{ active: s.id === currentSessionId }"
-            :title="`${s.title}\nid: ${s.id}\nсообщений: ${s.count}\nсоздан: ${fmtDate(s.createdAt)}\nпоследнее сообщение: ${fmtDate(s.updatedAt)}`"
+            :title="`${s.title}\nid: ${s.id}\n${tr('сообщений:')} ${s.count}\n${tr('создан:')} ${fmtDate(s.createdAt)}\n${tr('последнее сообщение:')} ${fmtDate(s.updatedAt)}`"
             @click="openSession(i + 1)"
             @contextmenu.prevent="ctxSession($event, i + 1, s.title)"
           >
             <div class="content">
               <div class="sess-main"><span>{{ s.title }}</span></div>
-              <div class="sub">создан {{ fmtDate(s.createdAt) }}</div>
-              <div class="sub">последнее {{ fmtDate(s.updatedAt) }}</div>
+              <div class="sub">{{ tr('создан') }} {{ fmtDate(s.createdAt) }}</div>
+              <div class="sub">{{ tr('последнее') }} {{ fmtDate(s.updatedAt) }}</div>
             </div>
             <span
               v-if="s.id !== currentSessionId"
-              class="del" title="Удалить разговор"
+              class="del" :title="tr('Удалить разговор')"
               @click.stop="deleteSession(i + 1, s.title)"
             >✕</span>
           </li>
@@ -758,100 +766,100 @@ onMounted(connectWs);
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('team') }" data-sec="team">
         <div class="side-head" @click="toggleSec('team')">
-          <span class="sec-toggle" title="Свернуть/развернуть">▾</span>
-          <span class="sec-name">Команда</span>
-          <button class="sec-add" title="Новый агент" @click.stop="openAgentCreate">＋</button>
+          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <span class="sec-name">{{ tr('Команда') }}</span>
+          <button class="sec-add" :title="tr('Новый агент')" @click.stop="openAgentCreate">＋</button>
         </div>
         <div v-if="teamError" class="errline side-err">agents.json: {{ teamError }}</div>
         <ul id="team">
           <li
             v-for="a in team"
             :key="a.id"
-            :title="`${a.inChat ? 'Вывести из чата' : 'Позвать в чат'} · правая кнопка — изменить/удалить`"
+            :title="`${a.inChat ? tr('Вывести из чата') : tr('Позвать в чат')} · ${tr('правая кнопка — изменить/удалить')}`"
             @click="toggleChat(a)"
             @contextmenu.prevent="ctxTeam($event, a)"
           >
             <div class="content">
               <div class="sess-main">
                 <span>{{ a.emoji }} {{ a.name }}</span>
-                <span class="tag" :class="{ in: a.inChat }">{{ a.inChat ? 'в чате' : '＋ чат' }}</span>
+                <span class="tag" :class="{ in: a.inChat }">{{ a.inChat ? tr('в чате') : '＋ ' + tr('чат') }}</span>
               </div>
               <div class="sub">{{ a.role ?? '' }}</div>
             </div>
-            <span class="del" title="Удалить агента" @click.stop="delAgent(a)">✕</span>
+            <span class="del" :title="tr('Удалить агента')" @click.stop="delAgent(a)">✕</span>
           </li>
         </ul>
       </section>
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('providers') }" data-sec="providers">
         <div class="side-head" @click="toggleSec('providers')">
-          <span class="sec-toggle" title="Свернуть/развернуть">▾</span>
-          <span class="sec-name">Провайдеры</span>
-          <button class="sec-add" title="Новый провайдер" @click.stop="providerCreate">＋</button>
+          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <span class="sec-name">{{ tr('Провайдеры') }}</span>
+          <button class="sec-add" :title="tr('Новый провайдер')" @click.stop="providerCreate">＋</button>
         </div>
         <ul id="providers">
           <li
             v-for="p in providers"
             :key="p.id"
-            :title="(p.isDefault ? 'Провайдер по умолчанию' : 'Сделать основным (для агентов)')
-              + (p.isDefault ? '' : ' · клик — сделать основным · правая кнопка — изменить/удалить')
-              + (p.ok ? '' : ` · проблема: ${p.note ?? ''}`)"
+            :title="(p.isDefault ? tr('Провайдер по умолчанию') : tr('Сделать основным (для агентов)'))
+              + (p.isDefault ? '' : ` · ${tr('клик — сделать основным')} · ${tr('правая кнопка — изменить/удалить')}`)
+              + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)"
             @click="setProvider(p)"
             @contextmenu.prevent="ctxProvider($event, p)"
           >
             <div class="content">
               <div class="sess-main">
                 <span>{{ p.ok ? '●' : '○' }} {{ p.id }}</span>
-                <span v-if="p.isDefault" class="tag in">основной</span>
+                <span v-if="p.isDefault" class="tag in">{{ tr('основной') }}</span>
               </div>
               <div class="sub">{{ p.model ?? p.kind ?? '' }}{{ p.ok ? '' : ` · ${p.note ?? ''}` }}</div>
             </div>
-            <span v-if="!p.isDefault" class="del" title="Удалить провайдера" @click.stop="delProvider(p)">✕</span>
+            <span v-if="!p.isDefault" class="del" :title="tr('Удалить провайдера')" @click.stop="delProvider(p)">✕</span>
           </li>
         </ul>
       </section>
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('schedule') }" data-sec="schedule">
         <div class="side-head" @click="toggleSec('schedule')">
-          <span class="sec-toggle" title="Свернуть/развернуть">▾</span>
-          <span class="sec-name">Расписание</span>
-          <button class="sec-add" title="Новая задача" @click.stop="openScheduleForm(true)">＋</button>
+          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <span class="sec-name">{{ tr('Расписание') }}</span>
+          <button class="sec-add" :title="tr('Новая задача')" @click.stop="openScheduleForm(true)">＋</button>
         </div>
         <ul id="schedule-list">
-          <li class="static" title="Добавить задачу по расписанию" @click="openScheduleForm(false)">
-            <span class="tag">＋ задача</span>
+          <li class="static" :title="tr('Добавить задачу по расписанию')" @click="openScheduleForm(false)">
+            <span class="tag">＋ {{ tr('задача') }}</span>
           </li>
           <li
             v-for="t in scheduleTasks"
             :key="t.id"
-            :title="`${t.message} — каждые ${t.intervalMinutes} мин · клик — пауза/пуск · правая кнопка — удалить`"
+            :title="`${t.message} — ${tr('каждые {n} мин', { n: t.intervalMinutes })} · ${tr('клик — пауза/пуск')} · ${tr('правая кнопка — удалить')}`"
             @click="scheduleToggle(t)"
             @contextmenu.prevent="ctxSchedule($event, t)"
           >
             <span class="tag" :class="{ in: t.enabled }">{{ t.enabled ? '▶' : '⏸' }}</span>
-            <span class="meta">{{ t.intervalMinutes }} мин</span>
+            <span class="meta">{{ t.intervalMinutes }} {{ tr('мин') }}</span>
             <span>{{ t.message.slice(0, 40) }}</span>
-            <span class="del" title="Удалить задачу" @click.stop="scheduleDelete(t)">✕</span>
+            <span class="del" :title="tr('Удалить задачу')" @click.stop="scheduleDelete(t)">✕</span>
           </li>
         </ul>
       </section>
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('projects') }" data-sec="projects">
         <div class="side-head" @click="toggleSec('projects')">
-          <span class="sec-toggle" title="Свернуть/развернуть">▾</span>
-          <span class="sec-name">Проекты</span>
-          <button class="sec-add" title="Открыть проект (папка)" @click.stop="openProjectForm">📂</button>
-          <button class="sec-add" title="Новый сервер проекта" @click.stop="projectAdd">＋</button>
+          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <span class="sec-name">{{ tr('Проекты') }}</span>
+          <button class="sec-add" :title="tr('Открыть проект (папка)')" @click.stop="openProjectForm">📂</button>
+          <button class="sec-add" :title="tr('Новый сервер проекта')" @click.stop="projectAdd">＋</button>
         </div>
         <ul id="projects">
-          <li class="proj-current" data-project-current title="Текущий проект — папка, где запущен сервер">
+          <li class="proj-current" data-project-current :title="tr('Текущий проект — папка, где запущен сервер')">
             <span>📁 {{ currentProject?.name ?? '—' }}</span><span class="meta">{{ currentProject?.path }}</span>
           </li>
           <li
             v-for="p in knownProjects.filter((k) => k.path !== currentProject?.path)"
             :key="p.path"
             class="proj-row"
-            :title="p.path + ' — переключиться'"
+            :title="p.path + ' — ' + tr('переключиться')"
             @click.stop="switchProject(p)"
           >
             <span>{{ p.name }}</span><span class="meta">{{ p.path }}</span>
@@ -863,8 +871,8 @@ onMounted(connectWs);
             @contextmenu.prevent="ctxHost($event, ph.p, ph.h)"
           >
             <span>{{ ph.p.id }}</span><span class="meta">{{ ph.h.name }}: {{ ph.h.host }}</span>
-            <span class="del" title="Добавить сервер в проект" @click.stop="projectHostAdd(ph.p)">＋</span>
-            <span class="del" title="Удалить сервер" @click.stop="projectHostDelete(ph.p, ph.h)">✕</span>
+            <span class="del" :title="tr('Добавить сервер в проект')" @click.stop="projectHostAdd(ph.p)">＋</span>
+            <span class="del" :title="tr('Удалить сервер')" @click.stop="projectHostDelete(ph.p, ph.h)">✕</span>
           </li>
         </ul>
       </section>
@@ -909,28 +917,28 @@ onMounted(connectWs);
       <div v-if="confirmDialog.show" id="confirm" class="panel">
         <div>
           <b :style="{ color: colorOf(confirmDialog.whoColor) }">{{ confirmDialog.whoEmoji }} {{ confirmDialog.whoName }}</b>
-          просит разрешение: {{ confirmDialog.label }}
+          {{ tr('просит разрешение:') }} {{ confirmDialog.label }}
         </div>
         <div class="dim">{{ confirmDialog.desc }}</div>
         <div class="row">
-          <button class="ok" @click="answerConfirm(true)">✓ Разрешить</button>
-          <button class="bad" @click="answerConfirm(false)">✗ Отказать</button>
+          <button class="ok" @click="answerConfirm(true)">✓ {{ tr('Разрешить') }}</button>
+          <button class="bad" @click="answerConfirm(false)">✗ {{ tr('Отказать') }}</button>
         </div>
       </div>
 
       <div v-if="chooseDialog.show" id="choose" class="panel">
-        <div class="side-head">Какой разговор приложить?</div>
+        <div class="side-head">{{ tr('Какой разговор приложить?') }}</div>
         <ul id="choose-list">
           <li v-for="(it, i) in chooseDialog.items" :key="i" @click="answerChoose(i)">
-            {{ i + 1 }}. {{ it.title }} <span class="dim">— {{ it.count }} сообщ.</span>
+            {{ i + 1 }}. {{ it.title }} <span class="dim">— {{ tr('{n} сообщ.', { n: it.count }) }}</span>
           </li>
         </ul>
-        <div class="row"><button @click="answerChoose(null)">Никакой</button></div>
+        <div class="row"><button @click="answerChoose(null)">{{ tr('Никакой') }}</button></div>
       </div>
 
       <div id="statusbar" :class="{ hidden: !statusVisible }">
         <span id="busy-label">{{ busyText }}</span>
-        <button v-show="roundActive" id="btn-abort" title="Прервать раунд (Esc в терминале)" @click="abortRound">⏹ Прервать</button>
+        <button v-show="roundActive" id="btn-abort" :title="tr('Прервать раунд (Esc в терминале)')" @click="abortRound">⏹ {{ tr('Прервать') }}</button>
         <button
           id="btn-auto"
           :class="{ in: autoMode }"
@@ -938,7 +946,7 @@ onMounted(connectWs);
             ? `Автономный режим вкл (осталось ${autoLeft} ходов). Клик — выключить.`
             : 'Автономный режим: агенты решают вопросы сами. Клик — включить.'"
           @click="toggleAuto"
-        >🤖 Авто{{ autoMode ? ` (${autoLeft})` : '' }}</button>
+        >🤖 {{ tr('Авто') }}{{ autoMode ? ` (${autoLeft})` : '' }}</button>
       </div>
 
       <div v-if="hintActive" id="hints">
@@ -960,19 +968,19 @@ onMounted(connectWs);
       </div>
 
       <div id="inputrow">
-        <button id="btn-attach" title="Прикрепить файл (положится в inbox проекта)" @click="pickAttach">📎</button>
+        <button id="btn-attach" :title="tr('Прикрепить файл (положится в inbox проекта)')" @click="pickAttach">📎</button>
         <input ref="attachFileEl" type="file" class="hidden" @change="onAttachFile">
         <textarea
           id="input"
           ref="inputEl"
           v-model="draft"
           rows="1"
-          placeholder="Напишите команде… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику, /help — команды)"
+          :placeholder="tr('Напишите команде… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику, /help — команды)')"
           @keydown="onInputKey"
           @input="autosize(); updateHints()"
           @click="updateHints"
         ></textarea>
-        <button id="btn-send" title="Отправить" :disabled="roundActive" @click="sendUserMessage">➤</button>
+        <button id="btn-send" :title="tr('Отправить')" :disabled="roundActive" @click="sendUserMessage">➤</button>
       </div>
     </section>
   </main>
@@ -989,8 +997,8 @@ onMounted(connectWs);
       </div>
       <div v-if="modal.error" class="errline">{{ modal.error }}</div>
       <div class="row">
-        <button @click="submitForm">Сохранить</button>
-        <button @click="closeForm">Отмена</button>
+        <button @click="submitForm">{{ tr('Сохранить') }}</button>
+        <button @click="closeForm">{{ tr('Отмена') }}</button>
       </div>
     </div>
   </div>
@@ -1006,11 +1014,11 @@ onMounted(connectWs);
   <!-- ── подтверждение удаления ──────────────────────────────────────────────── -->
   <div v-if="delConfirm.show" id="modal" @click.self="answerDelete(false)">
     <div class="modal-box">
-      <h2>Вы точно хотите удалить запись?</h2>
+      <h2>{{ tr('Вы точно хотите удалить запись?') }}</h2>
       <p class="confirm-subject">{{ delConfirm.subject }}</p>
       <div class="row">
-        <button class="bad" @click="answerDelete(true)">Да</button>
-        <button @click="answerDelete(false)">Нет</button>
+        <button class="bad" @click="answerDelete(true)">{{ tr('Да') }}</button>
+        <button @click="answerDelete(false)">{{ tr('Нет') }}</button>
       </div>
     </div>
   </div>

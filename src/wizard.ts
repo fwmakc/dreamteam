@@ -19,6 +19,7 @@ import { PassThrough } from 'node:stream';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
+import { applyLocale, knownLanguages, t, tf } from './i18n.js';
 import { DT_HOME, DT_PROJECT, WORKSPACE } from './paths.js';
 
 /** Куда мастер читает вопросы и пишет ответы (в пробах — потоки, не TTY). */
@@ -48,7 +49,7 @@ function makeAsk(io: WizardIo) {
       const a = await ask(prompt);
       if (!a) return fallback;
       if (allowed.includes(a)) return a;
-      io.output.write(pc.yellow(`  скажи один из: ${allowed.join(', ')}\n`));
+      io.output.write(pc.yellow(`  ${t('скажи один из:')} ${allowed.join(', ')}\n`));
     }
   };
 
@@ -89,46 +90,64 @@ function writeEnvKey(file: string, name: string, value: string): void {
   writeFileSync(file, lines.join('\n'), { mode: 0o600 });
 }
 
-/** Мастер: тип провайдера → параметры → providers.json (+ ключ в .env дома). */
+/** Мастер: язык интерфейса → тип провайдера → параметры → providers.json (+ ключ в .env дома). */
 export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promise<string[]> {
   const providersFile = join(homeDir, 'providers.json');
   const envFile = join(homeDir, '.env');
+  const settingsFile = join(homeDir, 'settings.json');
   const { ask, askChoice, askSecret, close } = makeAsk(io);
   const notes: string[] = [];
   try {
     io.output.write(pc.bold('\n  Первый запуск: настроим провайдера — без него команде нечем говорить.\n\n'));
-    io.output.write('  Тип провайдера:\n');
-    io.output.write('  1 — OpenAI-совместимый API (Z.ai GLM, OpenAI, OpenRouter, DeepSeek, Ollama…)\n');
-    io.output.write('  2 — Anthropic (Claude)\n');
-    io.output.write('  3 — GigaChat\n');
-    io.output.write("  4 — mock — без API, заготовленные ответы (посмотреть, как всё работает)\n");
-    const pick = await askChoice('  Выбор [1]: ', ['1', '2', '3', '4'], '1');
+    // Язык интерфейса — первый вопрос, и сам он на трёх встроенных языках:
+    // дальше мастер (и всё приложение) говорит на выбранном.
+    io.output.write('  Язык интерфейса / Interface language / 界面语言:\n');
+    for (const l of knownLanguages(homeDir)) {
+      io.output.write(`  · ${l.id} — ${l.name}${l.builtIn ? '' : ` (${join(homeDir, 'lang', l.id + '.json')})`}\n`);
+    }
+    const lang = await askChoice('  Language [en]: ', knownLanguages(homeDir).map((l) => l.id), 'en');
+    applyLocale(lang, homeDir);
+    // выбранный язык — в settings.json (его ensureHome скаффолдил раньше мастера)
+    try {
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf8')) as Record<string, unknown>;
+      settings.ui = lang;
+      writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+    } catch {
+      // settings.json нет/не читается — loadSettings ниже разберётся громко
+    }
+
+    io.output.write(`\n  ${t('Тип провайдера:')}\n`);
+    io.output.write(`  1 — ${t('OpenAI-совместимый API (Z.ai GLM, OpenAI, OpenRouter, DeepSeek, Ollama…)')}\n`);
+    io.output.write(`  2 — ${t('Anthropic (Claude)')}\n`);
+    io.output.write(`  3 — GigaChat\n`);
+    io.output.write(`  4 — ${t('mock — без API, заготовленные ответы (посмотреть, как всё работает)')}\n`);
+    const pick = await askChoice(`  ${t('Выбор [1]:')} `, ['1', '2', '3', '4'], '1');
 
     let id: string;
     let entry: Record<string, unknown>;
     let key = '';
     if (pick === '1') {
       id = 'main';
-      const baseUrl = await ask('  baseUrl API [https://api.openai.com/v1]: ') || 'https://api.openai.com/v1';
-      const model = await ask('  Модель [gpt-4o-mini]: ') || 'gpt-4o-mini';
-      key = await askSecret('  Ключ API (ввод скрыт; Enter — пропустить, если API локальный): ');
+      const baseUrl = await ask(`  ${t('baseUrl API [https://api.openai.com/v1]:')} `) || 'https://api.openai.com/v1';
+      const model = await ask(`  ${t('Модель [gpt-4o-mini]:')} `) || 'gpt-4o-mini';
+      key = await askSecret(`  ${t('Ключ API (ввод скрыт; Enter — пропустить, если API локальный):')} `);
       entry = { adapter: 'openai-compatible', baseUrl, model };
       if (key) entry.apiKey = key;
     } else if (pick === '2') {
       id = 'claude';
-      const model = await ask('  Модель [claude-sonnet-4-5]: ') || 'claude-sonnet-4-5';
+      const model = await ask(`  ${t('Модель [claude-sonnet-4-5]:')} `) || 'claude-sonnet-4-5';
       for (;;) {
-        key = await askSecret('  Ключ API (ввод скрыт): ');
+        key = await askSecret(`  ${t('Ключ API (ввод скрыт):')} `);
         if (key) break;
-        io.output.write(pc.yellow('  без ключа Claude отвечать не сможет — возьми его в кабинете Anthropic\n'));
+        io.output.write(pc.yellow(`  ${t('без ключа Claude отвечать не сможет — возьми его в кабинете Anthropic')}\n`));
       }
       entry = { adapter: 'anthropic', model, apiKey: key };
     } else if (pick === '3') {
       id = 'gigachat';
       for (;;) {
-        key = await askSecret('  Ключ из кабинета GigaChat (ввод скрыт): ');
+        key = await askSecret(`  ${t('Ключ из кабинета GigaChat (ввод скрыт):')} `);
         if (key) break;
-        io.output.write(pc.yellow('  без ключа GigaChat отвечать не сможет\n'));
+        io.output.write(pc.yellow(`  ${t('без ключа GigaChat отвечать не сможет')}\n`));
       }
       entry = { adapter: 'gigachat', apiKey: key };
     } else {
@@ -138,22 +157,22 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
 
     mkdirSync(homeDir, { recursive: true });
     writeFileSync(providersFile, JSON.stringify({ default: id, providers: { [id]: entry } }, null, 2) + '\n');
-    notes.push(`создал ${providersFile} (провайдер «${id}» по умолчанию)`);
+    notes.push(tf('создал {file} (провайдер «{id}» по умолчанию)', { file: providersFile, id }));
     if (key) {
-      notes.push(`ключ сохранил в ${providersFile} (поле "apiKey")`);
+      notes.push(tf('ключ сохранил в {file} (поле "apiKey")', { file: providersFile }));
     } else {
-      notes.push(`ключ не указан — провайдер будет работать в mock-режиме`);
+      notes.push(t('ключ не указан — провайдер будет работать в mock-режиме'));
     }
     // токен доступа к API (dreamteam serve): мастер генерирует сам, вручную
     // можно перегенерировать (README «Доступ извне»). Файл начинается
     // с примера, чтобы PORT/HOST были перед глазами.
     if (!existsSync(envFile)) {
       writeFileSync(envFile, readFileSync(join(SCAFFOLD_DIR, 'home', 'env.example'), 'utf8'), { mode: 0o600 });
-      notes.push(`создал ${envFile} из примера (env.example)`);
+      notes.push(tf('создал {file} из примера (env.example)', { file: envFile }));
     }
     writeEnvKey(envFile, 'TOKEN', randomBytes(32).toString('base64url'));
-    notes.push(`создал токен доступа TOKEN в ${envFile} (для dreamteam serve)`);
-    io.output.write(pc.green(`\n  Готово. Дальше — живой менеджер: спроси его «что ты умеешь?»\n`));
+    notes.push(tf('создал токен доступа TOKEN в {file} (для dreamteam serve)', { file: envFile }));
+    io.output.write(pc.green(`\n  ${t('Готово. Дальше — живой менеджер: спроси его «что ты умеешь?»')}\n`));
     return notes;
   } finally {
     close();
@@ -190,15 +209,15 @@ export function gitignoreNotice(projectDir: string = WORKSPACE): string | null {
   try {
     lines = readFileSync(gi, 'utf8').split(/\r?\n/);
   } catch {
-    return `в проекте git, но нет .gitignore — добавь строку «.dreamteam/»: в hosts.json бывают пароли серверов`;
+    return t('в проекте git, но нет .gitignore — добавь строку «.dreamteam/»: в hosts.json бывают пароли серверов');
   }
   const ignored = lines.some((l) => {
-    const t = l.trim().replace(/\/+$/, '');
-    return t && !t.startsWith('#') && (t === '.dreamteam' || t === '/.dreamteam' || t === '**/.dreamteam');
+    const tr = l.trim().replace(/\/+$/, '');
+    return tr && !tr.startsWith('#') && (tr === '.dreamteam' || tr === '/.dreamteam' || tr === '**/.dreamteam');
   });
   return ignored
     ? null
-    : `в .dreamteam бывают пароли серверов (hosts.json), а git её не игнорирует — добавь в .gitignore строку «.dreamteam/»`;
+    : t('в .dreamteam бывают пароли серверов (hosts.json), а git её не игнорирует — добавь в .gitignore строку «.dreamteam/»');
 }
 
 /** Каталог скелетов конфигов рядом с src/ — как gui/, едет с пакетом. */
@@ -222,7 +241,7 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
   if (!existsSync(settingsFile)) {
     mkdirSync(homeDir, { recursive: true });
     writeFileSync(settingsFile, JSON.stringify(readScaffold(join('home', 'settings.json')), null, 2) + '\n');
-    notes.push(`создал ${settingsFile} (язык и экран по умолчанию)`);
+    notes.push(tf('создал {file} (язык и экран по умолчанию)', { file: settingsFile }));
   }
   // команда — вещь машины: скаффолдим один раз, дальше живёт между проектами
   const agentsFile = join(homeDir, 'agents.json');
@@ -233,17 +252,25 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     const names = Array.isArray(roster)
       ? roster.map((a) => (typeof a === 'object' && a !== null && 'name' in a ? String((a as { name: unknown }).name) : '')).filter(Boolean)
       : [];
-    notes.push(`создал ${agentsFile} (${names.length > 0 ? `стартовая команда: ${names.join(', ')}` : 'пустая команда — менеджер позовёт и настроит'})`);
+    notes.push(names.length > 0
+      ? tf('создал {file} (стартовая команда: {names})', { file: agentsFile, names: names.join(', ') })
+      : tf('создал {file} (пустая команда — менеджер позовёт и настроит)', { file: agentsFile }));
   }
   const toolsDir = join(homeDir, 'tools');
   if (!existsSync(toolsDir)) {
     mkdirSync(toolsDir, { recursive: true });
-    notes.push(`создал ${toolsDir} (полка для своих тулов)`);
+    notes.push(tf('создал {file} (полка для своих тулов)', { file: toolsDir }));
+  }
+  // полка своих языков: lang/<id>.json — как tools/, только переводы
+  const langDir = join(homeDir, 'lang');
+  if (!existsSync(langDir)) {
+    mkdirSync(langDir, { recursive: true });
+    notes.push(tf('создал {file} (полка своих языков: <id>.json — { "name": "…", "translations": { … } })', { file: langDir }));
   }
   if (!existsSync(providersFile)) {
     if (!io.isTTY) {
       throw new Error(
-        `нет ${providersFile} — первый запуск проходит мастер: запусти приложение в терминале`,
+        tf('нет {file} — первый запуск проходит мастер: запусти приложение в терминале', { file: providersFile }),
       );
     }
     notes.push(...(await runWizard(io, homeDir)));
@@ -255,7 +282,7 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     const manager = readScaffold(join('home', 'manager.json'));
     manager.provider = defaultProviderOf(homeDir);
     writeFileSync(managerFile, JSON.stringify(manager, null, 2) + '\n');
-    notes.push(`создал ${managerFile} (менеджер переговорки на провайдере «${manager.provider}»)`);
+    notes.push(tf('создал {file} (менеджер переговорки на провайдере «{id}»)', { file: managerFile, id: String(manager.provider) }));
   }
   return notes;
 }
@@ -269,7 +296,7 @@ export function ensureProject(defaultProvider: string, projectDir: string = DT_P
     writeFileSync(join(projectDir, f), JSON.stringify(readScaffold(join('project', f)), null, 2) + '\n');
   }
   const notes = [
-    `создал ${projectDir} (реестры проекта: hosts.json — ssh-серверы, mails.json — почтовые ящики, messengers.json — боты; заполняются руками или через менеджера)`,
+    tf('создал {dir} (реестры проекта: hosts.json — ssh-серверы, mails.json — почтовые ящики, messengers.json — боты; заполняются руками или через менеджера)', { dir: projectDir }),
   ];
   const gi = gitignoreNotice(dirname(projectDir));
   if (gi) notes.push(gi);

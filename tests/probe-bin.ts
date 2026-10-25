@@ -53,6 +53,8 @@ check('флаги не создали дом', existsSync(home) && readdirSync(h
     join(serveDir, 'home', 'providers.json'),
     JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
   );
+  // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
+  writeFileSync(join(serveDir, 'home', 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
   const child = spawn(process.execPath, [BIN, 'serve'], {
     env: {
       ...process.env,

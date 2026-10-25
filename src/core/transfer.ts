@@ -36,6 +36,7 @@ import {
   USER_FILE,
 } from '../paths.js';
 import { loadManagerConfig, mergeTeamAgents } from '../manager.js';
+import { t, tf } from '../i18n.js';
 import type { App } from './engine.js';
 import type { Agent, Session } from '../types.js';
 
@@ -77,7 +78,7 @@ function participantIds(s: Session): Set<string> {
  *  Всей команды машины в архиве нет — карточки только у участников разговора. */
 export function sessionEntriesById(app: App, id: string): TransferEntry[] {
   const s = app.store.load(id);
-  if (!s) throw new Error(`разговор «${id}» не читается`);
+  if (!s) throw new Error(tf('разговор «{id}» не читается', { id }));
   const out: TransferEntry[] = [{ rel: 'session.json', data: Buffer.from(JSON.stringify(s, null, 2) + '\n') }];
   const wanted = participantIds(s);
   if (wanted.size === 0 || !existsSync(AGENTS_FILE)) return out;
@@ -91,7 +92,7 @@ export function sessionEntriesById(app: App, id: string): TransferEntry[] {
  *  раз — архив и его имя всегда про один и тот же разговор. */
 export function sessionEntries(app: App, n: number): TransferEntry[] {
   const meta = app.store.list()[n - 1];
-  if (!meta) throw new Error(`не нашёл разговор №${n} — см. /sessions`);
+  if (!meta) throw new Error(tf('не нашёл разговор №{n} — см. /sessions', { n }));
   return sessionEntriesById(app, meta.id);
 }
 
@@ -121,7 +122,7 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     const e = entries.find((x) => x.rel === f);
     if (!e) continue;
     writeFileSync(join(DT_HOME, f), e.data);
-    report.push(`${f} — заменён`);
+    report.push(tf('{file} — заменён', { file: f }));
   }
   mkdirSync(TOOLS_DIR, { recursive: true });
   let tools = 0;
@@ -131,7 +132,7 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     writeFileSync(join(TOOLS_DIR, name), e.data);
     tools++;
   }
-  if (tools > 0) report.push(`тулов влито: ${tools}`);
+  if (tools > 0) report.push(tf('тулов влито: {n}', { n: tools }));
   // после замены команды перечитываем память команды
   try {
     app.memory = loadTeamMemory(MEMORY_FILE);
@@ -146,16 +147,16 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
     app.defaultProviderId = loaded.defaultId;
     providerIds = loaded.providers.keys();
-    report.push('провайдеры перечитаны');
+    report.push(t('провайдеры перечитаны'));
   } catch (err) {
-    report.push(`провайдеры не перечитались (${err instanceof Error ? err.message : err})`);
+    report.push(tf('провайдеры не перечитались ({err})', { err: err instanceof Error ? err.message : String(err) }));
   }
   // manager.json заменён — менеджер в памяти перечитываем сразу, иначе он до
   // перезапуска живёт со старым именем и провайдером из прежнего дома
   try {
     app.mgr = loadManagerConfig(MANAGER_FILE, providerIds);
   } catch (err) {
-    report.push(`менеджер не перечитался (${err instanceof Error ? err.message : err})`);
+    report.push(tf('менеджер не перечитался ({err})', { err: err instanceof Error ? err.message : String(err) }));
   }
   // разговоры текущего проекта: влив по id, совпавшие заменяются. Транскрипты
   // перегенерируются при сохранении. Кривые записи пропускаем молча (в отчёте — счёт).
@@ -175,7 +176,7 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     }
   }
   if (sessions > 0) {
-    report.push(`разговоров влито: ${sessions}`);
+    report.push(tf('разговоров влито: {n}', { n: sessions }));
     if (reopened) {
       // в архиве был текущий открытый разговор: перечитываем с диска, чтобы
       // память не затёрла влитые данные при следующем сохранении
@@ -183,7 +184,7 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
       if (fresh) app.session = fresh;
     }
   }
-  return `Импорт дома выполнен: ${report.join('; ')}`;
+  return tf('Импорт дома выполнен: {report}', { report: report.join('; ') });
 }
 
 /**
@@ -195,19 +196,19 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
 export function applySessionImport(app: App, entries: TransferEntry[]): string {
   const report: string[] = [];
   const sessionEntry = entries.find((x) => x.rel === 'session.json');
-  if (!sessionEntry) throw new Error('в архиве нет session.json — это не экспорт сессии');
+  if (!sessionEntry) throw new Error(t('в архиве нет session.json — это не экспорт сессии'));
 
   let imported: Session;
   try {
     imported = JSON.parse(sessionEntry.data.toString('utf8')) as Session;
   } catch {
     // битый JSON — тот же честный отказ, что и JSON неправильной формы
-    throw new Error('session.json в архиве не похож на разговор — импорт отменён');
+    throw new Error(t('session.json в архиве не похож на разговор — импорт отменён'));
   }
   if (!imported || typeof imported !== 'object'
       || !Array.isArray(imported.messages)
       || typeof imported.title !== 'string') {
-    throw new Error('session.json в архиве не похож на разговор — импорт отменён');
+    throw new Error(t('session.json в архиве не похож на разговор — импорт отменён'));
   }
   const created = app.store.create();
   const now = Date.now();
@@ -223,7 +224,7 @@ export function applySessionImport(app: App, entries: TransferEntry[]): string {
   app.store.save(newSession);
   const list = app.store.list();
   const pos = list.findIndex((m) => m.id === newSession.id) + 1;
-  report.push(`разговор импортирован как №${pos} («${newSession.title}»)`);
+  report.push(tf('разговор импортирован как №{n} («{title}»)', { n: pos, title: newSession.title }));
 
   const agentsEntry = entries.find((x) => x.rel === 'agents.json');
   const wanted = participantIds(imported);
@@ -233,11 +234,11 @@ export function applySessionImport(app: App, entries: TransferEntry[]): string {
     const incoming = wholeTeam.filter((a) => wanted.has(a.id));
     const added = mergeTeamAgents(AGENTS_FILE, incoming);
     void loadTeam(AGENTS_FILE); // валидность после записи
-    report.push(`участников влито: ${added}`);
+    report.push(tf('участников влито: {n}', { n: added }));
   } else if (wanted.size === 0) {
-    report.push('состав разговора не указан — команда не менялась');
+    report.push(t('состав разговора не указан — команда не менялась'));
   }
-  return `Импорт сессии выполнен: ${report.join('; ')}`;
+  return tf('Импорт сессии выполнен: {report}', { report: report.join('; ') });
 }
 
 /** Пересобрать мету текущего списка (для GUI-сортировки не нужна — утилита). */

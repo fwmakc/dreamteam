@@ -21,6 +21,8 @@ writeFileSync(
   join(home, 'providers.json'),
   JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2),
 );
+// интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
 
 const { bootstrapApp } = await import('../src/core/bootstrap.js');
 const { Engine } = await import('../src/core/engine.js');

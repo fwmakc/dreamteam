@@ -87,6 +87,7 @@ import type {
   UserProfile,
 } from '../types.js';
 import type { Presenter, SpeakerRef } from './presenter.js';
+import { t, tf } from '../i18n.js';
 
 /** Общие правила агента; язык общения — из settings.json, в промт идёт как есть. */
 const commonRules = (language: string) =>
@@ -352,21 +353,21 @@ export class Engine {
     if (this.autoMode) return null;
     const list = this.app.store.list().filter((s) => s.id !== this.app.session.id);
     if (list.length === 0) {
-      this.presenter.notice('  ⚠ Других разговоров пока нет — нечего прикладывать.');
+      this.presenter.notice(t('  ⚠ Других разговоров пока нет — нечего прикладывать.'));
       return null;
     }
     if (numStr) {
       const n = Number.parseInt(numStr, 10);
       const meta = Number.isInteger(n) && n > 0 ? list[n - 1] : undefined;
       if (!meta) {
-        this.presenter.notice(`  ⚠ В списке других разговоров нет №${numStr} (см. /sessions).`);
+        this.presenter.notice(tf('  ⚠ В списке других разговоров нет №{n} (см. /sessions).', { n: numStr }));
         return null;
       }
       return this.app.store.load(meta.id);
     }
     const idx = await this.presenter.chooseSession(list.map((s) => ({ title: s.title, count: s.count })));
     if (idx === null || idx < 0 || idx >= list.length) {
-      this.presenter.notice('  … продолжаю без приложения.');
+      this.presenter.notice(t('  … продолжаю без приложения.'));
       return null;
     }
     return this.app.store.load(list[idx].id);
@@ -400,11 +401,11 @@ export class Engine {
       );
     }
     if (parts.length === 0) {
-      if (!quiet) this.presenter.notice('  ⚠ Выбранный разговор пуст.');
+      if (!quiet) this.presenter.notice(t('  ⚠ Выбранный разговор пуст.'));
       return null;
     }
 
-    const busy = quiet ? null : this.presenter.busy(`Читаю разговор «${session.title}»…`);
+    const busy = quiet ? null : this.presenter.busy(tf('Читаю разговор «{title}»…', { title: session.title }));
     try {
       let digest: string;
       if (provider.kind === 'mock') {
@@ -423,7 +424,7 @@ export class Engine {
         digest = out.trim();
       }
       if (!digest) {
-        if (!quiet) this.presenter.notice('  ⚠ Не удалось построить конспект разговора.');
+        if (!quiet) this.presenter.notice(t('  ⚠ Не удалось построить конспект разговора.'));
         return null;
       }
       session.digest = digest;
@@ -432,7 +433,7 @@ export class Engine {
       return digest;
     } catch (err) {
       if (signal?.aborted) return null; // прервано (Esc) — сообщение об этом ниже
-      if (!quiet) this.presenter.notice(`  ⚠ Не удалось прочитать разговор: ${err instanceof Error ? err.message : err}`);
+      if (!quiet) this.presenter.notice(tf('  ⚠ Не удалось прочитать разговор: {err}', { err: err instanceof Error ? err.message : String(err) }));
       return null;
     } finally {
       busy?.stop();
@@ -455,7 +456,7 @@ export class Engine {
     try {
       team = this.team();
     } catch (err) {
-      this.presenter.error(`не удалось прочитать команду: ${err instanceof Error ? err.message : err}`);
+      this.presenter.error(tf('не удалось прочитать команду: {err}', { err: err instanceof Error ? err.message : String(err) }));
       return;
     }
 
@@ -468,7 +469,7 @@ export class Engine {
       if (!this.autoMode || this.autoLeft <= 0 || signal.aborted) {
         if (this.autoMode && this.autoLeft <= 0 && this.autoMode) {
           this.autoMode = false;
-          this.presenter.notice('  🤖 автономный режим завершён: лимит ходов исчерпан (/auto on — включить снова)');
+          this.presenter.notice(t('  🤖 автономный режим завершён: лимит ходов исчерпан (/auto on — включить снова)'));
         }
         break;
       }
@@ -547,27 +548,27 @@ export class Engine {
     const moderator = this.managerProvider();
 
     // не даём контексту расти бесконечно: старые сообщения сворачиваются в конспект
-    const compressing = this.presenter.busy('Проверяю длину разговора…');
+    const compressing = this.presenter.busy(t('Проверяю длину разговора…'));
     let compressed = false;
     try {
       compressed = await compressIfNeeded(session, moderator, signal, profile.name);
     } catch (err) {
       if (signal.aborted) return;
-      this.presenter.notice(`  … не удалось сжать историю, продолжаю как есть: ${err instanceof Error ? err.message : err}`);
+      this.presenter.notice(tf('  … не удалось сжать историю, продолжаю как есть: {err}', { err: err instanceof Error ? err.message : String(err) }));
     } finally {
       compressing.stop();
     }
     if (compressed) {
       store.save(session);
-      this.presenter.notice('  … разговор длинный: старые сообщения свёрнуты в конспект (полная история — /session history и transcripts/ проекта)');
+      this.presenter.notice(t('  … разговор длинный: старые сообщения свёрнуты в конспект (полная история — /session history и transcripts/ проекта)'));
     }
 
-    const planning = this.presenter.busy('Модератор решает, кто из команды ответит…');
+    const planning = this.presenter.busy(t('Модератор решает, кто из команды ответит…'));
     let plan: PlanResult;
     const mentionedAll = findMentions(text, fullTeam);
     for (const a of mentionedAll) {
       if (!team.some((t) => t.id === a.id)) {
-        this.presenter.notice(`  ⚠ ${a.name} не в этом чате — позвать: /add ${a.name}`);
+        this.presenter.notice(tf('  ⚠ {name} не в этом чате — позвать: /add {name}', { name: a.name }));
       }
     }
     try {
@@ -592,7 +593,7 @@ export class Engine {
       this.presenter.turnHeader(turn.agent);
       const provider = this.agentProvider(turn.agent);
       const personal = memoryBlock(turn.agent, session, fullTeam, this.app.memory, profile.name);
-      const sink = this.presenter.stream(`${turn.agent.emoji} ${turn.agent.name} печатает…`);
+      const sink = this.presenter.stream(tf('{emoji} {name} печатает…', { emoji: turn.agent.emoji, name: turn.agent.name }));
       let full = '';
       let streamError: unknown = null;
       try {
@@ -625,11 +626,11 @@ export class Engine {
           await this.runToolLoop(turn.agent, full.trim(), fullTeam, profile, provider, signal);
         }
       } else if (!signal.aborted) {
-        this.presenter.notice('(пустой ответ)');
+        this.presenter.notice(t('(пустой ответ)'));
       }
     }
     if (signal.aborted) {
-      this.presenter.notice('\n  ⏹ Прервано (Esc). Ответы, которые успели появиться, сохранены в истории.');
+      this.presenter.notice(t('\n  ⏹ Прервано (Esc). Ответы, которые успели появиться, сохранены в истории.'));
       return;
     }
     // ленивые обновления памяти: максимум одна рефлексия и одно слияние за раунд
@@ -655,7 +656,7 @@ export class Engine {
     const agent = managerAsAgent(this.app.mgr);
     const provider = this.managerProvider();
     this.presenter.turnHeader(agent);
-    const busy = this.presenter.busy(`${agent.emoji} ${agent.name} разбирается…`);
+    const busy = this.presenter.busy(tf('{emoji} {name} разбирается…', { emoji: agent.emoji, name: agent.name }));
     // реестр серверов для блока состояния; не читается только если файл битый —
     // но тогда приложение не стартовало бы, так что здесь он всегда валиден
     const cfg = this.toolsConfig();
@@ -707,12 +708,12 @@ export class Engine {
       this.presenter.error(`ошибка провайдера «${provider.id}»: ${streamError instanceof Error ? streamError.message : streamError}`);
     }
     if (signal.aborted) {
-      this.presenter.notice('  ⏹ Прервано (Esc).');
+      this.presenter.notice(t('  ⏹ Прервано (Esc).'));
       return;
     }
     const reply = parseManagerReply(full);
     if (!reply.say && reply.actions.length === 0) {
-      this.presenter.notice('(менеджер молчит — пустой ответ)');
+      this.presenter.notice(t('(менеджер молчит — пустой ответ)'));
       return;
     }
     if (reply.say) this.presenter.say(reply.say);
@@ -778,11 +779,11 @@ export class Engine {
         // смена проекта — после сохранения реплики менеджера в СТАРУЮ сессию:
         // разговор принадлежит своему проекту
         const target = this.resolveProjectDir(String(action.path ?? ''));
-        if (resolve(target) === WORKSPACE) return 'Этот проект и так открыт.';
+        if (resolve(target) === WORKSPACE) return t('Этот проект и так открыт.');
         pendingSwitches.push(() => {
           this.applyProjectSwitch(target);
         });
-        return `✓ Переключаюсь на проект «${projectLabel(target)}» (${target})`;
+        return tf('✓ Переключаюсь на проект «{label}» ({path})', { label: projectLabel(target), path: target });
       }
       case 'mail.add': {
         // op и name — поля действия, не ящика: в spec не идут (валидация строга к лишним полям)
@@ -801,14 +802,14 @@ export class Engine {
         return this.sessionsListText();
       case 'session.open': {
         const meta = Number.isInteger(action.n) && action.n > 0 ? this.app.store.list()[action.n - 1] : undefined;
-        if (!meta) return `Не нашёл разговор №${action.n} — см. /sessions`;
-        if (meta.id === this.app.session.id) return `Разговор «${meta.title}» и так открыт.`;
+        if (!meta) return tf('Не нашёл разговор №{n} — см. /sessions', { n: action.n });
+        if (meta.id === this.app.session.id) return tf('Разговор «{title}» и так открыт.', { title: meta.title });
         const loaded = this.app.store.load(meta.id);
-        if (!loaded) return `Не удалось прочитать разговор «${meta.title}».`;
+        if (!loaded) return tf('Не удалось прочитать разговор «{title}».', { title: meta.title });
         pendingSwitches.push(() => {
           this.openSession(loaded);
         });
-        return `✓ Открываю разговор «${loaded.title}» (${loaded.messages.length} сообщ.)`;
+        return tf('✓ Открываю разговор «{title}» ({n} сообщ.)', { title: loaded.title, n: loaded.messages.length });
       }
       case 'session.new': {
         const title = (action.title ?? '').trim() || 'Новый разговор';
@@ -823,11 +824,11 @@ export class Engine {
           this.app.session.participants = ids.length > 0 ? ids : [MANAGER_ID];
           this.app.store.save(this.app.session);
           this.queueFlush(old);
-          this.presenter.notice(`  Новый разговор «${this.app.session.title}» (${this.app.session.id})`);
+          this.presenter.notice(tf('  Новый разговор «{title}» ({id})', { title: this.app.session.title, id: this.app.session.id }));
           const line = this.participantsLine(this.app.session);
-          if (line) this.presenter.notice(`  Участники: ${line}`);
+          if (line) this.presenter.notice(`  ${t('Участники:')} ${line}`);
         });
-        return `✓ Создаю разговор «${title}»${ids.length ? `, в чате: ${ids.join(', ')}` : ''}`;
+        return tf('✓ Создаю разговор «{title}»{chat}', { title, chat: ids.length ? tf(', в чате: {ids}', { ids: ids.join(', ') }) : '' });
       }
       case 'session.delete':
         return this.deleteSession(action.n);
@@ -839,9 +840,9 @@ export class Engine {
   /** Список разговоров текстом — для действия session.list. */
   sessionsListText(): string {
     const list = this.app.store.list();
-    if (list.length === 0) return 'Разговоров пока нет.';
+    if (list.length === 0) return t('Разговоров пока нет.');
     return list
-      .map((s, i) => `${i + 1}. ${s.title} — ${s.count} сообщ.${s.id === this.app.session.id ? ' (текущий)' : ''}`)
+      .map((s, i) => `${i + 1}. ${s.title} — ${tf('{n} сообщ.', { n: s.count })}${s.id === this.app.session.id ? ` (${t('текущий')})` : ''}`)
       .join('\n');
   }
 
@@ -854,10 +855,10 @@ export class Engine {
   /** Удаление разговора по номеру списка; текущий не удаляется. */
   deleteSession(n: number): string {
     const meta = Number.isInteger(n) && n > 0 ? this.app.store.list()[n - 1] : undefined;
-    if (!meta) return `Не нашёл разговор №${n} — см. /sessions`;
-    if (meta.id === this.app.session.id) return 'Текущий разговор удалить нельзя — сначала откройте другой.';
+    if (!meta) return tf('Не нашёл разговор №{n} — см. /sessions', { n });
+    if (meta.id === this.app.session.id) return t('Текущий разговор удалить нельзя — сначала откройте другой.');
     this.app.store.delete(meta.id);
-    return `Разговор «${meta.title}» удалён.`;
+    return tf('Разговор «{title}» удалён.', { title: meta.title });
   }
 
   // ── проекты: переключение и реестр ─────────────────────────────────────
@@ -877,7 +878,7 @@ export class Engine {
    *  хранилища: фоновое вливание должно писать в проект, где разговор жил. */
   applyProjectSwitch(dir: string): string {
     const target = resolve(dir);
-    if (target === WORKSPACE) return `Этот проект уже открыт: ${WORKSPACE}`;
+    if (target === WORKSPACE) return tf('Этот проект уже открыт: {path}', { path: WORKSPACE });
     // папка может быть новой — скаффолдим .dreamteam, как при первом запуске
     const notes = ensureProject(defaultProviderId(PROVIDERS_FILE), join(target, '.dreamteam'));
     this.queueFlush(this.app.session, this.app.store);
@@ -887,10 +888,10 @@ export class Engine {
     this.app.session = list.length > 0 ? this.app.store.load(list[0].id) ?? this.app.store.create() : this.app.store.create();
     rememberProject(PROJECTS_FILE, target, true);
     for (const note of notes) this.presenter.notice('  ' + note);
-    this.presenter.notice(`  Проект: ${WORKSPACE}`);
-    this.presenter.notice(`  Открыт разговор «${this.app.session.title}» (${this.app.session.messages.length} сообщ.)`);
+    this.presenter.notice(`  ${t('Проект:')} ${WORKSPACE}`);
+    this.presenter.notice(tf('  Открыт разговор «{title}» ({n} сообщ.)', { title: this.app.session.title, n: this.app.session.messages.length }));
     this.presenter.sessionOpened(this.app.session);
-    return `✓ Проект: ${WORKSPACE}`;
+    return tf('✓ Проект: {path}', { path: WORKSPACE });
   }
 
   /** Запомнить папку проекта в реестре без переключения (/project add). */
@@ -900,15 +901,15 @@ export class Engine {
     rememberProject(PROJECTS_FILE, dir, false);
     const label = projectLabel(dir);
     return known
-      ? `Проект «${label}» уже в реестре (${dir}).`
-      : `✓ Проект «${label}» запомнил: ${dir}. Открыть: /project open ${label}`;
+      ? tf('Проект «{label}» уже в реестре ({path}).', { label, path: dir })
+      : tf('✓ Проект «{label}» запомнил: {path}. Открыть: /project open {label}', { label, path: dir });
   }
 
   /** Забыть проект в реестре (/project remove); текущий не забывается. */
   removeProject(arg: string): string {
     const dir = this.resolveProjectDir(arg);
     forgetProject(PROJECTS_FILE, dir, WORKSPACE);
-    return `✓ Проект «${projectLabel(dir)}» забыт — файлы в ${dir} не тронуты.`;
+    return tf('✓ Проект «{label}» забыт — файлы в {path} не тронуты.', { label: projectLabel(dir), path: dir });
   }
 
   /**
@@ -923,7 +924,7 @@ export class Engine {
         ? `Вот краткое содержание разговора:\n${this.app.session.digest}`
         : this.namingContextFromMessages();
       const invented = await this.generateSessionName(`Нужно дать имя сессии.\n${context}`);
-      if (!invented) return 'Не придумал имя — назовите сами: /session rename <имя>';
+      if (!invented) return t('Не придумал имя — назовите сами: /session rename <имя>');
       return this.applySessionName(invented);
     }
     return this.applySessionName(clean.slice(0, 80) + (clean.length > 80 ? '…' : ''));
@@ -932,7 +933,7 @@ export class Engine {
   private applySessionName(title: string): string {
     this.app.session.title = title;
     this.app.store.save(this.app.session);
-    return `Разговор переименован: «${title}»`;
+    return tf('Разговор переименован: «{title}»', { title });
   }
 
   /** Первое и последние сообщения — запасной контекст, когда дайджеста ещё нет. */
@@ -945,7 +946,7 @@ export class Engine {
 
   /** Просит менеджера придумать короткое имя; неудача — null (останется прежнее). */
   private async generateSessionName(context: string): Promise<string | null> {
-    const busy = this.presenter.busy('Придумываю имя разговору…');
+    const busy = this.presenter.busy(t('Придумываю имя разговору…'));
     try {
       let full = '';
       for await (const chunk of this.managerProvider().stream({
@@ -971,7 +972,7 @@ export class Engine {
     const target = Number.isInteger(n) ? this.app.store.list()[n - 1] : undefined;
     const loaded = target ? this.app.store.load(target.id) : null;
     if (!loaded) {
-      this.presenter.notice(`  Не нашёл разговор №${arg}. Посмотрите список: /sessions`);
+      this.presenter.notice(tf('  Не нашёл разговор №{n}. Посмотрите список: /sessions', { n: arg }));
       return;
     }
     this.openSession(loaded);
@@ -984,9 +985,9 @@ export class Engine {
       this.app.session = loaded;
       this.queueFlush(old);
     }
-    this.presenter.notice(`  Открыт разговор «${loaded.title}» (${loaded.messages.length} сообщ.)`);
+    this.presenter.notice(tf('  Открыт разговор «{title}» ({n} сообщ.)', { title: loaded.title, n: loaded.messages.length }));
     const line = this.participantsLine(loaded);
-    if (line) this.presenter.notice(`  Участники: ${line}`);
+    if (line) this.presenter.notice(`  ${t('Участники:')} ${line}`);
     this.presenter.sessionOpened(loaded);
   }
 
@@ -1011,22 +1012,22 @@ export class Engine {
    *  changed — состав чата реально поменялся (только тогда это событие хроники). */
   addToChat(arg: string, fullTeam: Agent[]): { text: string; changed: boolean } {
     const agent = findAgentByArg(fullTeam, arg);
-    if (!agent) return { text: `Нет участника «${arg}» — см. /team`, changed: false };
+    if (!agent) return { text: tf('Нет участника «{name}» — см. /team', { name: arg }), changed: false };
     if (chatTeam(this.app.session, fullTeam).some((a) => a.id === agent.id)) {
-      return { text: `${agent.emoji} ${agent.name} уже в чате.`, changed: false };
+      return { text: tf('{emoji} {name} уже в чате.', { emoji: agent.emoji, name: agent.name }), changed: false };
     }
     this.app.session.participants ??= fullTeam.map((a) => a.id);
     if (!this.app.session.participants.includes(agent.id)) this.app.session.participants.push(agent.id);
     this.app.store.save(this.app.session);
-    return { text: `${agent.emoji} ${agent.name} присоединился к чату.`, changed: true };
+    return { text: tf('{emoji} {name} присоединился к чату.', { emoji: agent.emoji, name: agent.name }), changed: true };
   }
 
   /** Вывести участника из чата: общее для /out и действия менеджера chat.remove. */
   removeFromChat(arg: string, fullTeam: Agent[]): { text: string; changed: boolean } {
     const kicked = findAgentByArg(fullTeam, arg);
-    if (!kicked) return { text: `Нет участника «${arg}» — см. /team`, changed: false };
+    if (!kicked) return { text: tf('Нет участника «{name}» — см. /team', { name: arg }), changed: false };
     if (!chatTeam(this.app.session, fullTeam).some((a) => a.id === kicked.id)) {
-      return { text: `${kicked.emoji} ${kicked.name} и так не в этом чате.`, changed: false };
+      return { text: tf('{emoji} {name} и так не в этом чате.', { emoji: kicked.emoji, name: kicked.name }), changed: false };
     }
     // материализуем явный список, иначе выгон «вернул» бы всю команду
     this.app.session.participants ??= fullTeam.map((a) => a.id);
@@ -1038,8 +1039,8 @@ export class Engine {
     const alone = this.app.session.participants.length === 1 && this.app.session.participants[0] === MANAGER_ID;
     return {
       text:
-        `${kicked.emoji} ${kicked.name} покинул(а) чат. Реплики останутся в истории.` +
-        (alone ? ' Кроме менеджера в чате никого — попросите его позвать кого-нибудь.' : ''),
+        tf('{emoji} {name} покинул(а) чат. Реплики останутся в истории.', { emoji: kicked.emoji, name: kicked.name }) +
+        (alone ? ' ' + t('Кроме менеджера в чате никого — попросите его позвать кого-нибудь.') : ''),
       changed: true,
     };
   }
@@ -1060,9 +1061,9 @@ export class Engine {
       throw new Error(`не удалось сохранить ${USER_FILE}: ${err instanceof Error ? err.message : err}`);
     }
     return (
-      `Запомнил: вы — ${this.app.profile.name}` +
+      tf('Запомнил: вы — {name}', { name: this.app.profile.name }) +
       (this.app.profile.role ? ` (${this.app.profile.role})` : '') +
-      '. Команда теперь знает, кто вы.'
+      `. ${t('Команда теперь знает, кто вы.')}`
     );
   }
 
@@ -1070,7 +1071,7 @@ export class Engine {
   participantsLine(session: Session): string | null {
     if (!session.participants || session.participants.length === 0) return null;
     if (session.participants.length === 1 && session.participants[0] === MANAGER_ID) {
-      return `${this.app.mgr.emoji} ${this.app.mgr.name} — конфигурация через разговор`;
+      return tf('{emoji} {name} — конфигурация через разговор', { emoji: this.app.mgr.emoji, name: this.app.mgr.name });
     }
     try {
       const full = loadTeam(AGENTS_FILE);
@@ -1099,8 +1100,8 @@ export class Engine {
     this.app.session = this.app.store.create();
     this.app.session.participants = [MANAGER_ID];
     this.app.store.save(this.app.session);
-    this.presenter.notice(`  Новый разговор ${this.app.session.id}`);
-    this.presenter.notice(`  В чате: ${this.app.mgr.emoji} ${this.app.mgr.name} — попросите позвать кого-нибудь из команды (/team)`);
+    this.presenter.notice(tf('  Новый разговор {id}', { id: this.app.session.id }));
+    this.presenter.notice(tf('  В чате: {emoji} {name} — попросите позвать кого-нибудь из команды (/team)', { emoji: this.app.mgr.emoji, name: this.app.mgr.name }));
     this.queueFlush(old);
     await this.welcomeManager(signal);
   }
@@ -1110,7 +1111,7 @@ export class Engine {
     const session = this.app.session;
     session.participants = [MANAGER_ID];
     this.app.store.save(session);
-    this.presenter.notice(`  В чате: ${this.app.mgr.emoji} ${this.app.mgr.name} — попросите позвать кого-нибудь из команды (/team)`);
+    this.presenter.notice(tf('  В чате: {emoji} {name} — попросите позвать кого-нибудь из команды (/team)', { emoji: this.app.mgr.emoji, name: this.app.mgr.name }));
     await this.welcomeManager(signal);
   }
 
@@ -1177,7 +1178,7 @@ export class Engine {
         if (typeof verdict === 'object')
           return { ok: false, output: `отказ: shell отклонил команду «${command}»: ${verdict.deny}` };
         if (verdict === 'deny') return { ok: false, output: `отказ: shell отклонил команду «${command}»` };
-        if (verdict === 'ask' && !(await this.presenter.confirm({ label: 'Команда', desc: `команда: ${command}`, who }))) {
+        if (verdict === 'ask' && !(await this.presenter.confirm({ label: t('Команда'), desc: tf('команда: {cmd}', { cmd: command }), who }))) {
           return { ok: false, output: 'отклонено пользователем' };
         }
         const r = await executeRunAction({ kind: 'run', command, project: base.project }, cfg, signal, agent);
@@ -1227,7 +1228,7 @@ export class Engine {
       toolset = this.toolsetFor(agent, cfg, signal);
     } catch (err) {
       // кривая карточка или код тула: конфигурация чинится в файлах, раунд громко об этом скажет
-      this.presenter.notice(`  ⚠ тула не собраны: ${err instanceof Error ? err.message : err}`);
+      this.presenter.notice(tf('  ⚠ тула не собраны: {err}', { err: err instanceof Error ? err.message : String(err) }));
       return;
     }
     // виды тул-блоков, которые движок исполняет, — ровно тула агента: у него
@@ -1336,7 +1337,7 @@ export class Engine {
       }
     } catch (err) {
       if (!signal.aborted) {
-        this.presenter.notice(`  ⚠ не удалось получить продолжение: ${err instanceof Error ? err.message : err}`);
+        this.presenter.notice(tf('  ⚠ не удалось получить продолжение: {err}', { err: err instanceof Error ? err.message : String(err) }));
       }
     } finally {
       sink.done();
@@ -1384,10 +1385,10 @@ export class Engine {
         );
         session.memories = { ...session.memories, [agent.id]: { ...memory, updatedAtMsg: session.messages.length } };
         this.app.store.save(session);
-        this.presenter.notice(`  … ${agent.name} осмыслил(а) разговор — память обновлена`);
+        this.presenter.notice(tf('  … {name} осмыслил(а) разговор — память обновлена', { name: agent.name }));
       } catch (err) {
         if (!signal.aborted) {
-          this.presenter.notice(`  … не удалось обновить память ${agent.name}: ${err instanceof Error ? err.message : err}`);
+          this.presenter.notice(tf('  … не удалось обновить память {name}: {err}', { name: agent.name, err: err instanceof Error ? err.message : String(err) }));
         }
       } finally {
         busy.stop();
@@ -1411,7 +1412,7 @@ export class Engine {
           seenVersion: this.app.memory.logVersion,
         };
         saveTeamMemory(MEMORY_FILE, this.app.memory);
-        this.presenter.notice(`  … ${stale.name} освежил(а) память о других разговорах`);
+        this.presenter.notice(tf('  … {name} освежил(а) память о других разговорах', { name: stale.name }));
       } catch {
         // не критично: попробуем в следующем раунде
       }
@@ -1436,7 +1437,7 @@ export class Engine {
       && session.messages.length - session.digestAtCount < 10);
     if (fresh && session.digestInLog) return; // с прошлой выгрузки ничего нового
     if (opts.onlyIfFreshDigest && !fresh) {
-      this.presenter.notice('  Итоги этого разговора вольются в общую память позже — при следующем /new.');
+      this.presenter.notice(t('  Итоги этого разговора вольются в общую память позже — при следующем /new.'));
       return;
     }
 
@@ -1449,12 +1450,12 @@ export class Engine {
     session.digestInLog = true;
     store.save(session);
     try {
-      if (!quiet) this.presenter.notice('  Сохраняю итоги разговора в общую память команды…');
+      if (!quiet) this.presenter.notice(t('  Сохраняю итоги разговора в общую память команды…'));
       this.app.memory.shared = await mergeShared(this.app.memory.shared, session.title, digest, this.defaultProvider());
       saveTeamMemory(MEMORY_FILE, this.app.memory);
-      if (!quiet) this.presenter.notice('  … итоги влиты в общую память команды');
+      if (!quiet) this.presenter.notice(t('  … итоги влиты в общую память команды'));
     } catch (err) {
-      if (!quiet) this.presenter.notice(`  … не удалось обновить общую память: ${err instanceof Error ? err.message : err}`);
+      if (!quiet) this.presenter.notice(tf('  … не удалось обновить общую память: {err}', { err: err instanceof Error ? err.message : String(err) }));
     }
   }
 

@@ -69,6 +69,62 @@
   const colorOf = (name) => COLORS[String(name ?? '').toLowerCase()] ?? '#d7dae0';
   const norm = (s) => String(s ?? '').toLowerCase().replace(/ё/g, 'е');
 
+  // ── перевод интерфейса: словарь приходит в state.ui (русский → перевод) ──
+  function tr(s, vars) {
+    let out = (state?.ui?.strings?.[s]) ?? s;
+    if (vars) for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(String(v));
+    return out;
+  }
+
+  /** Статические надписи index.html: переписываем по таблице после каждого state. */
+  function applyStaticI18n() {
+    if (!state?.ui || state.ui.id === 'ru') return;
+    const set = (sel, attr, key, vars) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      if (attr === 'text') el.textContent = tr(key, vars);
+      else el.setAttribute(attr, tr(key, vars));
+    };
+    set('#btn-settings-top', 'title', 'Настройки');
+    set('#btn-export-home', 'title', 'Экспорт дома (настройки + история, без .env)');
+    set('#btn-import-home', 'title', 'Импорт дома из zip');
+    set('#btn-logout', 'title', 'Забыть токен доступа на этом устройстве');
+    set('#btn-logout', 'text', 'Выйти');
+    set('#auth h2', 'text', 'Доступ к Dream Team');
+    set('#auth .dim', 'text', 'Введите токен доступа (TOKEN из ~/.dreamteam/.env сервера).');
+    set('#auth-token', 'placeholder', 'токен');
+    set('#auth-enter', 'text', 'Войти');
+    document.querySelectorAll('.sec-toggle').forEach((el) => el.setAttribute('title', tr('Свернуть/развернуть')));
+    set('[data-sec="sessions"] .sec-name', 'text', 'Сессии');
+    set('[data-sec="sessions"] .sec-add', 'title', 'Новый разговор');
+    set('#btn-export-session', 'title', 'Экспорт текущего разговора в zip');
+    set('#btn-export-session', 'text', `⬇ ${tr('сессия')}`);
+    set('#btn-import-session', 'title', 'Импорт разговора из zip');
+    set('#btn-import-session', 'text', `⬆ ${tr('импорт')}`);
+    set('[data-sec="team"] .sec-name', 'text', 'Команда');
+    set('[data-sec="team"] .sec-add', 'title', 'Новый агент');
+    set('[data-sec="providers"] .sec-name', 'text', 'Провайдеры');
+    set('[data-sec="providers"] .sec-add', 'title', 'Новый провайдер');
+    set('[data-sec="schedule"] .sec-name', 'text', 'Расписание');
+    set('[data-sec="schedule"] .sec-add', 'title', 'Новая задача');
+    set('[data-sec="projects"] .sec-name', 'text', 'Проекты');
+    set('[data-sec="projects"] .sec-add', 'title', 'Новый проект');
+    set('#confirm-yes', 'text', `✓ ${tr('Разрешить')}`);
+    set('#confirm-no', 'text', `✗ ${tr('Отказать')}`);
+    set('#choose .side-head', 'text', 'Какой разговор приложить?');
+    set('#choose-cancel', 'text', 'Никакой');
+    set('#btn-abort', 'title', 'Прервать раунд (Esc в терминале)');
+    set('#btn-abort', 'text', `⏹ ${tr('Прервать')}`);
+    set('#btn-attach', 'title', 'Прикрепить файл (положится в inbox проекта)');
+    set('#input', 'placeholder', 'Напишите команде… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику, /help — команды)');
+    set('#btn-send', 'title', 'Отправить');
+    set('#modal-ok', 'text', 'Сохранить');
+    set('#modal-cancel', 'text', 'Отмена');
+    set('#del-modal h2', 'text', 'Вы точно хотите удалить запись?');
+    set('#del-yes', 'text', 'Да');
+    set('#del-no', 'text', 'Нет');
+  }
+
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
@@ -106,7 +162,7 @@
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws`);
     ws.onopen = () => {
-      connEl.textContent = 'на связи';
+      connEl.textContent = tr('на связи');
       connEl.className = 'conn on';
       send({ type: 'hello' });
     };
@@ -116,7 +172,7 @@
       dispatch(msg);
     };
     ws.onclose = () => {
-      connEl.textContent = 'отключено — переподключаюсь…';
+      connEl.textContent = tr('отключено — переподключаюсь…');
       connEl.className = 'conn off';
       retryTimer = setTimeout(connect, 1500);
     };
@@ -239,10 +295,10 @@
 
   // ── агенты: создать/удалить/настроить ─────────────────────────
   function openAgentCreate() {
-    openForm('Новый агент', [
-      { key: 'id', label: 'id (латиница, цифры, -/_)' },
-      { key: 'name', label: 'Имя' },
-      { key: 'role', label: 'Роль (можно пропустить)' },
+    openForm(tr('Новый агент'), [
+      { key: 'id', label: tr('id (латиница, цифры, -/_)') },
+      { key: 'name', label: tr('Имя') },
+      { key: 'role', label: tr('Роль (можно пропустить)') },
     ], (v) => {
       rpc('team.add', v)
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
@@ -250,12 +306,12 @@
     });
   }
   function openAgentSettings(a) {
-    openForm(`Настройки агента ${a.name}`, [
-      { key: 'role', label: 'Роль', value: a.role ?? '' },
-      { key: 'provider', label: 'Провайдер', value: a.provider ?? '' },
-      { key: 'temperature', label: 'Температура (0–2)', value: a.temperature ?? '' },
-      { key: 'prompt', label: 'Промпт', value: a.prompt ?? '' },
-      { key: 'tools', label: `Тулы через запятую (есть: ${(a.tools ?? []).join(', ') || 'нет'})` },
+    openForm(tr('Настройки агента {name}', { name: a.name }), [
+      { key: 'role', label: tr('Роль'), value: a.role ?? '' },
+      { key: 'provider', label: tr('Провайдер'), value: a.provider ?? '' },
+      { key: 'temperature', label: tr('Температура (0–2)'), value: a.temperature ?? '' },
+      { key: 'prompt', label: tr('Промпт'), value: a.prompt ?? '' },
+      { key: 'tools', label: tr('Тулы через запятую (есть: {list})', { list: (a.tools ?? []).join(', ') || tr('нет') }) },
     ], (v) => {
       const fields = {};
       for (const [k, val] of Object.entries(v)) if (val !== '' && k !== 'tools') fields[k] = k === 'temperature' ? Number(val) : val;
@@ -270,7 +326,7 @@
     });
   }
   function agentDelete(a) {
-    askDelete(`агент «${a.name}»`, () => {
+    askDelete(tr('агент «{name}»', { name: a.name }), () => {
       rpc('team.delete', { id: a.id })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
@@ -279,12 +335,12 @@
 
   // ── провайдеры: создать/удалить ───────────────────────────────
   function providerCreate() {
-    openForm('Новый провайдер', [
-      { key: 'id', label: 'id (латиница)' },
-      { key: 'adapter', label: 'Адаптер (openai-compatible / anthropic / gigachat)', value: 'openai-compatible' },
+    openForm(tr('Новый провайдер'), [
+      { key: 'id', label: tr('id (латиница)') },
+      { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat)'), value: 'openai-compatible' },
       { key: 'baseUrl', label: 'baseUrl' },
-      { key: 'model', label: 'Модель' },
-      { key: 'apiKey', label: 'Ключ API (можно пусто — для локальных API)' },
+      { key: 'model', label: tr('Модель') },
+      { key: 'apiKey', label: tr('Ключ API (можно пусто — для локальных API)') },
     ], (v) => {
       rpc('provider.add', { id: v.id, config: v })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
@@ -293,7 +349,7 @@
   }
   function providerDelete(p) {
     if (p.isDefault) return;
-    askDelete(`провайдер «${p.id}»`, () => {
+    askDelete(tr('провайдер «{id}»', { id: p.id }), () => {
       rpc('provider.delete', { id: p.id })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
@@ -304,10 +360,10 @@
   function renderSchedule(tasks) {
     scheduleListEl.innerHTML = '';
     const addLi = document.createElement('li');
-    addLi.innerHTML = '<span class="tag">＋ задача</span>';
-    addLi.onclick = () => openForm('Задача по расписанию', [
-      { key: 'message', label: 'Задание (уйдёт в чат как сообщение)' },
-      { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
+    addLi.innerHTML = `<span class="tag">＋ ${tr('задача')}</span>`;
+    addLi.onclick = () => openForm(tr('Задача по расписанию'), [
+      { key: 'message', label: tr('Задание (уйдёт в чат как сообщение)') },
+      { key: 'intervalMinutes', label: tr('Каждые N минут'), value: '10' },
     ], (v) => {
       rpc('schedule.add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
@@ -318,21 +374,21 @@
       const li = document.createElement('li');
       li.innerHTML =
         `<span class="tag ${t.enabled ? 'in' : ''}">${t.enabled ? '▶' : '⏸'}</span>` +
-        `<span class="meta">${t.intervalMinutes} мин</span>` +
+        `<span class="meta">${t.intervalMinutes} ${tr('мин')}</span>` +
         `<span>${esc(t.message.slice(0, 40))}</span>` +
-        '<span class="del" title="Удалить задачу">✕</span>';
-      li.title = `${t.message} — каждые ${t.intervalMinutes} мин · клик — пауза/пуск · правая кнопка — удалить`;
+        `<span class="del" title="${esc(tr('Удалить задачу'))}">✕</span>`;
+      li.title = `${t.message} — ${tr('каждые {n} мин', { n: t.intervalMinutes })} · ${tr('клик — пауза/пуск')} · ${tr('правая кнопка — удалить')}`;
       li.querySelector('.del').onclick = (e) => {
         e.stopPropagation();
-        askDelete(`задача «${t.message.slice(0, 40)}»`, () => {
+        askDelete(tr('задача «{msg}»', { msg: t.message.slice(0, 40) }), () => {
           rpc('schedule.delete', { id: t.id })
             .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
         });
       };
       li.oncontextmenu = (e) => openCtx(e, [
-        { label: t.enabled ? 'Пауза' : 'Запустить', fn: () => rpc('schedule.toggle', { id: t.id }) },
-        { label: 'Удалить', fn: () => {
-          askDelete(`задача «${t.message.slice(0, 40)}»`, () => {
+        { label: tr(t.enabled ? 'Пауза' : 'Запустить'), fn: () => rpc('schedule.toggle', { id: t.id }) },
+        { label: tr('Удалить'), fn: () => {
+          askDelete(tr('задача «{msg}»', { msg: t.message.slice(0, 40) }), () => {
             rpc('schedule.delete', { id: t.id })
               .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
           });
@@ -347,26 +403,27 @@
   function renderAuto() {
     const auto = state?.auto;
     const on = Boolean(auto?.mode);
-    btnAuto.textContent = on ? `🤖 Авто (${auto?.left ?? 0})` : '🤖 Авто';
+    btnAuto.textContent = on ? `🤖 ${tr('Авто')} (${auto?.left ?? 0})` : `🤖 ${tr('Авто')}`;
     btnAuto.classList.toggle('in', on);
     btnAuto.title = on
-      ? `Автономный режим вкл (осталось ${auto?.left ?? 0} ходов). Клик — выключить.`
-      : 'Автономный режим: агенты решают вопросы сами. Клик — включить.';
+      ? tr('Автономный режим вкл (осталось {n} ходов). Клик — выключить.', { n: auto?.left ?? 0 })
+      : tr('Автономный режим: агенты решают вопросы сами. Клик — включить.');
   }
 
   // ── настройки: форма правки ──────────────────────────────────
   function openSettingsForm() {
     const st = state.settings;
     if (!st) return;
-    openForm('Настройки', [
-      { key: 'language', label: 'Язык общения (russian / ru-RU / english…)', value: st.language ?? '' },
-      { key: 'autoMessage', label: 'Автоответ в автономном режиме', value: st.autoMessage ?? '' },
-      { key: 'width', label: 'Ширина экрана (40–500)', value: st.width ?? '' },
+    openForm(tr('Настройки'), [
+      { key: 'language', label: tr('Язык общения (russian / ru-RU / english…)'), value: st.language ?? '' },
+      { key: 'autoMessage', label: tr('Автоответ в автономном режиме'), value: st.autoMessage ?? '' },
+      { key: 'ui', label: tr('Язык интерфейса (ru / en / zh / свой из ~/.dreamteam/lang)'), value: state.ui?.id ?? '' },
+      { key: 'width', label: tr('Ширина экрана (40–500)'), value: st.width ?? '' },
     ], (v) => {
       const patch = {};
       for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' ? Number(val) : val;
       rpc('settings.set', { patch })
-        .then(() => addFeed('<div class="notice">· настройки сохранены</div>'))
+        .then(() => addFeed(`<div class="notice">· ${esc(tr('настройки сохранены'))}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
   }
@@ -375,10 +432,10 @@
   function openUserProfileForm() {
     const p = state.profile;
     if (!p) return;
-    openForm('Пользователь', [
-      { key: 'name', label: 'Имя', value: p.name ?? '' },
-      { key: 'role', label: 'Роль', value: p.role ?? '' },
-      { key: 'about', label: 'О себе', value: p.about ?? '' },
+    openForm(tr('Пользователь'), [
+      { key: 'name', label: tr('Имя'), value: p.name ?? '' },
+      { key: 'role', label: tr('Роль'), value: p.role ?? '' },
+      { key: 'about', label: tr('О себе'), value: p.about ?? '' },
     ], (v) => {
       rpc('profile.set', v)
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
@@ -390,11 +447,11 @@
   function openManagerForm() {
     const mgr = state.manager;
     if (!mgr) return;
-    openForm('Менеджер переговорки', [
-      { key: 'name', label: 'Имя', value: mgr.name ?? '' },
-      { key: 'emoji', label: 'Эмодзи', value: mgr.emoji ?? '' },
-      { key: 'color', label: 'Цвет (yellow/cyan/…)', value: mgr.color ?? '' },
-      { key: 'temperature', label: 'Температура (0–2)', value: mgr.temperature ?? '' },
+    openForm(tr('Менеджер переговорки'), [
+      { key: 'name', label: tr('Имя'), value: mgr.name ?? '' },
+      { key: 'emoji', label: tr('Эмодзи'), value: mgr.emoji ?? '' },
+      { key: 'color', label: tr('Цвет (yellow/cyan/…)'), value: mgr.color ?? '' },
+      { key: 'temperature', label: tr('Температура (0–2)'), value: mgr.temperature ?? '' },
     ], (v) => {
       const fields = {};
       for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
@@ -406,12 +463,12 @@
 
   // ── проекты: добавить сервер/удалить ──────────────────────────
   function projectAdd() {
-    openForm('Новый проект', [
-      { key: 'id', label: 'id проекта (латиница)' },
-      { key: 'hostName', label: 'Имя сервера (напр. prod)' },
-      { key: 'host', label: 'Хост (адрес)' },
-      { key: 'user', label: 'Пользователь (можно пропустить)' },
-      { key: 'port', label: 'Порт (можно пропустить)' },
+    openForm(tr('Новый проект'), [
+      { key: 'id', label: tr('id проекта (латиница)') },
+      { key: 'hostName', label: tr('Имя сервера (напр. prod)') },
+      { key: 'host', label: tr('Хост (адрес)') },
+      { key: 'user', label: tr('Пользователь (можно пропустить)') },
+      { key: 'port', label: tr('Порт (можно пропустить)') },
     ], (v) => {
       rpc('project.host.add', v)
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
@@ -419,7 +476,7 @@
     });
   }
   function projectHostDelete(p, h) {
-    askDelete(`сервер «${h.name}» проекта «${p.id}»`, () => {
+    askDelete(tr('сервер «{name}» проекта «{id}»', { name: h.name, id: p.id }), () => {
       rpc('project.host.delete', { name: h.name })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
@@ -465,7 +522,7 @@
         a.download = msg.name || 'dt-export.zip';
         a.click();
         URL.revokeObjectURL(url);
-        addFeed(`<div class="notice">· Экспорт готов: ${esc(msg.name)}</div>`);
+        addFeed(`<div class="notice">· ${tr('Экспорт готов: {name}', { name: msg.name })}</div>`);
         break;
       }
       case 'auth_required': {
@@ -481,7 +538,7 @@
         break;
       case 'auth_failed':
         localStorage.removeItem('dt-token');
-        showAuthForm('Неверный токен — попробуйте ещё раз.');
+        showAuthForm(tr('Неверный токен — попробуйте ещё раз.'));
         break;
       case 'state':
         roundActive = false;
@@ -490,6 +547,7 @@
         authEl.classList.add('hidden');
         renderAll();
         renderStatus();
+        applyStaticI18n();
         break;
       case 'session_opened':
         state = state ?? {};
@@ -635,7 +693,7 @@
     const who = msg.who ?? {};
     confirmTextEl.innerHTML =
       `<b style="color:${colorOf(who.color)}">${esc(who.emoji ?? '🤖')} ${esc(who.name ?? '')}</b>` +
-      ` просит разрешение: ${esc(msg.label)}`;
+      ` ${tr('просит разрешение:')} ${esc(msg.label)}`;
     confirmDescEl.textContent = msg.desc ?? '';
     confirmEl.classList.remove('hidden');
     confirmEl.dataset.id = msg.id;
@@ -651,7 +709,7 @@
     chooseListEl.innerHTML = '';
     msg.items.forEach((it, i) => {
       const li = document.createElement('li');
-      li.innerHTML = `${i + 1}. ${esc(it.title)} <span class="dim">— ${it.count} сообщ.</span>`;
+      li.innerHTML = `${i + 1}. ${esc(it.title)} <span class="dim">— ${it.count} ${tr('сообщ.')}</span>`;
       li.onclick = () => {
         send({ type: 'choose_response', id: msg.id, index: i });
         chooseEl.classList.add('hidden');
@@ -687,11 +745,11 @@
     const who = state.profile?.name;
     if (who) {
       badgeUser.innerHTML = `👤 ${esc(who)}`;
-      badgeUser.title = `${who}${state.profile?.role ? ` · ${state.profile.role}` : ''} — клик: настройки`;
+      badgeUser.title = `${who}${state.profile?.role ? ` · ${state.profile.role}` : ''} — ${tr('клик: настройки')}`;
     }
     if (state.manager?.name) {
       badgeMgr.innerHTML = `${esc(state.manager.emoji ?? '🛎')} ${esc(state.manager.name)}`;
-      badgeMgr.title = `${state.manager.name} (${state.manager.provider}) — клик: настройки менеджера`;
+      badgeMgr.title = `${state.manager.name} (${state.manager.provider}) — ${tr('клик: настройки менеджера')}`;
     }
     if (def) {
       document.title = `Dream Team — ${def.id}`;
@@ -706,14 +764,14 @@
       if (active) li.className = 'active';
       const created = new Date(s.createdAt).toLocaleString('ru-RU');
       const updated = new Date(s.updatedAt).toLocaleString('ru-RU');
-      li.title = `${s.title}\nid: ${s.id}\nсообщений: ${s.count}\nсоздан: ${created}\nпоследнее сообщение: ${updated}`;
+      li.title = `${s.title}\nid: ${s.id}\n${tr('сообщений:')} ${s.count}\n${tr('создан:')} ${created}\n${tr('последнее сообщение:')} ${updated}`;
       li.innerHTML =
         `<div class="content">` +
         `<div class="sess-main"><span>${esc(s.title)}</span></div>` +
-        `<div class="sub">создан ${esc(created)}</div>` +
-        `<div class="sub">последнее ${esc(updated)}</div>` +
+        `<div class="sub">${tr('создан')} ${esc(created)}</div>` +
+        `<div class="sub">${tr('последнее')} ${esc(updated)}</div>` +
         `</div>` +
-        (active ? '' : '<span class="del" title="Удалить разговор">✕</span>');
+        (active ? '' : `<span class="del" title="${esc(tr('Удалить разговор'))}">✕</span>`);
       li.onclick = (e) => {
         if (e.target.classList.contains('del')) {
           e.stopPropagation();
@@ -724,11 +782,11 @@
       };
       li.oncontextmenu = (e) => openCtx(e, [
         {
-          label: 'Переименовать',
+          label: tr('Переименовать'),
           fn: () => {
             if (roundActive) return;
-            openForm(`Переименовать «${esc(s.title)}»`, [
-              { key: 'name', label: 'Новое имя (пусто — менеджер придумает)', value: s.title },
+            openForm(tr('Переименовать «{name}»', { name: s.title }), [
+              { key: 'name', label: tr('Новое имя (пусто — менеджер придумает)'), value: s.title },
             ], (v) => {
               rpc('session.open', { n: i + 1 })
                 .then(() => rpc('session.rename', { name: v.name }))
@@ -737,14 +795,14 @@
             });
           },
         },
-        { label: 'Удалить', fn: () => { if (!roundActive) deleteSession(i + 1, s.title); } },
+        { label: tr('Удалить'), fn: () => { if (!roundActive) deleteSession(i + 1, s.title); } },
       ]);
       sessionsEl.appendChild(li);
     });
   }
 
   function deleteSession(n, title) {
-    askDelete(`разговор «${title}»`, () => {
+    askDelete(tr('разговор «{title}»', { title }), () => {
       rpc('session.delete', { n })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
@@ -764,14 +822,14 @@
 
     for (const a of state.team ?? []) {
       const li = document.createElement('li');
-      li.title = `${a.inChat ? 'Вывести из чата' : 'Позвать в чат'} · правая кнопка — изменить/удалить`;
+      li.title = `${a.inChat ? tr('Вывести из чата') : tr('Позвать в чат')} · ${tr('правая кнопка — изменить/удалить')}`;
       li.innerHTML =
         `<div class="content">` +
         `<div class="sess-main"><span>${esc(a.emoji)} ${esc(a.name)}</span>` +
-        `<span class="tag ${a.inChat ? 'in' : ''}">${a.inChat ? 'в чате' : '＋ чат'}</span></div>` +
+        `<span class="tag ${a.inChat ? 'in' : ''}">${a.inChat ? tr('в чате') : `＋ ${tr('чат')}`}</span></div>` +
         `<div class="sub">${esc(a.role ?? '')}</div>` +
         `</div>` +
-        '<span class="del" title="Удалить агента">✕</span>';
+        `<span class="del" title="${esc(tr('Удалить агента'))}">✕</span>`;
       li.onclick = () => {
         if (roundActive) return;
         const method = a.inChat ? 'chat.remove' : 'chat.add';
@@ -784,8 +842,8 @@
         if (!roundActive) agentDelete(a);
       };
       li.oncontextmenu = (e) => openCtx(e, [
-        { label: 'Изменить', fn: () => openAgentSettings(a) },
-        { label: 'Удалить', fn: () => { if (!roundActive) agentDelete(a); } },
+        { label: tr('Изменить'), fn: () => openAgentSettings(a) },
+        { label: tr('Удалить'), fn: () => { if (!roundActive) agentDelete(a); } },
       ]);
       teamEl.appendChild(li);
     }
@@ -795,24 +853,24 @@
     providersEl.innerHTML = '';
     for (const p of state.providers ?? []) {
       const li = document.createElement('li');
-      li.title = (p.isDefault ? 'Провайдер по умолчанию' : 'Сделать основным (для агентов)')
-        + (p.isDefault ? '' : ' · клик — сделать основным · правая кнопка — изменить/удалить');
+      li.title = (p.isDefault ? tr('Провайдер по умолчанию') : tr('Сделать основным (для агентов)'))
+        + (p.isDefault ? '' : ` · ${tr('клик — сделать основным')} · ${tr('правая кнопка — изменить/удалить')}`);
       li.innerHTML =
         `<div class="content">` +
         `<div class="sess-main"><span>${p.ok ? '●' : '○'} ${esc(p.id)}</span>` +
-        (p.isDefault ? '<span class="tag in">основной</span>' : '') + `</div>` +
+        (p.isDefault ? `<span class="tag in">${tr('основной')}</span>` : '') + `</div>` +
         `<div class="sub">${esc(p.model ?? p.kind ?? '')}${p.ok ? '' : ` · ${esc(p.note ?? '')}`}</div>` +
         `</div>` +
-        (p.isDefault ? '' : '<span class="del" title="Удалить провайдера">✕</span>');
-      if (!p.ok) li.title += ` · проблема: ${p.note ?? ''}`;
+        (p.isDefault ? '' : `<span class="del" title="${esc(tr('Удалить провайдера'))}">✕</span>`);
+      if (!p.ok) li.title += ` · ${tr('проблема:')} ${p.note ?? ''}`;
       li.onclick = () => {
         if (roundActive || p.isDefault) return;
         rpc('provider.set', { id: p.id })
           .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
       };
       li.oncontextmenu = (e) => {
-        const items = [{ label: 'Изменить', fn: () => openProviderSettings(p) }];
-        if (!p.isDefault) items.push({ label: 'Удалить', fn: () => { if (!roundActive) providerDelete(p); } });
+        const items = [{ label: tr('Изменить'), fn: () => openProviderSettings(p) }];
+        if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => { if (!roundActive) providerDelete(p); } });
         openCtx(e, items);
       };
       const del = li.querySelector('.del');
@@ -825,11 +883,11 @@
   }
 
   function openProviderSettings(p) {
-    openForm(`Провайдер ${p.id}`, [
-      { key: 'adapter', label: 'Адаптер (openai-compatible / anthropic / gigachat / mock)', value: p.kind },
-      { key: 'model', label: 'Модель', value: p.model ?? '' },
-      { key: 'baseUrl', label: 'baseUrl (пусто — не менять)', value: p.baseUrl ?? '' },
-      { key: 'apiKey', label: 'Ключ API (пусто — не менять)', value: '' },
+    openForm(tr('Провайдер {id}', { id: p.id }), [
+      { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat / mock)'), value: p.kind },
+      { key: 'model', label: tr('Модель'), value: p.model ?? '' },
+      { key: 'baseUrl', label: tr('baseUrl (пусто — не менять)'), value: p.baseUrl ?? '' },
+      { key: 'apiKey', label: tr('Ключ API (пусто — не менять)'), value: '' },
     ], (v) => {
       const fields = {};
       for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = val;
@@ -845,23 +903,23 @@
     for (const p of projects ?? []) {
       for (const h of p.hosts ?? []) {
         const li = document.createElement('li');
-        li.title = '✕ — удалить сервер · ＋ — добавить сервер · правая кнопка — удалить сервер';
+        li.title = `${tr('✕ — удалить сервер')} · ${tr('＋ — добавить сервер')} · ${tr('правая кнопка — удалить сервер')}`;
         li.oncontextmenu = (e) => openCtx(e, [
-          { label: 'Удалить сервер', fn: () => { if (!roundActive) projectHostDelete(p, h); } },
+          { label: tr('Удалить сервер'), fn: () => { if (!roundActive) projectHostDelete(p, h); } },
         ]);
         li.innerHTML =
           `<span>${esc(p.id)}</span><span class="meta">${esc(h.name)}: ${esc(h.host)}</span>` +
-          '<span class="del" title="Добавить сервер в проект">＋</span>' +
-          '<span class="del" title="Удалить сервер">✕</span>';
+          `<span class="del" title="${esc(tr('Добавить сервер в проект'))}">＋</span>` +
+          `<span class="del" title="${esc(tr('Удалить сервер'))}">✕</span>`;
         const btns = li.querySelectorAll('.del');
         btns[0].onclick = (e) => {
           e.stopPropagation();
           if (roundActive) return;
-          openForm(`Сервер проекта «${esc(p.id)}»`, [
-            { key: 'hostName', label: 'Имя сервера (напр. prod)' },
-            { key: 'host', label: 'Хост (адрес)' },
-            { key: 'user', label: 'Пользователь (можно пропустить)' },
-            { key: 'port', label: 'Порт (можно пропустить)' },
+          openForm(tr('Сервер проекта «{id}»', { id: p.id }), [
+            { key: 'hostName', label: tr('Имя сервера (напр. prod)') },
+            { key: 'host', label: tr('Хост (адрес)') },
+            { key: 'user', label: tr('Пользователь (можно пропустить)') },
+            { key: 'port', label: tr('Порт (можно пропустить)') },
           ], (v) => rpc('project.host.add', { id: p.id, ...v })
             .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
             .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`)));
@@ -911,7 +969,7 @@
       sessions: state.sessions ?? [],
       team: state.team ?? [],
       providerIds: (state.providers ?? []).map((p) => p.id),
-      managerName: state.manager?.name ?? 'Менеджер',
+      managerName: state.manager?.name ?? tr('Менеджер'),
     };
   }
 
@@ -919,10 +977,10 @@
     const d = completionData();
     if (!d) return [];
     return [
-      { label: d.managerName, hint: 'менеджер переговорки', insert: d.managerName + ' ' },
+      { label: d.managerName, hint: tr('менеджер переговорки'), insert: d.managerName + ' ' },
       ...d.team.filter((a) => a.inChat)
         .map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
-      { label: 'session', hint: 'конспект другого разговора', insert: 'session ' },
+      { label: 'session', hint: tr('конспект другого разговора'), insert: 'session ' },
     ];
   }
 
@@ -961,7 +1019,7 @@
     if (argName === 'кого|shared') {
       return [
         ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
-        { label: 'shared', hint: 'общая память', insert: 'shared ' },
+        { label: 'shared', hint: tr('общая память'), insert: 'shared ' },
       ];
     }
     if (argName === 'id' && op.cmd.startsWith('/provider')) {
@@ -1083,7 +1141,7 @@
     const show = roundActive || busyMap.size > 0;
     statusbarEl.classList.toggle('hidden', !show);
     btnAbort.classList.toggle('hidden', !roundActive);
-    busyLabelEl.textContent = label || (roundActive ? 'раунд идёт…' : '');
+    busyLabelEl.textContent = label || (roundActive ? tr('раунд идёт…') : '');
     btnSend.disabled = roundActive;
     renderAuto();
   }
@@ -1101,7 +1159,7 @@
       // команда: исполняет ядро, отчёты придут notice-событиями в журнал
       send({ type: 'command', text });
     } else {
-      addMsg(`<div class="msg user"><div class="head">👤 ${esc(state?.profile?.name ?? 'Вы')}` +
+      addMsg(`<div class="msg user"><div class="head">👤 ${esc(state?.profile?.name ?? tr('Вы'))}` +
         `</div><div class="txt">${formatText(text)}</div></div>`);
       send({ type: 'user_message', text });
     }
@@ -1191,9 +1249,9 @@
   function refreshSchedule() {
     rpc('schedule.list').then((r) => { state.scheduleTasks = r.tasks; renderSchedule(); }).catch(() => {});
   }
-  secAdd('schedule').onclick = () => { if (!roundActive) { refreshSchedule(); openForm('Задача по расписанию', [
-    { key: 'message', label: 'Задание (уйдёт в чат)' },
-    { key: 'intervalMinutes', label: 'Каждые N минут', value: '10' },
+  secAdd('schedule').onclick = () => { if (!roundActive) { refreshSchedule(); openForm(tr('Задача по расписанию'), [
+    { key: 'message', label: tr('Задание (уйдёт в чат)') },
+    { key: 'intervalMinutes', label: tr('Каждые N минут'), value: '10' },
   ], (v) => {
     rpc('schedule.add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
       .then(() => refreshSchedule())
@@ -1213,7 +1271,7 @@
           b64 += btoa(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
         }
         send({ type: home ? 'import_home' : 'import_session', dataB64: b64 });
-        addFeed(`<div class="notice">· Импорт ${home ? 'настроек' : 'разговора'} из ${esc(f.name)}…</div>`);
+        addFeed(`<div class="notice">· ${tr('Импорт {what} из {file}…', { what: home ? tr('настроек') : tr('разговора'), file: f.name })}</div>`);
       };
       reader.readAsArrayBuffer(f);
       importFile.value = '';
@@ -1247,7 +1305,7 @@
       roundActive = true;
       renderStatus();
       send({ type: 'file', name: f.name, dataB64: b64, text: `посмотрите файл ${f.name}` });
-      addFeed(`<div class="notice">· 📎 ${esc(f.name)} (${bytes.length} Б) — отправлен команде</div>`);
+      addFeed(`<div class="notice">· 📎 ${esc(f.name)} (${bytes.length} Б) — ${tr('отправлен команде')}</div>`);
     };
     reader.readAsArrayBuffer(f);
     attachFile.value = '';

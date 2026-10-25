@@ -1,395 +1,417 @@
-# 🎬 Dream Team — чат с командой ИИ-агентов
+# 🎬 Dream Team — a chat with a team of AI agents
 
-Вы общаетесь не с одним ИИ, а с виртуальной командой: у каждого участника — своё имя,
-роль, характер и цвет текста. Сообщение попадает модератору-оркестратору, который
-решает, кто из команды должен ответить (обычно 1–3 человека, не все подряд).
-Агенты видят реплики друг друга, спорят и развивают идеи. Можно адресовать вопрос
-конкретному участнику через `@имя`. Все разговоры сохраняются.
+You don't talk to a single AI here, but to a virtual team: every member has their own
+name, role, personality and text color. Your message goes to the moderator-orchestrator,
+who decides which team members should answer (usually 1–3 people, not everyone at once).
+The agents see each other's remarks, argue and build on each other's ideas. You can
+address a specific member with `@name`. Every conversation is saved.
 
-Оболочки две, ядро одно: терминальный TUI и локальный веб-GUI (`dreamteam serve`).
+Two shells, one core: a terminal TUI and a local web GUI (`dreamteam serve`).
 
-Команда — вещь машины: живёт в доме (`~/.dreamteam/agents.json`) и одна на все
-проекты. На старте она пуста — вас встречает **менеджер переговорки**, который по
-просьбе позовёт участников, включит кому-нибудь инструменты и заведёт проекты с
-серверами. Кто именно отвечает в конкретном разговоре, решает состав чата —
-список `participants` в файле разговора: пустой список — отвечают все, кого
-позвали (`/add`, `/out` или просьба менеджеру «позови Елену»).
+The interface — and this documentation — come in three languages: English, Russian and
+Chinese (`README.md`, `README.ru.md`, `README.zh.md`). The UI language is chosen at
+first launch (in the wizard) and can be changed at any time with
+`/settings set ui=en` (`ru`, `zh`, or the id of your own language from
+`~/.dreamteam/lang/<id>.json`).
 
-## Быстрый старт
+The team belongs to the machine: it lives in your home directory
+(`~/.dreamteam/agents.json`) and is shared by all projects. It starts out empty — you
+are greeted by the **war-room manager**, who will summon members on request, enable
+tools for someone, and set up projects with servers. Who exactly answers in a given
+conversation is decided by the chat roster — the `participants` list in the session
+file: an empty list means everyone you have summoned answers (`/add`, `/out`, or
+asking the manager to "bring Elena in").
 
-Нужен Node.js ≥ 18.17.
+## Quick start
+
+You need Node.js ≥ 18.17.
 
 ```bash
-npm install -g dreamteam   # или: git clone + npm install + npm link
-cd мой-проект              # работаем в папке проекта
+npm install -g dreamteam   # or: git clone + npm install + npm link
+cd my-project              # work inside a project folder
 dreamteam
 ```
 
-Проверить установку: `dreamteam -v` — версия, `dreamteam -h` — справка
-по запускам (TUI, `serve`).
+Check the installation: `dreamteam -v` — the version, `dreamteam -h` — help on the
+launch modes (TUI, `serve`).
 
-При первом запуске мастер проводит настройку (см. «Мастер первого запуска»):
-выбираете провайдера, вписываете API-ключ (ввод скрыт) и представляете себя —
-создаются `~/.dreamteam` (дом: настройки и команда) и `./.dreamteam`
-(проект: реестры hosts.json, mails.json, messengers.json и переписка).
-Дальше вы один на один с менеджером
-переговорки: скажите, что нужно.
+On first launch the wizard walks you through the setup (see "First-launch wizard"):
+you pick the interface language and a provider, enter an API key (the input is hidden)
+and introduce yourself — `~/.dreamteam` (the home: settings and the team) and
+`./.dreamteam` (the project: the hosts.json, mails.json, messengers.json registries
+and the conversations) are created. After that it's just you and the war-room
+manager: tell it what you need.
 
-Без настроенного ключа приложение работает в **mock-режиме** — агенты дают
-заготовленные ответы, чтобы можно было проверить интерфейс и механику.
-Ключ вписывается мастером или позже в карточку провайдера
-(`~/.dreamteam/providers.json`, поле `"apiKey"`).
+Without a configured key the app runs in **mock mode** — the agents give canned
+answers, so you can try out the interface and the mechanics. The key is entered by
+the wizard or later in the provider card (`~/.dreamteam/providers.json`, the
+`"apiKey"` field).
 
-## Два слоя: дом и проект
+## Two layers: home and project
 
-Приложение глобальное (как любой CLI), но данные у него разделены на слои:
+The app is global (like any CLI), but its data is split into layers:
 
-| Слой | Где | Что лежит |
+| Layer | Where | What it holds |
 |---|---|---|
-| **пакет** | папка установки | код приложения — только чтение, ничего не пишет |
-| **дом** | `~/.dreamteam` | ВСЁ глобальное: провайдеры с ключами моделей (`providers.json`), настройки (`settings.json`), профиль (`user.json`), **команда целиком** — агенты (`agents.json`), менеджер (`manager.json`), тула (`tools/`), расписание (`schedule.json`), общая память (`memory.json`) — и реестр известных проектов (`projects.json`). Симулятор команды — вещь машины: настроен один раз, работает в любом проекте |
-| **проект** | `<папка проекта>/.dreamteam` | ВСЁ про конкретный проект: `hosts.json` (ssh-серверы), почта и боты проекта (`mails.json`, `messengers.json` — секреты проекта, не в карточках агентов), переписка (`sessions/`, `transcripts/`). Файлы работы агентов — в папке проекта (inbox и т.п.) |
+| **package** | the installation folder | the application code — read-only, it writes nothing |
+| **home** | `~/.dreamteam` | EVERYTHING global: providers with model keys (`providers.json`), settings (`settings.json`), your profile (`user.json`), **the whole team** — agents (`agents.json`), the manager (`manager.json`), tools (`tools/`), the schedule (`schedule.json`), shared memory (`memory.json`) — plus the registry of known projects (`projects.json`). The team simulator belongs to the machine: configured once, it works in any project |
+| **project** | `<project folder>/.dreamteam` | EVERYTHING about this specific project: `hosts.json` (ssh servers), the project's mail and bots (`mails.json`, `messengers.json` — project secrets, never in agent cards), the conversations (`sessions/`, `transcripts/`). The agents' work files go into the project folder (inbox and the like) |
 
-Рабочая папка инструментов агентов — **всегда папка, из которой запущено
-приложение**: `dreamteam` в папке проекта работает в этом проекте. Не нужно
-никуда прописывать пути — запустили в репозитории, команда работает с ним.
+The tools' working folder is **always the folder the app was launched from**:
+`dreamteam` run inside a project folder works on that project. No paths to configure
+anywhere — launch it in a repository, and the team works on it.
 
-Проект можно сменить не выходя из приложения: `/project open <путь или имя>`
-меняет рабочую папку, список разговоров и реестры проекта (серверы, почта,
-боты) — команда, провайдеры и общая память остаются при вас. Обзор — `/project`
-(текущий проект с серверами и известные проекты), новый путь в реестр добавляет
-`/project add <путь>`, забывает — `/project remove <имя>` (текущий проект так
-не удалить). В веб-оболочке — панель «Проекты»: клик по записи переключает,
-кнопка «＋» у секции открывает форму с путём. Смену проекта можно попросить и
-у менеджера.
+You can switch projects without leaving the app: `/project open <path or name>`
+changes the working folder, the list of conversations and the project registries
+(servers, mail, bots) — the team, the providers and the shared memory stay with you.
+Overview: `/project` (the current project with its servers and the known projects),
+`/project add <path>` adds a new path to the registry, `/project remove <name>`
+forgets it (the current project can't be removed this way). In the web shell there
+is a "Projects" panel: click an entry to switch, the "＋" button by the section opens
+a form with a path field. You can also ask the manager to switch projects.
 
-Слои переопределяются переменными окружения `DT_HOME` и `DT_PROJECT` — так
-работают пробники и изоляция (папка `.dreamteam/` стоит добавить в `.gitignore`
-проекта: мастер напомнит при создании).
+The layers are overridden by the `DT_HOME` and `DT_PROJECT` environment variables —
+that's how the probes and isolation work (add `.dreamteam/` to the project's
+`.gitignore`: the wizard will remind you when creating it).
 
-## Мастер первого запуска
+## First-launch wizard
 
-Если дома (`~/.dreamteam`) нет — мастер спрашивает по очереди:
+If there is no home (`~/.dreamteam`), the wizard asks, in order:
 
-1. **Провайдер** — из списка адаптеров (для проверки можно `mock`, без ключей).
-2. **API-ключ** — ввод скрыт (не отображается и не попадает в лог терминала);
-   ключ сохраняется прямо в карточке провайдера в `providers.json`
-   (поле `"apiKey"`) и сразу подхватывается.
-3. **Как вас представить команде** — имя, роль, пара слов (можно пропустить).
+1. **Interface language** — the very first question, and the wizard itself already
+   speaks it: `ru`, `en`, `zh` out of the box, plus your own languages from
+   `~/.dreamteam/lang/<id>.json` (see "Settings"). Changed later with
+   `/settings set ui=<id>`.
+2. **Provider** — from the list of adapters (`mock` works for a trial run, no keys
+   needed).
+3. **API key** — the input is hidden (not displayed and not written to the terminal
+   log); the key is saved right into the provider card in `providers.json`
+   (the `"apiKey"` field) and picked up immediately.
+4. **How to introduce you to the team** — name, role, a couple of words (can be
+   skipped).
 
-Затем создаются оба слоя с минимальными файлами и понятными заметками-заготовками:
-в доме — стартовая команда из пяти участников (аналитик, секретарь, разработчик,
-дизайнер, писатель) и менеджер на выбранном провайдере. Состав меняется в
-`agents.json` или через разговор с менеджером. Если папка
-проекта — git-репозиторий без `.dreamteam/` в `.gitignore`, мастер предложит
-добавить. Повторный запуск мастера ничего не портит: существующие файлы не
-трогаются. В неинтерактивном режиме (пайп) мастер честно отказывается работать —
-настройка требует живого терминала.
+Then both layers are created with minimal files and clear starter notes: the home
+gets a starting team of five members (an analyst, a secretary, a developer,
+a designer, a writer) and the manager on the chosen provider, plus the `lang/` shelf
+for custom languages. The roster is edited in `agents.json` or via a conversation
+with the manager. If the project folder is a git repository without `.dreamteam/` in
+`.gitignore`, the wizard offers to add it. Running the wizard again breaks nothing:
+existing files are left untouched. In non-interactive mode (a pipe) the wizard
+honestly refuses to run — setup requires a live terminal.
 
-## Первый разговор: менеджер-консьерж
+## First conversation: the concierge manager
 
-Новый разговор всегда начинается один на один с менеджером переговорки — он
-сразу здоровается и объясняет, что умеет. Пока он единственный участник, любые
-ваши реплики адресуются ему, без `@`.
+A new conversation always starts one-on-one with the war-room manager — it greets
+you right away and explains what it can do. While it is the only participant, all
+your remarks are addressed to it, no `@` needed.
 
 ```
-Ты > позови Глеба и Марину
-  ✓ Глеб (id «gleb», роль «Главный по архитектуре и коду») добавлен в команду
-  💾 Глеб присоединился к чату.
-Ты > включи Глебу shell и файлы
-  ✓ gleb: тул «shell» включён
-Ты > заведём проект shop: сервер prod — deploy@203.0.113.10
-  ✓ проект «shop» добавлен (серверы: prod)
-Ты > ну что, Глеб, глянь структуру и предложи план рефакторинга
-  💾 Глеб: …
+You > bring in Gleb and Marina
+  ✓ Gleb (id "gleb", role "Head of architecture and code") added to the team
+  💾 Gleb joined the chat.
+You > enable shell and files for Gleb
+  ✓ gleb: tool "shell" enabled
+You > let's set up the shop project: server prod — deploy@203.0.113.10
+  ✓ project "shop" added (servers: prod)
+You > alright Gleb, look at the structure and propose a refactoring plan
+  💾 Gleb: …
 ```
 
-Менеджер — единственный, кто меняет конфигурацию, и только через разговор с ним
-(ярлыков больше нет — только канонические операции). В его системный промпт входит живое
-состояние: состав команды с тулами, состав чата, список разговоров, реестр
-проектов с серверами и список slash-команд. Файлы в `tools/` менеджер писать
-не может — такое действие в его протоколе отсутствует физически.
+The manager is the only one who changes the configuration, and only through a
+conversation with it (no more shortcuts — only canonical operations). Its system
+prompt includes the live state: the team roster with tools, the chat roster, the
+list of conversations, the registry of projects with servers, and the list of slash
+commands. The manager cannot write files in `tools/` — that action simply doesn't
+exist in its protocol.
 
-## Подключение API
+## Connecting APIs
 
-### Как это устроено
+### How it works
 
-- **Ключи моделей** — прямо в карточке провайдера в `~/.dreamteam/providers.json`
-  (поле `"apiKey"`; у GigaChat вместо него можно задать пару
-  `"clientId"`/`"clientSecret"`).
-- **Настройки serve** — `~/.dreamteam/.env` (`TOKEN`, `PORT`, `HOST`;
-  `.env` в папке проекта сознательно не читается — источник переменных один).
-  Это настройки конкретной машины: в архив `/home export` они не входят.
-  Мастер создаёт `.env` при первом запуске на свежей машине; в дом,
-  перенесённый `/home import`, файл не входит — без него serve просто открыт
-  на `127.0.0.1`, а для доступа извне создайте `.env` по образцу из пакета
-  (`scaffold/home/env.example`) и впишите `TOKEN` (см. «Доступ извне»).
-- **Описание API** — тот же `providers.json`: какой адаптер, адрес, модель
-  и ключ.
-- Приложение общается с LLM через единый интерфейс `LLMProvider`
-  (`src/providers/types.ts`). Конкретные протоколы спрятаны в адаптерах:
+- **Model keys** — right in the provider card in `~/.dreamteam/providers.json`
+  (the `"apiKey"` field; for GigaChat you can set a `"clientId"`/`"clientSecret"`
+  pair instead).
+- **serve settings** — `~/.dreamteam/.env` (`TOKEN`, `PORT`, `HOST`; the `.env`
+  in a project folder is deliberately not read — there is a single source of
+  variables). These are settings of a specific machine: they are not included in
+  the `/home export` archive. The wizard creates `.env` on first launch on a fresh
+  machine; a home moved over with `/home import` does not carry the file — without
+  it serve simply listens on `127.0.0.1`, and for outside access create `.env` from
+  the sample in the package (`scaffold/home/env.example`) and put in a `TOKEN`
+  (see "Access from outside").
+- **API description** — the same `providers.json`: which adapter, URL, model
+  and key.
+- The app talks to LLMs through a single `LLMProvider` interface
+  (`src/providers/types.ts`). The concrete protocols are hidden in the adapters:
 
-| Адаптер | Для каких API |
+| Adapter | For which APIs |
 |---|---|
 | `openai-compatible` | Z.ai (GLM), OpenAI, OpenRouter, DeepSeek, Ollama, LM Studio… |
 | `anthropic` | Claude |
-| `gigachat` | Сбер GigaChat (с полным циклом OAuth-токенов внутри) |
-| `mock` | работа без ключей |
+| `gigachat` | Sber GigaChat (with the full OAuth token cycle inside) |
+| `mock` | working without keys |
 
-Переезд на другую машину — `/home export` и `/home import`: настройки,
-команда и провайдеры переезжают вместе с ключами карточек, вписывать ничего
-заново не нужно; разговоры текущего проекта едут в том же архиве и вливаются
-по id (совпавшие заменяются). Архив содержит ключи — хранить его (в облаке и где угодно
-ещё) стоит как пароль.
+Moving to another machine — `/home export` and `/home import`: settings, the team
+and the providers move together with the card keys, nothing needs to be re-entered;
+the current project's conversations travel in the same archive and merge by id
+(matching ones are replaced). The archive contains keys — treat it (in the cloud and
+anywhere else) like a password.
 
 ### Z.ai (GLM)
 
-1. Получите API-ключ в личном кабинете открытой платформы Z.ai (раздел API keys).
-2. Впишите его в карточку провайдера в `~/.dreamteam/providers.json`:
+1. Get an API key in the console of the Z.ai open platform (the API keys section).
+2. Put it into the provider card in `~/.dreamteam/providers.json`:
    ```json
-   "apiKey": "ваш_ключ"
+   "apiKey": "your-key"
    ```
-3. Там же уже выбран провайдер по умолчанию (`"default"`). Модель меняется
-   рядом (поле `model`).
+3. The default provider is already selected there (`"default"`). The model is
+   changed right next to it (the `model` field).
 
-**Важно про тип ключа.** Например, у Z.ai два разных endpoint'а:
+**A note on key types.** For example, Z.ai has two different endpoints:
 
-| Endpoint | Для какого ключа |
+| Endpoint | For which key |
 |---|---|
-| `https://api.z.ai/api/paas/v4` | обычный pay-as-you-go API (оплата за токены) |
-| `https://api.z.ai/api/coding/paas/v4` | ключи подписки **GLM Coding Plan** |
+| `https://api.z.ai/api/paas/v4` | the regular pay-as-you-go API (paying per token) |
+| `https://api.z.ai/api/coding/paas/v4` | keys of the **GLM Coding Plan** subscription |
 
-Ключ от Coding Plan на обычном endpoint'е даёт ошибку
-`429: Insufficient balance or no resource package` — это нормально: подписка
-не видна платежному балансу. Если у вас подписка — укажите coding-endpoint в
-`baseUrl` провайдера `openai`. Список доступных моделей подписки можно
-посмотреть: `GET https://api.z.ai/api/coding/paas/v4/models`.
+A Coding Plan key on the regular endpoint gives the error
+`429: Insufficient balance or no resource package` — that's normal: the subscription
+is invisible to the payment balance. If you have a subscription, set the coding
+endpoint in the `baseUrl` of the `openai` provider. The list of models available on
+the subscription: `GET https://api.z.ai/api/coding/paas/v4/models`.
 
-### Боевой дым: `npm run smoke:live`
+### Live smoke: `npm run smoke:live`
 
-Быстрая проверка на настоящем (не mock) провайдере: живой ответ менеджера,
-менеджер реально создаёт агента по просьбе, агент с `files` реально пишет
-файл. Дом берётся настоящий (ключи и `providers.json`), проект — временная
-песочница, в реальном проекте ничего не меняется. Герметичные пробы (`npm run
-probe`) на боевой API не ходят — они бесплатны и детерминированы.
+A quick check against a real (non-mock) provider: a live answer from the manager,
+the manager actually creates an agent on request, an agent with `files` actually
+writes a file. The home is the real one (keys and `providers.json`), the project is
+a temporary sandbox — nothing in a real project changes. The hermetic probes
+(`npm run probe`) never touch the live API — they are free and deterministic.
 
 ### Anthropic (Claude)
 
-Ключ из кабинета Anthropic — в карточку провайдера `claude`
+The key from the Anthropic console goes into the `claude` provider card
 (`~/.dreamteam/providers.json`):
 
 ```json
-"apiKey": "ваш_ключ"
+"apiKey": "your-key"
 ```
 
-Затем в чате: `/provider claude` (или смените `"default"` в `providers.json`).
+Then in the chat: `/provider claude` (or change `"default"` in `providers.json`).
 
-### Сбер GigaChat
+### Sber GigaChat
 
-Адаптер сам делает всё, ради чего обычно поднимают прокси-сервис:
-получает `access_token` по вашему API-ключу, кэширует его, обновляет заранее
-(за минуту до истечения), переживает внезапный 401 (тихий рефреш + повтор),
-и подставляет российский TLS-сертификат.
+The adapter does by itself everything people usually build a proxy service for:
+gets an `access_token` with your API key, caches it, refreshes it ahead of time
+(a minute before expiry), survives a sudden 401 (a silent refresh + retry), and
+supplies the Russian TLS certificate.
 
-1. Получите API-ключ в кабинете GigaChat (developers.sber.ru → GigaChat API).
-2. Впишите его в карточку провайдера `gigachat` в `~/.dreamteam/providers.json`:
+1. Get an API key in the GigaChat console (developers.sber.ru → GigaChat API).
+2. Put it into the `gigachat` provider card in `~/.dreamteam/providers.json`:
    ```json
-   "apiKey": "ваш_ключ_из_кабинета"
+   "apiKey": "your-console-key"
    ```
-   (ключ из кабинета — это уже готовая Basic-строка; если у вас пара
-   client_id/secret, задайте вместо него `"clientId"` и `"clientSecret"`).
-3. Скачайте корневой сертификат Минцифры по инструкции GigaChat и положите
-   по пути из `caCertPath` (по умолчанию `certs/russian_trusted_root_ca.pem`).
-   Для быстрой проверки можно вместо этого поставить `"insecureTLS": true`
-   (небезопасно, только для тестов).
-4. В чате: `/provider gigachat`.
+   (the console key is already a ready Basic string; if you have a client_id/secret
+   pair, set `"clientId"` and `"clientSecret"` instead).
+3. Download the Ministry of Digital Development root certificate per the GigaChat
+   instructions and place it at the path from `caCertPath` (by default
+   `certs/russian_trusted_root_ca.pem`). For a quick check you can instead set
+   `"insecureTLS": true` (insecure, for tests only).
+4. In the chat: `/provider gigachat`.
 
-Каждый агент может работать на своём провайдере — укажите ему в
-`~/.dreamteam/agents.json` поле `"provider": "ид_провайдера"`. Можно собрать
-команду из разных моделей (например, Марина на Claude, Дмитрий на GLM).
+Every agent can run on its own provider — give it a `"provider": "<provider id>"`
+field in `~/.dreamteam/agents.json`. You can assemble a team of different models
+(say, Marina on Claude, Dmitry on GLM).
 
-## Операции: команды = rpc
+## Operations: commands = rpc
 
-Управление описано **манифестом операций** (`src/core/operations.ts`). Каноническое
-имя операции — `группа.глагол` — одно и то же в трёх поверхностях:
+Control is described by an **operations manifest** (`src/core/operations.ts`). The
+canonical operation name — `group.verb` — is the same across three surfaces:
 
-- текстовая команда: `/группа глагол аргументы` (обзор группы — просто `/группа`);
-- rpc-метод WebSocket: то же имя строкой (GUI вызывает его кнопками, скрипты — напрямую);
-- строка `/help` и автодополнение: производные от того же списка.
+- a text command: `/group verb arguments` (a group overview is just `/group`);
+- a WebSocket rpc method: the same name as a string (the GUI calls it with buttons,
+  scripts call it directly);
+- the `/help` string and autocompletion: derived from the same list.
 
-Алиасов и коротких форм нет: одно имя — одна операция.
+There are no aliases or short forms: one name — one operation.
 
-| Операция | Команда | Действие |
+| Operation | Command | Action |
 |---|---|---|
-| `session.new` | `/session new` | новый разговор: один на один с менеджером |
-| `sessions.list` | `/sessions` | список разговоров (свежие сверху, текущий отмечен) |
-| `session.open <номер>` | `/session open 2` | открыть разговор из списка |
-| `session.delete <номер>` | `/session delete 2` | удалить разговор (не текущий) |
-| `session.rename [имя]` | `/session rename Утрен планёрка` | переименовать текущий; без имени менеджер придумает |
-| `session.history [N]` | `/session history 20` | история текущего разговора (или последние N) |
-| `session.export [номер]` | `/session export 2` | архив разговора в zip (без номера — текущий) |
-| `session.import <файл>` | `/session import dt-session-….zip` | вернуть разговор из архива (вливается как новый) |
-| `home.export` | `/home export` | снимок дома для переезда: настройки, провайдеры с ключами, память команды, расписание и все разговоры (без .env — вещь машины); хранить как пароль |
-| `home.import <файл>` | `/home import dt-home-….zip` | развернуть дом из архива (с ключами); разговоры вливаются по id, даты разговоров сохраняются |
-| `chat.add <имя\|номер>` | `/chat add Юрист` | позвать участника в текущий разговор |
-| `chat.remove <имя\|номер>` | `/chat remove Юрист` | вывести из разговора (реплики остаются в истории) |
-| `team.list` | `/team` | состав команды: роли, тула, кто в чате |
-| `team.add <id> <Имя> [роль]` | `/team add yurist Юрист право` | новый участник (дефолты как у менеджера) |
-| `team.update <id> поле=знач…` | `/team update yurist role=сметана` | править: name, role, emoji, color, description, prompt, provider, temperature |
-| `team.delete <id…>` | `/team delete yurist, keks` | удалить участников: список через запятую или пробел |
-| `team.grant <агент> <тул>` | `/team grant yurist files` | включить тул: files, shell, ssh, look, image или свой из tools/ |
-| `provider.list` | `/provider` | провайдеры и их статус |
-| `provider.set <id>` | `/provider set glm` | сменить основного провайдера |
-| `provider.add <id> поле=знач…` | `/provider add glm adapter=openai-compatible …` | новый провайдер (adapter обязателен) |
-| `provider.update <id> поле=знач…` | `/provider update glm model=glm-4.6` | править карточку существующего (adapter, model, baseUrl, apiKey, maxTokens, temperature) |
-| `provider.delete <id>` | `/provider delete glm` | удалить провайдера; основной не удалить — сначала `/provider set` другого |
-| `profile.show` / `profile.set` | `/profile set Имя; роль; о себе` | как вас видит команда (user.json) |
-| `memory.show [кого\|shared]` | `/memory show Юрист` | что помнит участник; `shared` — общая память |
-| `project.list` | `/project` | текущий проект: серверы (hosts.json) и известные проекты |
-| `project.open <путь\|имя>` | `/project open ../other` | сменить проект: рабочая папка и разговоры; имя — из обзора `/project` |
-| `project.add <путь>` | `/project add ../other` | запомнить проект в реестре, не открывая |
-| `project.remove <имя>` | `/project remove other` | забыть проект (текущий так не удалить) |
-| `project.host.add <имя=хост>` | `/project host add backup=deploy@10.0.0.2` | сервер в текущий проект; формат хоста [пользователь@]хост[:порт] |
-| `project.host.delete <имя>` | `/project host delete backup` | убрать сервер из текущего проекта |
-| `mail.list` | `/mail` | реестр ящиков (mails.json) |
-| `mail.add <имя> поле=знач…` | `/mail add работа user=… password=… imap=… smtp=…` | ящик в mails.json; порты и `tlsNoVerify` — по желанию |
-| `mail.remove <имя>` | `/mail remove работа` | убрать ящик |
-| `messenger.list` | `/messenger` | боты (messengers.json) |
-| `messenger.add <telegram\|max> <токен>` | `/messenger add telegram 123456:ABC…` | токен бота в messengers.json |
-| `messenger.remove <telegram\|max>` | `/messenger remove max` | убрать бота |
-| `schedule.list` | `/schedule` | задачи, которые serve запускает сам |
-| `schedule.add <задание> [минуты]` | `/schedule add «планёрка» 60` | новая задача; интервал по умолчанию 10 минут |
-| `schedule.toggle <id>` / `schedule.delete <id>` | `/schedule toggle task-…` | пауза и удаление задачи |
-| `settings.show` / `settings.set поле=знач…` | `/settings set maxTurns=2` | настройки (вступают в силу со следующего раунда) |
-| `manager.show` / `manager.set поле=знач…` | `/manager set provider=glm` | менеджер переговорки: провайдер, температура, имя |
-| `auto.on [N]` / `auto.off` | `/auto on 5`, `/auto off` | автономный режим: агенты решают сами до N ходов |
-| `/help` | `/help` | справка по операциям (тот же манифест) |
-| `/exit` | `/exit` | выход (только в терминале) |
+| `session.new` | `/session new` | a new session: one-on-one with the manager |
+| `sessions.list` | `/sessions` | the list of sessions (freshest on top, the current one marked) |
+| `session.open <number>` | `/session open 2` | open a session from the list |
+| `session.delete <number>` | `/session delete 2` | delete a session (not the current one) |
+| `session.rename [name]` | `/session rename Morning standup` | rename the current one; with no name the manager will invent one |
+| `session.history [N]` | `/session history 20` | the current session's history (or the last N) |
+| `session.export [number]` | `/session export 2` | archive a session into a zip (no number — the current one) |
+| `session.import <file>` | `/session import dt-session-….zip` | restore a session from an archive (merges in as a new one) |
+| `home.export` | `/home export` | a snapshot of the home for moving: settings, providers with keys, the team's memory, the schedule and all sessions (no .env — a thing of the machine); store it like a password |
+| `home.import <file>` | `/home import dt-home-….zip` | unfold a home from an archive (with keys); sessions merge by id, session dates are preserved |
+| `chat.add <name\|number>` | `/chat add Lawyer` | summon a member into the current conversation |
+| `chat.remove <name\|number>` | `/chat remove Lawyer` | send out of the conversation (the remarks stay in the history) |
+| `team.list` | `/team` | the team roster: roles, tools, who is in the chat |
+| `team.add <id> <Name> [role]` | `/team add lawyer Lawyer law` | a new member (defaults like the manager's) |
+| `team.update <id> field=value…` | `/team update lawyer role=sourcream` | edit: name, role, emoji, color, description, prompt, provider, temperature |
+| `team.delete <id…>` | `/team delete lawyer, keks` | delete members: a comma- or space-separated list |
+| `team.grant <agent> <tool>` | `/team grant lawyer files` | enable a tool: files, shell, ssh, look, image or a custom one from tools/ |
+| `provider.list` | `/provider` | the providers and their status |
+| `provider.set <id>` | `/provider set glm` | change the main provider |
+| `provider.add <id> field=value…` | `/provider add glm adapter=openai-compatible …` | a new provider (adapter is required) |
+| `provider.update <id> field=value…` | `/provider update glm model=glm-4.6` | edit an existing card (adapter, model, baseUrl, apiKey, maxTokens, temperature) |
+| `provider.delete <id>` | `/provider delete glm` | delete a provider; the main one can't be deleted — `/provider set` another one first |
+| `profile.show` / `profile.set` | `/profile set Name; role; about you` | how the team sees you (user.json) |
+| `memory.show [who\|shared]` | `/memory show Lawyer` | what a member remembers; `shared` — the shared memory |
+| `project.list` | `/project` | the current project: servers (hosts.json) and known projects |
+| `project.open <path\|name>` | `/project open ../other` | switch project: the working folder and sessions; a name — from the `/project` overview |
+| `project.add <path>` | `/project add ../other` | remember a project in the registry without opening it |
+| `project.remove <name>` | `/project remove other` | forget a project (the current one can't be removed this way) |
+| `project.host.add <name=host>` | `/project host add backup=deploy@10.0.0.2` | a server in the current project; the host format is [user@]host[:port] |
+| `project.host.delete <name>` | `/project host delete backup` | remove a server from the current project |
+| `mail.list` | `/mail` | the mailbox registry (mails.json) |
+| `mail.add <name> field=value…` | `/mail add work user=… password=… imap=… smtp=…` | a mailbox into mails.json; ports and `tlsNoVerify` — optional |
+| `mail.remove <name>` | `/mail remove work` | remove a mailbox |
+| `messenger.list` | `/messenger` | bots (messengers.json) |
+| `messenger.add <telegram\|max> <token>` | `/messenger add telegram 123456:ABC…` | a bot token into messengers.json |
+| `messenger.remove <telegram\|max>` | `/messenger remove max` | remove a bot |
+| `schedule.list` | `/schedule` | the tasks serve runs by itself |
+| `schedule.add <task> [minutes]` | `/schedule add "standup" 60` | a new task; the default interval is 10 minutes |
+| `schedule.toggle <id>` / `schedule.delete <id>` | `/schedule toggle task-…` | pause and delete a task |
+| `settings.show` / `settings.set field=value…` | `/settings set maxTurns=2` | settings (take effect from the next round) |
+| `manager.show` / `manager.set field=value…` | `/manager set provider=glm` | the war-room manager: provider, temperature, name |
+| `auto.on [N]` / `auto.off` | `/auto on 5`, `/auto off` | autonomous mode: the agents decide on their own for up to N turns |
+| `/help` | `/help` | help on the operations (the same manifest) |
+| `/exit` | `/exit` | quit (in the terminal only) |
 
-Команды — часть ядра: в веб-оболочке тот же набор работает через тот же ввод
-(или кнопками панелей), терминал лишь добавляет цветные просмотры.
+Commands are part of the core: in the web shell the same set works through the same
+input (or via the panel buttons), the terminal only adds colored views.
 
-При запуске приложение продолжает последний разговор; если последний разговор
-пуст (или это самый первый запуск) — менеджер сам поздоровается.
+When launched, the app continues the last conversation; if the last conversation is
+empty (or it's the very first launch) — the manager greets you itself.
 
-**Имена разговоров.** Имя берётся из первого сообщения, а после первого же
-ответа менеджер придумывает разговору короткое название (по первому
-сообщению). Переименовать можно в любой момент: `/session rename <новое имя>` — или
-попросить менеджера: «придумай имя этому разговору» — он возьмёт краткое
-содержание, а если разговор ещё не сжимался — первые и последние сообщения.
+**Session names.** The name is taken from the first message, and after the first
+answer the manager invents a short title for the session (based on the first
+message). You can rename at any moment: `/session rename <new name>` — or ask the
+manager: "come up with a name for this conversation" — it will take the short
+summary, or, if the session hasn't been compacted yet, the first and last messages.
 
-**Подсказки команд.** Начните ввод с `/` — над строкой ввода появится список
-команд (короткое описание у каждой); при наборе список фильтруется. **Tab**
-автодополняет команду, а у команд с аргументами подсказывает и дополняет их:
-номера разговоров (с названиями) для `/session open` и `/session delete`, имена участников
-для `/chat add` и `/chat remove`, `кого|shared` для `/memory`, id провайдера для `/provider set`.
+**Command hints.** Start typing with `/` — a list of commands appears above the
+input line (a short description for each); as you type, the list is filtered.
+**Tab** autocompletes the command, and for commands with arguments it hints and
+completes them too: session numbers (with titles) for `/session open` and
+`/session delete`, member names for `/chat add` and `/chat remove`, `who|shared`
+for `/memory`, provider ids for `/provider set`.
 
-То же самое для упоминаний: введите `@` посреди сообщения — над строкой ввода
-откроется всплывашка с участниками текущего чата и `@session` (у каждого —
-роль). Набор букв фильтрует список, **стрелки вверх/вниз** двигают выбор
-(по кругу), **Enter** или **Tab** вставляют выбранное имя, **Esc** закрывает
-всплывашку, оставляя набранный `@фрагмент` как есть. Регистр и «ё» не важны.
-После `@session` и пробела подсказываются номера разговоров с названиями.
+The same for mentions: type `@` in the middle of a message — a popup with the
+members of the current chat and `@session` opens above the input line (each with
+their role). Typing filters the list, **up/down arrows** move the selection
+(wrapping around), **Enter** or **Tab** insert the selected name, **Esc** closes
+the popup leaving the typed `@fragment` as is. Case doesn't matter, and neither
+does the Russian "ye"/"yo" letter distinction. After `@session` and a space, session
+numbers with titles are suggested.
 
-**`!` — полный синоним `@`** (Shift+1 на любой раскладке и в любом языке):
-`!Катя, посмотри макет`, `!менеджер, позови Глеба`, `!session 2` — всё
-работает так же, включая всплывашку подсказок.
+**`!` is a full synonym of `@`** (Shift+1 on any layout and in any language):
+`!Katya, look at the mockup`, `!manager, bring Gleb in`, `!session 2` — everything
+works the same, including the hint popup.
 
-**Состав чата.** Новый разговор (`/session new` и самый первый) — всегда один на один
-с менеджером: он консьерж, попросите его позвать нужных людей. Дальше состав
-меняется на лету: `/chat add <имя или номер>` — позвать, `/chat remove <имя или номер>` —
-вывести (его реплики и память остаются в истории); то же самое менеджер делает
-по просьбе. События чата — «Глеб присоединился к чату», «Катя покинула чат» —
-идут в общей хронологии разговора репликой менеджера (и в терминале, и в веб-чате,
-и в сохранённой истории), а не отдельным журналом. Если из чата вывели последнего
-участника, менеджер остаётся — совсем без команды переговорка не работает.
-Актуальный состав виден в `/team` и `/session`. Итоги закрытого разговора
-вливаются в общую память команды в фоне, без ожидания.
+**Chat roster.** A new conversation (`/session new` and the very first one) always
+starts one-on-one with the manager: it's the concierge — ask it to call in the
+people you need. After that the roster changes on the fly: `/chat add <name or
+number>` — summon, `/chat remove <name or number>` — send out (their remarks and
+memory stay in the history); the manager does the same on request. Chat events —
+"Gleb joined the chat", "Katya left the chat" — go into the general chronology of
+the conversation as a manager line (in the terminal, in the web chat and in the
+saved history alike), not into a separate journal. If the last member is removed
+from the chat, the manager stays — the war room doesn't work with no team at all.
+The current roster is visible in `/team` and `/session`. Digests of a closed
+conversation are merged into the team's shared memory in the background, without
+waiting.
 
-**Многострочные сообщения.** Перенос строки внутри сообщения: `\` + Enter
-(работает в любом терминале) или **Ctrl+Enter** / **Alt+Enter**. Пока ввод
-продолжается, промпт превращается в `… `; пустая строка — разрыв абзаца;
-обычный **Enter** отправляет сообщение, **двойной Enter** или `.` — закончить
-ввод как есть. `\\` в конце строки — литеральный бэкслэш. Многострочная
-вставка из буфера (Ctrl+V в Windows Terminal, Shift+Ins, правый клик) тоже
-склеивается в одно сообщение, а не отправляет первую строку; если вставка
-заканчивалась переводом строки — после неё нажмите Enter ещё раз.
+**Multiline messages.** A line break inside a message: `\` + Enter (works in any
+terminal) or **Ctrl+Enter** / **Alt+Enter**. While the input continues, the prompt
+turns into `… `; an empty line is a paragraph break; a regular **Enter** sends the
+message, a **double Enter** or `.` finishes the input as is. `\\` at the end of a
+line is a literal backslash. A multiline paste from the clipboard (Ctrl+V in
+Windows Terminal, Shift+Ins, right click) is also glued into one message instead of
+sending the first line; if the paste ended with a newline, press Enter once more
+after it.
 
-**Прерывание.** Во время ответа команды (пока модератор думает или агенты
-печатают) раунд можно остановить клавишей **Esc** или **Ctrl+C** — запрос к
-модели отменяется, оставшиеся участники раунда не вызываются, приложение
-сразу возвращается к приглашению. Ответы, которые успели появиться,
-сохраняются в истории. На пустом промпте Ctrl+C, как и раньше, выходит из
-приложения.
+**Interruption.** While the team is answering (the moderator is thinking or the
+agents are typing) you can stop the round with **Esc** or **Ctrl+C** — the request
+to the model is cancelled, the remaining members of the round are not called, and
+the app immediately returns to the prompt. The answers that did appear are kept in
+the history. On an empty prompt Ctrl+C, as before, quits the app.
 
-## Веб-оболочка: `dreamteam serve`
+## Web shell: `dreamteam serve`
 
-То же самое — в браузере:
+The same thing — in the browser:
 
 ```bash
-dreamteam serve         # или: npm run serve; порт — PORT, по умолчанию 8080
+dreamteam serve         # or: npm run serve; the port is PORT, 8080 by default
 ```
 
-Поднимается локальный сервер: `http://127.0.0.1:8080` отдаёт веб-оболочку из
-`gui/` (обычные HTML/JS/CSS, без сборки) и разговаривает с ней по WebSocket.
-По умолчанию слушается только 127.0.0.1 — снаружи машины сервера нет. Порт и
-адрес задаются переменными `PORT` и `HOST` — их можно прописать в
-`~/.dreamteam/.env`: настройки переживут глобальную установку и смену проекта. **Осторожно:** `HOST=0.0.0.0` открывает сервер
-в сеть — авторизации в API нет, так стоит делать только в своей сети. Разговоры, команда
-и конфиги общие с терминалом: можно работать в TUI и досмотреть в браузере.
+A local server comes up: `http://127.0.0.1:8080` serves the web shell from `gui/`
+(plain HTML/JS/CSS, no build step) and talks to it over WebSocket. By default it
+listens on 127.0.0.1 only — the server is not visible from outside the machine.
+The port and address are set by the `PORT` and `HOST` variables — you can put them
+in `~/.dreamteam/.env`: the settings will survive a global reinstall and a project
+switch. **Careful:** `HOST=0.0.0.0` exposes the server to the network — the API has
+no authentication, so only do this on your own network. Conversations, the team
+and the configs are shared with the terminal: you can work in the TUI and continue
+in the browser.
 
-- слева — разговоры (переключение кликом, «＋» — новый), состав команды
-  (клик по участнику — позвать/вывести из чата), провайдеры (клик — сделать
-  основным для агентов) и проекты (клик — сменить проект, «＋» у секции —
-  форма с путём);
-- двойного клика в веб-интерфейсе нет: правая кнопка мыши по записи
-  открывает меню «Изменить» и «Удалить» (у разговора — «Переименовать»);
-  удаление всегда проходит через подтверждение «Вы точно хотите удалить
-  запись?» — «Да»/«Нет»;
-- в центре — тот же чат: стрим ответов, реплики менеджера (включая события
-  чата — «присоединился/покинул»), результаты инструментов, приложения-конспекты
-  `@session`;
-- вопрос инструмента «разрешить?» показывается кнопками ✓/✗; без ответа
-  5 минут он считается отказом — раунд не висит вечно;
-- «⏹ Прервать» останавливает раунд, как Esc в терминале.
+- on the left — conversations (click to switch, "＋" for a new one), the team
+  roster (click a member to summon/send them out of the chat), the providers
+  (click to make one the default for the agents) and the projects (click to switch
+  project, "＋" by the section — a form with a path field);
+- there is no double click in the web UI: right-clicking an entry opens an
+  "Edit" and "Delete" menu ("Rename" for a conversation); deletion always goes
+  through a "Delete this entry for sure?" confirmation — "Yes"/"No";
+- in the center — the same chat: answer streaming, manager lines (including chat
+  events — joined/left), tool results, `@session` digest attachments;
+- a tool's "allow?" question is shown as ✓/✗ buttons; with no answer for 5 minutes
+  it counts as a refusal — a round never hangs forever;
+- "⏹ Abort" stops the round, like Esc in the terminal.
 
-**Доступ извне.** Если сервер открывается наружу (`HOST` не 127.0.0.1),
-защита — токен: переменная `TOKEN` в `~/.dreamteam/.env`. Мастер создаёт
-её сам при первом запуске на свежей машине; после переноса дома на другую
-машину `.env` не въезжает — создайте файл по образцу (`scaffold/home/env.example`)
-и сгенерируйте токен вручную:
+**Access from outside.** If the server is exposed (`HOST` is not 127.0.0.1), the
+protection is a token: the `TOKEN` variable in `~/.dreamteam/.env`. The wizard
+creates it on first launch on a fresh machine; after moving a home to another
+machine `.env` doesn't come along — create the file from the sample
+(`scaffold/home/env.example`) and generate a token by hand:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
-При подключении оболочка попросит токен один раз и запомнит его в браузере;
-кнопка **Выйти** в шапке забывает токен на этом устройстве. Токен — доступ
-уровня «пароль сервера»: агенты имеют шелл и файлы, поэтому наружу его —
-только вместе с HTTPS (прокси с сертификатом) или внутри своей VPN-сети.
+When connecting, the shell asks for the token once and remembers it in the browser;
+the **Log out** button in the header forgets the token on that device. The token is
+"server password"-level access: the agents have shell and files, so expose it only
+behind HTTPS (a proxy with a certificate) or inside your own VPN.
 
-Слэш-команды терминала в веб-оболочке работают через тот же ввод: текст с `/`
-уходит ядру как команда (и не рисуется пузырём пользователя), отчёты остаются
-в журнале под чатом — туда попадают только отчёты команд и ошибки, события чата
-живут в общей хронологии. Автодополнение — как в терминале: `@` открывает попап
-упоминаний (менеджер, участники чата, session — стрелки/Tab/Enter/Esc), `/`
-показывает список команд с описаниями и подсказками аргументов, Tab
-дописывает. Словарь подсказок ядро отдаёт в снимке состояния (state).
+The terminal slash commands work in the web shell through the same input: text
+with `/` goes to the core as a command (and is not drawn as a user bubble), reports
+stay in the log under the chat — only command reports and errors land there, chat
+events live in the general chronology. Autocompletion is like in the terminal:
+`@` opens the mentions popup (the manager, chat members, session —
+arrows/Tab/Enter/Esc), `/` shows the command list with descriptions and argument
+hints, Tab completes. The hint dictionary is delivered by the core in the state
+snapshot.
 
-Ядро одно на обе оболочки: сервер (`src/serve.ts`) — это второй Presenter
-поверх `src/core/engine.ts`, отдельных «мозгов» у веб-версии нет. Протокол —
-JSON поверх WebSocket `/ws` (полный список событий и rpc — в шапке serve.ts),
-так что веб-оболочку можно заменить на свою.
+One core for both shells: the server (`src/serve.ts`) is a second Presenter over
+`src/core/engine.ts` — the web version has no separate "brains". The protocol is
+JSON over the WebSocket `/ws` (the full list of events and rpc is in the serve.ts
+header), so you can replace the web shell with your own.
 
-## Настройки: ~/.dreamteam/settings.json
+## Settings: ~/.dreamteam/settings.json
 
-Общие настройки приложения — `~/.dreamteam/settings.json` (файл обязателен —
-без него приложение не запустится): язык общения, экран и лимиты инструментов агентов.
+General app settings — `~/.dreamteam/settings.json` (the file is required — without
+it the app won't start): the interface language, the conversation language, the
+screen and the agents' tool limits.
 
 ```json
 {
   "width": 100,
-  "language": "русский",
+  "ui": "en",
+  "language": "english",
   "margin": 2,
   "screen": true,
   "runTimeoutMs": 180000,
@@ -397,177 +419,187 @@ JSON поверх WebSocket `/ws` (полный список событий и r
 }
 ```
 
-- `maxTurns` — максимальное число отвечающих за раунд (по умолчанию 3;
-  0 — без ограничения, но модератор сам решает, кто и сколько). Попадает
-  в промт модератора: «выбирай от 1 до N».
-- `language` — язык общения команды (по умолчанию `русский`). Попадает
-  в системные промты дословно — «отвечай строго на языке: …», — поэтому
-  запись любая: `russian`, `ru-RU`, `english`, `русский` — нейросети поймут.
-  Язык читается заново в каждом раунде: правка подхватывается без перезапуска.
-- `width` — логическая ширина экрана, целое число от 40 до 500. Весь вывод
-  (ответы агентов, баннер, справка) переносится на эту ширину, а не на всю
-  ширину терминала: текст не растягивается на широких окнах. Если терминал
-  уже, ширина обрезается до его размера.
-- `margin` — отступы по краям экрана, целое число от 0 до 10 (по умолчанию 2):
-  слева и справа контент пишется с отступом, сверху панель чата начинается
-  ниже отступа, снизу ввод отделён двумя пустыми строками.
-- `screen` — полноэкранный режим (`true` по умолчанию). `false` возвращает
-  прежний «линейный» readline-интерфейс — например, для пайпов и экзотических
-  терминалов (в не-TTY запуск так и так включается автоматически).
-- `runTimeoutMs` — таймаут команды (`​```run` и `​```ssh`, по умолчанию
-  180000 = 3 минуты); зависший процесс прерывается вместе с дочерними.
-- `maxOutputChars` — до скольких символов обрезается вывод команды
-  (по умолчанию 4000).
+- `ui` — the interface language: `ru`, `en`, `zh` are built in, or the id of your
+  own language from `~/.dreamteam/lang/<id>.json` (a file
+  `{ "name": "Deutsch", "translations": { … } }`; the id is the file name without
+  `.json`, files starting with `_` are ignored). Chosen in the first-launch wizard,
+  changed with `/settings set ui=en`. The interface and the three READMEs
+  (`README.md`, `README.ru.md`, `README.zh.md`) are available in English, Russian
+  and Chinese. Deliberately not translated: the agents' and manager's system
+  prompts (the answer language is governed by `language`), command argument names
+  (part of the syntax), config diagnostics (the fail-fast layer).
+- `maxTurns` — the maximum number of answerers per round (3 by default;
+  0 — no limit, the moderator decides who and how many). Goes into the moderator's
+  prompt: "pick from 1 to N".
+- `language` — the language the team converses in (default: Russian). It goes into
+  the system prompts verbatim — "answer strictly in the language: …" — so any
+  wording works: `russian`, `ru-RU`, `english`, `中文`. The language is re-read in
+  every round: edits are picked up without a restart.
+- `width` — the logical screen width, an integer from 40 to 500. All output (agent
+  answers, the banner, the help) wraps at this width rather than the full terminal
+  width: text doesn't stretch across wide windows. If the terminal is narrower,
+  the width is clamped to it.
+- `margin` — screen edge margins, an integer from 0 to 10 (2 by default): the
+  content is written with an indent on the left and right, the chat panel starts
+  below the indent on top, and the input is separated by two empty lines at the
+  bottom.
+- `screen` — full-screen mode (`true` by default). `false` brings back the old
+  "linear" readline interface — for pipes and exotic terminals, for example (a
+  non-TTY launch turns it on automatically anyway).
+- `runTimeoutMs` — the command timeout (`run` and `ssh` blocks, 180000 = 3 minutes
+  by default); a hung process is interrupted together with its children.
+- `maxOutputChars` — how many characters a command's output is trimmed to (4000 by
+  default).
 
-**Как устроен полноэкранный экран** (альтернативный буфер терминала — по
-выходу ваш терминал выглядит как до запуска):
+**How the full screen works** (the terminal's alternative buffer — after quitting,
+your terminal looks like it did before the launch):
 
 ```
 ┌──────────────────────────────┐
 │                              │
-│  панель чата (прокрутка)     │  ← история и стрим ответов
+│  chat panel (scrollback)     │  ← history and answer streaming
 │                              │
 ├──────────────────────────────┤
-│  5 строк подсказок           │  ← команды, всплывашка @, статус/спиннер
+│  5 hint lines                │  ← commands, the @ popup, status/spinner
 ├──────────────────────────────┤
-│  Ты > ввод                   │  ← поле ввода, растёт вверх при переносе
+│  You > input                 │  ← the input field, grows upward when wrapping
 │                              │
-│  (две пустые строки)         │  ← отступ от нижней границы
+│  (two empty lines)           │  ← the indent from the bottom edge
 └──────────────────────────────┘
 ```
 
-Чат прокручивается внутри своей панели — подсказки, ввод и статус всегда
-остаются на своих местах, что бы ни происходило. Строка режется по словам,
-а не по символам; слово длиннее строки режется по символам. То же правило —
-в поле ввода: ввод переносится по словам, курсор ходит по строкам (↑/↓ заняты
-историей, перемещение — ←/→/Home/End). Изменение размера терминала
-пересобирает зоны на лету.
+The chat scrolls inside its panel — hints, input and status always stay in place
+no matter what happens. Lines wrap at words, not characters; a word longer than
+a line is cut by characters. The same rule in the input field: input wraps at
+words, the cursor moves across lines (↑/↓ are taken by history, movement is
+←/→/Home/End). Resizing the terminal rebuilds the zones on the fly.
 
-**Прокрутка истории.** При запуске панель сразу показывает хвост прошлого
-разговора — в фирменных цветах участников; чтобы заглянуть выше, листайте
-**колесом мыши** или клавишами **PgUp/PgDn** (страница за раз).
-**Ctrl+PgUp** — прыжок в самое начало истории, **Ctrl+PgDn** — обратно к
-свежим сообщениям.
-Пока вы прокрутили вверх, новые ответы не подтягивают вид к низу — он
-«закреплён», а в нижней строке подсказок появляется счётчик: «↑ история: выше
-ещё на N стр.». Листайте вниз до конца — вид
-вернётся к свежим сообщениям, и стрим снова пойдёт в реальном времени.
-Колесо работает через мышиный режим терминала: пока он включён, выделение
-текста мышью в некоторых терминалах нужно делать с **Shift**.
+**Scrollback.** On launch the panel immediately shows the tail of the previous
+conversation — in the members' signature colors; to look further back, scroll with
+the **mouse wheel** or **PgUp/PgDn** (a page at a time). **Ctrl+PgUp** jumps to
+the very start of the history, **Ctrl+PgDn** — back to the fresh messages.
+While you are scrolled up, new answers don't pull the view to the bottom — it
+stays "pinned", and a counter appears on the bottom hint line: "↑ history: N more
+pages above". Scroll down to the end — the view returns to the fresh messages,
+and the stream goes live again. The wheel works through the terminal's mouse mode:
+while it is on, text selection with the mouse in some terminals requires holding
+**Shift**.
 
-**Выделение текста.** В истории чата фрагмент выделяется мышью: зажать левую
-кнопку, протянуть, отпустить — текст без цветов уходит в буфер обмена
-(Windows — через `clip`, другие платформы — OSC 52), в строке статуса
-мелькает «✓ Скопировано в буфер».
+**Text selection.** In the chat history a fragment is selected with the mouse:
+press the left button, drag, release — the text without colors goes to the
+clipboard (Windows — via `clip`, other platforms — OSC 52), the status line
+flashes "✓ Copied to clipboard".
 
-В **поле ввода** (набираемое сообщение) работает клавиатурное выделение, как
-в обычном редакторе: **Shift+стрелки** (←/→/↑/↓ — по символам и строкам
-мягкого переноса), **Ctrl+Shift+←/→** (по словам) и **Shift+Home/Shift+End**
-(до начала/конца ввода). Печать заменяет выделение,
-Backspace/Delete/Ctrl+W удаляют его, ←/→/Home/End
-схлопывают к краю, ↑/↓ снимают, **Ctrl+C** копирует (выделение остаётся),
-**Esc** снимает. Если поле ввода пустое, Shift+стрелки выделяют историю чата
-(свежее нажатие захватывает последнюю видимую строку, дальше — по строкам с
-автопрокруткой; Shift+Home/End — начало/конец строки под головой). Если ни
-там, ни там выделения нет, Ctrl+C работает как раньше — прерывает
-раунд/выход.
+In the **input field** (the message being typed) keyboard selection works like in
+a regular editor: **Shift+arrows** (←/→/↑/↓ — by characters and soft-wrapped
+lines), **Ctrl+Shift+←/→** (by words) and **Shift+Home/Shift+End** (to the
+start/end of the input). Typing replaces the selection,
+Backspace/Delete/Ctrl+W delete it, ←/→/Home/End collapse it to an edge,
+↑/↓ dismiss it, **Ctrl+C** copies it (the selection stays), **Esc** dismisses it.
+If the input field is empty, Shift+arrows select the chat history (a fresh press
+grabs the last visible line, then line by line with autoscroll; Shift+Home/End —
+the start/end of the line under the cursor). If there is no selection in either
+place, Ctrl+C works as before — it interrupts the round/quits.
 
-**Ответ в процессе печати** не обрезается одной строкой: недописанный стрим
-агента переносится и занимает нижние строки панели (от пяти и до полной
-высоты панели — что короче), прижавшись к полю ввода. Пока идёт стрим,
-выделение работает и по этим «живым» строкам — и мышью, и Shift+стрелками
-при пустом вводе; как только ответ дописан и уходит в историю, выделение
-снимается (строки остались на месте, но уже как обычная история). При
-просмотре истории вверх живой стрим не показывается — он допишется «за
-кадром» и появится, когда вид вернётся к свежим сообщениям.
+**An answer being streamed** is not cut to a single line: an agent's unfinished
+stream wraps and occupies the bottom lines of the panel (from five up to the full
+panel height — whichever is shorter), pressed against the input field. While the
+stream runs, selection works over those "live" lines too — both with the mouse and
+with Shift+arrows on empty input; once the answer is finished and moves into the
+history, the selection is dropped (the lines stay in place, but as regular history
+now). When you are scrolled up through the history, the live stream is not shown —
+it finishes "off screen" and appears when the view returns to the fresh messages.
 
-**Строки подсказок** (5 штук над вводом): список команд при вводе `/`,
-всплывашка `@упоминаний` (может вырастать и выше, поверх чата), а нижняя
-строка — статус: спиннер «Яна печатает…», вопрос подтверждения действия
-агента (`y/n`), а при прокрученной вверх истории — счётчик «↑ история:
-выше ещё на N стр.».
+**Hint lines** (5 of them above the input): the command list while typing `/`,
+the `@mentions` popup (it can grow taller still, over the chat), and the bottom
+line is the status: the "Yana is typing…" spinner, an agent's action confirmation
+question (`y/n`), and, when the history is scrolled up, the "↑ history: N more
+pages above" counter.
 
-**Клавиши редактора ввода:** ↑/↓ — история сообщений (черновик сохраняется),
-Ctrl+U — стереть строку, Ctrl+W или Alt+Backspace — стереть слово,
-←/→/Home/End — курсор, Ctrl+←/→ — по словам, Delete — удалить символ после
-курсора, Ctrl+D на пустой строке — выход. Вставка из буфера склеивает переводы
-строк в пробелы (многострочная вставка не отправляется по частям). Курсор не
-режет эмодзи и другие составные символы.
+**Input editor keys:** ↑/↓ — message history (the draft is kept), Ctrl+U — erase
+the line, Ctrl+W or Alt+Backspace — erase a word, ←/→/Home/End — cursor,
+Ctrl+←/→ — by words, Delete — delete the character after the cursor, Ctrl+D on an
+empty line — quit. Pasting from the clipboard glues line breaks into spaces (a
+multiline paste is not sent in parts). The cursor doesn't cut emoji or other
+composite characters in half.
 
-## Инструменты: агенты пишут файлы и выполняют команды
+## Tools: agents write files and run commands
 
-По умолчанию команда только обсуждает. Но агенту можно доверить реальные
-действия — поле `"tools"` в `~/.dreamteam/agents.json`. Форма одна — объект-карточки:
-имя тула → его настройки (объект; `null` или `{}` — настройки по умолчанию):
+By default the team only discusses. But an agent can be trusted with real actions —
+the `"tools"` field in `~/.dreamteam/agents.json`. There is a single form — an
+object of cards: tool name → its settings (an object; `null` or `{}` — default
+settings):
 
 ```json
 "tools": { "files": {}, "shell": null }
 ```
 
-- `files` — агент может создавать и перезаписывать файлы;
-- `shell` — агент может выполнять команды на этом ПК через **системный шелл**:
-  на Windows — cmd.exe (`dir`, `type`, `findstr`), на Linux/macOS — `/bin/sh`
-  (`ls`, `cat`, `grep`). Агенту в подсказке явно говорится, в какой он среде,
-  чтобы он не писал bash-команды под Windows. Для git — отдельный тул;
-- `git` — работа с репозиторием отдельным тулом (````git status`, ````git commit -m "…"```)
-  без локального шелла: read-only — молча, изменяющее — по карточке или вопрос
-  (репозиторий закрепляется карточкой `"repo"`, иначе — рабочая папка проекта);
-- `arch` — архивы **zip / tar / tar.gz** без внешних программ — чистый Node,
-  одинаково на Windows и Linux (````arch pack out.zip src/````,
-  ````arch unpack archive.zip```, ````arch list archive.zip```). Защита:
-  zip-slip и симлинки в архиве — отказ, лимиты числа файлов и объёма из
-  карточки (`maxEntries`, `maxTotalBytes`) против архивов-бомб, секреты и
-  `.dreamteam` не пакуются. rar/7z не поддерживаются сознательно;
-- `ssh` — агент может выполнять команды **на настроенных серверах** (см. ниже),
-  не имея локальной консоли: `"tools": { "files": {}, "ssh": null }` — и блоки `run`
-  от такого агента отклоняются автоматически;
-- `look` — агент может «смотреть» картинки vision-моделью и `image` —
-  генерировать/перерисовывать изображения (см. «Зрение и картинки»);
-- `docs`, `ocr`, `web`, `mail`, `telegram`, `max` — документы, сканы, веб,
-  почта и мессенджеры (см. «Документы, сканы, веб и связь» ниже); секреты
-  этих тулов живут в файлах дома, а не в карточках агентов.
+- `files` — the agent can create and overwrite files;
+- `shell` — the agent can run commands on this PC through the **system shell**:
+  on Windows — cmd.exe (`dir`, `type`, `findstr`), on Linux/macOS — `/bin/sh`
+  (`ls`, `cat`, `grep`). The agent is told explicitly in its cheat sheet which
+  environment it's in, so it doesn't write bash commands under Windows. Git gets
+  a separate tool;
+- `git` — repository work as a separate tool (``git status``, ``git commit -m "…"``)
+  without a local shell: read-only — silently, mutating — per the card or a
+  question (the repository is pinned by the `"repo"` card field, otherwise — the
+  project's working folder);
+- `arch` — **zip / tar / tar.gz** archives without external programs — pure Node,
+  the same on Windows and Linux (``arch pack out.zip src/``, ``arch unpack
+  archive.zip``, ``arch list archive.zip``). Protection: zip-slip and symlinks in
+  an archive — refused; entry-count and size limits from the card (`maxEntries`,
+  `maxTotalBytes`) against archive bombs; secrets and `.dreamteam` are never
+  packed. rar/7z are deliberately unsupported;
+- `ssh` — the agent can run commands **on configured servers** (see below) without
+  a local console: `"tools": { "files": {}, "ssh": null }` — and `run` blocks from
+  such an agent are rejected automatically;
+- `look` — the agent can "look at" pictures with a vision model and `image` —
+  generate/redraw images (see "Vision and images");
+- `docs`, `ocr`, `web`, `mail`, `telegram`, `max` — documents, scans, the web,
+  mail and messengers (see "Documents, scans, the web and messaging" below); the
+  secrets of these tools live in home files, not in agent cards.
 
-Включить тул можно и через менеджера: «включи Глебу shell» — он добавит
-карточку в `agents.json` (и сможет потом её править: «дай Глебу разрешение
-на docker compose»).
+A tool can also be enabled through the manager: "enable shell for Gleb" — it will
+add the card to `agents.json` (and can edit it later: "give Gleb permission for
+docker compose").
 
-**Как это работает.** Агент вставляет в свой ответ блок с действием,
-приложение проверяет структурные права (включён ли тул этому агенту, назначен
-ли проект/сервер), затем решение принимает **сам тул** — его обязательный
-метод `check()` возвращает один из трёх вердиктов:
+**How it works.** The agent inserts an action block into its answer, the app
+checks the structural permissions (is the tool enabled for this agent, is the
+project/server assigned), then the decision is made by **the tool itself** — its
+mandatory `check()` method returns one of three verdicts:
 
-- `allow` — пропустить молча, без вопроса;
-- `ask` — показать вам подтверждение:
+- `allow` — pass silently, no question;
+- `ask` — show you a confirmation:
 
   ```
-  ⚙ Команда: 💾 Глеб: [shop] docker compose up -d
-      y — выполнить · n — отказать
+  ⚙ Command: 💾 Gleb: [shop] docker compose up -d
+      y — run · n — deny
   ```
 
-  `y` — выполнить, `n` — отказать (агент узнает об отказе и предложит другое
-  решение);
-- `deny` — отказать сразу, без вопроса.
+  `y` — run it, `n` — refuse (the agent learns about the refusal and proposes
+  another solution);
+- `deny` — refuse right away, without a question.
 
-Встроенные тула по умолчанию: `files` молча пускает пути внутри рабочей папки
-и спрашивает про выход за неё; `look` и `image` разрешают всегда; `shell` и
-`ssh` спрашивают каждую команду, пока в карточке тула не заданы правила
-(см. «Карточки тулов» ниже). Результат возвращается агенту сообщением от
-«⚙ инструменты», и он продолжает работу — так, шаг за шагом, «кодер»
-действительно пишет файлы, а «девопс» реально запускает `docker ps` и смотрит
-вывод, а не выдумывает его. Максимум три цикла «действие → результат →
-продолжение» на один ответ. Всё происходящее остаётся в истории: `/session history`
-показывает действия как записи «⚙ инструменты».
+The built-in defaults: `files` silently lets through paths inside the working
+folder and asks about leaving it; `look` and `image` always allow; `shell` and
+`ssh` ask about every command until the tool card defines rules (see "Tool cards"
+below). The result is returned to the agent as a message from "⚙ tools", and it
+keeps working — this way, step by step, the "coder" really writes files, and the
+"devops" really runs `docker ps` and reads the output instead of making it up.
+At most three "action → result → continuation" cycles per answer. Everything that
+happens stays in the history: `/session history` shows the actions as "⚙ tools"
+entries.
 
-**Рабочая папка — папка запуска.** Агенты работают в папке, из которой
-запущено приложение (и в подпапках, которые агенту назначены полем
-`"workspace"` — путь относительно папки запуска). Файлы пишутся и команды
-выполняются только там.
+**The working folder is the launch folder.** The agents work in the folder the app
+was launched from (and in subfolders assigned to an agent via its `"workspace"`
+field — a path relative to the launch folder). Files are written and commands run
+only there.
 
-**Реестр серверов.** `.dreamteam/hosts.json` — серверы текущего проекта
-для ssh (файл создаётся скаффолдом). Проект один — папка, где запущено
-приложение; серверы добавляются командой
-`/project host add prod=deploy@203.0.113.10`, через менеджера («добавь
-сервер prod — deploy@203.0.113.10») или руками; убираются
+**The server registry.** `.dreamteam/hosts.json` — the ssh servers of the current
+project (the file is created by the scaffold). The project is the folder the app
+was launched from; servers are added with the command
+`/project host add prod=deploy@203.0.113.10`, through the manager ("add the prod
+server — deploy@203.0.113.10") or by hand; removed with
 `/project host delete prod`:
 
 ```json
@@ -580,48 +612,48 @@ Ctrl+U — стереть строку, Ctrl+W или Alt+Backspace — стер
 }
 ```
 
-Плоский словарь: имя сервера → подключение, у каждого обязательное поле
-`host`. В блоках сервер адресуется именем (`​```ssh prod uptime`); длинная
-форма `project:prod` тоже понимается.
+A flat dictionary: server name → connection, each with a mandatory `host` field.
+In a block the server is addressed by name (`ssh prod uptime`); the long
+`project:prod` form is understood too.
 
-В `agents.json` агенту назначаются проекты и включаются инструменты:
+In `agents.json` projects are assigned to the agent and its tools are enabled:
 
 ```json
 "tools": { "files": {}, "ssh": null }, "projects": ["project"]
 ```
 
-Проект один — текущая папка, его ярлык `project`; поле `projects` пускает
-агента к его серверам. Действие с чужим ярлыком отклоняется ещё до
-подтверждения. Доступы видны в `/team`.
+The project is one — the current folder, its label is `project`; the `projects`
+field lets the agent reach its servers. An action with someone else's label is
+rejected before confirmation. Accesses are visible in `/team`.
 
-**Серверы по ssh.** Блок `​```ssh prod` (или `​```ssh project:prod`) с командой
-в теле выполняется
-штатным ssh-клиентом на этом ПК: `ssh deploy@203.0.113.10 "команда"` — таймауты,
-обрезка вывода и Esc работают как у локальных команд. По умолчанию
-`BatchMode=yes`: только ключи, нет ключа — команда сразу падает, а не висит.
+**Servers over ssh.** An `ssh prod` block (or `ssh project:prod`) with a command
+in the body is run by the regular ssh client on this PC:
+`ssh deploy@203.0.113.10 "command"` — timeouts, output trimming and Esc work like
+for local commands. By default `BatchMode=yes`: keys only, no key — the command
+fails immediately instead of hanging.
 
-У хоста можно задать ещё два поля:
+A host can have two more fields:
 
-- `dir` — папка проекта на сервере. После коннекта всё исполняется из неё:
-  команда уходит на сервер как `cd '<dir>' && pwd && <команда>` — не пройти
-  cd (папки нет) — команда не запустится, а pwd подтверждает папку в выводе.
-  Проверка путей в тулe ssh тоже идёт от этой папки: абсолютный путь, `..`
-  или `~` мимо неё — отказ с обоснованием ещё до подключения;
-- `password` — пароль вместо ключей. Штатный ssh пароль из конфига не возьмёт,
-  поэтому команда идёт через `sshpass -e` (пароль — в переменной окружения,
-  а не в списке процессов); нет sshpass на PATH — внятный отказ. Пароль лежит
-  в конфиге открытым текстом: машина ваша, но помните об этом. В разговоре
-  с менеджером пароль лучше не диктовать — впишите его в `hosts.json` руками.
+- `dir` — the project folder on the server. After connecting, everything runs
+  from it: the command is sent to the server as `cd '<dir>' && pwd && <command>` —
+  if cd fails (no folder), the command won't start, and pwd confirms the folder in
+  the output. Path checks in the ssh tool also start from this folder: an absolute
+  path, `..` or `~` outside it — a refusal with a reason before even connecting;
+- `password` — a password instead of keys. The regular ssh won't take a password
+  from a config, so the command goes through `sshpass -e` (the password is in an
+  environment variable, not in the process list); no sshpass on PATH — a clear
+  refusal. The password sits in the config in plain text: it's your machine, but
+  keep it in mind. Better not dictate the password in a conversation with the
+  manager — put it into `hosts.json` by hand.
 
-Обмен файлами — тем же блоком: тело `put локальный удалённый` или
-`get удалённый локальный` уходит в штатный `scp`. Локальная сторона обязана
-быть внутри рабочей папки, удалённая — внутри `dir` хоста; по умолчанию
-перенос спрашивается вашим `y/n`, правилами карточки (`"allow": ["put *"]`)
-можно разрешить молча.
+File exchange — the same block: a body of `put local remote` or
+`get remote local` goes to the regular `scp`. The local side must be inside the
+working folder, the remote one — inside the host's `dir`; by default the transfer
+asks for your `y/n`, the card rules (`"allow": ["put *"]`) can allow it silently.
 
-**Карточки тулов.** Поле `tools` — только объект-карточки: содержимое карточки
-тул читает сам, приложение в него не заглядывает; пустой объект или `null` —
-настройки по умолчанию:
+**Tool cards.** The `tools` field is only the object of cards: the tool reads the
+card contents itself, the app doesn't look into it; an empty object or `null` —
+default settings:
 
 ```json
 "tools": {
@@ -634,107 +666,111 @@ Ctrl+U — стереть строку, Ctrl+W или Alt+Backspace — стер
 }
 ```
 
-Карточка `git` (тул встроенный): `repo` — закрепить репозиторий (иначе — рабочая
-папка действия), `allow`/`deny` — те же правила команд, что у `shell`
-(read-only — `status`, `log`, `diff`… — текут молча и без карточки),
-`timeoutMs` (по умолчанию 120 000) и `maxOutput` (символов, по умолчанию 4000).
+The `git` card (a built-in tool): `repo` — pin the repository (otherwise — the
+working folder of the action), `allow`/`deny` — the same command rules as `shell`
+(read-only — `status`, `log`, `diff`… — flow silently and without a card),
+`timeoutMs` (120 000 by default) and `maxOutput` (characters, 4000 by default).
 
-Правила `shell` и `ssh` (заданы — дефолт вытесняется целиком): цепочка (`&&`,
-`;`, `|`, `&`, перевод строки) разбирается на отдельные команды; `deny`
-запрещает команду в любой части цепочки; `allow` пропускает цепочку молча,
-только если каждая её команда начинается с разрешённого префикса по целым
-словам (`git` матчит `git status`, но не `gitify`; `*` — любое продолжение,
-только последним словом); команды с подстановками (`$`, `(`, `)`, `<`, `>`,
-`` ` ``) молча не проходят никогда — только вопрос. Всё, что не подошло ни к
-`allow`, ни к `deny`, показывается вам обычным вопросом `y/n`.
+The `shell` and `ssh` rules (once set, the default is displaced entirely): a chain
+(`&&`, `;`, `|`, `&`, a newline) is parsed into separate commands; `deny` forbids
+a command in any part of the chain; `allow` passes a chain silently only if every
+command starts with an allowed prefix by whole words (`git` matches `git status`,
+not `gitify`; `*` — any continuation, only as the last word); commands with
+substitutions (`$`, `(`, `)`, `<`, `>`, `` ` ``) never pass silently — only a
+question. Anything that matched neither `allow` nor `deny` is shown to you as a
+regular `y/n` question.
 
-**Дефолтная политика** (пустая карточка или `null`) — комбо из `git`-тула и
-рамки рабочей папки, как у `files`:
+**The default policy** (an empty card or `null`) — a combo of the `git` tool and
+the working-folder fence, like `files`:
 
-- read-only команды текут молча: у `shell` на Linux это `ls`, `cat`, `grep`…,
-  на Windows — `dir`, `type`, `findstr`; у `ssh` — `uptime`, `df`,
-  `systemctl status`… (у `find`/`systemctl` мутирующие флаги мимо дефолта);
-- подстановки переменных (`$VAR` и `%VAR%` — раскрытие секретов из окружения
-  тоже ловится) — вопрос;
-- путь за пределами рабочей папки — уже не вопрос, а **отказ с обоснованием**:
-  у `shell` аргументы-пути сверяются с папкой (`cat ../secret` — отказ),
-  у `ssh` машину не свернуть, поэтому относительный путь считается «своим»,
-  а абсолютный, `..` и `~` — выходом (`cat /etc/passwd` — отказ);
-- секреты (`.env`, `*.pem`, `*.key`, `id_rsa`…) не читаются молча даже внутри
-  рабочей папки — отказ;
-- всё остальное — обычный вопрос `y/n`.
+- read-only commands flow silently: for `shell` on Linux that's `ls`, `cat`,
+  `grep`…, on Windows — `dir`, `type`, `findstr`; for `ssh` — `uptime`, `df`,
+  `systemctl status`… (`find`/`systemctl` mutating flags are outside the default);
+- variable substitutions (`$VAR` and `%VAR%` — leaking environment secrets is
+  caught too) — a question;
+- a path outside the working folder — no longer a question but a **refusal with
+  a reason**: for `shell` path arguments are checked against the folder
+  (`cat ../secret` — refused); for `ssh` the machine can't be escaped, so a
+  relative path counts as "ours", while an absolute one, `..` and `~` — a way out
+  (`cat /etc/passwd` — refused);
+- secrets (`.env`, `*.pem`, `*.key`, `id_rsa`…) are never read silently even
+  inside the working folder — refused;
+- everything else — a regular `y/n` question.
 
-Ничего из этого не спрятано в коде: у каждого встроенного тула есть
-**обязательный дефолтный конфиг** — `src/tools/<тул>/default.json` рядом
-с его кодом. Там лежат и белые списки read-only команд (`shell` — с
-платформенными наборами `"allow"`/`"allowWin32"`, `ssh`, `git`), и заводские
-настройки (лимиты `arch`, языки `ocr`, адрес моста `soffice` у `docs`,
-пустой белый список `web`). Пустая карточка агента означает «возьми
-default.json»; карточка с полями заменяет его целиком. Кривой дефолтный файл
-роняет сборку тула с внятной ошибкой — как и кривая карточка.
+None of this is hidden in the code: every built-in tool has a **mandatory default
+config** — `src/tools/<tool>/default.json` next to its code. It holds both the
+read-only command whitelists (`shell` — with the platform sets
+`"allow"`/`"allowWin32"`, `ssh`, `git`) and the factory settings (the `arch`
+limits, the `ocr` languages, the `soffice` bridge address for `docs`, the empty
+`web` whitelist). An agent's empty card means "take default.json"; a card with
+fields replaces it entirely. A broken default file fails the tool's build with a
+clear error — same as a broken card.
 
-**Разводка командных тулов.** `run`, `git` и `ssh` — три входа в командную
-строку, у каждого свой домен, и шпаргалка агента проговаривает это явно:
-локальная командная строка — `run` (всё, что не git и не серверы), работа
-с репозиторием — только `​```git` (git-команды через `run` молча не проходят
-— агенту прилетает вопрос человеку, и он переключается на правильный тул),
-команды на серверах — только `​```ssh`.
+**Wiring of the command tools.** `run`, `git` and `ssh` are three entrances to
+the command line, each with its own domain, and the agent's cheat sheet says so
+explicitly: the local command line — `run` (everything that isn't git and isn't
+servers), repository work — only `git` blocks (git commands through `run` never
+pass silently — the agent gets a human question and switches to the right tool),
+commands on servers — only `ssh` blocks.
 
-**Маски файлов** (`"masks"` — у тулов `ssh` и `files`): ещё один слой поверх
-рамки рабочей папки — список масок в синтаксисе gitignore. Маска без `!` —
-запрет, с `!` — разрешение; последняя совпавшая решает, не совпало ничего —
-можно. Отказ по маске приходит агенту с обоснованием и не обходится правилами
-`allow`: правила решают, спрашивать ли человека, маски — что нельзя никогда.
+**File masks** (`"masks"` — on the `ssh` and `files` tools): another layer on top
+of the working-folder fence — a list of masks in gitignore syntax. A mask without
+`!` is a ban, with `!` — an allowance; the last match wins, if nothing matched —
+allowed. A mask refusal reaches the agent with a reason and is not bypassed by
+`allow` rules: the rules decide whether to ask the human, the masks — what is
+never allowed.
 
 ```json
 "ssh":   { "masks": ["*", "!logs/**", "!tmp/**"] },
 "files": { "masks": ["*.env", "*.pem", "*.key", "id_rsa*", "secrets/**"] }
 ```
 
-Синтаксис: `*` — любые символы внутри имени, `?` — ровно один, `**` — любое
-число папок (`src/**/*.ts`); маска без слэша (`*.log`) ловит файл на любой
-глубине; маска-каталог (`secrets`) запирает и содержимое. Относительные пути
-у `files` считаются от рабочей папки, у `ssh` — от `dir` хоста (а в put/get
-маски действуют на обе стороны — и локальную, и серверную).
+Syntax: `*` — any characters within a name, `?` — exactly one, `**` — any number
+of folders (`src/**/*.ts`); a mask without a slash (`*.log`) catches the file at
+any depth; a directory mask (`secrets`) locks the contents too. Relative paths
+for `files` count from the working folder, for `ssh` — from the host's `dir`
+(and in put/get the masks act on both sides — local and server).
 
-Карточка встроенного тула строгая: неизвестные поля — внятная ошибка при
-сборке тулов, а не молча неработающее правило (у `shell` разрешены `allow`
-и `deny`; у `ssh` — `allow`, `deny` и `masks`; у `files` — `masks`; у
-остальных тулов настроек нет). Тот же контроль действует и на default.json.
+A built-in tool's card is strict: unknown fields — a clear error when building
+the tools, not a silently dead rule (`shell` allows `allow` and `deny`; `ssh` —
+`allow`, `deny` and `masks`; `files` — `masks`; the other tools have no
+settings). The same control applies to default.json.
 
-**Свои тула.** Положите файл в `~/.dreamteam/tools/` дома — имя файла
-становится именем тула, код подхватывается без перезапуска:
+**Custom tools.** Put a file into the home's `~/.dreamteam/tools/` — the file
+name becomes the tool's name, the code is picked up without a restart:
 
 ```ts
 // ~/.dreamteam/tools/my.ts
 import type { Tool, ToolConfig } from 'dreamteam/src/tools-api.js';
 
 export default (config: ToolConfig): Tool => ({
-  desc: 'что это и как пользоваться — попадает в шпаргалку агента',
-  check: (body) => (body.startsWith('опасное') ? 'ask' : 'allow'),
+  desc: 'what it is and how to use it — goes into the agent cheat sheet',
+  check: (body) => (body.startsWith('dangerous') ? 'ask' : 'allow'),
   run: async (body, ctx) => {
-    // действие; результат — строка, ошибка — throw Error
-    return 'сделано';
+    // the action; the result is a string, an error — throw Error
+    return 'done';
   },
 });
 ```
 
-Контракт: `desc` — строка для шпаргалки агента; `check(body)` — **единственное
-место валидации**, возвращает `'allow' | 'ask' | 'deny'`, причём отказ можно
-обосновать — `{ deny: 'причина' }` уйдёт агенту в отчёт «⚙ инструменты», и он
-переформулирует запрос вместо тыканья наугад; `run(body, ctx)` —
-действие. В `ctx` тул видит рабочую папку и проект действия, `ctx.run` —
-запуск команды через полный конвейер (с вашим `y/n`), `ctx.http` — HTTP-запрос,
-`ctx.confirm` — живой вопрос человеку. Имена встроенных тулов (`files`,
-`shell`, `ssh`, `look`, `image`) занять нельзя. Ответственность за код
-скачанного тула — на вас, как и за любой npm-пакет: он исполняется с правами
-вашего пользователя. (Путь импорта `dreamteam/src/tools-api.js` — для
-глобальной установки из npm; при работе в клоне репозитория —
-относительный `'../src/tools-api.js'`.)
+The contract: `desc` — a string for the agent's cheat sheet; `check(body)` —
+**the single validation point**, returns `'allow' | 'ask' | 'deny'`, and a
+refusal can carry a reason — `{ deny: 'reason' }` goes to the agent in the
+"⚙ tools" report, and it reformulates the request instead of poking blindly;
+`run(body, ctx)` — the action. In `ctx` the tool sees the working folder and the
+project of the action, `ctx.run` — running a command through the full pipeline
+(with your `y/n`), `ctx.http` — an HTTP request, `ctx.confirm` — a live question
+to the human. The built-in tool names (`files`, `shell`, `ssh`, `look`, `image`)
+cannot be taken. Responsibility for downloaded tool code is yours, as with any
+npm package: it runs with your user's rights. (The
+`dreamteam/src/tools-api.js` import path is for a global install from npm; when
+working in a clone of the repository — the relative
+`'../src/tools-api.js'`.)
 
-**Готовый тул: git** (идёт в комплекте). Блок `​```git` с подкомандой в теле
-или в строке блока (`​```git shop:log --oneline`); репозиторий — рабочая папка
-действия (подпапка агента) или закреплённый в карточке `repo`.
+**A ready-made tool: git** (ships in the box). A `git` block with a subcommand in
+the body or on the block line (`git shop:log --oneline`); the repository — the
+working folder of the action (the agent's subfolder) or the one pinned in the
+card's `repo`.
 
 ```json
 "git": {
@@ -744,151 +780,152 @@ export default (config: ToolConfig): Tool => ({
 }
 ```
 
-Дефолтная политика без правил: read-only команды (список — в
+The default policy with no rules: read-only commands (the list is in
 `src/tools/git/default.json`: `status`, `log`, `diff`, `show`, `blame`,
-`branch` без аргументов…) текут молча — хоть цепочкой, всё
-изменяющее (`commit`, `push`, `reset`, `stash pop`…) и любые подстановки —
-вопрос. Задали `allow`/`deny` — правила работают как у `shell` и вытесняют
-дефолт целиком. Прочие настройки: `timeoutMs` (по умолчанию 120000) и
-`maxOutput` (символов, 4000); неизвестные поля — ошибка. `git` запускается
-напрямую (spawn, без cmd.exe), аргументы — массивом, так что кавычки в теле
-блока — это кавычки аргументов, а не шелл-синтаксис. Включите тул агенту
-полем `"git": {}` в его `tools`.
+`branch` without arguments…) flow silently — even in chains; everything mutating
+(`commit`, `push`, `reset`, `stash pop`…) and any substitutions — a question.
+Set `allow`/`deny` — the rules work like `shell`'s and displace the default
+entirely. Other settings: `timeoutMs` (120000 by default) and `maxOutput`
+(characters, 4000); unknown fields — an error. `git` runs directly (spawn, no
+cmd.exe), arguments as an array, so quotes in the block body are argument quotes,
+not shell syntax. Enable the tool for an agent with a `"git": {}` field in its
+`tools`.
 
-**Безопасность:**
+**Security:**
 
-- файлы пишутся **только внутри рабочей папки** — папка запуска приложения
-  или назначенная агенту подпапка (`workspace` в его карточке);
-- каждое действие проходит через `check()` тула: разрешённое — молча,
-  сомнительное — только с вашим `y/n`; отказ (`deny`) приходит агенту
-  с обоснованием — он понимает причину и строит правильный следующий запрос;
-  «разрешить до конца сессии» нет намеренно: что разрешено — то прописано
-  в карточке, всегда можно зайти и посмотреть;
-- права проверяются до подтверждения: чужой проект (включая его серверы) —
-  автоматический отказ;
-- у команд есть таймаут `runTimeoutMs` (по умолчанию 3 минуты) — зависший
-  процесс прерывается вместе с дочерними; вывод обрезается до `maxOutputChars`
-  (по умолчанию 4000 символов);
-- прерывание раунда (Esc) отменяет и запущенную команду.
+- files are written **only inside the working folder** — the app's launch folder
+  or a subfolder assigned to the agent (`workspace` in its card);
+- every action goes through the tool's `check()`: allowed — silently, dubious —
+  only with your `y/n`; a refusal (`deny`) reaches the agent with a reason — it
+  understands the cause and builds a proper follow-up request; there is
+  deliberately no "allow for the rest of the session": what is allowed is written
+  in the card, you can always go and look;
+- permissions are checked before confirmation: someone else's project (including
+  its servers) — an automatic refusal;
+- commands have a `runTimeoutMs` timeout (3 minutes by default) — a hung process
+  is interrupted together with its children; the output is trimmed to
+  `maxOutputChars` (4000 characters by default);
+- interrupting a round (Esc) cancels a running command too.
 
-В mock-режиме агент с инструментами показывает демо: записывает
-`demo-agent.txt` и выполняет `echo` — на этом можно проверить весь цикл
-без API-ключей. На Windows вывод команд может отображаться с искажённой
-кириллицей — cmd.exe печатает в кодировке консоли (cp866), сами команды
-при этом работают нормально.
+In mock mode an agent with tools shows a demo: it writes `demo-agent.txt` and
+runs `echo` — enough to check the whole cycle without API keys. On Windows command
+output may show garbled Cyrillic — cmd.exe prints in the console encoding
+(cp866); the commands themselves work fine.
 
-## Документы, сканы, веб и связь: docs, ocr, web, mail, telegram, max
+## Documents, scans, the web and messaging: docs, ocr, web, mail, telegram, max
 
-Шесть встроенных тулов на типовые поручения: «вот договор — вытащи всех
-действующих лиц», «вот сканы паспортов — распознай, собери в excel и отправь
-мне в макс и на почту». Включаются карточками в `tools` агента, все ходят
-через обычные блоки действий и ваши `y/n`:
+Six built-in tools for typical errands: "here's a contract — extract everyone
+involved", "here are passport scans — recognize them, build an excel and send it
+to me in MAX and by email". Enabled with cards in the agent's `tools`, all of
+them go through regular action blocks and your `y/n`:
 
 ```json
 "tools": { "files": {}, "docs": {}, "ocr": {}, "web": {}, "mail": {}, "max": {} }
 ```
 
-**docs — документы: читать и писать.** Блок `​```docs`:
+**docs — documents: reading and writing.** The `docs` block:
 
-- `read файл` — текст документа: pdf, docx, xlsx (листы → markdown-таблицы),
+- `read file` — the document's text: pdf, docx, xlsx (sheets → markdown tables),
   csv, txt/html/odt/ods/rtf;
-- `tables файл [csv] [лист]` — таблицы xlsx/csv: в ответ — markdown или
-  csv-строки, `лист` — имя или номер листа;
-- `write файл.xlsx` — тело блока: markdown-таблица `| a | b |` с шапкой и
-  разделителем — сохранится настоящим xlsx; `.md`/`.csv`/`.html`/`.json` —
-  по расширению;
-- `append файл.docx` — дописать абзацы (тело блока) в конец существующего;
-- `convert pdf файл.doc` — перекодировка формата. Родные пути: docx↔pdf/html/
-  txt, xlsx↔csv/html, csv↔xlsx. Остальное (`.doc`, `.xls`, `.rtf`, `.odt`…)
-  — через мост LibreOffice: `cd docker && docker compose --profile soffice
-  up -d --build` (порт 8200), в карточке тула — `"soffice": "http://127.0.0.1:8200"`.
+- `tables file [csv] [sheet]` — xlsx/csv tables: the answer is markdown or csv
+  rows, `sheet` — the sheet's name or number;
+- `write file.xlsx` — the block body: a markdown table `| a | b |` with a header
+  and a separator — saved as a real xlsx; `.md`/`.csv`/`.html`/`.json` — by
+  extension;
+- `append file.docx` — append paragraphs (the block body) to the end of an
+  existing one;
+- `convert pdf file.doc` — format transcoding. Native paths: docx↔pdf/html/txt,
+  xlsx↔csv/html, csv↔xlsx. The rest (`.doc`, `.xls`, `.rtf`, `.odt`…) — through
+  the LibreOffice bridge: `cd docker && docker compose --profile soffice up -d
+  --build` (port 8200), in the tool card — `"soffice": "http://127.0.0.1:8200"`.
 
-**ocr — текст и таблицы со сканов.** Блок `​```ocr` (tesseract, rus+eng):
+**ocr — text and tables from scans.** The `ocr` block (tesseract, rus+eng):
 
-- `text скан.png [страницы]` — распознанный текст: картинка, страницы pdf
-  (`2` или `2-5`) или картинки внутри docx;
-- `tables скан.pdf 1-3 [csv]` — таблицы: кластеризация слов по координатам,
-  в ответ — markdown-таблица или csv.
+- `text scan.png [pages]` — the recognized text: a picture, pdf pages (`2` or
+  `2-5`) or pictures inside a docx;
+- `tables scan.pdf 1-3 [csv]` — tables: clustering words by coordinates, the
+  answer is a markdown table or csv.
 
-При первом запуске модели скачиваются в `~/.dreamteam/cache/tesseract`
-(офлайн-машина — положите `rus.traineddata` рядом и укажите `"langPath"` в
-карточке; поля карточки: `lang`, `langPath`, `dpi`). Отсканированное — всегда
-черновик: агенту в шпаргалке прямо сказано перепроверять результат по смыслу.
+On first launch the models are downloaded into `~/.dreamteam/cache/tesseract`
+(an offline machine — put `rus.traineddata` next to it and set `"langPath"` in
+the card; card fields: `lang`, `langPath`, `dpi`). A scan is always a draft: the
+cheat sheet tells the agent explicitly to double-check the result for sense.
 
-**web — чтение разрешённых сайтов.** Блок `​```web`, адреса — только из
-белого списка в карточке: `"web": { "sites": ["example.com", "docs.corp.ru"] }`
-(локальные адреса — тоже только через список). `read адрес` — страница
-текстом (читалка статей + запасной путь), `links адрес [фильтр]` — ссылки
-страницы с их текстами («Глава 9. Сделки — https://…»): по названиям видно,
-куда идти, не читая каждую страницу; фильтр ищет в адресе и в названии.
-Редиректы проходятся, но каждый хоп сверяется со списком;
-JavaScript не исполняется — страница, которая рисуется скриптами, вернёт
-это честной оговоркой.
+**web — reading allowed sites.** The `web` block, addresses — only from the
+whitelist in the card: `"web": { "sites": ["example.com", "docs.corp.ru"] }`
+(local addresses — also only through the list). `read address` — the page as text
+(an article reader + a fallback path), `links address [filter]` — the page's
+links with their texts ("Chapter 9. Transactions — https://…"): the titles show
+where to go without reading every page; the filter searches the address and the
+title. Redirects are followed, but every hop is checked against the list;
+JavaScript is not executed — a page drawn by scripts will honestly say so.
 
-**mail — почта.** Ящики живут в `mails.json` проекта (служебная папка
-`.dreamteam`; пароли — только там, в карточках их нет; нужны **пароли
-приложений**). Ящик заводится командой `/mail add работа user=… password=…
-imap=… smtp=…`, разговором с менеджером («добавь ящик работа…») или рука­ми —
-формат один, всё явно, без пресетов:
+**mail — email.** Mailboxes live in the project's `mails.json` (the `.dreamteam`
+service folder; passwords only there, never in the cards; **app passwords** are
+required). A mailbox is created with the command
+`/mail add work user=… password=… imap=… smtp=…`, a conversation with the manager
+("add the work mailbox…") or by hand — one format, everything explicit, no
+presets:
 
 ```json
 {
-  "личное": { "user": "я@yandex.ru", "password": "…",
-              "imap": "imap.yandex.ru", "smtp": "smtp.yandex.ru" },
-  "работа": { "user": "я@corp.ru", "password": "…",
-              "imap": "imap.corp.ru", "smtp": "smtp.corp.ru", "smtpPort": 587 }
+  "personal": { "user": "me@yandex.ru", "password": "…",
+                "imap": "imap.yandex.ru", "smtp": "smtp.yandex.ru" },
+  "work": { "user": "me@corp.ru", "password": "…",
+            "imap": "imap.corp.ru", "smtp": "smtp.corp.ru", "smtpPort": 587 }
 }
 ```
 
-`imap` — сервер входящей почты, `smtp` — исходящей;
-порты 993/465 с шифрованием — по умолчанию, переопределяются полями
-`port` / `smtpPort`. Хосты популярных провайдеров:
+`imap` — the incoming mail server, `smtp` — outgoing; ports 993/465 with
+encryption are the default, overridden by the `port` / `smtpPort` fields. Hosts
+of popular providers:
 
-| Провайдер | IMAP (`imap`) | SMTP (`smtp`) |
+| Provider | IMAP (`imap`) | SMTP (`smtp`) |
 |---|---|---|
-| Яндекс | `imap.yandex.ru` | `smtp.yandex.ru` |
+| Yandex | `imap.yandex.ru` | `smtp.yandex.ru` |
 | Gmail | `imap.gmail.com` | `smtp.gmail.com` |
 | Mail.ru | `imap.mail.ru` | `smtp.mail.ru` |
-Если сервер хостера отдаёт сертификат на чужое имя (типично для
-`mail.мой-сайт.ru` на виртуальном хостинге), соединение отклоняется проверкой
-имени — тогда впишите ящику `"tlsNoVerify": true`: шифрование останется,
-сверяться будет только пароль, но подмену сервера такая связка уже не
-замечает, поэтому включать — осознанно. Блок `​```mail`: `boxes` — ящики
-без паролей; `list [ящик] [N]`, `find <ящик> <текст>` — проверка почты;
-`read <ящик> <uid>` — письмо целиком, вложения сохраняются в `mail/`
-рабочей папки; `send <ящик>` — в теле блока шапка `кому:` / `тема:` /
-`файлы:`, пустая строка, текст письма. Отправка всегда спрашивает `y/n`;
-вложения — только файлы из рабочей папки; секреты (`.env`, ключи, `.pem`)
-не читаются и не отправляются никогда.
+If the provider's server presents a certificate for a different name (typical for
+`mail.my-site.ru` on shared hosting), the connection is rejected by the name
+check — then set `"tlsNoVerify": true` on the mailbox: encryption stays, only the
+password is verified, but such a setup no longer notices server substitution, so
+enable it deliberately. The `mail` block: `boxes` — the mailboxes without
+passwords; `list [box] [N]`, `find <box> <text>` — checking mail;
+`read <box> <uid>` — a letter in full, attachments are saved into the working
+folder's `mail/`; `send <box>` — the block body holds the header `to:` /
+`subject:` / `files:`, an empty line, the letter text. Sending always asks
+`y/n`; attachments — only files from the working folder; secrets (`.env`, keys,
+`.pem`) are never read or sent.
 
-**telegram и max — мессенджеры.** Боты живут в `messengers.json` проекта
-(служебная папка `.dreamteam`; токен Telegram — @BotFather, токен
-MAX — dev.max.ru). Бот заводится командой
-`/messenger add telegram <токен>` или разговором с менеджером:
+**telegram and max — messengers.** Bots live in the project's `messengers.json`
+(the `.dreamteam` service folder; the Telegram token — @BotFather, the MAX token
+— dev.max.ru). A bot is created with the command
+`/messenger add telegram <token>` or a conversation with the manager:
 
 ```json
 { "telegram": { "token": "123456:ABC…" }, "max": { "token": "…" } }
 ```
 
-Блок `​```telegram`: `list` — чаты, откуда боту писали (chat_id + имя);
-`in [N]` — входящие; `send <chat_id>` — сообщение (в теле текст, строка
-`файлы: путь` в начале — вложение документом). Блок `​```max`: `me`,
-`chats`, `in`, `send <chat_id>` или `send user:<user_id>` — файлы уходят
-через загрузку `/uploads`. «Отправь в избранное» = диалог бота с вами:
-его chat_id виден в `list`/`chats`, как только вы написали боту первый раз.
-Оба тула: чтение — молча, отправка — всегда `y/n`; для прокси или проб
-адрес API можно подменить — `"api": { "max": "http://127.0.0.1:8082" }`.
+The `telegram` block: `list` — the chats the bot was written from (chat_id +
+name); `in [N]` — incoming; `send <chat_id>` — a message (the text in the body,
+a `files: path` line at the start — an attachment as a document). The `max`
+block: `me`, `chats`, `in`, `send <chat_id>` or `send user:<user_id>` — files go
+through the `/uploads` download. "Send to favorites" = the bot's dialog with you:
+its chat_id shows up in `list`/`chats` as soon as you write to the bot for the
+first time. Both tools: reading — silently, sending — always `y/n`; for a proxy
+or experiments the API address can be swapped —
+`"api": { "max": "http://127.0.0.1:8082" }`.
 
-Сценарий «сканы паспортов → excel → макс + почта» собирается сам: агенту
-включены `ocr`, `docs`, `max`, `mail` — он распознаёт сканы, собирает
-таблицу через `docs write паспорта.xlsx` и рассылает `max send` + `mail send`,
-показывая вам каждое исходящее на подтверждение.
+The "passport scans → excel → MAX + email" scenario assembles itself: the agent
+has `ocr`, `docs`, `max`, `mail` enabled — it recognizes the scans, builds the
+table with `docs write passports.xlsx` and sends it out with `max send` +
+`mail send`, showing you every outgoing message for confirmation.
 
-## Зрение и картинки: `look` и `image`
+## Vision and images: `look` and `image`
 
-Агенту можно дать «глаза» и «руки», отдельные от его «мозга»: разговаривает
-с вами обычная LLM (поле `provider`), картинки он смотрит vision-моделью
-(поле `vision`), а рисует image-моделью (поле `image`):
+An agent can be given "eyes" and "hands" separate from its "brain": it talks to
+you with a regular LLM (the `provider` field), looks at pictures with a vision
+model (the `vision` field) and draws with an image model (the `image` field):
 
 ```json
 "tools": { "look": null, "image": null },
@@ -896,13 +933,13 @@ MAX — dev.max.ru). Бот заводится командой
 "image": "bk-sdm"
 ```
 
-- **`look`** — агент показывает файл vision-модели и задаёт вопрос: что на
-  картинке, какие кнопки и цвета, где градиентная заливка, что не так с
-  композицией. Описание возвращается ему результатом действия. Так верстальщик
-  разбирает макет по блокам под код, а художник сам проверяет свои генерации,
-  прежде чем делать выводы.
-- **`image`** — генерация и перерисовка. Все параметры выбирает сам агент —
-  промпт, размер, число вариантов, качество, референсы:
+- **`look`** — the agent shows a file to the vision model and asks a question:
+  what's in the picture, which buttons and colors, where the gradient fill is,
+  what's wrong with the composition. The description comes back to it as the
+  action's result. This is how the layout person breaks a mockup into blocks for
+  code, and the artist checks their own generations before drawing conclusions.
+- **`image`** — generation and redrawing. The agent picks all the parameters
+  itself — prompt, size, number of variants, quality, references:
 
 ````text
 ```image
@@ -913,207 +950,217 @@ refs: images/poster-2.png
 ```
 ````
 
-`refs` включает режим перерисовки по образцам (взять выбранные вами варианты
-как основу). Файлы сохраняются в `images/` рабочей папки, пути приходят агенту
-результатом, а вам открываются в просмотрщике. Подтверждение работает как у
-остальных инструментов — в строке видно, сколько вариантов и какого размера
-просит агент, так что занесшегося художника можно остановить до трат.
+`refs` turns on redraw-from-samples mode (take the variants you picked as the
+base). The files are saved into the working folder's `images/`, the paths come to
+the agent as the result and open for you in a viewer. Confirmation works like
+with the other tools — the line shows how many variants and of what size the
+agent wants, so an over-ambitious artist can be stopped before the spending.
 
-**Глаза и руки настраиваются независимо.** Для художника — облачное зрение
-(GLM-4.6V), для верстальщика — локальное (Qwen-VL в docker); генератор
-меняется одной записью в `providers.json`, не трогая персон. Провайдер
-становится «зрячим» флагом `"vision": true` (адаптеры `openai-compatible` и
-`anthropic` умеют передавать картинки; `mock` — видит по-своему, для демо).
-Image-провайдеры — адаптеры `openai-images` (наш facade в docker или облачный
-API) и `mock-images` (тестовый, работает без docker).
+**The eyes and hands are configured independently.** For the artist — cloud
+vision (GLM-4.6V), for the layout person — local (Qwen-VL in docker); the
+generator changes with one record in `providers.json` without touching the
+personas. A provider becomes "seeing" with the `"vision": true` flag (the
+`openai-compatible` and `anthropic` adapters can pass pictures; `mock` — sees in
+its own way, for the demo). Image providers — the `openai-images` adapters (our
+facade in docker or a cloud API) and `mock-images` (a test one, works without
+docker).
 
-**Свои модели в docker.** Папка `docker/` самодостаточна: скопируйте её на
-любую машину и поднимите модели по именам — `docker compose --profile
-qwen2-vl-2b --profile bk-sdm up -d` (самая лёгкая пара, ~3 ГБ RAM каждая,
-совсем без GPU), на машинах побогаче — `sd-turbo`, а на GPU — `qwen3-vl-8b`,
-`flux-dev`, `photomaker` (контроль лиц) и другие. Контейнеры всегда
-запускаются вручную — приложение только обращается к ним по HTTP и ничего
-не поднимает само. Творческая тройка (Марта, Ника, Паша) с завода указывает
-на CPU-модели, так что после ручного запуска лёгкой пары цикл проверяется
-сразу, без правок конфига; адрес машины в `providers.json` меняется, только
-если контейнеры на другом ПК. Подробности и таблица моделей — `docker/README.md`.
+**Your own models in docker.** The `docker/` folder is self-sufficient: copy it
+to any machine and bring the models up by name — `docker compose --profile
+qwen2-vl-2b --profile bk-sdm up -d` (the lightest pair, ~3 GB RAM each, no GPU at
+all), on richer machines — `sd-turbo`, and on GPU — `qwen3-vl-8b`, `flux-dev`,
+`photomaker` (face control) and others. The containers are always started by
+hand — the app only talks to them over HTTP and never starts anything itself.
+The creative trio (Marta, Nika, Pasha) points at the CPU models out of the
+factory, so after manually starting the light pair the cycle checks out right
+away, no config edits; the machine's address in `providers.json` changes only if
+the containers live on another PC. Details and the model table —
+`docker/README.md`.
 
-**Эскизный протокол.** В персонах творческих участников прописаны правила:
-новая задача → дешёвые эскизы маленького разрешения в нескольких вариантах →
-показ и вопрос вам → правки по выбранным вариантам как референсам →
-мастер-версия в высоком разрешении только после одобрения. Выбор всегда за
-вами: агент не вправе забраковать направление молча.
+**The sketch protocol.** The creative members' personas codify the rules:
+a new task → cheap low-resolution sketches in several variants → showing them to
+you and asking → edits based on the chosen variants as references → the
+high-resolution master version only after approval. The choice is always yours:
+the agent may not silently scrap a direction.
 
-В mock-режиме весь цикл работает без моделей: `mock` описывает картинку по
-заготовке, `mock-images` сохраняет настоящие PNG — можно проверить сценарий
-«эскизы → выбор → перерисовка» на любой машине.
+In mock mode the whole cycle works without models: `mock` describes a picture
+from a template, `mock-images` saves real PNGs — the "sketches → choice →
+redraw" scenario can be checked on any machine.
 
-## История, логи и сжатие контекста
+## History, logs and context compaction
 
-- **Полная история каждого разговора** хранится в двух видах:
-  - `<проект>/.dreamteam/transcripts/<id>.md` — человекочитаемый лог (откройте в любом редакторе), обновляется по ходу разговора;
-  - `<проект>/.dreamteam/sessions/<id>.json` — машиночитаемое состояние (используется для `/session`).
-- **`/history [N]`** распечатает историю текущего разговора в терминал с цветами участников.
-- **Сжатие контекста.** Когда разговор становится длинным (более ~24 сообщений),
-  старые сообщения автоматически сворачиваются LLM в краткий конспект
-  (`session.summary`), а в контекст отправляются только конспект + последние
-  16 сообщений. Полная история при этом нигде не удаляется — она остаётся в
-  JSON и транскрипте. В чате появляется пометка «старые сообщения свёрнуты в
-  конспект», а агенты продолжают помнить суть обсуждения.
+- **The full history of every conversation** is kept in two forms:
+  - `<project>/.dreamteam/transcripts/<id>.md` — a human-readable log (open it
+    in any editor), updated as the conversation goes;
+  - `<project>/.dreamteam/sessions/<id>.json` — the machine-readable state (used
+    for `/session`).
+- **`/history [N]`** prints the current conversation's history to the terminal
+  with the members' colors.
+- **Context compaction.** When a conversation gets long (more than ~24 messages),
+  the old messages are automatically rolled up by an LLM into a short digest
+  (`session.summary`), and only the digest + the last 16 messages go into the
+  context. The full history is never deleted anywhere — it stays in the JSON and
+  the transcript. A note appears in the chat that "old messages were rolled up
+  into a digest", and the agents keep remembering the gist of the discussion.
 
-В сообщениях: `@марина` / `@viktor` — адресовать конкретных участников
-(работает и по имени, и по id, регистр не важен; `!` — синоним `@`).
+In messages: `@marina` / `@viktor` — address specific members (works by name and
+by id, case doesn't matter; `!` is a synonym of `@`).
 
-## Кто вы для команды: /me и ~/.dreamteam/user.json
+## Who you are for the team: /me and ~/.dreamteam/user.json
 
-По умолчанию участники видят собеседника просто как «Пользователь». Чтобы
-команда знала, кто вы и как к вам обращаться, представьтесь:
+By default the members see the conversation partner simply as "User". So that the
+team knows who you are and how to address you, introduce yourself:
 
 ```
-Ты > /me Алексей; основатель стартапа; ценит краткость и конкретику
-  Запомнил: вы — Алексей (основатель стартапа). Команда теперь знает, кто вы.
+You > /me Alexey; startup founder; values brevity and specifics
+  Noted: you are Alexey (startup founder). The team now knows who you are.
 ```
 
-- Имя попадает во все системные промпты («Твой собеседник — Алексей…»),
-  в подписи ваших сообщений в контексте («Алексей: …») и к модератору —
-  агенты начинают обращаться по имени.
-- Профиль хранится в `~/.dreamteam/user.json`, его можно править и руками
-  (подхватывается без перезапуска); мастер заполняет его при первом запуске:
+- The name goes into all the system prompts ("Your conversation partner is
+  Alexey…"), into the signatures of your messages in the context ("Alexey: …")
+  and to the moderator — the agents start addressing you by name.
+- The profile is stored in `~/.dreamteam/user.json` and can be edited by hand too
+  (picked up without a restart); the wizard fills it in at first launch:
 
 ```json
-{ "name": "Алексей", "role": "основатель стартапа", "about": "ценит краткость" }
+{ "name": "Alexey", "role": "startup founder", "about": "values brevity" }
 ```
 
-## Память команды: отношения, задачи и чужие разговоры
+## Team memory: relationships, tasks and other conversations
 
-У каждого участника есть своя **субъективная память**:
+Every member has their own **subjective memory**:
 
-- **внутри разговора** — личная задача в этом чате, личное отношение к вам
-  и к каждому из коллег («Тимур давит по срокам, но по сути он прав»);
-- **между разговорами** — что обсуждали в других чатах (у каждого своя
-  версия, как у людей) и **общий документ команды** — решения, договорённости,
-  незакрытые вопросы.
+- **within a conversation** — a personal task in this chat, a personal attitude
+  to you and to each of the colleagues ("Timur is pushing on the deadlines, but
+  on the merits he's right");
+- **between conversations** — what was discussed in other chats (everyone has
+  their own version, like people do) and **the team's shared document** —
+  decisions, agreements, open questions.
 
-Это делает участников похожими на людей: они помнят договорённости из
-закрытых чатов без явного `@session`, у них складываются отношения
-с вами и друг с другом, и каждый понимает свою задачу в текущем разговоре.
+This makes the members human-like: they remember the agreements from closed
+chats without an explicit `@session`, they form relationships with you and with
+each other, and each understands their task in the current conversation.
 
-**Экономика токенов** (память никогда не разрастается):
+**Token economy** (memory never balloons):
 
-- в обычном раунде — **ноль** лишних LLM-вызовов: память читается из кэша;
-- примерно раз в 12 сообщений один из отвечавших «осмысливает» разговор и
-  обновляет свою память (один небольшой вызов, не все сразу);
-- при закрытии разговора (`/session new`, `/exit`) его конспект вливается
-  в общий лог и общую память — обычно 0–2 вызова, конспект кэшируется;
-- у каждого документа жёсткий лимит слов, в контекст агента память входит
-  сжатым блоком (~150–250 токенов).
+- in a regular round — **zero** extra LLM calls: memory is read from a cache;
+- about once every 12 messages one of the answerers "reflects" on the
+  conversation and updates their memory (one small call, not all at once);
+- on closing a conversation (`/session new`, `/exit`) its digest is merged into
+  the shared log and the shared memory — usually 0–2 calls, the digest is
+  cached;
+- every document has a hard word limit, and memory enters the agent's context as
+  a compact block (~150–250 tokens).
 
-Подсмотреть: `/memory Глеб` — что Глеб помнит в этом разговоре (задача,
-отношение к вам, связи), `/memory shared` — общая память команды.
-Хранилище: `.dreamteam/memory.json` (память команды — вещь проекта) +
-поле `memories` в JSON разговора (`<проект>/.dreamteam/sessions/`).
+To peek: `/memory Gleb` — what Gleb remembers in this conversation (the task,
+the attitude to you, the connections), `/memory shared` — the team's shared
+memory. Storage: `.dreamteam/memory.json` (the team's memory — a thing of the
+project) + the `memories` field in the session JSON
+(`<project>/.dreamteam/sessions/`).
 
-## Ссылки на другие разговоры: `@session`
+## Links to other sessions: `@session`
 
-Классический кейс: неделю назад вы обсудили в одном чате название компании,
-закрыли тему. Сегодня в новом чате обсуждаете продукты — и хотите напомнить
-команде, что уже решили про название. Для этого приложите старый разговор:
-
-```
-Ты > обсуждаем продукты компании. Напомните, что мы решили про название: @session
-  → список разговоров → введите номер (Enter — отмена)
-Ты > что делаем дальше? @session 2     ← сразу по номеру из /sessions
-```
-
-Как это работает:
-
-- `@session` (без номера) показывает список других разговоров; выберите номер
-  или нажмите Enter для отмены. `@session N` прикладывает разговор сразу.
-  `!session` — полный синоним `@session`.
-- Для приложенного разговора LLM строит **конспект** (решения, аргументы,
-  названия, незакрытые вопросы) — не весь текст целиком, чтобы не раздувать
-  контекст.
-- Конспект показывается в чате как `📎 Приложен конспект разговора «...»` и
-  сохраняется в истории: все участники текущего разговора его «видят» и
-  учитывают в дальнейших ответах.
-- Можно приложить несколько разговоров в одном сообщении: `@session 2 @session 5`.
-- Конспект кэшируется в исходном разговоре и перестраивается, только если тот
-  подрос на 10+ сообщений.
-
-## Менеджер переговорки: `@менеджер`
-
-Кроме участников есть **менеджер переговорки** — тот самый модератор, который
-планирует раунды, но с собственным конфигом и правом менять настройки команды.
-В новых разговорах он первый собеседник (см. «Первый разговор»); и позже его
-всегда можно позвать:
+A classic case: a week ago you discussed the company name in one chat and closed
+the topic. Today in a new chat you're discussing products — and want to remind
+the team what was already decided about the name. For that, attach the old
+conversation:
 
 ```
-Ты > @менеджер, добавь в команду аналитика Руслана, пусть работает на claude
-Ты > @менеджер назначь Глебу роль ведущего разработчика и температуру 0.3
-Ты > @менеджер позови Катю в этот чат
-Ты > @менеджер покажи разговоры и открой второй
-Ты > @менеджер включи Паше тул git и разреши ему commit
-Ты > @менеджер добавь сервер router — admin@192.168.1.1
+You > we're discussing the company's products. Remind us what we decided about the name: @session
+  → the list of sessions → enter a number (Enter — cancel)
+You > what do we do next? @session 2     ← straight by number from /sessions
 ```
 
-Менеджер выполняет просьбу и отчитывается строками `✓ …` прямо в чате.
-Через него — и только через него — приложение меняет конфигурацию:
+How it works:
 
-| Что просят | Что сделает |
+- `@session` (no number) shows the list of other sessions; pick a number or press
+  Enter to cancel. `@session N` attaches the session right away. `!session` is a
+  full synonym of `@session`.
+- For an attached session the LLM builds a **digest** (decisions, arguments,
+  names, open questions) — not the whole text, so as not to bloat the context.
+- The digest is shown in the chat as `📎 Attached a digest of session "..."` and
+  saved into the history: all members of the current conversation "see" it and
+  take it into account in further answers.
+- Several sessions can be attached in one message: `@session 2 @session 5`.
+- The digest is cached in the original session and rebuilt only if that session
+  has grown by 10+ messages.
+
+## The war-room manager: `@manager`
+
+Besides the members there is the **war-room manager** — the very moderator who
+plans the rounds, but with its own config and the power to change the team's
+settings. In new conversations it's the first conversation partner (see "First
+conversation"); and later it can always be summoned:
+
+```
+You > @manager, add analyst Ruslan to the team, let him work on claude
+You > @manager give Gleb the lead developer role and temperature 0.3
+You > @manager bring Katya into this chat
+You > @manager show the sessions and open the second one
+You > @manager enable the git tool for Pasha and allow him commit
+You > @manager add the router server — admin@192.168.1.1
+```
+
+The manager fulfills the request and reports with `✓ …` lines right in the chat.
+Through it — and only through it — the app changes the configuration:
+
+| What you ask | What it does |
 |---|---|
-| «добавь в команду …» | новый участник в `agents.json`: id, имя, роль, промпт, эмодзи, цвет, провайдер, температура, тула |
-| «назначь …» | правка участника: роль, промпт, модель (провайдер), температура, имя, эмодзи, цвет |
-| «позови …» / «выведи …» | состав текущего чата (как `/chat add` и `/chat remove`) |
-| «покажи разговоры», «открой №2», «новый разговор …», «удали №3» | управление разговорами (как `/sessions`, `/session open`, `/session new`, `/session delete`) |
-| «переименуй разговор в …», «придумай имя этому разговору» | переименование (как `/session rename`); для придумывания менеджер использует краткое содержание или начало разговора |
-| «включи … тул …» / «дай права …» | тул участнику: включить или обновить карточку (`shell`, `ssh`, свой тул из `tools/`…) |
-| «добавь сервер …» | реестр серверов `hosts.json`: новый сервер в текущем проекте |
-| «добавь ящик …», «убери ящик …» | реестр ящиков `mails.json` (как `/mail add` и `/mail remove`) |
-| «добавь телеграм-бота …», «убери бота …» | токен бота в `messengers.json` (как `/messenger add` и `/messenger remove`) |
+| "add … to the team" | a new member in `agents.json`: id, name, role, prompt, emoji, color, provider, temperature, tools |
+| "assign …" | a member edit: role, prompt, model (provider), temperature, name, emoji, color |
+| "bring in …" / "send out …" | the current chat roster (like `/chat add` and `/chat remove`) |
+| "show the sessions", "open #2", "new session …", "delete #3" | session management (like `/sessions`, `/session open`, `/session new`, `/session delete`) |
+| "rename the session to …", "come up with a name for this conversation" | renaming (like `/session rename`); for inventing names the manager uses the short summary or the beginning of the conversation |
+| "enable … tool …" / "grant permissions …" | a tool for a member: enable or update the card (`shell`, `ssh`, a custom tool from `tools/`…) |
+| "add the server …" | the `hosts.json` server registry: a new server in the current project |
+| "add a mailbox …", "remove the mailbox …" | the `mails.json` mailbox registry (like `/mail add` and `/mail remove`) |
+| "add a telegram bot …", "remove the bot …" | a bot token in `messengers.json` (like `/messenger add` and `/messenger remove`) |
 
-Правки `agents.json` и реестров проекта (`hosts.json`, `mails.json`,
-`messengers.json`) безопасны: файл перезаписывается через
-временный файл с проверкой валидности — неудачная правка не портит конфиг,
-неизвестные поля сохраняются. Если же испортить `agents.json` руками
-(битый JSON, у агента нет `name` или `prompt`), команда не исчезает молча:
-ошибка видна при раунде и красной строкой в панели команды веб-оболочки.
-Отсутствие файла ошибкой не считается — это пустой старт один на один
-с менеджером. У всего, чем управляет менеджер, есть явные
-операции манифеста — `/team add`, `/team grant`, `/project host add`,
-`/project open`
-(одни и те же исполнители: и нейросеть, и команды пишут конфиг через одни и те же проверенные
-helpers). Менеджер нужен для всего, что командами не покрыто, — например,
-продумать промпт нового участника или выбрать, кому какой тул дать.
+Edits of `agents.json` and of the project registries (`hosts.json`, `mails.json`,
+`messengers.json`) are safe: the file is rewritten through a temporary file with
+a validity check — a failed edit doesn't ruin the config, unknown fields are
+preserved. And if you ruin `agents.json` by hand (broken JSON, an agent without
+`name` or `prompt`), the team doesn't vanish silently: the error is visible
+during a round and as a red line in the team panel of the web shell. A missing
+file is not an error — it's an empty start one-on-one with the manager.
+Everything the manager controls also has explicit manifest operations —
+`/team add`, `/team grant`, `/project host add`, `/project open`
+(the same executors: both the neural network and the commands write the config
+through the same proven helpers). The manager is needed for whatever the commands
+don't cover — e.g. thinking through a new member's prompt or choosing who gets
+which tool.
 
-Настраивается он в `.dreamteam/manager.json` (файл обязателен, как
+It is configured in `.dreamteam/manager.json` (the file is required, like
 `settings.json`):
 
 ```json
-{ "provider": "openai", "name": "Менеджер", "emoji": "🛎", "color": "yellow", "temperature": 0.2 }
+{ "provider": "openai", "name": "Manager", "emoji": "🛎", "color": "yellow", "temperature": 0.2 }
 ```
 
-- `provider` — id из `providers.json`, модель берётся из записи провайдера.
-  Неизвестный id — приложение не запустится с внятной ошибкой.
-- `name` — имя для обращения. `@менеджер`, `@manager` и `!менеджер` работают
-  всегда, независимо от имени; во всплывашке `@` он предлагается первым.
-- `emoji`, `color` — внешний вид реплик; `temperature` по умолчанию строже,
-  чем у участников (0.2): от менеджера ждут аккуратных действий, а не творчества.
+- `provider` — an id from `providers.json`, the model is taken from the
+  provider's record. An unknown id — the app won't start, with a clear error.
+- `name` — the name for addressing. `@manager` and `!manager` always work,
+  regardless of the name; in the `@` popup it is offered first.
+- `emoji`, `color` — the look of the lines; `temperature` by default is stricter
+  than the members' (0.2): careful actions are expected from the manager, not
+  creativity.
 
-`/provider` меняет основного провайдера **агентов**; у менеджера провайдер свой
-(из `manager.json`) — на него `/provider` не влияет.
+`/provider` changes the main provider of the **agents**; the manager has its own
+provider (from `manager.json`) — `/provider` doesn't affect it.
 
-## Свои роли и свой API
+## Custom roles and your own API
 
-**Поменять команду** — отредактируйте `~/.dreamteam/agents.json` (сохраняется
-на лету): поля `id`, `name`, `emoji`, `role`, `description`, `color`
-(red/green/yellow/blue/magenta/cyan/white/gray), `prompt` (персона),
-опционально `provider` и `temperature`; доступы к реальным действиям — `tools`,
-`projects`, `workspace`, глаза и руки — `vision` и `image` (см. «Инструменты»
-и «Зрение и картинки»). Поле `provider` — только существующий id из
-`providers.json`: команды `/team add|update`, веб-оболочка и менеджер отвергнут
-чужой id со списком доступных, а не запишут мусор в конфиг.
+**Change the team** — edit `~/.dreamteam/agents.json` (saved on the fly): the
+`id`, `name`, `emoji`, `role`, `description`, `color`
+(red/green/yellow/blue/magenta/cyan/white/gray), `prompt` (persona) fields,
+optionally `provider` and `temperature`; access to real actions — `tools`,
+`projects`, `workspace`, eyes and hands — `vision` and `image` (see "Tools"
+and "Vision and images"). The `provider` field — only an existing id from
+`providers.json`: the `/team add|update` commands, the web shell and the manager
+will reject a foreign id with the list of available ones instead of writing
+garbage into the config.
 
-**Добавить новый API** — реализуйте интерфейс в одном файле:
+**Add a new API** — implement the interface in one file:
 
 ```ts
 // src/providers/my-api.ts
@@ -1124,14 +1171,14 @@ export const myApiFactory: ProviderFactory = (id, config) => ({
   kind: 'my-api',
   model: String(config.model ?? 'default'),
   async *stream(req) {
-    // обращаетесь к своему API и отдаёте ответ по кусочкам
-    yield 'ответ ';
-    yield 'частями';
+    // call your API and yield the answer in pieces
+    yield 'answer ';
+    yield 'in parts';
   },
 });
 ```
 
-и зарегистрируйте его в `src/providers/registry.ts`:
+and register it in `src/providers/registry.ts`:
 
 ```ts
 import { myApiFactory } from './my-api.js';
@@ -1142,143 +1189,146 @@ const adapters = {
 };
 ```
 
-После этого провайдер описывается в `providers.json` как
+After that the provider is described in `providers.json` as
 `{ "adapter": "my-api", ... }`.
 
-## Проверки
+## Checks
 
-Проект проверяется пробниками в `tests/` — без тестового фреймворка, каждый
-файл запускается напрямую и печатает `ok`/`FAIL` по каждой проверке. Все
-пробники герметичны: реальные данные не трогаются, слои переопределяются во
-временные папки (`DT_HOME`/`DT_PROJECT`).
+The project is checked by probes in `tests/` — no test framework, each file runs
+directly and prints `ok`/`FAIL` per check. All probes are hermetic: real data is
+untouched, the layers are redirected into temporary folders
+(`DT_HOME`/`DT_PROJECT`).
 
-- `npm run probe` — быстрые проверки без реального терминала: перенос строк
-  (`probe-screen`), валидация `settings.json` и `hosts.json`, ssh-адресация
-  «проект:хост» и права через проекты, математика зон экрана, живой стрим
-  на несколько строк, выделение мышью и Shift+клавишами, прокрутка
-  (`probe-editor`: клавиши, курсор, история, ввод), менеджер переговорки
-  (`probe-manager`: валидация конфига, парсер ответов, новые действия
-  `tool.grant`/`project.add`/`project.host.add` с откатом, стейт) и сквозной
-  конвейер менеджера как шлюза конфигурации (`probe-manager-flow`: снимок
-  состояния для LLM, JSON-протокол, все 11 операций до файлов с откатами,
-  отчёты ✓/✗ в истории, реплика остаётся в старом разговоре при смене),
-  канонические команды (`probe-commands`: все `/…` в ядре, перехват без
-  записи в историю, управление `/team`/`/project`), смена проектов
-  (`probe-project`: реестр в доме, `/project open/add/remove`, переключение
-  ядра на другую папку с изоляцией разговоров и hosts, менеджер `project.open`,
-  rpc и state веб-оболочки, автодополнение), импорт-экспорт
-  (`probe-transfer`: снимок дома — ключи карточек внутри, .env не переносится,
-  вливание разговоров по id,
-  сессия как новая с агентами по id, zip-slip мимо, отмена через confirm),
-  эквивалентность
-  данных GUI и TUI (`probe-consistency`: снапшот serve ≡ файлы слоя дома,
-  раунд GUI виден TUI, перезапуск подхватывает), мастер
-  первого запуска и скаффолдинг (`probe-wizard`, включая сокрытие API-ключа),
-  перенос старой схемы на слои (`probe-migrate`: переезд файлов, отсутствие
-  перезаписи, защита пробников через `DT_HOME`/`DT_PROJECT`), тула работы
-  с внешним миром — все герметичные: `probe-docs` (читает и пишет настоящие
-  pdf/docx/xlsx во временных папках), `probe-ocr` (рисует картинки с текстом
-  локальным канвасом и распознаёт), `probe-web` (белый список и локальный
-  сайт-заглушка), `probe-mail` (валидация ящиков, парсинг send, без сети),
-  `probe-messengers` (telegram и max против локальных mock-серверов обоих API).
-- `npm run probe:e2e` — те же зоны под настоящим псевдо-TTY Windows (ConPTY):
-  что реально доходит до приложения (`probe-input`) и отрисованный экран
-  через мини-эмулятор VT (`probe-startup`). Сам ставит и удаляет node-pty.
-- `npm run probe:tui` — полный прогон приложения в псевдо-TTY: мастер не
-  нужен (слои подставлены), старт с приветствием менеджера, `team.add`,
-  `chat.add`, раунд с инструментами, `/team`, выход — всё на mock-провайдере
-  во временных папках.
-- `npm run probe:api` — серверное API (`dreamteam serve`) на mock-провайдере
-  во временных папках: статика gui/, WS-сценарий консьержа (приветствие,
-  реплики, team.add через разговор), rpc (chat.add/remove, provider.set,
-  session.new/delete со свежими state после них), живые вопросы confirm/choose
-  — ответ клиента, отказ по таймауту и отказ при отсутствии клиентов.
+- `npm run probe` — quick checks without a real terminal: line wrapping
+  (`probe-screen`), `settings.json` and `hosts.json` validation, "project:host"
+  ssh addressing and permissions through projects, screen zone math, live
+  multi-line streaming, mouse and Shift+key selection, scrollback
+  (`probe-editor`: keys, cursor, history, input), the war-room manager
+  (`probe-manager`: config validation, answer parsing, new actions
+  `tool.grant`/`project.add`/`project.host.add` with rollback, state) and the
+  end-to-end manager pipeline as the configuration gateway (`probe-manager-flow`:
+  the state snapshot for the LLM, the JSON protocol, all 11 operations down to
+  files with rollbacks, ✓/✗ reports in the history, a remark staying in the old
+  session when switching), the canonical commands (`probe-commands`: all `/…` in
+  the core, interception without history records, `/team`/`/project` control),
+  project switching (`probe-project`: the registry in the home,
+  `/project open/add/remove`, switching the core to another folder with session
+  and hosts isolation, the manager's `project.open`, the web shell's rpc and
+  state, autocompletion), import-export (`probe-transfer`: the home snapshot —
+  card keys inside, .env not transferred, merging sessions by id,
+  a session as a new one with agents by id, zip-slip blocked, cancellation via
+  confirm), GUI/TUI data equivalence (`probe-consistency`: the serve snapshot ≡
+  the home-layer files, a GUI round visible to the TUI, a restart picks things
+  up), the first-launch wizard and scaffolding (`probe-wizard`, including API-key
+  hiding), migrating the old layout to layers (`probe-migrate`: file moves, no
+  overwriting, probe protection via `DT_HOME`/`DT_PROJECT`), the outer-world
+  tools — all hermetic: `probe-docs` (reads and writes real pdf/docx/xlsx in
+  temporary folders), `probe-ocr` (draws pictures with text with a local canvas
+  and recognizes them), `probe-web` (whitelist and a local stub site),
+  `probe-mail` (mailbox validation, send parsing, no network),
+  `probe-messengers` (telegram and max against local mock servers of both APIs); the UI language system — `probe-i18n` (built-in en/zh, external lang/, live switching).
+- `npm run probe:e2e` — the same zones under a real pseudo-TTY on Windows
+  (ConPTY): what actually reaches the app (`probe-input`) and the rendered screen
+  through a mini VT emulator (`probe-startup`). It installs and removes node-pty
+  itself.
+- `npm run probe:tui` — a full run of the app in a pseudo-TTY: no wizard needed
+  (layers substituted), start with the manager's greeting, `team.add`,
+  `chat.add`, a round with tools, `/team`, exit — all on the mock provider in
+  temporary folders.
+- `npm run probe:api` — the server API (`dreamteam serve`) on the mock provider
+  in temporary folders: gui/ statics, a WS concierge scenario (greeting,
+  remarks, team.add through a conversation), rpc (chat.add/remove, provider.set,
+  session.new/delete with fresh states after them), live confirm/choose
+  questions — a client answer, a timeout refusal and a refusal with no clients.
 
-`npm run typecheck` — проверка типов (src и tests).
+`npm run typecheck` — type checking (src and tests).
 
-## Структура
+## Layout
 
-Пакет устанавливается глобально, данные живут в двух слоях рядом с вами:
+The package installs globally, the data lives in two layers next to you:
 
 ```
-~/.dreamteam/                 # дом: одна машина — один дом
-├── providers.json            # провайдеры: адаптер, адрес, модель, ключ ("apiKey")
-├── settings.json             # общие настройки: экран (width/margin/screen) и лимиты инструментов
-├── user.json                 # ваш профиль для команды (/me)
-├── agents.json               # команда: роли, персоны, цвета, инструменты (tools)
-├── manager.json              # менеджер переговорки: провайдер, имя, вид (@менеджер)
-├── projects.json             # реестр известных проектов (/project open по имени)
-├── memory.json               # общая память команды
-├── tools/                    # свои тула: tools/имя.ts → тул «имя»
-├── .env                      # настройки serve: TOKEN, PORT, HOST (вещь машины)
-└── cache/                    # локальные кэши (модели tesseract для ocr)
+~/.dreamteam/                 # home: one machine — one home
+├── providers.json            # providers: adapter, URL, model, key ("apiKey")
+├── settings.json             # general settings: UI language (ui), conversation language, screen (width/margin/screen), tool limits
+├── user.json                 # your profile for the team (/me)
+├── agents.json               # the team: roles, personas, colors, tools
+├── manager.json              # the war-room manager: provider, name, look (@manager)
+├── projects.json             # the registry of known projects (/project open by name)
+├── memory.json               # the team's shared memory
+├── lang/                     # custom UI languages: lang/<id>.json
+├── tools/                    # custom tools: tools/name.ts → the "name" tool
+├── .env                      # serve settings: TOKEN, PORT, HOST (a thing of the machine)
+└── cache/                    # local caches (tesseract models for ocr)
 
-мой-проект/
-├── .dreamteam/               # проект: серверы, почта и переписка этого проекта (в .gitignore)
-│   ├── hosts.json            # ssh-серверы проекта
-│   ├── mails.json            # ящики для тула mail (пароли приложений)
-│   ├── messengers.json       # токены ботов Telegram и MAX
-│   ├── sessions/             # разговоры проекта (JSON)
-│   └── transcripts/          # те же разговоры человекочитаемым логом (.md)
-└── …                         # сам проект: здесь агенты пишут файлы и запускают команды
+my-project/
+├── .dreamteam/               # the project: servers, mail and conversations of this project (in .gitignore)
+│   ├── hosts.json            # the project's ssh servers
+│   ├── mails.json            # mailboxes for the mail tool (app passwords)
+│   ├── messengers.json       # Telegram and MAX bot tokens
+│   ├── sessions/             # the project's conversations (JSON)
+│   └── transcripts/          # the same conversations as human-readable logs (.md)
+└── …                         # the project itself: the agents write files and run commands here
 ```
 
-Состав чата каждого разговора — в его файле `sessions/<id>.json` (поле
-`participants`): это id участников против полной команды из дома; пусто —
-отвечает вся команда.
+Each conversation's chat roster — in its `sessions/<id>.json` file (the
+`participants` field): member ids against the full team from the home; empty —
+the whole team answers.
 
-Код пакета (то, что ставится через npm):
+The package code (what gets installed via npm):
 
 ```
 dreamteam/
-├── bin/dreamteam.js          # глобальная команда: tsx-загрузчик; serve → src/serve.ts
-├── gui/                      # веб-оболочка для `dreamteam serve`: HTML+JS+CSS, без сборки
-├── scaffold/                 # скелеты конфигов первого запуска: home/, project/ — JSON, разворачиваются мастером
+├── bin/dreamteam.js          # the global command: a tsx loader; serve → src/serve.ts
+├── gui/                      # the web shell for `dreamteam serve`: HTML+JS+CSS, no build
+├── scaffold/                 # first-launch config skeletons: home/, project/ — JSON, unfolded by the wizard
 ├── src/
-│   ├── index.ts              # терминальная оболочка: REPL-цикл, команды чата, экран и редактор
+│   ├── index.ts              # the terminal shell: the REPL loop, chat commands, screen and editor
 │   ├── core/
-│   │   ├── engine.ts         # ядро: раунды, модератор, менеджер, инструменты, память
-│   │   ├── projects.ts       # реестр проектов дома: помним/забываем, резолв имён
-│   │   ├── presenter.ts      # канал ядро→оболочка (терминал и сеть реализуют его)
-│   │   └── bootstrap.ts      # общий старт оболочек: слои, конфиги, провайдеры, сессия
-│   ├── serve.ts              # локальный сервер: HTTP+WS на 127.0.0.1, статика gui/, второй Presenter
-│   ├── paths.ts              # три слоя путей: дом, проект, рабочая папка
-│   ├── wizard.ts             # мастер первого запуска: провайдер, ключ, профиль, скаффолдинг
-│   ├── orchestrator.ts       # модератор: кто отвечает и на чём сфокусироваться
-│   ├── manager.ts            # менеджер переговорки: конфиг, промпт, действия (team/chat/session/tool/project)
-│   ├── agents.ts             # загрузка agents.json
-│   ├── actions.ts            # блоки действий агентов, проекты, структурные права, исполнение
-│   ├── docs.ts               # стек документов: pdf/docx/xlsx — чтение и запись + мост LibreOffice
-│   ├── ocr.ts                # распознавание: tesseract, страницы pdf, таблицы по координатам
-│   ├── web.ts                # чтение сайтов: белый список, читалка статей, ссылки
-│   ├── mail.ts               # почта: imapflow/mailparser/nodemailer, явные ящики
-│   ├── messengers.ts         # Telegram Bot API и MAX (platform-api2.max.ru)
-│   ├── tools-api.ts          # контракт тула: check() → allow/deny/ask, карточки, правила команд
-│   ├── tools-registry.ts     # реестр: встроенные тула и загрузка своих из tools/
-│   ├── tools/                # встроенные тула — по папке на тул: tools/<тул>/<тул>.ts
-│   │                         #   + обязательный default.json (дефолтная карточка):
+│   │   ├── engine.ts         # the core: rounds, moderator, manager, tools, memory
+│   │   ├── projects.ts       # the home's project registry: remember/forget, name resolution
+│   │   ├── presenter.ts      # the core→shell channel (the terminal and the network implement it)
+│   │   └── bootstrap.ts      # the shells' shared start: layers, configs, providers, session
+│   ├── serve.ts              # the local server: HTTP+WS on 127.0.0.1, gui/ statics, a second Presenter
+│   ├── paths.ts              # the three layers of paths: home, project, working folder
+│   ├── wizard.ts             # the first-launch wizard: language, provider, key, profile, scaffolding
+│   ├── orchestrator.ts       # the moderator: who answers and what to focus on
+│   ├── manager.ts            # the war-room manager: config, prompt, actions (team/chat/session/tool/project)
+│   ├── agents.ts             # loading agents.json
+│   ├── actions.ts            # agents' action blocks, projects, structural permissions, execution
+│   ├── docs.ts               # the document stack: pdf/docx/xlsx — reading and writing + the LibreOffice bridge
+│   ├── ocr.ts                # recognition: tesseract, pdf pages, tables by coordinates
+│   ├── web.ts                # reading sites: whitelist, article reader, links
+│   ├── mail.ts               # mail: imapflow/mailparser/nodemailer, explicit mailboxes
+│   ├── messengers.ts         # the Telegram Bot API and MAX (platform-api2.max.ru)
+│   ├── tools-api.ts          # the tool contract: check() → allow/deny/ask, cards, command rules
+│   ├── tools-registry.ts     # the registry: built-in tools and loading custom ones from tools/
+│   ├── tools/                # the built-in tools — a folder per tool: tools/<tool>/<tool>.ts
+│   │                         #   + a mandatory default.json (the default card):
 │   │                         #   files, shell, git, arch, ssh, look, image, docs,
 │   │                         #   ocr, web, mail, telegram, max
-│   ├── completion.ts         # автодополнение команд и @упоминаний (панель подсказок, всплывашка со стрелками)
-│   ├── screen.ts             # управляемый экран: альтернативный буфер, зоны, перенос по словам
-│   ├── editor.ts             # редактор ввода: сырые клавиши, история, курсор по кодпоинтам
-│   ├── memory.ts             # память команды: личная, общая, о других разговорах
-│   ├── compress.ts           # сжатие длинных разговоров в конспект
-│   ├── sessions.ts           # хранение разговоров
-│   ├── ui.ts                 # цвета и оформление вывода (спиннер, шапка, стрим)
+│   ├── i18n.ts               # UI languages: t()/tf(), built-in ru/en/zh + the home's lang/
+│   ├── locales/              # built-in translations: en.ts, zh.ts
+│   ├── completion.ts         # command and @mention autocompletion (the hint panel, the arrow popup)
+│   ├── screen.ts             # the managed screen: alternative buffer, zones, word wrapping
+│   ├── editor.ts             # the input editor: raw keys, history, cursor by codepoints
+│   ├── memory.ts             # team memory: personal, shared, about other conversations
+│   ├── compress.ts           # compacting long conversations into a digest
+│   ├── sessions.ts           # conversation storage
+│   ├── ui.ts                 # output colors and styling (spinner, header, stream)
 │   ├── types.ts
-│   └── providers/            # адаптеры API
-│       ├── types.ts          #   интерфейс LLMProvider + конфиги
-│       ├── registry.ts       #   реестр адаптеров
-│       ├── utils.ts          #   SSE-парсер, нормализация сообщений
+│   └── providers/            # API adapters
+│       ├── types.ts          #   the LLMProvider interface + configs
+│       ├── registry.ts       #   the adapter registry
+│       ├── utils.ts          #   the SSE parser, message normalization
 │       ├── openai-compatible.ts
 │       ├── anthropic.ts
-│       ├── gigachat.ts       #   OAuth-токены + TLS-сертификаты Сбера
-│       ├── images.ts         #   image-провайдеры: openai-images, mock-images
+│       ├── gigachat.ts       #   OAuth tokens + the Sber TLS certificates
+│       ├── images.ts         #   image providers: openai-images, mock-images
 │       └── mock.ts
-├── docker/                   # контейнеры моделей для look/image + мост LibreOffice (soffice)
-│                             #   для конвертаций тула docs — см. docker/README.md
-├── tests/                    # пробники: probe-screen, probe-editor, probe-manager,
+├── docker/                   # model containers for look/image + the LibreOffice bridge (soffice)
+│                             #   for the docs tool's conversions — see docker/README.md
+├── tests/                    # probes: probe-screen, probe-editor, probe-manager,
 │   ├── …                     #   probe-manager-flow, probe-project, probe-tools,
 │   │                         #   probe-wizard, probe-input, probe-startup,
 │   │                         #   probe-tui, probe-api, probe-commands, probe-docs,

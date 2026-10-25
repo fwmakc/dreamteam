@@ -36,6 +36,8 @@ writeFileSync(
   join(home, 'providers.json'),
   JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
 );
+// интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
 writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Босс', role: 'руководитель' }, null, 2) + '\n');
 
 const { startServe } = await import('../src/serve.js');

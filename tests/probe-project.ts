@@ -52,6 +52,8 @@ writeFileSync(
   join(home, 'providers.json'),
   JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
 );
+// интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
 
 // src-модули — строго после подмены слоёв: paths.ts вычисляет пути при загрузке
 const paths = await import('../src/paths.js');

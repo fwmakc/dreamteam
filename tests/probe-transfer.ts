@@ -46,6 +46,8 @@ writeFileSync(
 );
 writeFileSync(join(home, '.env'), 'TOKEN=секрет-токен-serve\nПОЧТА_KEY=секрет-для-команд\n');
 writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Хозяин', role: 'босс' }, null, 2) + '\n');
+// интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
 
 // все импорты src — только после установки env и chdir: статический импорт
 // закэшировал бы paths.js с реальным домом (пробник трогал бы машину)

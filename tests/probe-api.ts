@@ -43,6 +43,8 @@ writeFileSync(
   join(home, 'providers.json'),
   JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
 );
+// интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
 
 const { startServe, ServerPresenter } = await import('../src/serve.js');
 
@@ -398,8 +400,10 @@ const client = await makeClient(handle.port);
     check(
       'state: ключи верхнего уровня',
       JSON.stringify(Object.keys(st).sort()) ===
-        JSON.stringify(['auto', 'completion', 'images', 'knownProjects', 'manager', 'memory', 'profile', 'project', 'projects', 'providers', 'session', 'sessions', 'settings', 'team', 'teamError']),
+        JSON.stringify(['auto', 'completion', 'images', 'knownProjects', 'manager', 'memory', 'profile', 'project', 'projects', 'providers', 'session', 'sessions', 'settings', 'team', 'teamError', 'ui']),
     );
+    const uiSt = st.ui as { id?: unknown; strings?: unknown } | undefined;
+    check('state: ui — id активной локали и словарь строк', Boolean(uiSt) && uiSt!.id === 'ru' && typeof uiSt!.strings === 'object');
     const proj = st.project as { name?: unknown; path?: unknown } | undefined;
     check('state: проект — path+name, известные проекты — реестр', Boolean(proj) && typeof proj!.path === 'string' && typeof proj!.name === 'string' && Array.isArray(st.knownProjects) && (st.knownProjects as Record<string, unknown>[]).every((p) => typeof p.path === 'string' && typeof p.name === 'string'));
     const sess = st.session as Record<string, unknown>;

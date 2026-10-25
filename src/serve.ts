@@ -37,6 +37,7 @@ import { homeEntries, packEntriesZip, readZipEntries, sessionEntriesById, applyH
 import { loadSchedule, saveSchedule, type ScheduleTask } from './core/schedule.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, Session } from './types.js';
+import { localeId, localeDict, applyLocale } from './i18n.js';
 
 /**
  * Локальный API поверх ядра: `dreamteam serve` поднимает HTTP+WS на
@@ -138,6 +139,8 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
     // (разговоры, команда, состав чата, провайдеры, имя менеджера) выводятся
     // клиентом из остальных полей этого же снапшота
     completion: { operations: operationHints() },
+    // язык интерфейса и его словарь: оболочка переводит строки через tr(s)
+    ui: { id: localeId(), strings: localeDict() },
   };
 }
 
@@ -728,6 +731,8 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
         loadSettings(tmp, 0);
         renameSync(tmp, SETTINGS_FILE);
+        // язык интерфейса — сразу: в следующем state уйдёт новый словарь
+        if (typeof patch.ui === 'string') applyLocale(patch.ui, DT_HOME);
         broadcastState();
         return { ok: true };
       }

@@ -57,6 +57,8 @@ writeFileSync(
     null, 2,
   ) + '\n',
 );
+// интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
 writeFileSync(
   join(home, 'agents.json'),
   JSON.stringify(

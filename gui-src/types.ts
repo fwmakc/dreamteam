@@ -92,6 +92,8 @@ export interface StateSnapshot {
   auto: { mode: boolean; left: number };
   settings: { width: number; language: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string };
   completion: { operations: OpHint[] };
+  /** язык интерфейса и словарь переводов (русский ключ → перевод) */
+  ui?: { id: string; strings: Record<string, string> };
   /** кэш последнего события schedule (в снапшот state не входит) */
   scheduleTasks?: ScheduleTaskInfo[];
   /** память команды: общая и «из других разговоров» по участникам */
