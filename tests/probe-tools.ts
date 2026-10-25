@@ -296,7 +296,9 @@ const tctx: ToolContext = {
   const esc = shell.check(readCmd('type ../outside.txt'), { cwd: root });
   check('shell дефолт: «..» вне папки — отказ с обоснованием', typeof esc === 'object' && esc.deny.includes('вне рабочей папки'), JSON.stringify(esc));
   check('shell дефолт: листинг выше папки — отказ', typeof shell.check(readCmd('dir ..'), { cwd: root }) === 'object');
-  check('shell дефолт: абсолютный путь мимо папки — отказ', typeof shell.check(readCmd('type C:/Windows/win.ini'), { cwd: root }) === 'object');
+  // на POSIX «C:/...» — относительный путь; честно абсолютный — только с ведущим /
+  const outsideAbs = isWin ? 'type C:/Windows/win.ini' : 'cat /etc/passwd';
+  check('shell дефолт: абсолютный путь мимо папки — отказ', typeof shell.check(readCmd(outsideAbs), { cwd: root }) === 'object');
   const secret = shell.check(readCmd('type .env'), { cwd: root });
   check('shell дефолт: .env — отказ «секретный»', typeof secret === 'object' && secret.deny.includes('секретн'), JSON.stringify(secret));
   check('shell дефолт: ssh-ключ — отказ', typeof shell.check(readCmd('type ~/.ssh/id_rsa')) === 'object');
