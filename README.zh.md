@@ -4,6 +4,8 @@
 
 [![ci](https://github.com/fwmakc/dreamteam/actions/workflows/ci.yml/badge.svg)](https://github.com/fwmakc/dreamteam/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/dreamteam)](https://www.npmjs.com/package/dreamteam) [![node](https://img.shields.io/node/v/dreamteam)](https://www.npmjs.com/package/dreamteam)
 
+[English](README.md) · [Русский](README.ru.md) · **中文**
+
 在这里，你面对的不是单个 AI，而是一支虚拟团队：每个成员都有自己的名字、角色、性格和文字颜色。你的消息发给主持人-协调者，由它决定由哪些成员回答（通常 1–3 人，而不是全员一起）。智能体们看得见彼此的发言，会争论、会互相接续思路。可以用 `@名字` 点名特定成员。每场谈话都会保存。
 
 两套外壳，一个内核：终端 TUI 和本地网页 GUI（`dreamteam serve`）。

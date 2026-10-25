@@ -2,6 +2,8 @@
 
 [![ci](https://github.com/fwmakc/dreamteam/actions/workflows/ci.yml/badge.svg)](https://github.com/fwmakc/dreamteam/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/dreamteam)](https://www.npmjs.com/package/dreamteam) [![node](https://img.shields.io/node/v/dreamteam)](https://www.npmjs.com/package/dreamteam)
 
+**English** · [Русский](README.ru.md) · [中文](README.zh.md)
+
 You don't talk to a single AI here, but to a virtual team: every member has their own
 name, role, personality and text color. Your message goes to the moderator-orchestrator,
 who decides which team members should answer (usually 1–3 people, not everyone at once).
