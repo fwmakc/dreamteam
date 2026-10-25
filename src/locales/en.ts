@@ -558,4 +558,5 @@ export const en: Record<string, string> = {
   'Ярлык быстрого запуска (dreamteam serve + браузер) на рабочем столе? [Y/n]:': 'Desktop shortcut for quick launch (dreamteam serve + browser)? [Y/n]:',
   'создал ярлык «Dream Team» → {file}': 'created the «Dream Team» shortcut → {file}',
   'ярлык создать не удалось: {err}': 'could not create the shortcut: {err}',
+  '{cached} из {total} входных токенов — из кэша промпта': '{cached} of {total} input tokens came from the prompt cache',
 };

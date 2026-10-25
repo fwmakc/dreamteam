@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import type { ClientRequest, IncomingMessage } from 'node:http';
-import type { LLMProvider, StreamRequest } from '../types.js';
+import type { LLMProvider, RoundUsage, StreamRequest } from '../types.js';
 import { ConfigurationError } from './types.js';
 import type { ProviderConfig, ProviderFactory } from './types.js';
 import { openAiDeltaText, sseData, splitSystem, num } from './utils.js';
@@ -185,7 +185,7 @@ export const gigachatFactory: ProviderFactory = (
     kind: 'gigachat',
     model,
 
-    async *stream(req: StreamRequest): AsyncGenerator<string> {
+    async *stream(req: StreamRequest, onUsage?: (usage: RoundUsage) => void): AsyncGenerator<string> {
       const { system, messages } = splitSystem(req);
       const payloadMessages = system
         ? [{ role: 'system' as const, content: system }, ...messages]
@@ -224,11 +224,29 @@ export const gigachatFactory: ProviderFactory = (
         throw new Error(`HTTP ${res.statusCode}: ${text.slice(0, 300)}`);
       }
 
-      // GigaChat совместим с OpenAI по формату SSE
+      // GigaChat совместим с OpenAI по формату SSE; usage (если отдаёт) —
+      // читаем тем же защитным разбором: кэш-токены появятся, когда появятся
+      const usage: RoundUsage = {};
       for await (const data of sseData(res)) {
         const text = openAiDeltaText(data);
         if (text) yield text;
+        if (!data || data === '[DONE]') continue;
+        try {
+          const json = JSON.parse(data) as {
+            usage?: {
+              prompt_tokens?: unknown;
+              completion_tokens?: unknown;
+              prompt_tokens_details?: { cached_tokens?: unknown };
+            };
+          };
+          if (typeof json.usage?.prompt_tokens === 'number') usage.promptTokens = json.usage.prompt_tokens;
+          if (typeof json.usage?.completion_tokens === 'number') usage.outputTokens = json.usage.completion_tokens;
+          if (typeof json.usage?.prompt_tokens_details?.cached_tokens === 'number') {
+            usage.cachedTokens = json.usage.prompt_tokens_details.cached_tokens;
+          }
+        } catch { /* не JSON — не usage */ }
       }
+      onUsage?.(usage);
     },
   };
   return provider;

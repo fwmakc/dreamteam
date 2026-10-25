@@ -192,6 +192,14 @@ writes a file. The home is the real one (keys and `providers.json`), the project
 a temporary sandbox — nothing in a real project changes. The hermetic probes
 (`npm run probe`) never touch the live API — they are free and deterministic.
 
+### Token caching (fewer tokens for the same conversation)
+
+Conversation rounds grow the history at the tail, so providers can reuse the cached prefix — repeated tokens are not billed at full price twice.
+
+- **Z.ai (GLM), OpenAI, DeepSeek…** (the `openai-compatible` adapter) — automatic prefix caching, nothing to enable. The app requests usage stats in streaming mode and reports hits.
+- **Anthropic (Claude)** — explicit cache markers, enabled by default: two breakpoints (the system prompt and the end of the history) make each round's prefix the next round's cache hit. Disable per provider with `"cache": false` in the card.
+- A cache hit shows up as a feed note: «1 240 из 1 500 входных токенов — из кэша промпта». The cache resets when history compaction (~24 messages) or a memory reflection (~once per 12 messages) rewrites the prefix — by design.
+
 ### Anthropic (Claude)
 
 The key from the Anthropic console goes into the `claude` provider card

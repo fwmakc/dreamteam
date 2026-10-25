@@ -81,6 +81,7 @@ import type {
   LLMProvider,
   ManagerAction,
   ManagerConfig,
+  RoundUsage,
   Session,
   StreamRequest,
   TeamMemory,
@@ -596,11 +597,15 @@ export class Engine {
       const sink = this.presenter.stream(tf('{emoji} {name} печатает…', { emoji: turn.agent.emoji, name: turn.agent.name }));
       let full = '';
       let streamError: unknown = null;
+      let usage: RoundUsage | undefined;
       try {
-        for await (const chunk of provider.stream({
-          ...this.buildRequest(turn.agent, turn.focus, contextSlice(session), profile, session.summary, personal),
-          signal,
-        })) {
+        for await (const chunk of provider.stream(
+          {
+            ...this.buildRequest(turn.agent, turn.focus, contextSlice(session), profile, session.summary, personal),
+            signal,
+          },
+          (u) => { usage = u; },
+        )) {
           full += chunk;
           sink.delta(chunk);
         }
@@ -613,6 +618,15 @@ export class Engine {
         this.presenter.error(`ошибка провайдера «${provider.id}»: ${streamError instanceof Error ? streamError.message : streamError}`);
       }
       this.presenter.turnEnd(full);
+      // кэш промптов: попадание показываем сразу, промахи и мелочи молча
+      if (usage && (usage.cachedTokens ?? 0) > 0) {
+        this.presenter.notice(
+          tf('{cached} из {total} входных токенов — из кэша промпта', {
+            cached: (usage.cachedTokens ?? 0).toLocaleString('ru-RU'),
+            total: (usage.promptTokens ?? usage.cachedTokens ?? 0).toLocaleString('ru-RU'),
+          }),
+        );
+      }
       if (full.trim()) {
         session.messages.push({
           authorId: turn.agent.id,
@@ -662,6 +676,7 @@ export class Engine {
     const cfg = this.toolsConfig();
     let full = '';
     let streamError: unknown = null;
+    let usage: RoundUsage | undefined;
     try {
       for await (const chunk of provider.stream({
         // язык общения добавляется хвостом: mock и пробы узнают менеджерский
@@ -696,7 +711,7 @@ export class Engine {
         ],
         temperature: this.app.mgr.temperature,
         signal,
-      })) {
+      }, (u) => { usage = u; })) {
         full += chunk;
       }
     } catch (err) {
@@ -706,6 +721,14 @@ export class Engine {
     }
     if (streamError && !signal.aborted) {
       this.presenter.error(`ошибка провайдера «${provider.id}»: ${streamError instanceof Error ? streamError.message : streamError}`);
+    }
+    if (usage && (usage.cachedTokens ?? 0) > 0) {
+      this.presenter.notice(
+        tf('{cached} из {total} входных токенов — из кэша промпта', {
+          cached: (usage.cachedTokens ?? 0).toLocaleString('ru-RU'),
+          total: (usage.promptTokens ?? usage.cachedTokens ?? 0).toLocaleString('ru-RU'),
+        }),
+      );
     }
     if (signal.aborted) {
       this.presenter.notice(t('  ⏹ Прервано (Esc).'));

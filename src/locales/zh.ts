@@ -558,4 +558,5 @@ export const zh: Record<string, string> = {
   'Ярлык быстрого запуска (dreamteam serve + браузер) на рабочем столе? [Y/n]:': '在桌面创建快速启动快捷方式（dreamteam serve + 浏览器）？[Y/n]：',
   'создал ярлык «Dream Team» → {file}': '已创建「Dream Team」快捷方式 → {file}',
   'ярлык создать не удалось: {err}': '未能创建快捷方式：{err}',
+  '{cached} из {total} входных токенов — из кэша промпта': '{total} 个输入 tokens 中有 {cached} 个来自提示缓存',
 };

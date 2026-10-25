@@ -115,6 +115,14 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 
 对着真实（非 mock）服务商的快速检查：经理的实时回答、经理确实按请求创建智能体、带 `files` 的智能体确实写出文件。家目录是真实的（密钥和 `providers.json`），项目是临时沙箱 —— 真实项目里什么都不会变。密封探针（`npm run probe`）绝不触碰真实 API —— 免费且确定。
 
+### 提示缓存（同样的对话，更少的 tokens）
+
+对话每轮在历史尾部增长，服务商可以复用前缀缓存 — 相同的 tokens 不会按全价计费两次。
+
+- **Z.ai (GLM)、OpenAI、DeepSeek…**（`openai-compatible` 适配器）— 自动前缀缓存，无需开启。应用在流式模式下请求 usage 统计并报告命中。
+- **Anthropic (Claude)** — 显式缓存标记，默认开启：两个断点（system 提示词与历史末尾）让本轮前缀成为下一轮的缓存命中。可在服务商卡片中用 `"cache": false` 关闭。
+- 命中会在日志中显示：«1 240 из 1 500 входных токенов — из кэша промпта」。历史压缩（约 24 条消息）与记忆反思（约每 12 条一次）会重写前缀并重置缓存 — 这是有意为之。
+
 ### Anthropic (Claude)
 
 来自 Anthropic 控制台的密钥放进 `claude` 服务商卡片（`~/.dreamteam/providers.json`）：

@@ -1,4 +1,4 @@
-import type { LLMProvider, StreamRequest } from '../types.js';
+import type { LLMProvider, RoundUsage, StreamRequest } from '../types.js';
 import { sleep } from './utils.js';
 import type { ProviderConfig, ProviderFactory } from './types.js';
 
@@ -71,7 +71,7 @@ export class MockProvider implements LLMProvider {
     private readonly delayMs = 20,
   ) {}
 
-  async *stream(req: StreamRequest): AsyncGenerator<string> {
+  async *stream(req: StreamRequest, onUsage?: (usage: RoundUsage) => void): AsyncGenerator<string> {
     let text = this.fixedReply ?? pickReply(req);
     // демо менеджера переговорки: приветствие нового разговора — без действий
     if (!this.fixedReply && (req.system ?? '').startsWith('Ты — менеджер переговорки')) {
@@ -146,6 +146,13 @@ export class MockProvider implements LLMProvider {
       await sleep(this.delayMs);
       yield token;
     }
+    // синтетическая статистика без попаданий в кэш: упражняет путь onUsage
+    // в пробах, а заметку о кэше в mock-режиме рисовать не о чем
+    onUsage?.({
+      promptTokens: 400,
+      cachedTokens: 0,
+      outputTokens: Math.ceil(text.length / 4),
+    });
   }
 }
 

@@ -242,8 +242,20 @@ export interface LLMProvider {
   /** имя адаптера ('openai-compatible' | 'anthropic' | 'gigachat' | 'mock' | ...) */
   readonly kind: string;
   readonly model: string;
-  /** Поток кусочков текста ответа */
-  stream(req: StreamRequest): AsyncIterable<string>;
+  /**
+   * Поток кусочков текста ответа. onUsage — необязательный приёмник статистики
+   * токенов, если API её отдаёт (кэш промптов, попадания — см. README
+   * «Token caching»); адаптер вызывает его один раз ближе к концу потока.
+   */
+  stream(req: StreamRequest, onUsage?: (usage: RoundUsage) => void): AsyncIterable<string>;
+}
+
+/** Статистика токенов раунда (что API сообщил; чего нет — undefined). */
+export interface RoundUsage {
+  promptTokens?: number;
+  /** Сколько входных токенов отдали из кэша промпта (экономия). */
+  cachedTokens?: number;
+  outputTokens?: number;
 }
 
 /** Запрос к image-модели: генерация с нуля или перерисовка по референсам */

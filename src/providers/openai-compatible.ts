@@ -1,4 +1,4 @@
-import type { LLMMessage, LLMProvider, StreamRequest } from '../types.js';
+import type { LLMMessage, LLMProvider, RoundUsage, StreamRequest } from '../types.js';
 import { ConfigurationError } from './types.js';
 import type { ProviderConfig, ProviderFactory } from './types.js';
 import { openAiDeltaText, sseData, num, withTimeout } from './utils.js';
@@ -47,7 +47,7 @@ export const openAiCompatibleFactory: ProviderFactory = (
     kind: 'openai-compatible',
     model,
 
-    async *stream(req: StreamRequest): AsyncGenerator<string> {
+    async *stream(req: StreamRequest, onUsage?: (usage: RoundUsage) => void): AsyncGenerator<string> {
       const messages: LLMMessage[] = req.system
         ? [{ role: 'system', content: req.system }, ...req.messages]
         : req.messages;
@@ -56,6 +56,9 @@ export const openAiCompatibleFactory: ProviderFactory = (
         messages: toApiMessages(messages),
         stream: true,
         temperature: req.temperature ?? defaultTemperature,
+        // статистика токенов в последнем чанке потока (OpenAI-расширение;
+        // серверы, которые его не знают, молча игнорируют)
+        stream_options: { include_usage: true },
       };
       const maxTokens = req.maxTokens ?? defaultMaxTokens;
       if (maxTokens) body.max_tokens = maxTokens;
@@ -77,10 +80,29 @@ export const openAiCompatibleFactory: ProviderFactory = (
           `HTTP ${res.status}: ${detail.slice(0, 300)}`,
         );
       }
+      const usage: RoundUsage = {};
       for await (const data of sseData(res.body as unknown as AsyncIterable<Uint8Array>)) {
         const text = openAiDeltaText(data);
         if (text) yield text;
+        // usage идёт в финальном чанке (choices пустой): префиксный кэш
+        // (Z.ai GLM, OpenAI, DeepSeek…) отчитывается в prompt_tokens_details
+        if (!data || data === '[DONE]') continue;
+        try {
+          const json = JSON.parse(data) as {
+            usage?: {
+              prompt_tokens?: unknown;
+              completion_tokens?: unknown;
+              prompt_tokens_details?: { cached_tokens?: unknown };
+            };
+          };
+          if (typeof json.usage?.prompt_tokens === 'number') usage.promptTokens = json.usage.prompt_tokens;
+          if (typeof json.usage?.completion_tokens === 'number') usage.outputTokens = json.usage.completion_tokens;
+          if (typeof json.usage?.prompt_tokens_details?.cached_tokens === 'number') {
+            usage.cachedTokens = json.usage.prompt_tokens_details.cached_tokens;
+          }
+        } catch { /* не JSON — не usage */ }
       }
+      onUsage?.(usage);
     },
   };
   return provider;
