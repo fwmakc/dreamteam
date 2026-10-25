@@ -71,6 +71,8 @@ No conventional-commit prefixes; the subject is the changelog line.
 ```bash
 npm version 0.0.x --no-git-tag-version   # package.json + package-lock.json
 git add package.json package-lock.json && git commit -m "Версия 0.0.x" && git push
+git tag -a v0.0.x -m "dreamteam 0.0.x" && git push origin v0.0.x
+gh release create v0.0.x --title "0.0.x"   # notes: copy the 0.0.x section of CHANGELOG.md
 npm publish                              # prepublishOnly: typecheck + build:gui
 ```
 
