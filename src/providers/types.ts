@@ -1,4 +1,4 @@
-import type { LLMProvider, LLMMessage, StreamRequest } from '../types.js';
+import type { ImageProvider, LLMProvider, LLMMessage, StreamRequest } from '../types.js';
 
 export type { LLMProvider, LLMMessage, StreamRequest };
 
@@ -18,6 +18,9 @@ export interface ProvidersFile {
 
 /** Фабрика: создаёт провайдера по конфигу. Кидает ConfigurationError, если не хватает настроек/ключей. */
 export type ProviderFactory = (id: string, config: ProviderConfig) => LLMProvider;
+
+/** Фабрика image-провайдера (генерация/перерисовка картинок) — та же карта конфигов. */
+export type ImageAdapterFactory = (id: string, config: ProviderConfig) => ImageProvider;
 
 /** Провайдер настроен неполностью (нет ключа, неверный baseUrl и т.п.) */
 export class ConfigurationError extends Error {}

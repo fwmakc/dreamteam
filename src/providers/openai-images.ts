@@ -1,18 +1,14 @@
 import type { ImageProvider, ImageRequest, ImageResult } from '../types.js';
-import type { ProviderConfig } from './types.js';
+import type { ImageAdapterFactory, ProviderConfig } from './types.js';
 
 /**
- * Image-провайдеры: генерация и перерисовка картинок. Отдельная ветка реестра —
- * это не LLM, протокол другой (OpenAI images API). Свои модели — тонкий facade
- * в docker/ (FastAPI над diffusers); облачные API — той же записью в providers.json.
- *
+ * Адаптер "openai-images": наш facade в docker (по умолчанию) или любой
+ * OpenAI-совместимый images API. Референсы переводят запрос на /images/edits.
  * Адаптер — только транспорт: байты картинок возвращаются приложению, файлы
  * на диск кладёт actions.ts в рабочую папку агента.
  */
 
 const REQUEST_TIMEOUT_MS = 600_000; // генерация медленная, особенно на CPU
-
-export type ImageAdapterFactory = (id: string, config: ProviderConfig) => ImageProvider;
 
 /** Опции генерации, которые стоит слать только если заданы (облачные API строгие) */
 function optionalParams(req: ImageRequest): Record<string, unknown> {
@@ -108,10 +104,6 @@ async function generateViaOpenAi(
   return { ok: true, images };
 }
 
-/**
- * Адаптер "openai-images": наш facade в docker (по умолчанию) или любой
- * OpenAI-совместимый images API. Референсы переводят запрос на /images/edits.
- */
 export const openAiImagesFactory: ImageAdapterFactory = (id, config: ProviderConfig): ImageProvider => {
   const baseUrl = String(config.baseUrl ?? '').replace(/\/+$/, '');
   if (!baseUrl) {
@@ -128,33 +120,4 @@ export const openAiImagesFactory: ImageAdapterFactory = (id, config: ProviderCon
     model,
     generate: (req, signal) => generateViaOpenAi(baseUrl, model, req, apiKey, signal),
   };
-};
-
-/** Крошечный валидный PNG (1×1 синий пиксель) — чтобы mock-режим рисовал настоящие файлы. */
-const MOCK_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkKPn/HwAEfgJ/qN5MzAAAAABJRU5ErkJggg==';
-
-/**
- * Адаптер "mock-images": работает без docker и GPU — отдает 1×1 PNG.
- * Нужен, чтобы проверять весь цикл «сгенерировал → сохранил → посмотрел»
- * на любой машине.
- */
-export const mockImagesFactory: ImageAdapterFactory = (id, config: ProviderConfig): ImageProvider => {
-  const model = typeof config.model === 'string' ? config.model : 'mock';
-  return {
-    id,
-    kind: 'mock-images',
-    model,
-    async generate(req: ImageRequest): Promise<ImageResult> {
-      const n = Math.min(Math.max(req.n ?? 1, 1), 6);
-      const images = Array.from({ length: n }, () => ({ data: MOCK_PNG_BASE64, mediaType: 'image/png' }));
-      return { ok: true, images };
-    },
-  };
-};
-
-/** Реестр image-адаптеров (для loadImageProviders в registry.ts) */
-export const imageAdapters: Record<string, ImageAdapterFactory> = {
-  'openai-images': openAiImagesFactory,
-  'mock-images': mockImagesFactory,
 };

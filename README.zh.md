@@ -759,7 +759,8 @@ dreamteam/
 │       ├── openai-compatible.ts
 │       ├── anthropic.ts
 │       ├── gigachat.ts       #   OAuth 令牌 + Sber TLS 证书
-│       ├── images.ts         #   图像服务商：openai-images、mock-images
+│       ├── openai-images.ts  #   图像适配器：OpenAI images API / docker 门面
+│       ├── mock-images.ts    #   测试图像适配器（真实 PNG，无需模型）
 │       └── mock.ts
 ├── docker/                   # look/image 的模型容器 + docs 工具转换用的 LibreOffice 桥（soffice）
 │                             #   — 见 docker/README.md

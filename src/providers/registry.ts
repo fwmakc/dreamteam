@@ -2,12 +2,13 @@ import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ImageProvider, LLMProvider } from '../types.js';
-import type { ProviderConfig, ProviderFactory, ProvidersFile } from './types.js';
+import type { ImageAdapterFactory, ProviderConfig, ProviderFactory, ProvidersFile } from './types.js';
 import { openAiCompatibleFactory } from './openai-compatible.js';
 import { anthropicFactory } from './anthropic.js';
 import { gigachatFactory } from './gigachat.js';
 import { mockFactory, unconfiguredProvider } from './mock.js';
-import { imageAdapters } from './images.js';
+import { openAiImagesFactory } from './openai-images.js';
+import { mockImagesFactory } from './mock-images.js';
 import { t, tf } from '../i18n.js';
 
 /**
@@ -23,6 +24,15 @@ const adapters: Record<string, ProviderFactory> = {
   anthropic: anthropicFactory,
   gigachat: gigachatFactory,
   mock: mockFactory,
+};
+
+/**
+ * Image-адаптеры: отдельная ветка реестра — это не LLM, протокол другой
+ * (OpenAI images API: наш facade в docker или облачный).
+ */
+const imageAdapters: Record<string, ImageAdapterFactory> = {
+  'openai-images': openAiImagesFactory,
+  'mock-images': mockImagesFactory,
 };
 
 /** Кастомные адаптеры из providers/ дома (заполняет bootstrap до loadProviders). */

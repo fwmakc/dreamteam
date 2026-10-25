@@ -1332,7 +1332,8 @@ dreamteam/
 │       ├── openai-compatible.ts
 │       ├── anthropic.ts
 │       ├── gigachat.ts       #   OAuth tokens + the Sber TLS certificates
-│       ├── images.ts         #   image providers: openai-images, mock-images
+│       ├── openai-images.ts  #   image adapter: OpenAI images API / docker facade
+│       ├── mock-images.ts    #   test image adapter (real PNGs, no models)
 │       └── mock.ts
 ├── docker/                   # model containers for look/image + the LibreOffice bridge (soffice)
 │                             #   for the docs tool's conversions — see docker/README.md
