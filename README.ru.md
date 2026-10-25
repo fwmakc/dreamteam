@@ -1,6 +1,8 @@
 <!-- Русская версия README. English version: README.md. Chinese version: README.zh.md -->
 # 🎬 Dream Team — чат с командой ИИ-агентов
 
+[![ci](https://github.com/fwmakc/dreamteam/actions/workflows/ci.yml/badge.svg)](https://github.com/fwmakc/dreamteam/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/dreamteam)](https://www.npmjs.com/package/dreamteam) [![node](https://img.shields.io/node/v/dreamteam)](https://www.npmjs.com/package/dreamteam)
+
 Вы общаетесь не с одним ИИ, а с виртуальной командой: у каждого участника — своё имя,
 роль, характер и цвет текста. Сообщение попадает модератору-оркестратору, который
 решает, кто из команды должен ответить (обычно 1–3 человека, не все подряд).
