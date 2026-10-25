@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 import { applyLocale, knownLanguages, t, tf } from './i18n.js';
+import { createShortcut } from './shortcut.js';
 import { DT_HOME, DT_PROJECT, WORKSPACE } from './paths.js';
 
 /** Куда мастер читает вопросы и пишет ответы (в пробах — потоки, не TTY). */
@@ -172,6 +173,18 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
     }
     writeEnvKey(envFile, 'TOKEN', randomBytes(32).toString('base64url'));
     notes.push(tf('создал токен доступа TOKEN в {file} (для dreamteam serve)', { file: envFile }));
+    // Ярлык быстрого запуска: dreamteam serve --open — сервер + браузер одним
+    // кликом с рабочего стола. Только живой терминал: в трубе вопросов нет.
+    if (io.isTTY) {
+      const want = await askChoice(`  ${t('Ярлык быстрого запуска (dreamteam serve + браузер) на рабочем столе? [Y/n]:')} `, ['y', 'n'], 'y');
+      if (want === 'y') {
+        try {
+          notes.push(...(await createShortcut(homeDir)));
+        } catch (err) {
+          notes.push(tf('ярлык создать не удалось: {err}', { err: err instanceof Error ? err.message : String(err) }));
+        }
+      }
+    }
     io.output.write(pc.green(`\n  ${t('Готово. Дальше — живой менеджер: спроси его «что ты умеешь?»')}\n`));
     return notes;
   } finally {

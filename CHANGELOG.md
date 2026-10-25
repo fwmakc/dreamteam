@@ -7,6 +7,13 @@ semver while pre-1.0 (breaking changes may land in minors).
 
 ### Added
 
+- **Quick-launch shortcut and `serve --open`** — `dreamteam serve --open` opens
+  the web shell in the browser; the first-launch wizard offers to create a
+  desktop shortcut that runs exactly that: Windows — `.lnk` (via PowerShell),
+  Linux — `.desktop` in the applications menu and on the Desktop, macOS —
+  `Dream Team.command`. The launcher script lives in `~/.dreamteam/bin/` with
+  absolute paths (no dependence on the desktop session's PATH). New probe:
+  `probe-shortcut`.
 - **Custom provider adapters** — the same shelf pattern as custom tools: put a
   `~/.dreamteam/providers/<id>.ts` file exporting a `(id, config) => LLMProvider`
   factory and reference it from a provider card with `"adapter": "<id>"`.

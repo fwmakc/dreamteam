@@ -11,6 +11,7 @@ const usage = (toStderr) => {
     '',
     '  dreamteam            терминальная оболочка (TUI)',
     '  dreamteam serve      веб-оболочка: API+GUI (адрес — HOST/PORT, по умолчанию 127.0.0.1:8080)',
+    '  dreamteam serve --open  то же + открыть http://адрес в браузере (так работает ярлык быстрого запуска)',
     '  dreamteam -v         версия пакета',
     '  dreamteam -h         эта справка',
     '',

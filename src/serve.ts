@@ -24,6 +24,7 @@ import {
   updateManagerConfig,
 } from './manager.js';
 import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from './providers/registry.js';
+import { openBrowser } from './open.js';
 import { loadSettings } from './settings.js';
 import { AGENTS_FILE, APP_VERSION, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, PROJECTS_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
 import { loadProjectRegistry, projectLabel } from './core/projects.js';
@@ -821,12 +822,19 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 }
 
 // запускаемся только как точка входа — bin serve (ставит DT_SERVE=1) или
-// npm run serve (argv[1] — этот файл); при импорте из проб не стартуем
+// npm run serve (argv[1] — этот файл); при импорте из проб не стартуем.
+// Флаг --open: после поднятия сервера открыть http://адрес в браузере —
+// так работает ярлык быстрого запуска (см. src/shortcut.ts).
 const entry = (process.argv[1] ?? '').replace(/\\/g, '/');
 if (process.env.DT_SERVE === '1' || entry.endsWith('/src/serve.ts')) {
+  const openFlag = process.argv.slice(2).includes('--open');
   startServe()
     .then(({ port, host }) => {
       console.log(pc.dim(`\n  API поднято: http://${host}:${port} (WS — /ws) · dreamteam v${APP_VERSION} · ${host === '127.0.0.1' ? 'только локально' : 'ОТКРЫТО В СЕТЬ — авторизации нет'} · Ctrl+C — останов`));
+      if (openFlag) {
+        // HOST=0.0.0.0 — браузеру всё равно нужен конкретный адрес
+        openBrowser(`http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}/`);
+      }
     })
     .catch((err) => {
       console.error(pc.red(`Фатальная ошибка: ${err instanceof Error ? err.stack ?? err.message : err}`));

@@ -555,4 +555,7 @@ export const zh: Record<string, string> = {
   'его провайдер, имя и температура': '它的服务商、名字和温度',
   'provider, temperature, name, emoji, color': 'provider、temperature、name、emoji、color',
   'создал {file} (полка своих адаптеров провайдеров: <id>.ts — export default фабрика (id, config) => LLMProvider)': '已创建 {file}（自定义服务商适配器架子：<id>.ts — export default 一个 (id, config) => LLMProvider 工厂）',
+  'Ярлык быстрого запуска (dreamteam serve + браузер) на рабочем столе? [Y/n]:': '在桌面创建快速启动快捷方式（dreamteam serve + 浏览器）？[Y/n]：',
+  'создал ярлык «Dream Team» → {file}': '已创建「Dream Team」快捷方式 → {file}',
+  'ярлык создать не удалось: {err}': '未能创建快捷方式：{err}',
 };

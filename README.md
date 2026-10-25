@@ -351,6 +351,7 @@ The same thing — in the browser:
 
 ```bash
 dreamteam serve         # or: npm run serve; the port is PORT, 8080 by default
+dreamteam serve --open  # + open the web shell in the browser
 ```
 
 A local server comes up: `http://127.0.0.1:8080` serves the web shell from `gui/`
@@ -360,7 +361,7 @@ The port and address are set by the `PORT` and `HOST` variables — you can put 
 in `~/.dreamteam/.env`: the settings will survive a global reinstall and a project
 switch. **Careful:** `HOST=0.0.0.0` exposes the server to the network — the API has
 no authentication, so only do this on your own network. Conversations, the team
-and the configs are shared with the terminal: you can work in the TUI and continue
+and the configs are shared with the terminal The `--open` flag makes serve open the browser itself; at first launch the wizard offers to create a desktop shortcut («Dream Team») that runs exactly this command (works on Windows, Linux and macOS).: you can work in the TUI and continue
 in the browser.
 
 - on the left — conversations (click to switch, "＋" for a new one), the team

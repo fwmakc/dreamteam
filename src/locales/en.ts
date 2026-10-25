@@ -555,4 +555,7 @@ export const en: Record<string, string> = {
   'его провайдер, имя и температура': 'its provider, name and temperature',
   'provider, temperature, name, emoji, color': 'provider, temperature, name, emoji, color',
   'создал {file} (полка своих адаптеров провайдеров: <id>.ts — export default фабрика (id, config) => LLMProvider)': 'created {file} (a shelf for your own provider adapters: <id>.ts — export default a (id, config) => LLMProvider factory)',
+  'Ярлык быстрого запуска (dreamteam serve + браузер) на рабочем столе? [Y/n]:': 'Desktop shortcut for quick launch (dreamteam serve + browser)? [Y/n]:',
+  'создал ярлык «Dream Team» → {file}': 'created the «Dream Team» shortcut → {file}',
+  'ярлык создать не удалось: {err}': 'could not create the shortcut: {err}',
 };
