@@ -1,0 +1,1 @@
+﻿probe-frugal: 15 проверок бережливости (соло-пропуск, serviceModel, старение tool-выводов, focused-контекст, /usage)

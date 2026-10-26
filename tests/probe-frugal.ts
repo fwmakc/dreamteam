@@ -37,7 +37,7 @@ writeFileSync(join(home, 'settings.json'),
 {
   const { planTurns } = await import('../src/orchestrator.js');
   const { MockProvider } = await import('../src/providers/mock.js');
-  const kirk = { id: 'kirk', name: 'Кир', emoji: '🔧', color: 'cyan', prompt: 'Ты — Кир.' };
+  const kirk = { id: 'kirk', name: 'Кир', emoji: '🔧', color: 'cyan', prompt: 'Ты — Кир.', role: 'тест' };
   const moderator = new MockProvider('moderator');
   let llmCalled = false;
   const spy: import('../src/types.js').LLMProvider = {
@@ -52,7 +52,7 @@ writeFileSync(join(home, 'settings.json'),
   check('соло: план вернул одного агента', solo.turns.length === 1 && solo.turns[0].agent.id === 'kirk', JSON.stringify(solo.turns.map((t) => t.agent.id)));
   check('соло: LLM не вызван', !llmCalled, 'модератор был вызван для одного агента');
   // два агента → LLM вызывается (mock→mockPlan эвристика, но проверяем что путь не skip)
-  const mira = { id: 'mira', name: 'Мира', emoji: '🎨', color: 'magenta', prompt: 'Ты — Мира.' };
+  const mira = { id: 'mira', name: 'Мира', emoji: '🎨', color: 'magenta', prompt: 'Ты — Мира.', role: 'тест' };
   const duo = await planTurns({ text: 'привет', mentioned: [], team: [kirk, mira], moderator: spy, maxTurns: 3, userName: 'Хозяин', history: [] });
   check('два агента: план вернулся', duo.turns.length > 0, JSON.stringify(duo.turns.map((t) => t.agent.id)));
 }
