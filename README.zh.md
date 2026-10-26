@@ -28,7 +28,7 @@ dreamteam
 
 首次启动时向导会带你完成设置（见“首次启动向导”）：选择界面语言和服务商，输入 API 密钥（输入隐藏），并自我介绍 —— 随之创建 `~/.dreamteam`（家目录：设置与团队）和 `./.dreamteam`（项目：hosts.json、mails.json、messengers.json 注册表以及谈话记录）。之后就是你和会议室经理的对话：直接告诉它你需要什么。
 
-没有配置密钥时，应用以 **mock 模式**运行 —— 智能体给出预置回答，可以先用它熟悉界面和机制。密钥由向导输入，或之后在服务商卡片里填写（`~/.dreamteam/models/` 的 `"apiKey"` 字段）。
+没有配置密钥时，应用以 **mock 模式**运行 —— 智能体给出预置回答，可以先用它熟悉界面和机制。密钥由向导输入，或之后在模型卡片里填写（`~/.dreamteam/models/` 的 `"apiKey"` 字段）。
 
 ## 两层结构：家目录与项目
 
@@ -52,7 +52,7 @@ dreamteam
 
 1. **界面语言** —— 第一个问题，向导本身已经会用它：开箱即用 `ru`、`en`、`zh`，加上来自 `~/.dreamteam/lang/<id>.json` 的自定义语言（见“设置”）。之后用 `/settings set ui=<id>` 更改。
 2. **服务商** —— 从适配器列表选择（`mock` 无需密钥即可试用）。
-3. **API 密钥** —— 输入隐藏（不显示、也不进终端日志）；密钥直接保存到 `models/` 的服务商卡片里（`"apiKey"` 字段）并立即生效。
+3. **API 密钥** —— 输入隐藏（不显示、也不进终端日志）；密钥直接保存到 `models/` 的模型卡片里（`"apiKey"` 字段）并立即生效。
 4. **如何向团队介绍你** —— 名字、角色、几句介绍（可跳过）。
 
 之后两层都以最小文件和清晰的初始提示创建：家目录获得五人初始团队（分析师、秘书、开发者、设计师、文案）和运行在所选服务商上的经理，外加自定义语言的 `lang/` 架子。名单在 `agents/` 里编辑，或通过与经理对话编辑。如果项目文件夹是 git 仓库而 `.gitignore` 里没有 `.dreamteam/`，向导会建议加上。重复运行向导不会破坏任何东西：已存在的文件原样保留。在非交互模式（管道）下向导会诚实地拒绝运行 —— 设置需要真实终端。
@@ -79,7 +79,7 @@ You > alright Gleb, look at the structure and propose a refactoring plan
 
 ### 工作方式
 
-- **模型密钥** —— 直接放在 `~/.dreamteam/models/` 的服务商卡片里（`"apiKey"` 字段；GigaChat 也可以改用 `"clientId"`/`"clientSecret"` 对）。
+- **模型密钥** —— 直接放在 `~/.dreamteam/models/` 的模型卡片里（`"apiKey"` 字段；GigaChat 也可以改用 `"clientId"`/`"clientSecret"` 对）。
 - **serve 设置** —— `~/.dreamteam/.env`（`TOKEN`、`PORT`、`HOST`；项目文件夹里的 `.env` 刻意不读 —— 变量只有单一来源）。这些是具体机器的设置：不会进入 `/home export` 归档。向导在新机器上首次启动时会创建 `.env`；经 `/home import` 迁移来的家目录不带该文件 —— 没有它 serve 只是监听 `127.0.0.1`；要外部访问，就按包里的样例（`scaffold/home/env.example`）创建 `.env` 并填入 `TOKEN`（见“外部访问”）。
 - **API 描述** —— 同一个 `models/`：哪个适配器、URL、模型和密钥。
 - 应用通过统一的 `LLMProvider` 接口与 LLM 通信（`src/providers/types.ts`）。具体协议藏在适配器里：
@@ -91,12 +91,32 @@ You > alright Gleb, look at the structure and propose a refactoring plan
 | `gigachat` | Sber GigaChat（内置完整 OAuth 令牌周期） |
 | `mock` | 无密钥工作 |
 
+### 模型卡片
+
+每个模型是家目录中的一个文件 `models/<id>.json`。id 即不带 `.json` 的文件名。
+卡片字段由**适配器契约**验证 — 适配器声明接受哪些键、哪些必填、哪些可被智能体覆盖：
+
+```json
+{ "adapter": "openai-compatible", "baseUrl": "https://api.z.ai/api/paas/v4",
+  "model": "glm-4.6", "apiKey": "…", "maxTokens": 4096, "thinking": "disabled" }
+```
+
+智能体通过 **`ModelRef`** 引用模型 — 带 `id` 和生成参数覆盖的对象（temperature、maxTokens、thinking、reasoning）。连接字段（`baseUrl`、`apiKey`）不可覆盖 — 请创建另一张模型卡片：
+
+```json
+{ "model": { "id": "glm-4.6", "temperature": 0.4 } }
+```
+
+自定义适配器 — 架子 `~/.dreamteam/providers/<id>.ts`（同自定义工具）— export default 一个 `(id, config) => LLMProvider` 工厂。
+
+换机器 —— `/home export` 和 `/home import`：设置、团队和模型连同卡片密钥一起迁移，无需重新输入；当前项目的谈话也在同一个归档里并按 id 合并（重名的替换）。归档里有密钥 —— 无论在云端还是别处，都当密码保管。
+
 换机器 —— `/home export` 和 `/home import`：设置、团队和服务商连同卡片密钥一起迁移，无需重新输入；当前项目的谈话也在同一个归档里并按 id 合并（重名的替换）。归档里有密钥 —— 无论在云端还是别处，都当密码保管。
 
 ### Z.ai (GLM)
 
 1. 在 Z.ai 开放平台控制台（API 密钥分区）获取 API 密钥。
-2. 填入 `~/.dreamteam/models/` 的服务商卡片：
+2. 填入 `~/.dreamteam/models/` 的模型卡片：
    ```json
    "apiKey": "your-key"
    ```
@@ -120,12 +140,12 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 对话每轮在历史尾部增长，服务商可以复用前缀缓存 — 相同的 tokens 不会按全价计费两次。
 
 - **Z.ai (GLM)、OpenAI、DeepSeek…**（`openai-compatible` 适配器）— 自动前缀缓存，无需开启。应用在流式模式下请求 usage 统计并报告命中。
-- **Anthropic (Claude)** — 显式缓存标记，默认开启：两个断点（system 提示词与历史末尾）让本轮前缀成为下一轮的缓存命中。可在服务商卡片中用 `"cache": false` 关闭。
+- **Anthropic (Claude)** — 显式缓存标记，默认开启：两个断点（system 提示词与历史末尾）让本轮前缀成为下一轮的缓存命中。可在模型卡片中用 `"cache": false` 关闭。
 - 命中会在日志中显示：«1 240 из 1 500 входных токенов — из кэша промпта」。历史压缩（约 24 条消息）与记忆反思（约每 12 条一次）会重写前缀并重置缓存 — 这是有意为之。
 
 ### Anthropic (Claude)
 
-来自 Anthropic 控制台的密钥放进 `claude` 服务商卡片（`~/.dreamteam/models/`）：
+来自 Anthropic 控制台的密钥放进 `claude` 模型卡片（`~/.dreamteam/models/`）：
 
 ```json
 "apiKey": "your-key"
@@ -138,7 +158,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 适配器自己就做好了人们通常要搭代理服务才有的全套事情：用 API 密钥换取 `access_token`、缓存它、提前刷新（过期前一分钟）、扛住突发的 401（静默刷新 + 重试），并挂上俄罗斯 TLS 证书。
 
 1. 在 GigaChat 控制台获取 API 密钥（developers.sber.ru → GigaChat API）。
-2. 填入 `~/.dreamteam/models/` 的 `gigachat` 服务商卡片：
+2. 填入 `~/.dreamteam/models/` 的 `gigachat` 模型卡片：
    ```json
    "apiKey": "your-console-key"
    ```
@@ -651,7 +671,7 @@ You > @manager add the router server — admin@192.168.1.1
 **更换团队** — 编辑 `~/.dreamteam/agents/`（即时生效）：字段 `id`、`name`、`emoji`、`role`、`description`、`color`（red/green/yellow/blue/magenta/cyan/white/gray）、`prompt`（人设），可选 `provider` 和 `temperature`；真实动作的权限 — `tools`、`projects`、`workspace`，眼睛和双手 — `vision` 和 `image`（见“工具”与“视觉与图片”）。`provider` 字段只能是 `models/` 里存在的 id：`/team add|update` 命令、网页外壳和经理都会拒绝陌生的 id 并给出可用列表，而不是把垃圾写进配置。
 
 **接入新 API — 一个文件，无需 fork。** 把适配器放进家目录的架子
-`~/.dreamteam/models/`：文件名即适配器 id，`models/` 里的服务商卡片用 `"adapter": "<id>"` 引用它。架子在首次启动时创建；代码在启动时加载 — 文件损坏或与内置适配器（含 image-）重名，都会在启动时给出明确错误：
+`~/.dreamteam/models/`：文件名即适配器 id，`models/` 里的模型卡片用 `"adapter": "<id>"` 引用它。架子在首次启动时创建；代码在启动时加载 — 文件损坏或与内置适配器（含 image-）重名，都会在启动时给出明确错误：
 
 ```ts
 // ~/.dreamteam/models/my-api.ts

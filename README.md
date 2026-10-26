@@ -40,7 +40,7 @@ Check the installation: `dreamteam -v` — the version, `dreamteam -h` — help 
 launch modes (TUI, `serve`).
 
 On first launch the wizard walks you through the setup (see "First-launch wizard"):
-you pick the interface language and a provider, enter an API key (the input is hidden)
+you pick the interface language and a model, enter an API key (the input is hidden)
 and introduce yourself — `~/.dreamteam` (the home: settings and the team) and
 `./.dreamteam` (the project: the hosts.json, mails.json, messengers.json registries
 and the conversations) are created. After that it's just you and the war-room
@@ -48,7 +48,7 @@ manager: tell it what you need.
 
 Without a configured key the app runs in **mock mode** — the agents give canned
 answers, so you can try out the interface and the mechanics. The key is entered by
-the wizard or later in the provider card (`~/.dreamteam/models/`, the
+the wizard or later in the model card (`~/.dreamteam/models/`, the
 `"apiKey"` field).
 
 ## Two layers: home and project
@@ -67,7 +67,7 @@ anywhere — launch it in a repository, and the team works on it.
 
 You can switch projects without leaving the app: `/project open <path or name>`
 changes the working folder, the list of conversations and the project registries
-(servers, mail, bots) — the team, the providers and the shared memory stay with you.
+(servers, mail, bots) — the team, the models and the shared memory stay with you.
 Overview: `/project` (the current project with its servers and the known projects),
 `/project add <path>` adds a new path to the registry, `/project remove <name>`
 forgets it (the current project can't be removed this way). In the web shell there
@@ -89,7 +89,7 @@ If there is no home (`~/.dreamteam`), the wizard asks, in order:
 2. **Provider** — from the list of adapters (`mock` works for a trial run, no keys
    needed).
 3. **API key** — the input is hidden (not displayed and not written to the terminal
-   log); the key is saved right into the provider card in `models/`
+   log); the key is saved right into the model card in `models/`
    (the `"apiKey"` field) and picked up immediately.
 4. **How to introduce you to the team** — name, role, a couple of words (can be
    skipped).
@@ -132,7 +132,7 @@ exist in its protocol.
 
 ### How it works
 
-- **Model keys** — right in the provider card in `~/.dreamteam/models/`
+- **Model keys** — right in the model card in `~/.dreamteam/models/`
   (the `"apiKey"` field; for GigaChat you can set a `"clientId"`/`"clientSecret"`
   pair instead).
 - **serve settings** — `~/.dreamteam/.env` (`TOKEN`, `PORT`, `HOST`; the `.env`
@@ -155,8 +155,32 @@ exist in its protocol.
 | `gigachat` | Sber GigaChat (with the full OAuth token cycle inside) |
 | `mock` | working without keys |
 
+### Model cards
+
+Each model is a file `models/<id>.json` in the home. The id is the file name
+without `.json`. The card fields are validated by the **adapter contract** —
+each adapter declares which keys it accepts, which are required, and which can
+be overridden per-agent:
+
+```json
+{ "adapter": "openai-compatible", "baseUrl": "https://api.z.ai/api/paas/v4",
+  "model": "glm-4.6", "apiKey": "…", "maxTokens": 4096, "thinking": "disabled" }
+```
+
+Agents reference models with a **`ModelRef`** — an object with `id` plus
+generation-param overrides (temperature, maxTokens, thinking, reasoning).
+Connection fields (`baseUrl`, `apiKey`) are NOT overridable — create another
+model card for that:
+
+```json
+{ "model": { "id": "glm-4.6", "temperature": 0.4 } }
+```
+
+Custom adapters go on the shelf `~/.dreamteam/providers/<id>.ts` (same pattern
+as custom tools) — export default a `(id, config) => LLMProvider` factory.
+
 Moving to another machine — `/home export` and `/home import`: settings, the team
-and the providers move together with the card keys, nothing needs to be re-entered;
+and the models move together with the card keys, nothing needs to be re-entered;
 the current project's conversations travel in the same archive and merge by id
 (matching ones are replaced). The archive contains keys — treat it (in the cloud and
 anywhere else) like a password.
@@ -164,11 +188,11 @@ anywhere else) like a password.
 ### Z.ai (GLM)
 
 1. Get an API key in the console of the Z.ai open platform (the API keys section).
-2. Put it into the provider card in `~/.dreamteam/models/`:
+2. Put it into the model card in `~/.dreamteam/models/`:
    ```json
    "apiKey": "your-key"
    ```
-3. The default provider is already selected there (`"default"`). The model is
+3. The default provider is already selected there (`settings.json` `"model": {"id": …}`). The model is
    changed right next to it (the `model` field).
 
 **A note on key types.** For example, Z.ai has two different endpoints:
@@ -202,14 +226,14 @@ Conversation rounds grow the history at the tail, so providers can reuse the cac
 
 ### Anthropic (Claude)
 
-The key from the Anthropic console goes into the `claude` provider card
+The key from the Anthropic console goes into the `claude` model card
 (`~/.dreamteam/models/`):
 
 ```json
 "apiKey": "your-key"
 ```
 
-Then in the chat: `/model claude` (or change `"default"` in `models/`).
+Then in the chat: `/model claude` (or change `settings.json` `"model": {"id": …}` in `models/`).
 
 ### Sber GigaChat
 
@@ -219,7 +243,7 @@ gets an `access_token` with your API key, caches it, refreshes it ahead of time
 supplies the Russian TLS certificate.
 
 1. Get an API key in the GigaChat console (developers.sber.ru → GigaChat API).
-2. Put it into the `gigachat` provider card in `~/.dreamteam/models/`:
+2. Put it into the `gigachat` model card in `~/.dreamteam/models/`:
    ```json
    "apiKey": "your-console-key"
    ```
@@ -266,11 +290,11 @@ There are no aliases or short forms: one name — one operation.
 | `team.update <id> field=value…` | `/team update lawyer role=sourcream` | edit: name, role, emoji, color, description, prompt, provider, temperature |
 | `team.delete <id…>` | `/team delete lawyer, keks` | delete members: a comma- or space-separated list |
 | `team.grant <agent> <tool>` | `/team grant lawyer files` | enable a tool: files, shell, ssh, look, image or a custom one from tools/ |
-| `provider.list` | `/model` | the providers and their status |
+| `provider.list` | `/model` | the models and their status |
 | `model.set <id>` | `/model set glm` | change the main provider |
 | `model.add <id> field=value…` | `/model add glm adapter=openai-compatible …` | a new provider (adapter is required) |
 | `model.update <id> field=value…` | `/model update glm model=glm-4.6` | edit an existing card (adapter, model, baseUrl, apiKey, maxTokens, temperature) |
-| `model.delete <id>` | `/model delete glm` | delete a provider; the main one can't be deleted — `/model set` another one first |
+| `model.delete <id>` | `/model delete glm` | delete a model; the main one can't be deleted — `/model set` another one first |
 | `profile.show` / `profile.set` | `/profile set Name; role; about you` | how the team sees you (user.json) |
 | `memory.show [who\|shared]` | `/memory show Lawyer` | what a member remembers; `shared` — the shared memory |
 | `project.list` | `/project` | the current project: servers (hosts.json) and known projects |
@@ -373,7 +397,7 @@ and the configs are shared with the terminal The `--open` flag makes serve open 
 in the browser.
 
 - on the left — conversations (click to switch, "＋" for a new one), the team
-  roster (click a member to summon/send them out of the chat), the providers
+  roster (click a member to summon/send them out of the chat), the models
   (click to make one the default for the agents) and the projects (click to switch
   project, "＋" by the section — a form with a path field);
 - there is no double click in the web UI: right-clicking an entry opens an
@@ -898,7 +922,7 @@ of popular providers:
 | Yandex | `imap.yandex.ru` | `smtp.yandex.ru` |
 | Gmail | `imap.gmail.com` | `smtp.gmail.com` |
 | Mail.ru | `imap.mail.ru` | `smtp.mail.ru` |
-If the provider's server presents a certificate for a different name (typical for
+If the model's server presents a certificate for a different name (typical for
 `mail.my-site.ru` on shared hosting), the connection is rejected by the name
 check — then set `"tlsNoVerify": true` on the mailbox: encryption stays, only the
 password is verified, but such a setup no longer notices server substitution, so
@@ -1174,7 +1198,7 @@ will reject a foreign id with the list of available ones instead of writing
 garbage into the config.
 
 **Add a new API — a file, no fork.** Drop an adapter into the home shelf
-`~/.dreamteam/models/`: the file name becomes the adapter id, and a provider card in
+`~/.dreamteam/models/`: the file name becomes the adapter id, and a model card in
 `models/` references it with "adapter": "<id>". The shelf is scaffolded on first
 launch; the code loads at startup — a broken file or a name colliding with a
 built-in adapter (including the image ones) fails the startup with a clear
