@@ -71,14 +71,19 @@ No conventional-commit prefixes; the subject is the changelog line.
 
 ```bash
 npm version 0.0.x --no-git-tag-version   # package.json + package-lock.json
-git add package.json package-lock.json && git commit -m "Версия 0.0.x" && git push
+# describe the release in CHANGELOG.md (a new ## [0.0.x] section)
+git add package.json package-lock.json CHANGELOG.md
+git commit -m "Версия 0.0.x" && git push
 git tag -a v0.0.x -m "dreamteam 0.0.x" && git push origin v0.0.x
-gh release create v0.0.x --title "0.0.x"   # notes: copy the 0.0.x section of CHANGELOG.md
-npm publish                              # prepublishOnly: typecheck + build:gui
 ```
 
-`gui-dist/` is gitignored but must ship — `prepublishOnly` rebuilds it before
-packing. Check what goes out with `npm publish --dry-run`.
+That is the whole release: pushing a `v*` tag triggers
+`.github/workflows/release.yml`, which runs typecheck + `build:gui`, then
+`npm publish --provenance` and creates the GitHub Release with generated
+notes. Don't run `npm publish` by hand — it would race the workflow.
+
+`gui-dist/` is gitignored but must ship — the workflow builds it before
+packing. Check what goes out locally with `npm publish --dry-run`.
 
 ## Probes
 
