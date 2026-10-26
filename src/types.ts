@@ -112,6 +112,15 @@ export interface ChatMessage {
 }
 
 /** Разговор, сохраняемый в data/sessions/<id>.json */
+
+/** Накопительная статистика токенов сессии (по раундам) */
+export interface SessionUsage {
+  promptTokens: number;
+  cachedTokens: number;
+  outputTokens: number;
+  rounds: number;
+}
+
 export interface Session {
   id: string;
   title: string;
@@ -132,6 +141,9 @@ export interface Session {
   digestInLog?: boolean;
   /** Кто позван в этот чат (id агентов); пусто — вся команда (старые разговоры) */
   participants?: string[];
+
+  /** Накопительная статистика токенов (заполняется при раундах) */
+  usage?: SessionUsage;
 }
 
 /** Краткие сведения о разговоре для списка /sessions */

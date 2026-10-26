@@ -564,4 +564,9 @@ export const en: Record<string, string> = {
   '  Своя модель у агента — поля "model", "vision", "image" в его карточке (agents.json).': '  Per-agent model — the "model", "vision", "image" fields in its card (agents.json).',
   'Тип адаптера:': 'Adapter type:',
   'создал {file} (полка своих адаптеров: <id>.ts — export default фабрика (id, config) => LLMProvider)': 'created {file} (a shelf for your own adapters: <id>.ts — export default a (id, config) => LLMProvider factory)',
+  'Статистики пока нет — сделайте раунд с API (не mock).': 'No stats yet — run a round with a real API (not mock).',
+  'Раундов: {rounds}': 'Rounds: {rounds}',
+  'Вход: {in} · Выход: {out} · Из кэша: {cached} ({pct}%)': 'In: {in} · Out: {out} · Cached: {cached} ({pct}%)',
+  'агентов влито: {n}': 'agents merged: {n}',
+  'создал {file} (карточки моделей — примеры; впишите apiKey или удалите лишние)': 'created {file} (model cards — examples; fill in apiKey or remove extras)',
 };

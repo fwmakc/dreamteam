@@ -11,8 +11,24 @@ const SYSTEM = `Ты — модератор совещания. Сожми ис�
 
 /** Сообщения, которые ещё отправляются в LLM целиком (после границы сжатия). */
 export function contextSlice(session: Session): ChatMessage[] {
-  return session.messages.slice(Math.max(0, session.compressedUpTo ?? 0));
+  const slice = session.messages.slice(Math.max(0, session.compressedUpTo ?? 0));
+  // старение tool-выводов: кроме последних TOOL_KEEP_FULL — первая строка + счётчик
+  let toolSeen = 0;
+  for (let i = slice.length - 1; i >= 0; i--) {
+    if (slice[i].authorId !== 'tool') continue;
+    toolSeen++;
+    if (toolSeen <= TOOL_KEEP_FULL) continue;
+    const firstLine = slice[i].text.split('\n')[0];
+    slice[i] = {
+      ...slice[i],
+      text: `${firstLine.slice(0, 120)}\n(+${slice[i].text.length} символов — полное: /session history)`,
+    };
+  }
+  return slice;
 }
+
+/** Сколько последних tool-результатов не сжимаем (свежие нужны агенту в полном виде). */
+const TOOL_KEEP_FULL = 2;
 
 /**
  * Периодическое сжатие контекста: когда старых сообщений накопилось много,

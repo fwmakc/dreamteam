@@ -951,6 +951,25 @@ export const OPERATIONS: OpSpec[] = [
     },
   },
   {
+    name: 'usage.show', implicit: true, title: 'статистика токенов',
+    help: 'вход/выход/кэш — накопительно за текущий разговор',
+    run: async (engine) => {
+      const u = engine.app.session.usage;
+      if (!u || u.rounds === 0) return [t('Статистики пока нет — сделайте раунд с API (не mock).')];
+      const pct = u.promptTokens > 0 ? Math.round((u.cachedTokens / u.promptTokens) * 100) : 0;
+      return [
+        tf('Раундов: {rounds}', { rounds: u.rounds }),
+        tf('Вход: {in} · Выход: {out} · Из кэша: {cached} ({pct}%)', {
+          in: u.promptTokens.toLocaleString('ru-RU'),
+          out: u.outputTokens.toLocaleString('ru-RU'),
+          cached: u.cachedTokens.toLocaleString('ru-RU'),
+          pct,
+        }),
+      ];
+    },
+  },
+
+  {
     name: 'manager.show', implicit: true, title: 'менеджер переговорки',
     help: 'его модель, имя и температура',
     run: async (engine) => [

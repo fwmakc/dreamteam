@@ -564,4 +564,9 @@ export const zh: Record<string, string> = {
   '  Своя модель у агента — поля "model", "vision", "image" в его карточке (agents.json).': '  每个智能体的模型 — 其卡片中的 "model"、"vision"、"image" 字段（agents.json）。',
   'Тип адаптера:': '适配器类型：',
   'создал {file} (полка своих адаптеров: <id>.ts — export default фабрика (id, config) => LLMProvider)': '已创建 {file}（自定义适配器架子：<id>.ts — export default 一个 (id, config) => LLMProvider 工厂）',
+  'Статистики пока нет — сделайте раунд с API (не mock).': '统计还没有 — 请用真实 API（非 mock）运行一轮。',
+  'Раундов: {rounds}': '轮数：{rounds}',
+  'Вход: {in} · Выход: {out} · Из кэша: {cached} ({pct}%)': '输入：{in} · 输出：{out} · 缓存：{cached}（{pct}%）',
+  'агентов влито: {n}': '已并入智能体：{n}',
+  'создал {file} (карточки моделей — примеры; впишите apiKey или удалите лишние)': '已创建 {file}（模型卡片示例；填入 apiKey 或删除多余的）',
 };

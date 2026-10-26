@@ -646,6 +646,14 @@ export class Engine {
           }),
         );
       }
+      // накопительная статистика: раунд → session.usage
+      if (usage) {
+        const u = session.usage ?? (session.usage = { promptTokens: 0, cachedTokens: 0, outputTokens: 0, rounds: 0 });
+        u.promptTokens += usage.promptTokens ?? 0;
+        u.cachedTokens += usage.cachedTokens ?? 0;
+        u.outputTokens += usage.outputTokens ?? 0;
+        u.rounds++;
+      }
       if (full.trim()) {
         session.messages.push({
           authorId: turn.agent.id,
