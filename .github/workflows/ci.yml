@@ -27,9 +27,11 @@ jobs:
       # all probes are hermetic: temp DT_HOME/DT_PROJECT, mock provider, no keys
       - run: npm run probe
 
-  # ConPTY-based e2e probes: need node-pty (native build), Windows only
+  # ConPTY-based e2e probes: need node-pty (native build), Windows only.
+  # continue-on-error: probes use hardcoded C:\tmp paths — CI support is WIP (#3)
   e2e:
     runs-on: windows-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
