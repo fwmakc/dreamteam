@@ -26,3 +26,18 @@ jobs:
       - run: npm run build:gui
       # all probes are hermetic: temp DT_HOME/DT_PROJECT, mock provider, no keys
       - run: npm run probe
+
+  # ConPTY-based e2e probes: need node-pty (native build), Windows only
+  e2e:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm i --no-save node-pty
+      - run: npx tsx tests/probe-input.ts
+      - run: npx tsx tests/probe-startup.ts
+      - run: npx tsx tests/probe-tui.ts
+      - run: npx tsx tests/probe-tui-scenario.ts

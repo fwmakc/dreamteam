@@ -64,6 +64,21 @@ export function localeId(): string {
   return currentId;
 }
 
+/** BCP 47-тег активной локали — для toLocaleString / Intl. */
+export function localeTag(): string {
+  return { ru: 'ru-RU', en: 'en-US', zh: 'zh-CN' }[currentId] ?? 'ru-RU';
+}
+
+/** Дата и время в активной локали. */
+export function fmtDate(ts: number): string {
+  return new Date(ts).toLocaleString(localeTag());
+}
+
+/** Только время в активной локали. */
+export function fmtTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString(localeTag());
+}
+
 /** Словарь активной локали — сервер отдаёт его веб-оболочке в state.ui. */
 export function localeDict(): Dict {
   return current;

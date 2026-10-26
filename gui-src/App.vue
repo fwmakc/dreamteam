@@ -70,7 +70,10 @@ function colorByAuthor(m: ChatMessage): string {
   const a = team.value.find((x) => x.id === m.authorId);
   return colorOf(a?.color);
 }
-const fmtDate = (ts: number): string => new Date(ts).toLocaleString('ru-RU');
+const fmtDate = (ts: number): string => {
+  const tag = { ru: 'ru-RU', en: 'en-US', zh: 'zh-CN' }[snapshot.ui?.id ?? 'ru'] ?? 'ru-RU';
+  return new Date(ts).toLocaleString(tag);
+};
 
 // ── автоскролл чата ──────────────────────────────────────────────────────────
 const chatEl = ref<HTMLElement | null>(null);

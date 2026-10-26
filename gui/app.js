@@ -762,8 +762,12 @@
       const li = document.createElement('li');
       const active = state.session && s.id === state.session.id;
       if (active) li.className = 'active';
-      const created = new Date(s.createdAt).toLocaleString('ru-RU');
-      const updated = new Date(s.updatedAt).toLocaleString('ru-RU');
+  const fmtDate = (ts) => {
+    const tag = { ru: 'ru-RU', en: 'en-US', zh: 'zh-CN' }[state?.ui?.id] ?? 'ru-RU';
+    return new Date(ts).toLocaleString(tag);
+  };
+  const created = fmtDate(s.createdAt);
+  const updated = fmtDate(s.updatedAt);
       li.title = `${s.title}\nid: ${s.id}\n${tr('сообщений:')} ${s.count}\n${tr('создан:')} ${created}\n${tr('последнее сообщение:')} ${updated}`;
       li.innerHTML =
         `<div class="content">` +

@@ -19,7 +19,7 @@ import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
 import { bootstrapApp } from './core/bootstrap.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, ChatMessage, Session } from './types.js';
-import { t, tf } from './i18n.js';
+import { fmtDate, fmtTime, t, tf } from './i18n.js';
 
 // доступен командам /exit: закрытие readline завершает приложение через 'close'
 let rl: ReturnType<typeof createInterface> | null = null;
@@ -416,7 +416,7 @@ function messageRows(m: ChatMessage, team: Agent[]): string[] {
       : isSessionRef(m)
         ? pc.dim(tf('📎 разговор «{title}»', { title: m.authorName }))
         : colorFn(agent?.color)(`${agent?.emoji ?? '🤖'} ${m.authorName}`);
-  const rows = [`  ${who} ${pc.dim(`· ${new Date(m.ts).toLocaleTimeString('ru-RU')}`)}`];
+  const rows = [`  ${who} ${pc.dim(`· ${fmtTime(m.ts)}`)}`];
   for (const line of m.text.split('\n')) rows.push('  ' + line);
   return rows;
 }
@@ -638,7 +638,7 @@ function runCommand(engine: Engine, line: string): CommandVerdict {
       }
       console.log(pc.dim(`\n  ${t('Разговоры (свежие сверху):')}`));
       list.forEach((s, i) => {
-        const date = new Date(s.updatedAt).toLocaleString('ru-RU');
+        const date = fmtDate(s.updatedAt);
         const cur = s.id === app.session.id ? pc.cyan(` ${t('← текущий')}`) : '';
         console.log(`    ${i + 1}. ${s.title} — ${tf('{n} сообщ.', { n: s.count })}, ${date}${cur}`);
       });
