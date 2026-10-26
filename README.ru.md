@@ -132,7 +132,7 @@ dreamteam
 - **Описание API** — тот же `models/`: какой адаптер, адрес, модель
   и ключ.
 - Приложение общается с LLM через единый интерфейс `LLMProvider`
-  (`src/models/types.ts`). Конкретные протоколы спрятаны в адаптерах:
+  (`src/providers/types.ts`). Конкретные протоколы спрятаны в адаптерах:
 
 | Адаптер | Для каких API |
 |---|---|
@@ -1137,9 +1137,9 @@ helpers). Менеджер нужен для всего, что командам
 
 ```ts
 // ~/.dreamteam/models/my-api.ts
-// при установке из npm — 'dreamteam/src/models/types.js';
-// в клоне репозитория — '../src/models/types.js'
-import type { LLMProvider, ProviderConfig } from 'dreamteam/src/models/types.js';
+// при установке из npm — 'dreamteam/src/providers/types.js';
+// в клоне репозитория — '../src/providers/types.js'
+import type { LLMProvider, ProviderConfig } from 'dreamteam/src/providers/types.js';
 
 export default (id: string, config: ProviderConfig): LLMProvider => ({
   id,
@@ -1160,8 +1160,8 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 Для API в стиле OpenAI свой адаптер почти не нужен — встроенный
 `openai-compatible` покрывает их через `baseUrl`. Развёрнутый встроенный пример —
 `gigachat`: цикл OAuth-токенов и TLS-сертификаты (см. «Sber GigaChat»). Чтобы
-адаптер ехал в пакете, реализуйте тот же интерфейс в `src/models/` и
-зарегистрируйте его в `src/models/registry.ts`.
+адаптер ехал в пакете, реализуйте тот же интерфейс в `src/providers/` и
+зарегистрируйте его в `src/providers/registry.ts`.
 
 ## Проверки
 

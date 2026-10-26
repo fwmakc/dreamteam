@@ -82,7 +82,7 @@ You > alright Gleb, look at the structure and propose a refactoring plan
 - **模型密钥** —— 直接放在 `~/.dreamteam/models/` 的服务商卡片里（`"apiKey"` 字段；GigaChat 也可以改用 `"clientId"`/`"clientSecret"` 对）。
 - **serve 设置** —— `~/.dreamteam/.env`（`TOKEN`、`PORT`、`HOST`；项目文件夹里的 `.env` 刻意不读 —— 变量只有单一来源）。这些是具体机器的设置：不会进入 `/home export` 归档。向导在新机器上首次启动时会创建 `.env`；经 `/home import` 迁移来的家目录不带该文件 —— 没有它 serve 只是监听 `127.0.0.1`；要外部访问，就按包里的样例（`scaffold/home/env.example`）创建 `.env` 并填入 `TOKEN`（见“外部访问”）。
 - **API 描述** —— 同一个 `models/`：哪个适配器、URL、模型和密钥。
-- 应用通过统一的 `LLMProvider` 接口与 LLM 通信（`src/models/types.ts`）。具体协议藏在适配器里：
+- 应用通过统一的 `LLMProvider` 接口与 LLM 通信（`src/providers/types.ts`）。具体协议藏在适配器里：
 
 | 适配器 | 适用 API |
 |---|---|
@@ -655,9 +655,9 @@ You > @manager add the router server — admin@192.168.1.1
 
 ```ts
 // ~/.dreamteam/models/my-api.ts
-// npm 安装后用 'dreamteam/src/models/types.js';
-// 仓库克隆里用 '../src/models/types.js'
-import type { LLMProvider, ProviderConfig } from 'dreamteam/src/models/types.js';
+// npm 安装后用 'dreamteam/src/providers/types.js';
+// 仓库克隆里用 '../src/providers/types.js'
+import type { LLMProvider, ProviderConfig } from 'dreamteam/src/providers/types.js';
 
 export default (id: string, config: ProviderConfig): LLMProvider => ({
   id,
@@ -675,7 +675,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 { "my": { "adapter": "my-api", "model": "任意" } }
 ```
 
-对 OpenAI 风格的 API 通常不需要自定义适配器 — 内置 `openai-compatible` 已通过 `baseUrl` 覆盖它们。功能完整的内置示例是 `gigachat`：OAuth 令牌周期与 TLS 证书（见「Sber GigaChat」）。要让适配器随包发布，在 `src/models/` 实现同一接口并在 `src/models/registry.ts` 注册。
+对 OpenAI 风格的 API 通常不需要自定义适配器 — 内置 `openai-compatible` 已通过 `baseUrl` 覆盖它们。功能完整的内置示例是 `gigachat`：OAuth 令牌周期与 TLS 证书（见「Sber GigaChat」）。要让适配器随包发布，在 `src/providers/` 实现同一接口并在 `src/providers/registry.ts` 注册。
 
 ## 检查
 

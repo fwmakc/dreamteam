@@ -146,7 +146,7 @@ exist in its protocol.
 - **API description** — the same `models/`: which adapter, URL, model
   and key.
 - The app talks to LLMs through a single `LLMProvider` interface
-  (`src/models/types.ts`). The concrete protocols are hidden in the adapters:
+  (`src/providers/types.ts`). The concrete protocols are hidden in the adapters:
 
 | Adapter | For which APIs |
 |---|---|
@@ -1182,9 +1182,9 @@ error:
 
 ```ts
 // ~/.dreamteam/models/my-api.ts
-// when installed from npm — 'dreamteam/src/models/types.js';
-// in a repo clone — '../src/models/types.js'
-import type { LLMProvider, ProviderConfig } from 'dreamteam/src/models/types.js';
+// when installed from npm — 'dreamteam/src/providers/types.js';
+// in a repo clone — '../src/providers/types.js'
+import type { LLMProvider, ProviderConfig } from 'dreamteam/src/providers/types.js';
 
 export default (id: string, config: ProviderConfig): LLMProvider => ({
   id,
@@ -1206,7 +1206,7 @@ For OpenAI-style APIs you rarely need a custom adapter — the built-in
 `openai-compatible` already covers them via `baseUrl`. A full-featured built-in
 example is `gigachat`: the OAuth token cycle and TLS certificates (see
 "Sber GigaChat"). To ship an adapter inside the package, implement the same
-interface in `src/models/` and register it in `src/models/registry.ts`.
+interface in `src/providers/` and register it in `src/providers/registry.ts`.
 
 ## Checks
 
