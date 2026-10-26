@@ -126,7 +126,13 @@ export function buildToolset(
     const config = agentToolConfig(agent, id);
     const factory = makeBuiltin(id);
     if (factory) {
-      set.set(id, validateInstance(id, `встроенный тул ${id}`, factory(config, { cfg, agent, tctx, signal })));
+      // tool card "model" — переопределение модели для look/image:
+      // {"look": {"model": {"id": "other-vision"}}} перекрывает agent.vision
+      let effectiveAgent = agent;
+      if ((id === 'look' || id === 'image') && config.model && typeof config.model === 'object') {
+        effectiveAgent = { ...agent, [id]: config.model };
+      }
+      set.set(id, validateInstance(id, `встроенный тул ${id}`, factory(config, { cfg, agent: effectiveAgent, tctx, signal })));
       continue;
     }
     const userFactory = userTools.get(id);

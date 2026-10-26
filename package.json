@@ -28,6 +28,7 @@
     "probe:providers": "tsx tests/probe-providers.ts",
     "probe:shortcut": "tsx tests/probe-shortcut.ts",
     "probe:caching": "tsx tests/probe-caching.ts",
+    "probe:frugal": "tsx tests/probe-frugal.ts",
     "probe:bin": "tsx tests/probe-bin.ts",
     "probe:commands": "tsx tests/probe-commands.ts",
     "probe:project": "tsx tests/probe-project.ts",
