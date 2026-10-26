@@ -36,6 +36,10 @@ semver while pre-1.0 (breaking changes may land in minors).
 
 ### Changed
 
+- **Vanilla `gui/` shell removed** — `serve` always serves the Vue build
+  (`gui-dist/`); publishing runs `npm run build:gui` anyway. From a repo clone
+  run `npm run build:gui` once — without the build serve explains itself
+  instead of silently falling back to the old shell.
 - Switching a project or a session now renders the conversation history into
   the TUI panel (as on startup), and the concierge greets after
   `/project new` / `project.open` in an empty session.

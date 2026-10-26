@@ -31,7 +31,7 @@ asking the manager to "bring Elena in").
 You need Node.js ≥ 18.17.
 
 ```bash
-npm install -g dreamteam   # or: git clone + npm install + npm link
+npm install -g dreamteam   # or: git clone + npm install + npm run build:gui + npm link
 cd my-project              # work inside a project folder
 dreamteam
 ```
@@ -398,8 +398,8 @@ dreamteam serve         # or: npm run serve; the port is PORT, 8080 by default
 dreamteam serve --open  # + open the web shell in the browser
 ```
 
-A local server comes up: `http://127.0.0.1:8080` serves the web shell from `gui/`
-(plain HTML/JS/CSS, no build step) and talks to it over WebSocket. By default it
+A local server comes up: `http://127.0.0.1:8080` serves the web shell from `gui-dist/`
+(the Vue build from `gui-src/`, `npm run build:gui`) and talks to it over WebSocket. By default it
 listens on 127.0.0.1 only — the server is not visible from outside the machine.
 The port and address are set by the `PORT` and `HOST` variables — you can put them
 in `~/.dreamteam/.env`: the settings will survive a global reinstall and a project
@@ -1296,7 +1296,7 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   temporary folders. `probe:scenario-tui` — the same scenario with on-disk file
   checks after every step (sessions, agents/, the export archive).
 - `npm run probe:api` — the server API (`dreamteam serve`) on the mock provider
-  in temporary folders: gui/ statics, the no-project state in the snapshot,
+  in temporary folders: gui-dist/ statics, the no-project state in the snapshot,
   a WS concierge scenario (`project.open` → greeting,
   remarks, team.add through a conversation), rpc (chat.add/remove, model.set,
   session.new/delete with fresh states after them), live confirm/choose
@@ -1342,7 +1342,6 @@ The package code (what gets installed via npm):
 ```
 dreamteam/
 ├── bin/dreamteam.js          # the global command: a tsx loader; serve → src/serve.ts
-├── gui/                      # the web shell for `dreamteam serve`: HTML+JS+CSS, no build
 ├── scaffold/                 # first-launch config skeletons: home/ — JSON, unfolded by the wizard
 ├── src/
 │   ├── index.ts              # the terminal shell: the REPL loop, chat commands, screen and editor
@@ -1351,7 +1350,7 @@ dreamteam/
 │   │   ├── projects.ts       # the home's project registry: remember/forget, name resolution
 │   │   ├── presenter.ts      # the core→shell channel (the terminal and the network implement it)
 │   │   └── bootstrap.ts      # the shells' shared start: layers, configs, providers, session
-│   ├── serve.ts              # the local server: HTTP+WS on 127.0.0.1, gui/ statics, a second Presenter
+│   ├── serve.ts              # the local server: HTTP+WS on 127.0.0.1, gui-dist/ statics, a second Presenter
 │   ├── paths.ts              # the three layers of paths: home, project, working folder
 │   ├── wizard.ts             # the first-launch wizard: language, model, key, profile, scaffolding
 │   ├── orchestrator.ts       # the moderator: who answers and what to focus on

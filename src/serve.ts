@@ -54,7 +54,7 @@ import { localeId, localeDict, applyLocale } from './i18n.js';
 /**
  * Локальный API поверх ядра: `dreamteam serve` поднимает HTTP+WS на
  * 127.0.0.1:8080 (PORT/HOST, можно в ~/.dreamteam/.env) и раздаёт
- * веб-оболочку из gui/. Ядро общается с клиентами
+ * собранную веб-оболочку из gui-dist/. Ядро общается с клиентами
  * только через ServerPresenter (тот же интерфейс Presenter, что и у
  * терминала) — никакого второго ядра нет.
  *
@@ -299,13 +299,10 @@ const MIME: Record<string, string> = {
 };
 
 /**
- * Каталог веб-оболочки рядом с src/ — и в репозитории, и в установленном пакете.
- * Предпочитаем собранную Vue-оболочку (gui-dist/); если сборки нет
- * (установка из npm без этапа build) — vanilla-оболочка из gui/.
+ * Каталог собранной Vue-оболочки рядом с src/ — и в репозитории, и в
+ * установленном пакете (build:gui выполняется перед публикацией).
  */
-const GUI_DIST = fileURLToPath(new URL('../gui-dist/', import.meta.url));
-const GUI_VANILLA = fileURLToPath(new URL('../gui/', import.meta.url));
-const GUI_DIR = existsSync(join(GUI_DIST, 'index.html')) ? GUI_DIST : GUI_VANILLA;
+const GUI_DIR = fileURLToPath(new URL('../gui-dist/', import.meta.url));
 
 export interface ServeHandle {
   port: number;
@@ -889,8 +886,10 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       return;
     }
     if (!existsSync(file) || !statSync(file).isFile()) {
+      // клон репозитория без build:gui — вместо пустой страницы объясняем, как собрать
+      const hint = rel === 'index.html' ? ' — оболочка не собрана: npm run build:gui' : '';
       res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: 'нет такого файла (оболочка живёт в gui-dist/ или gui/ пакета)' }));
+      res.end(JSON.stringify({ error: 'нет такого файла (оболочка живёт в gui-dist/ пакета)' + hint }));
       return;
     }
     res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });

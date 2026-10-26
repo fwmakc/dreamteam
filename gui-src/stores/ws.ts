@@ -125,7 +125,7 @@ function handleAuthEvent(type: string, msg: Record<string, unknown>): boolean {
   }
 }
 
-/** Войти по токену из формы (vanilla enterWithToken). */
+/** Войти по токену из формы. */
 export function submitToken(token: string): void {
   const t = token.trim();
   if (!t) return;

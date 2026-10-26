@@ -7,7 +7,6 @@
  *  - диспетчер событий обрабатывает КАЖДЫЙ тип из WsEvent (types.ts);
  *  - сервер не шлёт типы вне контракта, оболочка не шлёт необработанное;
  *  - rpc-методы из оболочки существуют в handleRpc сервера;
- *  - vanilla-фолбэк gui/ на месте (serve падает в него без сборки);
  *  - gui-dist собран: index.html ссылается на существующие ассеты и свежее
  *    всех исходников gui-src (правка без пересборки = провал).
  *
@@ -158,12 +157,8 @@ function checkForms(file: string, src: string): void {
     `onSave без rpc/send: ${dead.join(' | ')}`);
 }
 checkForms('gui-src/App.vue', appSrc);
-checkForms('gui/app.js', read('gui/app.js'));
 
-// --- 5. vanilla-фолбэк и собранная оболочка ---
-for (const f of ['gui/index.html', 'gui/app.js', 'gui/style.css']) {
-  check(`vanilla-фолбэк ${f} на месте`, existsSync(join(root, f)));
-}
+// --- 5. собранная оболочка ---
 const distIndex = join(root, 'gui-dist', 'index.html');
 check('gui-dist/index.html собран', existsSync(distIndex));
 if (existsSync(distIndex)) {

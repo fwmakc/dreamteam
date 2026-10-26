@@ -19,7 +19,7 @@
 需要 Node.js ≥ 18.17。
 
 ```bash
-npm install -g dreamteam   # 或者：git clone + npm install + npm link
+npm install -g dreamteam   # 或者：git clone + npm install + npm run build:gui + npm link
 cd my-project              # 在项目文件夹里工作
 dreamteam
 ```
@@ -257,7 +257,7 @@ dreamteam serve         # 或：npm run serve；端口取 PORT，默认 8080
 dreamteam serve --open  # + 在浏览器中打开网页外壳
 ```
 
-本地服务器启动：`http://127.0.0.1:8080` 提供 `gui/` 的网页外壳（纯 HTML/JS/CSS，无需构建）并通过 WebSocket 与之通信。默认只监听 127.0.0.1 —— 机器外部看不到服务器。端口和地址由 `PORT` 和 `HOST` 变量设置 —— 可以放进 `~/.dreamteam/.env`：全局重装和切换项目后设置仍在。**注意：** `HOST=0.0.0.0` 会把服务器暴露到网络 —— API 没有鉴权，只在自己的网络里这样做。谈话、团队和配置与终端共享 `--open` 标志让 serve 自己打开浏览器；首次启动时向导会提议在桌面创建「Dream Team」快捷方式 — 它运行的就是这条命令（Windows、Linux、macOS 上行为一致）。：可以在 TUI 工作，再到浏览器继续。
+本地服务器启动：`http://127.0.0.1:8080` 提供 `gui-dist/` 的网页外壳（由 `gui-src/` 构建的 Vue 应用，`npm run build:gui` 构建）并通过 WebSocket 与之通信。默认只监听 127.0.0.1 —— 机器外部看不到服务器。端口和地址由 `PORT` 和 `HOST` 变量设置 —— 可以放进 `~/.dreamteam/.env`：全局重装和切换项目后设置仍在。**注意：** `HOST=0.0.0.0` 会把服务器暴露到网络 —— API 没有鉴权，只在自己的网络里这样做。谈话、团队和配置与终端共享 `--open` 标志让 serve 自己打开浏览器；首次启动时向导会提议在桌面创建「Dream Team」快捷方式 — 它运行的就是这条命令（Windows、Linux、macOS 上行为一致）。：可以在 TUI 工作，再到浏览器继续。
 
 - 左侧 —— 谈话（点击切换，“＋”新建）、团队名单（点击成员召唤/请出聊天）、服务商（点击设为智能体的默认）和项目（未选择项目时面板展开居首；点击切换项目，“＋”按钮创建新项目）；
 - 网页界面没有双击：右键条目打开“编辑”和“删除”菜单（谈话多一项“重命名”）；删除总要经过“确定删除这条记录？”确认 —— “是”/“否”；
@@ -709,7 +709,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 - `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `tool.grant`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部 11 种操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/team`/`/project` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/remove/rename/path`、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。
 - `npm run probe:e2e` — Windows 真实伪终端（ConPTY）下的同样区域：真正到达应用的东西（`probe-input`）与经迷你 VT 仿真器的渲染屏幕（`probe-startup`：无项目启动、打开带旧谈话的项目、面板中的历史、滚轮/PgUp/鼠标/选择）。它自行安装并移除 node-pty。
 - `npm run probe:tui` — 伪终端里完整跑一遍应用：无项目启动 → `/project new` → 礼宾经理问候、`team.add`、`chat.add`、带工具的一轮、`/team`、退出 — 全在 mock 服务商和临时文件夹上进行。`probe:scenario-tui` —— 同一场景，每步之后还校验磁盘上的文件（会话、agents/、导出归档）。
-- `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui/ 静态资源、快照中的无项目启动、WS 礼宾场景（`project.open` → 问候、发言、经对话的 team.add）、rpc（chat.add/remove、model.set、session.new/delete 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。
+- `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui-dist/ 静态资源、快照中的无项目启动、WS 礼宾场景（`project.open` → 问候、发言、经对话的 team.add）、rpc（chat.add/remove、model.set、session.new/delete 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。
 
 `npm run typecheck` — 类型检查（src 与 tests）。
 
@@ -749,7 +749,6 @@ my-project/                   # 工作文件夹（project.json 的 "path"）：
 ```
 dreamteam/
 ├── bin/dreamteam.js          # 全局命令：tsx 加载器；serve → src/serve.ts
-├── gui/                      # `dreamteam serve` 的网页外壳：HTML+JS+CSS，无需构建
 ├── scaffold/                 # 首次启动配置骨架：home/ — JSON，由向导展开
 ├── src/
 │   ├── index.ts              # 终端外壳：REPL 循环、聊天命令、屏幕与编辑器
@@ -758,7 +757,7 @@ dreamteam/
 │   │   ├── projects.ts       # 家目录的项目注册表：记住/遗忘、名字解析
 │   │   ├── presenter.ts      # 内核→外壳通道（终端与网络各自实现）
 │   │   └── bootstrap.ts      # 各外壳共用的启动：层、配置、服务商、会话
-│   ├── serve.ts              # 本地服务器：127.0.0.1 上的 HTTP+WS、gui/ 静态、第二个 Presenter
+│   ├── serve.ts              # 本地服务器：127.0.0.1 上的 HTTP+WS、gui-dist/ 静态、第二个 Presenter
 │   ├── paths.ts              # 三层路径：家目录、项目、工作文件夹
 │   ├── wizard.ts             # 首次启动向导：语言、模型、密钥、资料、骨架
 │   ├── orchestrator.ts       # 主持人：谁回答、聚焦什么

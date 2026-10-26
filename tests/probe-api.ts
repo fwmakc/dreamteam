@@ -1,6 +1,6 @@
 /**
  * Проверка локального API (dreamteam serve) без LLM и терминала:
- *  - HTTP: /health, статика 404 до появления gui/;
+ *  - HTTP: /health, статика 404 до появления gui-dist/;
  *  - WS: первичный state, раунд через mock-провайдера (менеджер: team.add,
  *    chat.add, статус), rpc (sessions.list, session.new с приветствием,
  *    chat.add/remove, provider.set, session.delete, неизвестный метод);

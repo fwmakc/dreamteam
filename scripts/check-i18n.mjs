@@ -18,7 +18,6 @@ function walk(dir) {
 }
 walk(join(root, 'src'));
 walk(join(root, 'gui-src'));
-walk(join(root, 'gui'));
 walk(join(root, 'tests'));
 // probe-i18n намеренно проверяет отсутствующий ключ — из harvest его исключаем
 files.splice(files.findIndex((f) => f.includes('probe-i18n')), 1);

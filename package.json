@@ -9,7 +9,6 @@
   "files": [
     "bin",
     "src",
-    "gui",
     "gui-dist",
     "scaffold",
     "docker",

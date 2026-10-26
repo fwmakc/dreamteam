@@ -25,7 +25,7 @@
 Нужен Node.js ≥ 18.17.
 
 ```bash
-npm install -g dreamteam   # или: git clone + npm install + npm link
+npm install -g dreamteam   # или: git clone + npm install + npm run build:gui + npm link
 cd мой-проект              # работаем в папке проекта
 dreamteam
 ```
@@ -379,7 +379,7 @@ dreamteam serve --open  # + открыть веб-оболочку в брауз
 Флаг `--open` заставляет serve самому открыть браузер; при первом запуске мастер предлагает создать ярлык «Dream Team» на рабочем столе — он запускает ровно эту команду (одинаково на Windows, Linux и macOS).
 
 Поднимается локальный сервер: `http://127.0.0.1:8080` отдаёт веб-оболочку из
-`gui/` (обычные HTML/JS/CSS, без сборки) и разговаривает с ней по WebSocket.
+`gui-dist/` (Vue-сборка из `gui-src/`, `npm run build:gui`) и разговаривает с ней по WebSocket.
 По умолчанию слушается только 127.0.0.1 — снаружи машины сервера нет. Порт и
 адрес задаются переменными `PORT` и `HOST` — их можно прописать в
 `~/.dreamteam/.env`: настройки переживут глобальную установку и смену проекта. **Осторожно:** `HOST=0.0.0.0` открывает сервер
@@ -1251,7 +1251,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
   во временных папках. `probe:scenario-tui` — тот же сценарий с проверкой
   файлов на диске после каждого шага (сессии, agents/, архив экспорта).
 - `npm run probe:api` — серверное API (`dreamteam serve`) на mock-провайдере
-  во временных папках: статика gui/, старт без проекта в снапшоте, WS-сценарий
+  во временных папках: статика gui-dist/, старт без проекта в снапшоте, WS-сценарий
   консьержа (`project.open` → приветствие, реплики, team.add через разговор),
   rpc (chat.add/remove, model.set, session.new/delete со свежими state после
   них), живые вопросы confirm/choose
@@ -1296,7 +1296,6 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 ```
 dreamteam/
 ├── bin/dreamteam.js          # глобальная команда: tsx-загрузчик; serve → src/serve.ts
-├── gui/                      # веб-оболочка для `dreamteam serve`: HTML+JS+CSS, без сборки
 ├── scaffold/                 # скелеты конфигов первого запуска: home/ — JSON, разворачиваются мастером
 ├── src/
 │   ├── index.ts              # терминальная оболочка: REPL-цикл, команды чата, экран и редактор
@@ -1305,7 +1304,7 @@ dreamteam/
 │   │   ├── projects.ts       # реестр проектов дома: помним/забываем, резолв имён
 │   │   ├── presenter.ts      # канал ядро→оболочка (терминал и сеть реализуют его)
 │   │   └── bootstrap.ts      # общий старт оболочек: слои, конфиги, провайдеры, сессия
-│   ├── serve.ts              # локальный сервер: HTTP+WS на 127.0.0.1, статика gui/, второй Presenter
+│   ├── serve.ts              # локальный сервер: HTTP+WS на 127.0.0.1, статика gui-dist/, второй Presenter
 │   ├── paths.ts              # три слоя путей: дом, проект, рабочая папка
 │   ├── wizard.ts             # мастер первого запуска: модель, ключ, профиль, скаффолдинг
 │   ├── orchestrator.ts       # модератор: кто отвечает и на чём сфокусироваться
