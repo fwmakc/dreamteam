@@ -46,14 +46,13 @@ process.chdir(base); // рабочая папка инструментов — �
 // загрузки, а manager.ts теперь транзитно тянет paths.js (через mail.js)
 const { MANAGER_PROMPT, MANAGER_ID } = await import('../src/manager.js');
 
-writeFileSync(
-  join(home, 'providers.json'),
-  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' }, claude: { adapter: 'mock' } } }, null, 2) + '\n',
-);
+mkdirSync(join(home, 'models'), { recursive: true });
+writeFileSync(join(home, 'models', 'mock.json'), JSON.stringify({ adapter: 'mock' }, null, 2) + '\n');
+writeFileSync(join(home, 'models', 'claude.json'), JSON.stringify({ adapter: 'mock' }, null, 2) + '\n');
 // язык общения задаём до старта: ensureHome не перезаписывает существующий settings
 writeFileSync(
   join(home, 'settings.json'),
-  JSON.stringify({ width: 100, language: 'english' }, null, 2) + '\n',
+  JSON.stringify({ width: 100, language: 'english', model: { id: 'mock' } }, null, 2) + '\n',
 );
 
 const { bootstrapApp } = await import('../src/core/bootstrap.js');
@@ -102,7 +101,7 @@ const stub: Presenter = {
 const { app } = await bootstrapApp();
 const engine = new Engine(app, stub);
 // все провайдеры дома (mock и claude) — под одним скриптовым LLM
-for (const p of app.providers.values()) p.provider = fakeProvider;
+for (const p of app.models.values()) p.provider = fakeProvider;
 const signal = () => new AbortController().signal;
 
 /** Ход менеджера: заготовленный ответ + просьба руководителя. */
@@ -136,7 +135,7 @@ function lastManagerMessage(): string {
 {
   // наполняем переговорку: команда с тула­ми и провайдерами, проект, история
   writeFileSync(agentsFile, JSON.stringify([
-    { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'Ты — Катя.', provider: 'claude', temperature: 0.3, tools: { files: {}, look: {} } },
+    { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'Ты — Катя.', model: 'claude', temperature: 0.3, tools: { files: {}, look: {} } },
     { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'Ты — Глеб.', projects: ['project'] },
   ], null, 2) + '\n');
   writeFileSync(hostsFile, JSON.stringify({ prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } }, null, 2) + '\n');
@@ -149,8 +148,8 @@ function lastManagerMessage(): string {
   await askManager('Принято к сведению.', 'что видишь?');
   const req = requests.at(-1)!;
   check('снимок: ростер — id, роль, провайдер, temp, тула',
-    req.user?.includes('- katya — Катя (дизайнер), провайдер: claude, temp 0.3; тула: files, look') ?? false, req.user);
-  check('снимок: агент без тула — пометка', req.user?.includes('- gleb — Глеб (разработчик), провайдер: основной; тула нет') ?? false, req.user);
+    req.user?.includes('- katya — Катя, модель: claude, temp 0.3; тула: files, look') ?? false, req.user);
+  check('снимок: агент без тула — пометка', req.user?.includes('- gleb — Глеб, модель: основная; тула нет') ?? false, req.user);
   check('снимок: состав чата — только позванные', req.user?.includes('В этом чате: katya') ?? false, req.user);
   check('снимок: проект — серверы',
     req.user?.includes('- project: серверы prod, staging') ?? false, req.user);
@@ -180,13 +179,13 @@ function lastManagerMessage(): string {
 {
   const before = readFileSync(agentsFile, 'utf8');
   await askManager(
-    'Готово, зову Пашу.\n{"say":"Зову Пашу.","actions":[{"op":"team.add","id":"pasha","name":"Паша","role":"тестировщик","provider":"claude","temperature":0.4,"tools":{"files":{},"shell":null}}]}',
+    'Готово, зову Пашу.\n{"say":"Зову Пашу.","actions":[{"op":"team.add","id":"pasha","name":"Паша","role":"тестировщик","model":"claude","temperature":0.4,"tools":{"files":{},"shell":null}}]}',
     'добавь Пашу тестировщиком',
   );
   const team = (await import('../src/agents.js')).loadTeam(agentsFile);
   const pasha = team.find((a) => a.id === 'pasha');
   check('team.add: участник в agents.json', !!pasha);
-  check('team.add: спецификация целиком', pasha?.name === 'Паша' && pasha?.role === 'тестировщик' && pasha?.provider === 'claude' && pasha?.temperature === 0.4, JSON.stringify(pasha));
+  check('team.add: спецификация целиком', pasha?.name === 'Паша' && pasha?.role === 'тестировщик' && pasha?.model?.id === 'claude' && pasha?.temperature === 0.4, JSON.stringify(pasha));
   check('team.add: дефолты эмодзи/цвета/промпта', pasha?.emoji === '🤖' && pasha?.color === 'white' && pasha?.prompt === 'Ты — Паша, тестировщик.', JSON.stringify(pasha));
   check('team.add: карточки тула­ов записаны', JSON.stringify(pasha?.tools?.shell) === '{}', JSON.stringify(pasha?.tools));
   const msg = lastManagerMessage();
@@ -203,7 +202,7 @@ function lastManagerMessage(): string {
   const team = (await import('../src/agents.js')).loadTeam(agentsFile);
   const pasha = team.find((a) => a.id === 'pasha');
   check('team.update: роль и temp применились', pasha?.role === 'ведущий тестировщик' && pasha?.temperature === 0.1, JSON.stringify(pasha));
-  check('team.update: соседние поля целы', pasha?.provider === 'claude' && pasha?.emoji === '🤖');
+  check('team.update: соседние поля целы', pasha?.model?.id === 'claude' && pasha?.emoji === '🤖');
   check('team.update: отчёт в истории', lastManagerMessage().includes('role="ведущий тестировщик"'), lastManagerMessage().slice(0, 160));
 }
 

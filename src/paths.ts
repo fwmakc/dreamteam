@@ -54,7 +54,8 @@ export function setProjectRoot(workspaceDir: string): void {
 }
 
 /** Файлы дом-слоя: машина и команда. */
-export const PROVIDERS_FILE = join(DT_HOME, 'providers.json');
+/** Полка моделей: models/<id>.json — карточки (адаптер, соединение, параметры). */
+export const MODELS_DIR = join(DT_HOME, 'models');
 export const SETTINGS_FILE = join(DT_HOME, 'settings.json');
 export const USER_FILE = join(DT_HOME, 'user.json');
 export const AGENTS_FILE = join(DT_HOME, 'agents.json');

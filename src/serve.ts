@@ -23,10 +23,10 @@ import {
   removeTeamAgent,
   updateManagerConfig,
 } from './manager.js';
-import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from './providers/registry.js';
+import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from './providers/registry.js';
 import { openBrowser } from './open.js';
 import { loadSettings } from './settings.js';
-import { AGENTS_FILE, APP_VERSION, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, PROJECTS_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
+import { AGENTS_FILE, APP_VERSION, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, MODELS_DIR, PROJECTS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
 import { loadProjectRegistry, projectLabel } from './core/projects.js';
 import { agentToolIds } from './tools-api.js';
 import { safePath } from './actions.js';
@@ -53,7 +53,7 @@ import { localeId, localeDict, applyLocale } from './i18n.js';
  *    session_opened, rpc_result, rpc_error;
  *  клиент → сервер: hello, user_message, command, abort, confirm_response,
  *    choose_response, rpc {method: state | sessions.list | session.open |
- *    session.new | session.delete | chat.add | chat.remove | provider.set |
+ *    session.new | session.delete | chat.add | chat.remove | model.set |
  *    project.open | project.add | project.remove}.
  *
  * `command` — текст `/…`: ядро исполняет те же команды, что и терминал
@@ -111,12 +111,12 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       role: a.role,
       emoji: a.emoji,
       color: a.color,
-      provider: a.provider,
+      model: a.model?.id,
       tools: agentToolIds(a),
       inChat: inChat.has(a.id),
     })),
-    manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, provider: app.mgr.provider },
-    providers: [...app.providers].map(([id, s]) => ({
+    manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, model: app.mgr.model.id },
+    models: [...app.models].map(([id, s]) => ({
       id,
       kind: s.provider.kind,
       model: s.provider.model,
@@ -124,8 +124,8 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       ok: s.ok,
       note: s.note,
       vision: s.vision,
-      isDefault: id === app.defaultProviderId,
-      isManager: id === app.mgr.provider,
+      isDefault: id === app.settings.model?.id,
+      isManager: id === app.mgr.model.id,
     })),
     images: [...app.images].map(([id, s]) => ({ id, ok: s.ok, note: s.note })),
     memory: { shared: app.memory.shared ?? '', agents: app.memory.agents },
@@ -563,7 +563,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text: res.text };
       }
       case 'team.add': {
-        const report = addTeamAgent(AGENTS_FILE, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined }, engine.app.providers);
+        const report = addTeamAgent(AGENTS_FILE, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined }, engine.app.models);
         broadcastState();
         return { text: report };
       }
@@ -573,7 +573,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text: report };
       }
       case 'team.update': {
-        const report = updateTeamAgent(AGENTS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>, engine.app.providers);
+        const report = updateTeamAgent(AGENTS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>, engine.app.models);
         broadcastState();
         return { text: report };
       }
@@ -604,37 +604,37 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         const messages = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
         return { messages };
       }
-      case 'provider.set': {
-        const pid = String(args.id ?? '').trim();
-        const ok = engine.setProvider(pid);
-        if (!ok) throw new Error(`Нет провайдера «${pid}». Доступны: ${[...app.providers.keys()].join(', ')}`);
+      case 'model.set': {
+        const mid = String(args.id ?? '').trim();
+        const ok = engine.setModel(mid);
+        if (!ok) throw new Error(`Нет модели «${mid}». Доступны: ${[...app.models.keys()].join(', ')}`);
         broadcastState();
         return { ok: true };
       }
-      case 'provider.add': {
-        const report = addProviderConfig(PROVIDERS_FILE, String(args.id ?? ''), (args.config ?? {}) as Record<string, unknown>);
-        const loaded = loadProviders(PROVIDERS_FILE);
-        for (const [k, v] of loaded.providers) app.providers.set(k, v);
-        for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
+      case 'model.add': {
+        const report = addModelConfig(MODELS_DIR, String(args.id ?? ''), (args.config ?? {}) as Record<string, unknown>);
+        const { models, images } = loadModels(MODELS_DIR);
+        app.models = models;
+        app.images = images;
         presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
-      case 'provider.update': {
-        const report = updateProviderConfig(PROVIDERS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>);
-        const loaded = loadProviders(PROVIDERS_FILE);
-        for (const [k, v] of loaded.providers) app.providers.set(k, v);
-        for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
+      case 'model.update': {
+        const report = updateModelConfig(MODELS_DIR, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>);
+        const { models, images } = loadModels(MODELS_DIR);
+        app.models = models;
+        app.images = images;
         presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
-      case 'provider.delete': {
-        const pid = String(args.id ?? '');
-        const report = removeProviderConfig(PROVIDERS_FILE, pid, []);
-        const loaded = loadProviders(PROVIDERS_FILE);
-        for (const [k, v] of loaded.providers) app.providers.set(k, v);
-        for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
+      case 'model.delete': {
+        const mid = String(args.id ?? '');
+        const report = removeModelConfig(MODELS_DIR, mid, [app.settings.model?.id, app.settings.serviceModel?.id, app.mgr.model.id].filter((x): x is string => Boolean(x)));
+        const { models, images } = loadModels(MODELS_DIR);
+        app.models = models;
+        app.images = images;
         presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
@@ -683,7 +683,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text: report };
       }
       case 'manager.show':
-        return { manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, temperature: app.mgr.temperature, provider: app.mgr.provider } };
+        return { manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, temperature: app.mgr.temperature, model: app.mgr.model.id } };
       case 'settings.show':
         return { settings: loadSettings(SETTINGS_FILE, 0) };
       case 'project.host.delete': {
@@ -739,7 +739,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       }
       case 'manager.set': {
         const fields = (args.fields ?? {}) as Record<string, unknown>;
-        const known = [...app.providers.keys()];
+        const known = [...app.models.keys()];
         const report = updateManagerConfig(MANAGER_FILE, fields, known);
         broadcastState();
         return { text: report };

@@ -51,23 +51,22 @@ const j = (p: string, v: unknown): void =>
   writeFileSync(join(home, p), JSON.stringify(v, null, 2) + '\n');
 const pj = (p: string, v: unknown): void =>
   writeFileSync(join(proj, '.dreamteam', p), JSON.stringify(v, null, 2) + '\n');
-j('providers.json', {
-  default: 'mock',
-  providers: { mock: { adapter: 'mock' }, 'mock-images': { adapter: 'mock-images' } },
-});
-j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000 });
+mkdirSync(join(home, 'models'), { recursive: true });
+j('models/mock.json', { adapter: 'mock' });
+j('models/mock-images.json', { adapter: 'mock-images' });
+j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000, model: { id: 'mock' } });
 j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
 // команда — вещь машины: менеджер и команда в доме
-j('manager.json', { provider: 'mock', name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
+j('manager.json', { model: { id: 'mock' }, name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
 // проект — только свой hosts.json (серверы)
 pj('hosts.json', { dev: { host: '192.0.2.1' } });
 // команда — копия боевой (фикстура в репозитории): имена и роли важны для
-// сценария, провайдеры сажаем на mock
+// сценария, модели сажаем на mock
 const team = JSON.parse(readFileSync('.dreamteam/agents.json', 'utf8')) as Array<Record<string, unknown>>;
 for (const a of team) {
-  if (a.provider) a.provider = 'mock';
-  if (a.vision) a.vision = 'mock';
-  if (a.image) a.image = 'mock-images';
+  if (a.provider) { a.model = { id: 'mock' }; delete a.provider; }
+  if (a.vision) a.vision = { id: 'mock' };
+  if (a.image) a.image = { id: 'mock-images' };
 }
 j('agents.json', team);
 import { rmTemp } from './rm-tmp.js';

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { ModelRef } from './types.js';
 
 /**
  * Общие настройки приложения: settings.json в дом-слое (~/.dreamteam) — файл
@@ -28,6 +29,10 @@ export interface SettingsConfig {
   runTimeoutMs: number;
   /** До скольких символов обрезается вывод команды */
   maxOutputChars: number;
+  /** Модель по умолчанию: ссылка {id, temperature…} — агенты без своей модели берут её */
+  model?: ModelRef;
+  /** Служебная модель (модератор, нейминг, сжатие, память); пусто — model */
+  serviceModel?: ModelRef;
 }
 
 /** Читает settings.json по пути; termCols > 0 — width обрезается по терминалу. */
@@ -81,6 +86,8 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   if (maxTurns !== undefined && (typeof maxTurns !== 'number' || !Number.isInteger(maxTurns) || maxTurns < 0)) {
     throw new Error(`${file}: поле "maxTurns" — целое число ≥ 0 (0 — без ограничения)`);
   }
+  const model = checkModelRef(file, 'model', raw.model);
+  const serviceModel = checkModelRef(file, 'serviceModel', raw.serviceModel);
   return {
     width: termCols > 0 ? Math.min(width, termCols) : width,
     language: typeof language === 'string' ? language.trim() : 'русский',
@@ -91,5 +98,27 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
     screen: screen !== false,
     runTimeoutMs: typeof runTimeoutMs === 'number' ? runTimeoutMs : 180000,
     maxOutputChars: typeof maxOutputChars === 'number' ? maxOutputChars : 4000,
+    model,
+    serviceModel,
   };
+}
+
+/** Ссылка на модель в settings.json: объект {id?, …}; форма проверяется здесь,
+ *  существование id в models/ — при разрешении в реестре (громко). */
+function checkModelRef(file: string, field: string, raw: unknown): ModelRef | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${file}: поле "${field}" — объект {"id": "…", "temperature": …}`);
+  }
+  const ref = { ...(raw as Record<string, unknown>) };
+  if (ref.id !== undefined && (typeof ref.id !== 'string' || ref.id.trim() === '')) {
+    throw new Error(`${file}: поле "${field}.id" — непустая строка (id карточки из models/)`);
+  }
+  if (ref.temperature !== undefined && typeof ref.temperature !== 'number') {
+    throw new Error(`${file}: поле "${field}.temperature" — число`);
+  }
+  if (ref.maxTokens !== undefined && (typeof ref.maxTokens !== 'number' || ref.maxTokens <= 0)) {
+    throw new Error(`${file}: поле "${field}.maxTokens" — положительное число`);
+  }
+  return ref as ModelRef;
 }

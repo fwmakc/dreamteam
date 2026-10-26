@@ -1,0 +1,6 @@
+{
+  "adapter": "openai-compatible",
+  "baseUrl": "https://api.z.ai/api/paas/v4",
+  "model": "glm-4.6v",
+  "vision": true
+}

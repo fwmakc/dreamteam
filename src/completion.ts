@@ -13,7 +13,8 @@ export interface CompletionContext {
   teamNames(): string[];
   /** Участники текущего чата — их предлагает всплывашка @упоминаний */
   chatAgents(): { name: string; role?: string }[];
-  providerIds(): string[];
+  /** Модели из models/ дома — для /model set|update|delete. */
+  modelIds(): string[];
   /** Имя менеджера переговорки (~/.dreamteam/manager.json) — первый пункт всплывашки @ */
   managerName(): string;
   /** Имена известных проектов (реестр projects.json) — для /project open|remove.
@@ -73,8 +74,8 @@ function argValues(op: OpSpec, argPos: number, ctx: CompletionContext): string[]
       return [...ctx.teamNames().map((_, i) => String(i + 1)), ...ctx.teamNames()];
     case 'chat':
       return [...ctx.chatAgents().map((_, i) => String(i + 1)), ...ctx.chatAgents().map((a) => a.name)];
-    case 'providers':
-      return ctx.providerIds();
+    case 'models':
+      return ctx.modelIds();
     case 'projects':
       return ctx.projectNames?.() ?? [];
     default:
@@ -242,7 +243,7 @@ function valueRows(op: OpSpec, argPos: number, ctx: CompletionContext): string[]
   let values: string[] | null = null;
   if (arg.hint === 'team') values = [...ctx.teamNames(), 'shared'];
   else if (arg.hint === 'chat') values = ctx.chatAgents().map((a) => a.name);
-  else if (arg.hint === 'providers') values = ctx.providerIds();
+  else if (arg.hint === 'models') values = ctx.modelIds();
   else if (arg.hint === 'projects') values = ctx.projectNames?.() ?? [];
   if (values === null) return [];
   return [

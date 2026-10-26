@@ -40,14 +40,16 @@ process.env.DT_HOME = home;
 process.env.DT_PROJECT = proj;
 process.chdir(base);
 
+mkdirSync(join(home, 'models'), { recursive: true });
 writeFileSync(
-  join(home, 'providers.json'),
-  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock', apiKey: 'СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА' } } }, null, 2) + '\n',
+  join(home, 'models', 'fake.json'),
+  JSON.stringify({ adapter: 'openai-compatible', baseUrl: 'https://api.test/v1', model: 'mock-1', apiKey: 'СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА' }, null, 2) + '\n',
 );
+writeFileSync(join(home, 'models', 'mock.json'), JSON.stringify({ adapter: 'mock' }, null, 2) + '\n');
 writeFileSync(join(home, '.env'), 'TOKEN=секрет-токен-serve\nПОЧТА_KEY=секрет-для-команд\n');
 writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Хозяин', role: 'босс' }, null, 2) + '\n');
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
-writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 
 // все импорты src — только после установки env и chdir: статический импорт
 // закэшировал бы paths.js с реальным домом (пробник трогал бы машину)
@@ -113,9 +115,10 @@ app.store.save(s2);
   ], null, 2) + '\n');
 
   const entries = homeEntries(app);
-  check('экспорт дома: настройки/профиль/провайдеры на месте',
-    ['settings.json', 'user.json', 'providers.json'].every((f) => entries.some((e) => e.rel === f)),
+  check('экспорт дома: настройки/профиль на месте',
+    ['settings.json', 'user.json'].every((f) => entries.some((e) => e.rel === f)),
     JSON.stringify(entries.map((e) => e.rel)));
+  check('экспорт дома: модель на месте', entries.some((e) => e.rel === 'models/mock.json'), JSON.stringify(entries.map((e) => e.rel)));
   check('экспорт дома: память и расписание в архиве',
     entries.some((e) => e.rel === 'memory.json') && entries.some((e) => e.rel === 'schedule.json'),
     JSON.stringify(entries.map((e) => e.rel)));
@@ -125,10 +128,10 @@ app.store.save(s2);
     sessRels.some((r) => r.includes(s1.id)) && sessRels.some((r) => r.includes(s2.id)) && sessRels.length === app.store.list().length,
     JSON.stringify(sessRels));
   check('экспорт дома: .env (вещь машины) не включён', !entries.some((e) => e.rel.includes('.env')));
-  const provEntry = entries.find((e) => e.rel === 'providers.json');
+  const provEntry = entries.find((e) => e.rel === 'models/fake.json');
   const provText = provEntry ? provEntry.data.toString('utf8') : '';
-  check('экспорт дома: карточка провайдера с ключом — снимок полный',
-    provText.includes('"adapter": "mock"') && provText.includes('СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА'), provText);
+  check('экспорт дома: карточка модели с ключом — снимок полный',
+    provText.includes('"adapter": "openai-compatible"') && provText.includes('СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА'), provText);
   const zip = packEntriesZip(entries);
   const back = readZipEntries(zip);
   check('экспорт дома: zip roundtrip без потерь', back.length === entries.length);
@@ -185,7 +188,7 @@ app.store.save(s2);
     !(app.store.load(s1.id)?.messages ?? []).some((m) => m.text.includes('локальная правка')), `${app.store.list().length} разговоров`);
   check('импорт дома: разговоры вне архива не удаляются', app.store.list().some((m) => m.title === 'Гамма'));
   check('импорт дома: открытый разговор перечитан с диска', !app.session.messages.some((m) => m.text.includes('реплика открытого после архива')));
-  check('импорт дома: app.providers жив', app.providers.get('mock') !== undefined);
+  check('импорт дома: app.models жив', app.models.get('mock') !== undefined);
 }
 
 // ── экспорт сессии: разговор + агенты ─────────────────────────────────────────

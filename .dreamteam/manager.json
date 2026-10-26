@@ -1,5 +1,5 @@
 {
-  "provider": "openai",
+  "model": { "id": "openai" },
   "name": "Менеджер",
   "emoji": "🛎",
   "color": "yellow",

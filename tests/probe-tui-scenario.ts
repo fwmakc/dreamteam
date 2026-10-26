@@ -48,9 +48,10 @@ process.env.DT_HOME = home;
 process.env.DT_PROJECT = dt;
 // cwd НЕ трогаем: относительные пути (node_modules/tsx, src/index.ts) резолвятся
 // из корня репозитория; песочница живёт в DT_HOME/DT_PROJECT и в cwd самого pty
-writeFileSync(join(home, 'providers.json'), JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n');
-writeFileSync(join(home, 'settings.json'), JSON.stringify({ width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000 }, null, 2) + '\n');
-writeFileSync(join(home, 'manager.json'), JSON.stringify({ provider: 'mock', model: 'mock-1' }, null, 2) + '\n');
+mkdirSync(join(home, 'models'), { recursive: true });
+writeFileSync(join(home, 'models', 'mock.json'), JSON.stringify({ adapter: 'mock' }, null, 2) + '\n');
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000, model: { id: 'mock' } }, null, 2) + '\n');
+writeFileSync(join(home, 'manager.json'), JSON.stringify({ model: { id: 'mock' } }, null, 2) + '\n');
 writeFileSync(join(home, 'agents.json'), '[]\n');
 writeFileSync(join(dt, 'hosts.json'), '{}\n');
 // скаффолд руками: команда и manager — в доме, hosts.json — в проекте

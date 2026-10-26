@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue';
 import type {
   AgentInfo, ChatMessage, OpHint, ProjectHost, ProjectInfo, ProjectRecordInfo,
-  ProviderInfo, ScheduleTaskInfo, SessionMeta,
+  ModelInfo, ScheduleTaskInfo, SessionMeta,
 } from './types';
 import {
   addFeed, answerChoose, answerConfirm, authError, authNeeded, authed, busyCount, busyLabel,
@@ -16,7 +16,7 @@ const sessions = computed(() => (snapshot.sessions ?? []) as SessionMeta[]);
 const currentSessionId = computed(() => snapshot.session?.id ?? '');
 const team = computed(() => (snapshot.team ?? []) as AgentInfo[]);
 const teamError = computed(() => snapshot.teamError ?? null);
-const providers = computed(() => (snapshot.providers ?? []) as ProviderInfo[]);
+const models = computed(() => (snapshot.models ?? []) as ModelInfo[]);
 const projects = computed(() => (snapshot.projects ?? []) as ProjectInfo[]);
 const currentProject = computed(() => snapshot.project);
 const knownProjects = computed(() => (snapshot.knownProjects ?? []) as ProjectRecordInfo[]);
@@ -36,7 +36,7 @@ function tr(s: string, vars?: Record<string, string | number>): string {
 }
 
 watchEffect(() => {
-  const def = providers.value.find((p) => p.isDefault);
+  const def = models.value.find((p) => p.isDefault);
   if (def) document.title = `Dream Team — ${def.id}`;
 });
 
@@ -116,9 +116,9 @@ function ctxTeam(e: MouseEvent, a: AgentInfo): void {
     { label: tr('Удалить'), fn: () => delAgent(a) },
   ]);
 }
-function ctxProvider(e: MouseEvent, p: ProviderInfo): void {
-  const items: CtxItem[] = [{ label: tr('Изменить'), fn: () => openProviderSettings(p) }];
-  if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => delProvider(p) });
+function ctxModel(e: MouseEvent, p: ModelInfo): void {
+  const items: CtxItem[] = [{ label: tr('Изменить'), fn: () => openModelSettings(p) }];
+  if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => delModel(p) });
   openCtx(e, items);
 }
 function ctxSession(e: MouseEvent, i: number, title: string): void {
@@ -184,7 +184,7 @@ function openAgentCreate(): void {
 function openAgentSettings(a: AgentInfo): void {
   openForm(tr('Настройки агента {name}', { name: a.name }), [
     { key: 'role', label: tr('Роль'), value: a.role ?? '' },
-    { key: 'provider', label: tr('Провайдер'), value: a.provider ?? '' },
+    { key: 'model', label: tr('Модель'), value: a.model ?? '' },
     { key: 'temperature', label: tr('Температура (0–2)'), value: a.temperature != null ? String(a.temperature) : '' },
     { key: 'prompt', label: tr('Промпт'), value: a.prompt ?? '' },
     { key: 'tools', label: tr('Тулы через запятую (есть: {list})', { list: (a.tools ?? []).join(', ') || tr('нет') }) },
@@ -213,37 +213,37 @@ function delAgent(a: AgentInfo): void {
   if (!roundActive.value) agentDelete(a);
 }
 
-// ── провайдеры: создать/удалить/настроить ────────────────────────────────────
-function providerCreate(): void {
-  openForm(tr('Новый провайдер'), [
+// ── модели: создать/удалить/настроить ────────────────────────────────────────
+function modelCreate(): void {
+  openForm(tr('Новая модель'), [
     { key: 'id', label: tr('id (латиница)') },
     { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat)'), value: 'openai-compatible' },
     { key: 'baseUrl', label: 'baseUrl' },
     { key: 'model', label: tr('Модель') },
-    { key: 'apiKeyEnv', label: tr('Имя переменной с ключом') },
-  ], (v) => rpcReport(rpc('provider.add', { id: v.id, config: v })));
+    { key: 'apiKey', label: tr('Ключ API (можно пусто — для локальных API)') },
+  ], (v) => rpcReport(rpc('model.add', { id: v.id, config: v })));
 }
-function providerDelete(p: ProviderInfo): void {
+function modelDelete(p: ModelInfo): void {
   if (p.isDefault) return;
-  askDelete(`провайдер «${p.id}»`, () => rpcReport(rpc('provider.delete', { id: p.id })));
+  askDelete(`модель «${p.id}»`, () => rpcReport(rpc('model.delete', { id: p.id })));
 }
-function setProvider(p: ProviderInfo): void {
+function setModel(p: ModelInfo): void {
   if (roundActive.value || p.isDefault) return;
-  rpc('provider.set', { id: p.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
+  rpc('model.set', { id: p.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
-function delProvider(p: ProviderInfo): void {
-  if (!roundActive.value) providerDelete(p);
+function delModel(p: ModelInfo): void {
+  if (!roundActive.value) modelDelete(p);
 }
-function openProviderSettings(p: ProviderInfo): void {
-  openForm(tr('Провайдер {id}', { id: p.id }), [
+function openModelSettings(p: ModelInfo): void {
+  openForm(tr('Модель {id}', { id: p.id }), [
     { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat / mock)'), value: p.kind },
     { key: 'model', label: tr('Модель'), value: p.model ?? '' },
     { key: 'baseUrl', label: tr('baseUrl (пусто — не менять)'), value: p.baseUrl ?? '' },
-    { key: 'apiKeyEnv', label: tr('Имя переменной с ключом (пусто — не менять)'), value: p.apiKeyEnv ?? '' },
+    { key: 'apiKey', label: tr('Ключ API (пусто — не менять)'), value: '' },
   ], (v) => {
     const fields: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = val;
-    rpcReport(rpc('provider.update', { id: p.id, fields }));
+    rpcReport(rpc('model.update', { id: p.id, fields }));
   });
 }
 
@@ -379,7 +379,7 @@ function deleteSession(i: number, title: string): void {
 
 // ── сворачивание секций (localStorage) ───────────────────────────────────────
 const LS_COLLAPSED = 'dt-collapsed';
-const DEFAULT_COLLAPSED = ['team', 'providers', 'schedule', 'projects'];
+const DEFAULT_COLLAPSED = ['team', 'models', 'schedule', 'projects'];
 const collapsed = reactive(new Set<string>((() => {
   try {
     const saved = localStorage.getItem(LS_COLLAPSED);
@@ -498,7 +498,7 @@ const completionData = computed(() => {
     operations: commands.value,
     sessions: sessions.value,
     team: team.value,
-    providerIds: providers.value.map((p) => p.id),
+    modelIds: models.value.map((p) => p.id),
     managerName: manager.value?.name ?? 'Менеджер',
   };
 });
@@ -619,8 +619,8 @@ function argHintItems(op: OpHint, argPos: number, d: CompletionData): HintItem[]
       { label: 'shared', hint: tr('общая память'), insert: 'shared ' },
     ];
   }
-  if (argName === 'id' && op.cmd.startsWith('/provider')) {
-    return d.providerIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
+  if (argName === 'id' && op.cmd.startsWith('/model')) {
+    return d.modelIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
   }
   if (argName === 'тул') {
     return ['files', 'shell', 'ssh', 'look', 'image'].map((t) => ({ label: t, hint: '', insert: t + ' ' }));
@@ -697,7 +697,7 @@ onMounted(connectWs);
     <span
       v-if="manager?.name"
       class="badge clickable"
-      :title="`${manager.name} (${manager.provider}) — ${tr('клик: настройки менеджера')}`"
+      :title="`${manager.name} (${manager.model ?? ''}) — ${tr('клик: настройки менеджера')}`"
       @click="openManagerForm()"
     >{{ manager.emoji ?? '🛎' }} {{ manager.name }}</span>
     <button class="tb-btn" :title="tr('Настройки')" @click="openSettingsForm()">⚙</button>
@@ -791,30 +791,30 @@ onMounted(connectWs);
         </ul>
       </section>
 
-      <section class="side-sec" :class="{ collapsed: collapsed.has('providers') }" data-sec="providers">
-        <div class="side-head" @click="toggleSec('providers')">
+      <section class="side-sec" :class="{ collapsed: collapsed.has('models') }" data-sec="models">
+        <div class="side-head" @click="toggleSec('models')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
-          <span class="sec-name">{{ tr('Провайдеры') }}</span>
-          <button class="sec-add" :title="tr('Новый провайдер')" @click.stop="providerCreate">＋</button>
+          <span class="sec-name">{{ tr('Модели') }}</span>
+          <button class="sec-add" :title="tr('Новая модель')" @click.stop="modelCreate">＋</button>
         </div>
-        <ul id="providers">
+        <ul id="models">
           <li
-            v-for="p in providers"
+            v-for="p in models"
             :key="p.id"
-            :title="(p.isDefault ? tr('Провайдер по умолчанию') : tr('Сделать основным (для агентов)'))
+            :title="(p.isDefault ? tr('Модель по умолчанию') : tr('Сделать основной (для агентов)'))
               + (p.isDefault ? '' : ` · ${tr('клик — сделать основным')} · ${tr('правая кнопка — изменить/удалить')}`)
               + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)"
-            @click="setProvider(p)"
-            @contextmenu.prevent="ctxProvider($event, p)"
+            @click="setModel(p)"
+            @contextmenu.prevent="ctxModel($event, p)"
           >
             <div class="content">
               <div class="sess-main">
                 <span>{{ p.ok ? '●' : '○' }} {{ p.id }}</span>
-                <span v-if="p.isDefault" class="tag in">{{ tr('основной') }}</span>
+                <span v-if="p.isDefault" class="tag in">{{ tr('основная') }}</span>
               </div>
               <div class="sub">{{ p.model ?? p.kind ?? '' }}{{ p.ok ? '' : ` · ${p.note ?? ''}` }}</div>
             </div>
-            <span v-if="!p.isDefault" class="del" :title="tr('Удалить провайдера')" @click.stop="delProvider(p)">✕</span>
+            <span v-if="!p.isDefault" class="del" :title="tr('Удалить модель')" @click.stop="delModel(p)">✕</span>
           </li>
         </ul>
       </section>

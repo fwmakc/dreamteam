@@ -22,19 +22,19 @@ export interface AgentInfo {
   role?: string;
   emoji?: string;
   color?: string;
-  provider?: string;
+  model?: string;
   temperature?: number;
   prompt?: string;
   tools?: string[];
   inChat: boolean;
 }
 
-export interface ProviderInfo {
+/** Карточка модели из models/ дома (id = имя файла) */
+export interface ModelInfo {
   id: string;
   kind: string;
   model?: string;
   baseUrl?: string;
-  apiKeyEnv?: string;
   ok: boolean;
   note?: string;
   vision?: boolean;
@@ -80,8 +80,8 @@ export interface StateSnapshot {
   /** битый agents.json: текст ошибки (нет файла — пустая команда, ошибки нет) */
   teamError?: string | null;
   team: AgentInfo[];
-  manager: { name: string; emoji: string; color: string; provider: string; temperature?: number };
-  providers: ProviderInfo[];
+  manager: { name: string; emoji: string; color: string; model?: string; temperature?: number };
+  models: ModelInfo[];
   images: { id: string; ok: boolean; note?: string }[];
   profile: { name: string; role?: string; about?: string };
   projects: ProjectInfo[];

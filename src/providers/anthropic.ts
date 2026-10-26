@@ -1,10 +1,23 @@
 import type { LLMProvider, RoundUsage, StreamRequest } from '../types.js';
 import { ConfigurationError } from './types.js';
-import type { ProviderConfig, ProviderFactory } from './types.js';
+import type { AdapterContract, ProviderConfig, ProviderFactory } from './types.js';
 import { sseData, splitSystem, num, withTimeout } from './utils.js';
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const API_VERSION = '2023-06-01';
+
+/** Контракт карточки models/<id>.json для адаптера anthropic. */
+export const contract: AdapterContract = {
+  keys: {
+    apiKey: { type: 'string', desc: 'ключ из кабинета Anthropic (нет ключа — статус «не настроен»)' },
+    model: { type: 'string', desc: 'по умолчанию claude-sonnet-4-5' },
+    baseUrl: { type: 'string', desc: 'по умолчанию https://api.anthropic.com' },
+    maxTokens: { type: 'number', desc: 'потолок ответа (по умолчанию 2048)' },
+    temperature: { type: 'number' },
+    cache: { type: 'boolean', desc: 'кэш промптов (по умолчанию включён)' },
+  },
+  ref: ['temperature', 'maxTokens'],
+};
 
 /**
  * Адаптер Anthropic (Claude). Отличия от OpenAI-протокола учтены здесь:

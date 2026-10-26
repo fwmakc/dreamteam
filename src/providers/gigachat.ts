@@ -4,8 +4,26 @@ import { request as httpsRequest } from 'node:https';
 import type { ClientRequest, IncomingMessage } from 'node:http';
 import type { LLMProvider, RoundUsage, StreamRequest } from '../types.js';
 import { ConfigurationError } from './types.js';
-import type { ProviderConfig, ProviderFactory } from './types.js';
+import type { AdapterContract, ProviderConfig, ProviderFactory } from './types.js';
 import { openAiDeltaText, sseData, splitSystem, num } from './utils.js';
+
+/** Контракт карточки models/<id>.json для адаптера gigachat. */
+export const contract: AdapterContract = {
+  keys: {
+    apiKey: { type: 'string', desc: 'ключ из кабинета GigaChat (нет ключа — статус «не настроен»)' },
+    clientId: { type: 'string', desc: 'пара с clientSecret вместо apiKey' },
+    clientSecret: { type: 'string' },
+    scope: { type: 'string', desc: 'по умолчанию GIGACHAT_API_PERS' },
+    baseUrl: { type: 'string' },
+    authUrl: { type: 'string' },
+    caCertPath: { type: 'string', desc: 'путь к сертификатам Минцифры' },
+    insecureTLS: { type: 'boolean', desc: 'не проверять сертификат (только тесты)' },
+    model: { type: 'string', desc: 'по умолчанию GigaChat' },
+    maxTokens: { type: 'number' },
+    temperature: { type: 'number' },
+  },
+  ref: ['temperature', 'maxTokens'],
+};
 
 const REQUEST_TIMEOUT_MS = 120_000;
 /** Обновляем токен за минуту до истечения, а не на каждом запросе */

@@ -14,6 +14,7 @@
  * Запуск: npm run probe:i18n
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { writeModels } from './models.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -42,8 +43,8 @@ check('фолбэк: нет перевода — исходная строка',
 applyLocale('en', home);
 check('en: t переводит', t('Настройки') === 'Settings' && t('Команда') === 'Team');
 check('en: tf подставляет переменные',
-  tf('создал {file} (провайдер «{id}» по умолчанию)', { file: 'p.json', id: 'mock' })
-    === 'created p.json (provider «mock» as the default)');
+  tf('создал {file} (модель «{id}» по умолчанию)', { file: 'p.json', id: 'mock' })
+    === 'created p.json (model «mock» as the default)');
 check('en: ключ с переводом-пустышкой не обязателен', t('Нет задачи «{id}» — см. /schedule') !== '');
 
 applyLocale('zh', home);
@@ -59,7 +60,7 @@ writeFileSync(join(langDir, 'de.json'), JSON.stringify({
   name: 'Deutsch',
   translations: {
     'Настройки': 'Einstellungen',
-    'создал {file} (провайдер «{id}» по умолчанию)': 'erstellt {file} (Anbieter «{id}» als Standard)',
+    'создал {file} (модель «{id}» по умолчанию)': 'erstellt {file} (Modell «{id}» als Standard)',
   },
 }, null, 2));
 
@@ -70,8 +71,8 @@ check('knownLanguages: de — внешний, имя из файла', de?.built
 
 applyLocale('de', home);
 check('внешний: t переводит из lang/de.json', t('Настройки') === 'Einstellungen');
-check('внешний: tf подставляет в перевод файла', tf('создал {file} (провайдер «{id}» по умолчанию)', { file: 'p.json', id: 'mock' })
-  === 'erstellt p.json (Anbieter «mock» als Standard)');
+check('внешний: tf подставляет в перевод файла', tf('создал {file} (модель «{id}» по умолчанию)', { file: 'p.json', id: 'mock' })
+  === 'erstellt p.json (Modell «mock» als Standard)');
 check('внешний: непереведённое — исходное', t('Команда') === 'Команда');
 applyLocale('ru', home);
 
@@ -143,12 +144,9 @@ check('шаблон _*.json и не-id файлы игнорируются', okS
 }
 
 // ── через ядро: /settings set ui=… переключает интерфейс на лету ─────────────
-writeFileSync(
-  join(home, 'providers.json'),
-  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
-);
+writeModels(home, { mock: { adapter: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
-writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 
 const { bootstrapApp } = await import('../src/core/bootstrap.js');
 const { Engine } = await import('../src/core/engine.js');

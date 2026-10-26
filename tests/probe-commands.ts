@@ -7,6 +7,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { writeModels } from './models.js';
 
 const base = mkdtempSync(join(tmpdir(), 'dt-cmds-'));
 const home = join(base, 'home');
@@ -17,12 +18,9 @@ process.env.DT_PROJECT = proj;
 // рабочая папка инструментов = cwd на момент импорта: уводим процесс в tmp
 process.chdir(base);
 
-writeFileSync(
-  join(home, 'providers.json'),
-  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2),
-);
+writeModels(home, { mock: { adapter: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
-writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 
 const { bootstrapApp } = await import('../src/core/bootstrap.js');
 const { Engine } = await import('../src/core/engine.js');
@@ -165,26 +163,26 @@ function check(name: string, cond: boolean, detail?: string): void {
   check('memory show: неизвестное имя — отказ', lines[0]?.includes('Нет участника') ?? false);
 }
 
-// ── провайдеры ───────────────────────────────────────────────────────────────
+// ── модели ───────────────────────────────────────────────────────────────────
 {
-  let lines = await run(engine, '/provider');
-  check('provider: обзор — готовые провайдеры', lines.some((l) => l.includes('mock') && l.includes('готов')) ?? false);
-  lines = await run(engine, '/provider set mock');
-  check('provider set: смена на тот же', lines[0]?.includes('Основной провайдер: mock') ?? false);
-  lines = await run(engine, '/provider set nope');
-  check('provider set: неизвестный id — отказ', lines[0]?.includes('Нет провайдера «nope»') ?? false);
+  let lines = await run(engine, '/model');
+  check('model: обзор — готовые модели', lines.some((l) => l.includes('mock') && l.includes('готов')) ?? false);
+  lines = await run(engine, '/model set mock');
+  check('model set: смена на ту же', lines[0]?.includes('Основная модель: mock') ?? false);
+  lines = await run(engine, '/model set nope');
+  check('model set: неизвестный id — отказ', lines[0]?.includes('Нет модели «nope»') ?? false);
 
-  lines = await run(engine, '/provider update mock model=mock-9');
-  check('provider update: отчёт', lines[0]?.includes('mock-9') ?? false);
-  const provs = JSON.parse(readFileSync(join(home, 'providers.json'), 'utf8')) as { providers: Record<string, { model?: string }> };
-  check('provider update: модель на диске', provs.providers.mock?.model === 'mock-9');
+  lines = await run(engine, '/model update mock model=mock-9');
+  check('model update: отчёт', lines[0]?.includes('mock-9') ?? false);
+  const card = JSON.parse(readFileSync(join(home, 'models', 'mock.json'), 'utf8')) as { model?: string };
+  check('model update: модель на диске', card.model === 'mock-9');
   let threw = '';
   try {
-    await run(engine, '/provider update nope model=x');
+    await run(engine, '/model update nope model=x');
   } catch (err) {
     threw = err instanceof Error ? err.message : String(err);
   }
-  check('provider update: нет провайдера — отказ', threw.includes('«nope» нет'));
+  check('model update: нет модели — отказ', threw.includes('«nope» нет'));
 }
 
 // ── команда: team add/update/delete/grant ────────────────────────────────────
@@ -209,7 +207,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   }
   check('team add: дубликат id — ошибка', threw.includes('уже есть'));
 
-  lines = await run(engine, '/team update test2 role=сметана provider=mock');
+  lines = await run(engine, '/team update test2 role=сметана model=mock');
   check('team update: отчёт с полями', lines[0]?.includes('role="сметана"') ?? false);
   team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
   check('team update: роль и провайдер записаны', team.find((a) => a.id === 'test2')?.role === 'сметана');
@@ -355,7 +353,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   check('settings set: значение на диске', settings.maxTurns === 2);
 
   lines = await run(engine, '/manager');
-  check('manager: обзор — провайдер', lines.some((l) => l.includes('провайдер: mock')) ?? false);
+  check('manager: обзор — модель', lines.some((l) => l.includes('модель: mock')) ?? false);
   lines = await run(engine, '/manager set temperature=0.4');
   check('manager set: отчёт', lines[0]?.includes('temperature="0.4"') ?? false);
   const manager = JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')) as { temperature: number };

@@ -1,19 +1,19 @@
 /**
  * Первый запуск: wizard и скаффолдинг слоёв.
  *
- * Дома (DT_HOME) обязателен только providers.json — без него команде нечем
- * говорить. Нет файла → мастер в обычном терминале (до TUI): тип провайдера,
- * параметры, ключ (ввод не отображается) — ключ сохраняется прямо в карточке
- * провайдера в providers.json. Остальное добирается
- * само: settings.json с дефолтами, в проекте — .dreamteam с пустой командой,
- * менеджером на дефолтном провайдере и пустым реестром серверов.
+ * В доме (DT_HOME) обязательна хотя бы одна модель — карточка models/<id>.json.
+ * Нет ни одной → мастер в обычном терминале (до TUI): тип адаптера, параметры,
+ * ключ (ввод не отображается) — карточка сохраняется в models/<id>.json,
+ * settings.model получает id, manager.json — ту же модель. Остальное добирается
+ * само: settings.json с дефолтами, в проекте — .dreamteam с пустой командой
+ * и пустым реестром серверов.
  *
  * Не молча: каждый созданный файл — заметка, которую печатает вызывающий.
  * Битый конфиг мастером не лечится: чтение конфигов позже уронит приложение
  * с внятной ошибкой, как и раньше (явное лучше неявного).
  */
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { PassThrough } from 'node:stream';
 import { dirname, join } from 'node:path';
@@ -91,15 +91,15 @@ function writeEnvKey(file: string, name: string, value: string): void {
   writeFileSync(file, lines.join('\n'), { mode: 0o600 });
 }
 
-/** Мастер: язык интерфейса → тип провайдера → параметры → providers.json (+ ключ в .env дома). */
+/** Мастер: язык интерфейса → модель (адаптер + параметры) → models/<id>.json (+ настройки, + .env дома). */
 export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promise<string[]> {
-  const providersFile = join(homeDir, 'providers.json');
+  const modelsDir = join(homeDir, 'models');
   const envFile = join(homeDir, '.env');
   const settingsFile = join(homeDir, 'settings.json');
   const { ask, askChoice, askSecret, close } = makeAsk(io);
   const notes: string[] = [];
   try {
-    io.output.write(pc.bold('\n  Первый запуск: настроим провайдера — без него команде нечем говорить.\n\n'));
+    io.output.write(pc.bold('\n  Первый запуск: настроим модель — без неё команде нечем говорить.\n\n'));
     // Язык интерфейса — первый вопрос, и сам он на трёх встроенных языках:
     // дальше мастер (и всё приложение) говорит на выбранном.
     io.output.write('  Язык интерфейса / Interface language / 界面语言:\n');
@@ -117,7 +117,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
       // settings.json нет/не читается — loadSettings ниже разберётся громко
     }
 
-    io.output.write(`\n  ${t('Тип провайдера:')}\n`);
+    io.output.write(`\n  ${t('Тип адаптера:')}\n`);
     io.output.write(`  1 — ${t('OpenAI-совместимый API (Z.ai GLM, OpenAI, OpenRouter, DeepSeek, Ollama…)')}\n`);
     io.output.write(`  2 — ${t('Anthropic (Claude)')}\n`);
     io.output.write(`  3 — GigaChat\n`);
@@ -125,15 +125,15 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
     const pick = await askChoice(`  ${t('Выбор [1]:')} `, ['1', '2', '3', '4'], '1');
 
     let id: string;
-    let entry: Record<string, unknown>;
+    let card: Record<string, unknown>;
     let key = '';
     if (pick === '1') {
       id = 'main';
       const baseUrl = await ask(`  ${t('baseUrl API [https://api.openai.com/v1]:')} `) || 'https://api.openai.com/v1';
       const model = await ask(`  ${t('Модель [gpt-4o-mini]:')} `) || 'gpt-4o-mini';
       key = await askSecret(`  ${t('Ключ API (ввод скрыт; Enter — пропустить, если API локальный):')} `);
-      entry = { adapter: 'openai-compatible', baseUrl, model };
-      if (key) entry.apiKey = key;
+      card = { adapter: 'openai-compatible', baseUrl, model };
+      if (key) card.apiKey = key;
     } else if (pick === '2') {
       id = 'claude';
       const model = await ask(`  ${t('Модель [claude-sonnet-4-5]:')} `) || 'claude-sonnet-4-5';
@@ -142,7 +142,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
         if (key) break;
         io.output.write(pc.yellow(`  ${t('без ключа Claude отвечать не сможет — возьми его в кабинете Anthropic')}\n`));
       }
-      entry = { adapter: 'anthropic', model, apiKey: key };
+      card = { adapter: 'anthropic', model, apiKey: key };
     } else if (pick === '3') {
       id = 'gigachat';
       for (;;) {
@@ -150,19 +150,27 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
         if (key) break;
         io.output.write(pc.yellow(`  ${t('без ключа GigaChat отвечать не сможет')}\n`));
       }
-      entry = { adapter: 'gigachat', apiKey: key };
+      card = { adapter: 'gigachat', apiKey: key };
     } else {
       id = 'mock';
-      entry = { adapter: 'mock' };
+      card = { adapter: 'mock' };
     }
 
-    mkdirSync(homeDir, { recursive: true });
-    writeFileSync(providersFile, JSON.stringify({ default: id, providers: { [id]: entry } }, null, 2) + '\n');
-    notes.push(tf('создал {file} (провайдер «{id}» по умолчанию)', { file: providersFile, id }));
+    mkdirSync(modelsDir, { recursive: true });
+    writeFileSync(join(modelsDir, `${id}.json`), JSON.stringify(card, null, 2) + '\n');
+    notes.push(tf('создал {file} (модель «{id}» по умолчанию)', { file: join(modelsDir, `${id}.json`), id }));
     if (key) {
-      notes.push(tf('ключ сохранил в {file} (поле "apiKey")', { file: providersFile }));
+      notes.push(tf('ключ сохранил в {file} (поле "apiKey")', { file: join(modelsDir, `${id}.json`) }));
     } else {
-      notes.push(t('ключ не указан — провайдер будет работать в mock-режиме'));
+      notes.push(t('ключ не указан — модель будет работать в mock-режиме'));
+    }
+    // модель по умолчанию — в settings.json (его ensureHome скаффолдил раньше)
+    try {
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf8')) as Record<string, unknown>;
+      settings.model = { id };
+      writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+    } catch {
+      // settings.json нет/не читается — loadSettings ниже разберётся громко
     }
     // токен доступа к API (dreamteam serve): мастер генерирует сам, вручную
     // можно перегенерировать (README «Доступ извне»). Файл начинается
@@ -193,19 +201,14 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
 }
 
 /**
- * Дефолтный провайдер из providers.json — лёгкое чтение для скаффолдинга
- * проекта. Битый файл здесь не валидируем: loadProviders чуть позже уронит
- * приложение с внятной ошибкой.
+ * id первой модели из models/ дома (по алфавиту) — для скаффолдинга, когда
+ * мастер не нужен. Битые карточки здесь не валидируем: loadModels чуть позже
+ * уронит приложение с внятной ошибкой.
  */
-export function defaultProviderId(file: string = join(DT_HOME, 'providers.json')): string {
+export function defaultModelId(dir: string = join(DT_HOME, 'models')): string {
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as {
-      default?: unknown;
-      providers?: Record<string, unknown>;
-    };
-    const ids = Object.keys(raw.providers ?? {});
-    if (typeof raw.default === 'string' && ids.includes(raw.default)) return raw.default;
-    return ids[0] ?? 'mock';
+    const cards = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+    return cards[0]?.replace(/\.json$/, '') ?? 'mock';
   } catch {
     return 'mock';
   }
@@ -246,9 +249,9 @@ function readScaffold(rel: string): Record<string, unknown> {
   }
 }
 
-/** Дом: провайдеры (wizard, если нет), настройки и КОМАНДА (агенты, менеджер, тула). */
+/** Дом: модели (wizard, если нет ни одной), настройки и КОМАНДА (агенты, менеджер, тула). */
 export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promise<string[]> {
-  const providersFile = join(homeDir, 'providers.json');
+  const modelsDir = join(homeDir, 'models');
   const settingsFile = join(homeDir, 'settings.json');
   const notes: string[] = [];
   if (!existsSync(settingsFile)) {
@@ -278,7 +281,7 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
   const providersDir = join(homeDir, 'providers');
   if (!existsSync(providersDir)) {
     mkdirSync(providersDir, { recursive: true });
-    notes.push(tf('создал {file} (полка своих адаптеров провайдеров: <id>.ts — export default фабрика (id, config) => LLMProvider)', { file: providersDir }));
+    notes.push(tf('создал {file} (полка своих адаптеров: <id>.ts — export default фабрика (id, config) => LLMProvider)', { file: providersDir }));
   }
   // полка своих языков: lang/<id>.json — как tools/, только переводы
   const langDir = join(homeDir, 'lang');
@@ -286,24 +289,54 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     mkdirSync(langDir, { recursive: true });
     notes.push(tf('создал {file} (полка своих языков: <id>.json — { "name": "…", "translations": { … } })', { file: langDir }));
   }
-  if (!existsSync(providersFile)) {
+  // полка моделей: scaffold-карточки копируются как примеры; без ключей — «не настроены»
+  if (!existsSync(modelsDir)) {
+    mkdirSync(modelsDir, { recursive: true });
+    try {
+      for (const f of readdirSync(join(SCAFFOLD_DIR, 'home', 'models')).filter((x) => x.endsWith('.json'))) {
+        writeFileSync(join(modelsDir, f), readFileSync(join(SCAFFOLD_DIR, 'home', 'models', f)));
+      }
+      notes.push(tf('создал {file} (карточки моделей — примеры; впишите apiKey или удалите лишние)', { file: modelsDir }));
+    } catch { /* scaffold models/ отсутствует — не беда */ }
+  }
+  // wizard нужен пока settings.model.id не задан (первый запуск или сброс)
+  const needsWizard = (() => {
+    try {
+      const s = JSON.parse(readFileSync(settingsFile, 'utf8')) as { model?: { id?: string } };
+      return !s.model?.id;
+    } catch {
+      return true;
+    }
+  })();
+  if (needsWizard) {
     if (!io.isTTY) {
       throw new Error(
-        tf('нет {file} — первый запуск проходит мастер: запусти приложение в терминале', { file: providersFile }),
+        tf('нет ни одной модели в {dir} — первый запуск проходит мастер: запусти приложение в терминале', { dir: modelsDir }),
       );
     }
     notes.push(...(await runWizard(io, homeDir)));
   }
-  // менеджер — после wizard: его провайдер = основной, выбранный только что
+  // менеджер — после wizard: его модель = основная, выбранная только что
   const managerFile = join(homeDir, 'manager.json');
   if (!existsSync(managerFile)) {
     mkdirSync(homeDir, { recursive: true });
     const manager = readScaffold(join('home', 'manager.json'));
-    manager.provider = defaultProviderOf(homeDir);
+    const modelId = defaultModelOf(homeDir);
+    manager.model = { id: modelId };
+    delete manager.provider;
     writeFileSync(managerFile, JSON.stringify(manager, null, 2) + '\n');
-    notes.push(tf('создал {file} (менеджер переговорки на провайдере «{id}»)', { file: managerFile, id: String(manager.provider) }));
+    notes.push(tf('создал {file} (менеджер переговорки на модели «{id}»)', { file: managerFile, id: modelId }));
   }
   return notes;
+}
+
+/** id модели по умолчанию из settings.model.id (мастер записал) или первая по алфавиту. */
+function defaultModelOf(homeDir: string): string {
+  try {
+    const s = JSON.parse(readFileSync(join(homeDir, 'settings.json'), 'utf8')) as { model?: { id?: string } };
+    if (typeof s.model?.id === 'string' && s.model.id) return s.model.id;
+  } catch { /* читаем ниже */ }
+  return defaultModelId(join(homeDir, 'models'));
 }
 
 /** Проект: нет .dreamteam — создать реестры (серверы, ящики, боты) и предупредить про git. */
@@ -322,16 +355,6 @@ export function ensureProject(defaultProvider: string, projectDir: string = DT_P
   return notes;
 }
 
-/** Основной провайдер из providers.json папки (для менеджера в скаффолде). */
-function defaultProviderOf(homeDir: string): string {
-  try {
-    const raw = JSON.parse(readFileSync(join(homeDir, 'providers.json'), 'utf8')) as { default?: string };
-    return String(raw.default ?? 'mock');
-  } catch {
-    return 'mock';
-  }
-}
-
 export function defaultIo(): WizardIo {
   return {
     input: process.stdin,
@@ -347,6 +370,6 @@ export async function ensureLayers(
   projectDir: string = DT_PROJECT,
 ): Promise<string[]> {
   const notes = await ensureHome(io, homeDir);
-  notes.push(...ensureProject(defaultProviderId(join(homeDir, 'providers.json')), projectDir));
+  notes.push(...ensureProject(defaultModelId(join(homeDir, 'models')), projectDir));
   return notes;
 }

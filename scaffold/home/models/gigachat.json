@@ -1,0 +1,6 @@
+{
+  "adapter": "gigachat",
+  "scope": "GIGACHAT_API_PERS",
+  "caCertPath": "certs/russian_trusted_root_ca.pem",
+  "model": "GigaChat"
+}

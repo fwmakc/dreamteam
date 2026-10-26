@@ -38,7 +38,6 @@ import {
 } from '../tools-api.js';
 import { buildToolset, loadUserTools } from '../tools-registry.js';
 import { operationHints, runOperationText } from './operations.js';
-import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
 import {
@@ -48,7 +47,7 @@ import {
   MEMORY_FILE,
   MESSENGERS_FILE,
   PROJECTS_FILE,
-  PROVIDERS_FILE,
+    PROVIDERS_DIR,
   SESSIONS_DIR,
   SETTINGS_FILE,
   TOOLS_DIR,
@@ -56,7 +55,7 @@ import {
   WORKSPACE,
   setProjectRoot,
 } from '../paths.js';
-import { defaultProviderId, ensureProject } from '../wizard.js';
+import { ensureProject } from '../wizard.js';
 import { forgetProject, loadProjectRegistry, projectLabel, rememberProject, resolveProjectDir } from './projects.js';
 import { planTurns, type PlanResult } from '../orchestrator.js';
 import { compressIfNeeded, contextSlice } from '../compress.js';
@@ -71,14 +70,16 @@ import {
   reflectSessionMemory,
   saveTeamMemory,
 } from '../memory.js';
-import type { ImageProviderStatus, ProviderStatus } from '../providers/registry.js';
+import { instantiateModel, resolveRefId, type ImageProviderStatus, type ProviderStatus } from '../providers/registry.js';
 import { SessionStore } from '../sessions.js';
-import { loadSettings } from '../settings.js';
+import { loadSettings, type SettingsConfig } from '../settings.js';
+import { readFileSync, writeFileSync } from 'node:fs';
 import type {
   Agent,
   ChatMessage,
   LLMMessage,
   LLMProvider,
+  ModelRef,
   ManagerAction,
   ManagerConfig,
   RoundUsage,
@@ -135,12 +136,14 @@ class ChatEvent {
 export interface App {
   store: SessionStore;
   session: Session;
-  providers: Map<string, ProviderStatus>;
-  /** image-провайдеры (генерация картинок) из того же providers.json */
+  /** Карточки моделей из models/ дома */
+  models: Map<string, ProviderStatus>;
+  /** image-модели (генерация картинок) из той же полки */
   images: Map<string, ImageProviderStatus>;
-  defaultProviderId: string;
   /** Мозг модератора и шлюз конфигурации (config/manager.json) */
   mgr: ManagerConfig;
+  /** Общие настройки: settings.model — модель по умолчанию (ссылка) */
+  settings: SettingsConfig;
   profile: UserProfile;
   memory: TeamMemory;
 }
@@ -197,55 +200,72 @@ export class Engine {
     private presenter: Presenter,
   ) {}
 
-  // ── провайдеры ───────────────────────────────────────────────────────────
+  // ── модели ───────────────────────────────────────────────────────────────
 
-  defaultProvider(): LLMProvider {
-    const status = this.app.providers.get(this.app.defaultProviderId);
-    if (!status) {
-      throw new Error('не настроен ни один провайдер — проверьте config/providers.json');
-    }
+  /**
+   * Провайдер по ссылке с учётом дефолтной (settings.model): карточка ←
+   * settings.model ← ref. Неизвестный id — громко (списком доступных).
+   */
+  resolveProvider(ref: ModelRef | undefined): LLMProvider {
+    const status = this.modelStatus(ref);
     return status.provider;
   }
 
-  /** Провайдер менеджера переговорки: только его, /provider на это не влияет */
-  private managerProvider(): LLMProvider {
-    const status = this.app.providers.get(this.app.mgr.provider);
+  private modelStatus(ref: ModelRef | undefined): ProviderStatus {
+    const settings = this.app.settings;
+    const id = resolveRefId(ref, settings.model?.id);
+    const status = this.app.models.get(id);
     if (!status) {
-      throw new Error(`у менеджера переговорки неизвестный провайдер «${this.app.mgr.provider}» (config/manager.json)`);
+      const known = [...this.app.models.keys()].join(', ') || 'нет ни одной';
+      throw new Error(`модель «${id}» не найдена в models/ (есть: ${known})`);
     }
-    return status.provider;
+    // мердж параметров: настройки по умолчанию, затем ссылка вызывающего
+    const merged: ModelRef | undefined =
+      settings.model || ref
+        ? {
+            ...(settings.model ?? {}),
+            ...(ref ?? {}),
+          }
+        : undefined;
+    return instantiateModel(id, status, merged);
+  }
+
+  /** Модель менеджера переговорки: только его ссылка из manager.json */
+  private managerProvider(): LLMProvider {
+    return this.resolveProvider(this.app.mgr.model);
   }
 
   private agentProvider(agent: Agent): LLMProvider {
-    if (agent.provider) {
-      const status = this.app.providers.get(agent.provider);
-      if (status) return status.provider;
-      this.presenter.notice(`⚠ у агента ${agent.name} указан неизвестный провайдер «${agent.provider}», использую основной`);
-    }
-    return this.defaultProvider();
+    return this.resolveProvider(agent.model);
   }
 
-  /** Глаза и руки агентов: vision-провайдер для look и image-провайдер для image. */
+  /** Служебная модель (модератор, нейминг, сжатие, память); пусто — основная. */
+  private serviceModel(): LLMProvider {
+    if (this.app.settings.serviceModel) return this.resolveProvider(this.app.settings.serviceModel);
+    return this.resolveProvider(undefined);
+  }
+
+  /** Глаза и руки агентов: vision-модель для look и image-модель для image. */
   private toolContext(): ToolContext {
     const app = this.app;
     return {
       getVisionProvider(agent) {
-        const pid = agent?.vision ?? agent?.provider ?? app.defaultProviderId;
-        const status = app.providers.get(pid);
-        if (!status) return { error: `провайдер «${pid}» не найден (см. providers.json)` };
+        const status = app.models.get(resolveRefId(agent?.vision ?? agent?.model, app.settings.model?.id));
+        if (!status) return { error: 'модель не найдена (см. models/)' };
         if (!status.vision) {
           return {
-            error: `провайдер «${pid}» (${status.provider.model}) не умеет смотреть картинки — задайте агенту поле "vision" с провайдером, у которого в providers.json "vision": true`,
+            error: `модель «${status.provider.model}» не умеет смотреть картинки — задайте агенту поле "vision" со ссылкой на модель, у которой в карточке "vision": true`,
           };
         }
         return { provider: status.provider };
       },
       getImageProvider(agent) {
-        const pid = agent?.image;
-        if (!pid) return { error: 'агенту не назначен image-провайдер (поле "image" в agents.json)' };
-        const status = app.images.get(pid);
-        if (!status) return { error: `image-провайдер «${pid}» не найден (см. providers.json)` };
-        if (!status.ok) return { error: `image-провайдер «${pid}» не настроен: ${status.note ?? ''}` };
+        const ref = agent?.image;
+        if (!ref) return { error: 'агенту не назначена image-модель (поле "image" в карточке агента)' };
+        const id = resolveRefId(ref, app.settings.model?.id);
+        const status = app.images.get(id);
+        if (!status) return { error: `image-модель «${id}» не найдена (см. models/)` };
+        if (!status.ok) return { error: `image-модель «${id}» не настроена: ${status.note ?? ''}` };
         return { provider: status.provider };
       },
     };
@@ -385,9 +405,8 @@ export class Engine {
     quiet = false,
     store: SessionStore = this.app.store,
   ): Promise<string | null> {
-    const provider = this.defaultProvider();
-    if (session.digest && session.digestAtCount !== undefined
-        && session.messages.length - session.digestAtCount < 10) {
+    const provider = this.resolveProvider(undefined);
+    if (session.digest && session.digestAtCount !== undefined        && session.messages.length - session.digestAtCount < 10) {
       return session.digest;
     }
     const parts: string[] = [];
@@ -777,9 +796,9 @@ export class Engine {
   ): Promise<string | ChatEvent> {
     switch (action.op) {
       case 'team.add':
-        return addTeamAgent(AGENTS_FILE, action, this.app.providers);
+        return addTeamAgent(AGENTS_FILE, action, this.app.models);
       case 'team.update':
-        return updateTeamAgent(AGENTS_FILE, action.id, action.fields, this.app.providers);
+        return updateTeamAgent(AGENTS_FILE, action.id, action.fields, this.app.models);
       case 'chat.add': {
         const res = this.addToChat(action.who, fullTeam);
         if (!res.changed) return res.text;
@@ -903,7 +922,7 @@ export class Engine {
     const target = resolve(dir);
     if (target === WORKSPACE) return tf('Этот проект уже открыт: {path}', { path: WORKSPACE });
     // папка может быть новой — скаффолдим .dreamteam, как при первом запуске
-    const notes = ensureProject(defaultProviderId(PROVIDERS_FILE), join(target, '.dreamteam'));
+    const notes = ensureProject(this.app.settings.model?.id ?? '', join(target, '.dreamteam'));
     this.queueFlush(this.app.session, this.app.store);
     setProjectRoot(target);
     this.app.store = new SessionStore(SESSIONS_DIR);
@@ -1068,10 +1087,17 @@ export class Engine {
     };
   }
 
-  /** Смена основного провайдера агентов; false — нет такого id. */
-  setProvider(id: string): boolean {
-    if (!this.app.providers.has(id)) return false;
-    this.app.defaultProviderId = id;
+  /** Смена основной модели агентов: пишет settings.model в settings.json; false — нет такой id. */
+  setModel(id: string): boolean {
+    if (!this.app.models.has(id)) return false;
+    this.app.settings.model = { ...this.app.settings.model, id };
+    try {
+      const raw = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
+      raw.model = this.app.settings.model;
+      writeFileSync(SETTINGS_FILE, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    } catch (err) {
+      throw new Error(`не удалось сохранить ${SETTINGS_FILE}: ${err instanceof Error ? err.message : err}`);
+    }
     return true;
   }
 
@@ -1474,7 +1500,7 @@ export class Engine {
     store.save(session);
     try {
       if (!quiet) this.presenter.notice(t('  Сохраняю итоги разговора в общую память команды…'));
-      this.app.memory.shared = await mergeShared(this.app.memory.shared, session.title, digest, this.defaultProvider());
+      this.app.memory.shared = await mergeShared(this.app.memory.shared, session.title, digest, this.resolveProvider(undefined));
       saveTeamMemory(MEMORY_FILE, this.app.memory);
       if (!quiet) this.presenter.notice(t('  … итоги влиты в общую память команды'));
     } catch (err) {

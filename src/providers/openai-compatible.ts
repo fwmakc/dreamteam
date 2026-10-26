@@ -1,9 +1,28 @@
-import type { LLMMessage, LLMProvider, RoundUsage, StreamRequest } from '../types.js';
+import type { LLMMessage, LLMProvider, ModelRef, RoundUsage, StreamRequest } from '../types.js';
 import { ConfigurationError } from './types.js';
-import type { ProviderConfig, ProviderFactory } from './types.js';
+import type { AdapterContract, ProviderConfig, ProviderFactory } from './types.js';
 import { openAiDeltaText, sseData, num, withTimeout } from './utils.js';
 
 const REQUEST_TIMEOUT_MS = 120_000;
+
+/**
+ * Контракт карточки models/<id>.json: обязательные и опциональные ключи,
+ * подмножество для переопределения ссылкой (ModelRef). Источник для
+ * валидации реестром, форм GUI и подсказок.
+ */
+export const contract: AdapterContract = {
+  keys: {
+    baseUrl: { type: 'string', required: true, desc: 'адрес API вместе с /v1 (Z.ai — /api/paas/v4 или /api/coding/paas/v4)' },
+    model: { type: 'string', required: true, desc: 'имя модели у API' },
+    apiKey: { type: 'string', desc: 'ключ API; для локальных API можно опустить' },
+    maxTokens: { type: 'number', desc: 'потолок ответа' },
+    temperature: { type: 'number', desc: '0 — строже, 1 — креативнее' },
+    thinking: { type: 'string', enum: ['enabled', 'disabled'], desc: 'размышления GLM (биллятся)' },
+    reasoning: { type: 'string', enum: ['minimal', 'low', 'medium', 'high', 'max'], desc: 'глубина размышлений' },
+    extra: { type: 'object', desc: 'словарь дополнительных полей тела запроса' },
+  },
+  ref: ['temperature', 'maxTokens', 'thinking', 'reasoning'],
+};
 
 /**
  * Универсальный адаптер для любых OpenAI-совместимых API:
@@ -62,6 +81,14 @@ export const openAiCompatibleFactory: ProviderFactory = (
       };
       const maxTokens = req.maxTokens ?? defaultMaxTokens;
       if (maxTokens) body.max_tokens = maxTokens;
+      // размышления GLM: из ссылки (req) или из карточки
+      const thinking = req.thinking ?? (config.thinking === 'disabled' || config.thinking === 'enabled' ? config.thinking : undefined);
+      if (thinking) body.thinking = { type: thinking };
+      const reasoning = req.reasoning ?? (typeof config.reasoning === 'string' ? config.reasoning : undefined);
+      if (reasoning) body.reasoning_effort = reasoning;
+      if (config.extra && typeof config.extra === 'object' && !Array.isArray(config.extra)) {
+        Object.assign(body, config.extra);
+      }
 
       const headers: Record<string, string> = {
         'content-type': 'application/json',

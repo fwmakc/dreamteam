@@ -60,6 +60,21 @@ export interface TeamMemory {
  */
 export type AgentTools = Record<string, unknown>;
 
+/**
+ * Ссылка на модель: карточка models/<id>.json + переопределение параметров
+ * генерации. id необязателен — тогда берётся settings.model.id (или
+ * настройки тула поверх агентской). Мердж: карточка модели ← settings.model
+ * ← ссылка. Строчной формы нет (явное лучше неявного).
+ */
+export interface ModelRef {
+  /** id модели из models/ дома */
+  id?: string;
+  temperature?: number;
+  maxTokens?: number;
+  thinking?: string;
+  reasoning?: string;
+}
+
 /** Участник команды из config/agents.json */
 export interface Agent {
   id: string;
@@ -71,8 +86,8 @@ export interface Agent {
   color: string;
   /** Персона агента — системный промпт */
   prompt: string;
-  /** Свой провайдер из config/providers.json (необязательно) */
-  provider?: string;
+  /** Модель агента — ссылка на карточку models/ дома (пусто → settings.model) */
+  model?: ModelRef;
   temperature?: number;
   /** Инструменты-карточки {"shell": {…} или null} (поле tools в agents.json) */
   tools?: AgentTools;
@@ -80,10 +95,10 @@ export interface Agent {
   projects?: string[];
   /** Подпапка рабочей папки или абсолютный путь — куда идут блоки без префикса */
   workspace?: string;
-  /** Чем агент смотрит картинки (```look): id провайдера с "vision": true; по умолчанию — его же провайдер */
-  vision?: string;
-  /** Чем агент рисует (```image): id image-провайдера из providers.json */
-  image?: string;
+  /** Чем агент смотрит картинки (```look): ссылка на vision-модель; по умолчанию — модель агента */
+  vision?: ModelRef;
+  /** Чем агент рисует (```image): ссылка на image-модель из models/ */
+  image?: ModelRef;
 }
 
 /** Сообщение в истории разговора */
@@ -142,19 +157,23 @@ export interface StreamRequest {
   messages: LLMMessage[];
   temperature?: number;
   maxTokens?: number;
+  /** Режим размышлений (GLM): перекрывает карточку модели */
+  thinking?: 'enabled' | 'disabled';
+  /** Глубина размышлений (GLM): перекрывает карточку модели */
+  reasoning?: string;
   /** Отмена запроса извне (Esc во время раунда) */
   signal?: AbortSignal;
 }
 
 /**
  * Менеджер переговорки: config/manager.json. Это тот самый модератор-оркестратор,
- * но с собственным минимальным конфигом: свой провайдер, имя, вид. Через него
+ * но с собственным минимальным конфигом: своя модель, имя, вид. Через него
  * (@менеджер) выполняются все конфигурационные операции — состав команды,
  * состав чата, разговоры.
  */
 export interface ManagerConfig {
-  /** id провайдера из config/providers.json (модель берётся из записи провайдера) */
-  provider: string;
+  /** Ссылка на модель из models/ дома */
+  model: ModelRef;
   name: string;
   emoji: string;
   color: string;
@@ -169,7 +188,8 @@ export interface ManagerUpdateFields {
   role?: string;
   description?: string;
   prompt?: string;
-  provider?: string;
+  /** id модели строкой или объект-ссылка */
+  model?: string | ModelRef;
   temperature?: number;
 }
 
@@ -185,7 +205,7 @@ export type ManagerAction =
       color?: string;
       description?: string;
       temperature?: number;
-      provider?: string;
+      model?: ModelRef;
       tools?: AgentTools;
     }
   | { op: 'team.update'; id: string; fields: ManagerUpdateFields }

@@ -32,11 +32,11 @@ import {
   updateManagerConfig,
   updateTeamAgent,
 } from '../manager.js';
-import { addProviderConfig, loadProviders, removeProviderConfig, updateProviderConfig } from '../providers/registry.js';
+import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from '../providers/registry.js';
 import { resolveEndpoints } from '../mail.js';
 import { agentToolIds } from '../tools-api.js';
 import { t, tf, applyLocale } from '../i18n.js';
-import { AGENTS_FILE, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, PROJECTS_FILE, PROVIDERS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
+import { AGENTS_FILE, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, MODELS_DIR, PROJECTS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
 import { loadProjectRegistry, projectLabel } from './projects.js';
 import { loadSettings } from '../settings.js';
 import { chatTeam, isSessionRef, type App, type Engine } from './engine.js';
@@ -49,7 +49,7 @@ import {
   readZipEntries,
   sessionEntriesById,
 } from './transfer.js';
-import type { Agent, ManagerHostSpec } from '../types.js';
+import type { Agent, ManagerHostSpec, ModelRef } from '../types.js';
 
 /** Аргумент операции — для справки, подсказок и проверки количества. */
 export interface OpArg {
@@ -57,7 +57,7 @@ export interface OpArg {
   name: string;
   required: boolean;
   /** Уточнение для панели подсказок (что подставлять: номера, имена, id…) */
-  hint?: 'sessions' | 'team' | 'chat' | 'providers' | 'projects' | 'schedule';
+  hint?: 'sessions' | 'team' | 'chat' | 'models' | 'projects' | 'schedule';
 }
 
 export interface OpSpec {
@@ -87,6 +87,13 @@ function sessionsText(app: App): string[] {
   return lines;
 }
 
+/** Перечитывает карточки моделей после правки файлов; app.models/images — новые карты. */
+function reloadModels(engine: Engine): void {
+  const { models, images } = loadModels(MODELS_DIR);
+  engine.app.models = models;
+  engine.app.images = images;
+}
+
 function teamText(app: App): string[] {
   let fullTeam: Agent[] = [];
   try {
@@ -96,15 +103,15 @@ function teamText(app: App): string[] {
   }
   const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
   const lines = [
-    tf('{emoji} {name} — менеджер переговорки: консьерж и шлюз настроек [провайдер: {provider}]', {
-      emoji: app.mgr.emoji, name: app.mgr.name, provider: app.mgr.provider,
+    tf('{emoji} {name} — менеджер переговорки: консьерж и шлюз настроек [модель: {model}]', {
+      emoji: app.mgr.emoji, name: app.mgr.name, model: app.mgr.model.id ?? '',
     }),
   ];
   fullTeam.forEach((a, i) => {
     const tools = agentToolIds(a);
     const marks = [
       tools.length > 0 ? tf('тулы: {list}', { list: tools.join(', ') }) : '',
-      a.provider ? tf('провайдер: {id}', { id: a.provider }) : '',
+      a.model?.id ? tf('модель: {id}', { id: a.model.id }) : '',
     ].filter(Boolean);
     lines.push(
       `${i + 1}. ${a.emoji} ${a.name} — ${a.role}${a.description ? ': ' + a.description : ''}` +
@@ -115,15 +122,15 @@ function teamText(app: App): string[] {
   return lines;
 }
 
-function providersText(app: App): string[] {
+function modelsText(app: App): string[] {
   const lines: string[] = [];
-  for (const [id, s] of app.providers) {
+  for (const [id, s] of app.models) {
     const state = s.ok ? t('✓ готов') : `✗ ${s.note ?? t('не настроен')}`;
     lines.push(
       `• ${id} (${s.provider.kind}, ${s.provider.model}) ${state}` +
       (s.vision ? ` ${t('◉ зрение')}` : '') +
-      (id === app.defaultProviderId ? ` ${t('★ основной')}` : '') +
-      (id === app.mgr.provider ? ` ${t('🛎 менеджер')}` : ''),
+      (id === app.settings.model?.id ? ` ${t('★ основной')}` : '') +
+      (id === app.mgr.model.id ? ` ${t('🛎 менеджер')}` : ''),
     );
   }
   for (const [id, s] of app.images) {
@@ -316,7 +323,7 @@ function exportHomeZip(engine: Engine): string[] {
   const entries = homeEntries(app);
   const file = join(WORKSPACE, `dt-home-${ts}.zip`);
   writeFileSync(file, packEntriesZip(entries));
-  return [tf('Экспорт: {file} ({n} записей, включая ключи провайдеров — хранить как пароль)', { file, n: entries.length })];
+  return [tf('Экспорт: {file} ({n} записей, включая ключи моделей — хранить как пароль)', { file, n: entries.length })];
 }
 
 /** Экспорт разговора: номер резолвится в id один раз — архив и его имя
@@ -427,7 +434,7 @@ export const OPERATIONS: OpSpec[] = [
       const entries = readZipEntries(readFileSync(file));
       const ok = await engine.confirmAction(
         t('Импортировать домашние настройки из этого архива?'),
-        t('Настройки/профиль/провайдеры, память команды и расписание заменяются; разговоры вливаются по id. Ключи (.env) не переносятся.'),
+        t('Настройки/профиль/модели, память команды и расписание заменяются; разговоры вливаются по id. Ключи (.env) не переносятся.'),
       );
       if (!ok) return [t('Импорт дома отменён.')];
       return [applyHomeImport(engine.app, entries)];
@@ -468,7 +475,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine, rest) => {
       const [id, name, ...roleParts] = rest;
       if (!id || !name) return [t('Синтаксис: /team add <id> <Имя> [роль]')];
-      return [addTeamAgent(AGENTS_FILE, { id, name, role: roleParts.join(' ') || undefined }, engine.app.providers)];
+      return [addTeamAgent(AGENTS_FILE, { id, name, role: roleParts.join(' ') || undefined }, engine.app.models)];
     },
   },
   {
@@ -478,13 +485,13 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: true },
     ],
     title: 'править участника',
-    help: 'поля: name, role, emoji, color, description, prompt, provider, temperature',
+    help: 'поля: name, role, emoji, color, description, prompt, model, temperature',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
         return [
           t('Синтаксис: /team update <id> поле=значение…'),
-          t('Поля: name, role, emoji, color, description, prompt, provider, temperature'),
+          t('Поля: name, role, emoji, color, description, prompt, model, temperature'),
         ];
       }
       const parsed = parsePairs(pairs);
@@ -492,7 +499,7 @@ export const OPERATIONS: OpSpec[] = [
       // поля агента в нижнем регистре (белый список updateTeamAgent точный)
       const fields: Record<string, string | number> = {};
       for (const [k, v] of Object.entries(parsed)) fields[k.toLowerCase()] = v;
-      return [updateTeamAgent(AGENTS_FILE, id, fields, engine.app.providers)];
+      return [updateTeamAgent(AGENTS_FILE, id, fields, engine.app.models)];
     },
   },
   {
@@ -530,58 +537,56 @@ export const OPERATIONS: OpSpec[] = [
     },
   },
 
-  // провайдеры
+  // модели
   {
-    name: 'provider.list', implicit: true, title: 'провайдеры',
-    help: 'какие есть, кто готов, кто основной и менеджерский',
-    run: async (engine) => providersText(engine.app),
+    name: 'model.list', implicit: true, title: 'модели',
+    help: 'какие есть, кто готов, кто основная и менеджерская',
+    run: async (engine) => modelsText(engine.app),
   },
   {
-    name: 'provider.set',
-    args: [{ name: 'id', required: true, hint: 'providers' }],
-    title: 'сменить основного',
-    help: 'у менеджера переговорки свой провайдер (/manager show)',
+    name: 'model.set',
+    args: [{ name: 'id', required: true, hint: 'models' }],
+    title: 'сменить основную',
+    help: 'у менеджера переговорки своя модель (/manager show)',
     run: async (engine, rest) => {
       const id = rest[0] ?? '';
-      return engine.setProvider(id)
-        ? [tf('Основной провайдер: {id}', { id })]
-        : [tf('Нет провайдера «{id}». Доступны: {list}', { id, list: [...engine.app.providers.keys()].join(', ') })];
+      return engine.setModel(id)
+        ? [tf('Основная модель: {id}', { id })]
+        : [tf('Нет модели «{id}». Доступны: {list}', { id, list: [...engine.app.models.keys()].join(', ') })];
     },
   },
   {
-    name: 'provider.add',
+    name: 'model.add',
     args: [
       { name: 'id', required: true },
       { name: 'поле=значение…', required: true },
     ],
-    title: 'новый провайдер',
-    help: 'adapter обязателен; дальше model, baseUrl, apiKey и свой ключ адаптера',
+    title: 'новая модель',
+    help: 'adapter обязателен; дальше model, baseUrl, apiKey и ключи контракта адаптера',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return [t('Синтаксис: /provider add <id> adapter=openai-compatible model=… baseUrl=… apiKey=…')];
+        return [t('Синтаксис: /model add <id> adapter=openai-compatible model=… baseUrl=… apiKey=…')];
       }
       const config = parsePairs(pairs);
       if (Array.isArray(config)) return config;
-      const report = addProviderConfig(PROVIDERS_FILE, id, config);
-      const loaded = loadProviders(PROVIDERS_FILE);
-      for (const [k, v] of loaded.providers) engine.app.providers.set(k, v);
-      for (const k of [...engine.app.providers.keys()]) if (!loaded.providers.has(k)) engine.app.providers.delete(k);
+      const report = addModelConfig(MODELS_DIR, id, config);
+      reloadModels(engine);
       return [report];
     },
   },
   {
-    name: 'provider.update',
+    name: 'model.update',
     args: [
-      { name: 'id', required: true, hint: 'providers' },
+      { name: 'id', required: true, hint: 'models' },
       { name: 'поле=значение…', required: true },
     ],
-    title: 'править провайдера',
-    help: 'adapter, model, baseUrl, apiKey, maxTokens, temperature; пустое значение убирает поле',
+    title: 'править модель',
+    help: 'adapter, model, baseUrl, apiKey, maxTokens, temperature, thinking…; пустое значение убирает поле',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return [t('Синтаксис: /provider update <id> model=… baseUrl=… apiKey=… adapter=…')];
+        return [t('Синтаксис: /model update <id> model=… baseUrl=… apiKey=… adapter=…')];
       }
       const parsed = parsePairs(pairs);
       if (Array.isArray(parsed)) return parsed;
@@ -590,25 +595,22 @@ export const OPERATIONS: OpSpec[] = [
         if (k === 'temperature' || k === 'maxTokens') fields[k] = Number(v);
         else fields[k] = v;
       }
-      const report = updateProviderConfig(PROVIDERS_FILE, id, fields);
-      const loaded = loadProviders(PROVIDERS_FILE);
-      for (const [k, v] of loaded.providers) engine.app.providers.set(k, v);
-      for (const k of [...engine.app.providers.keys()]) if (!loaded.providers.has(k)) engine.app.providers.delete(k);
+      const report = updateModelConfig(MODELS_DIR, id, fields);
+      reloadModels(engine);
       return [report];
     },
   },
   {
-    name: 'provider.delete',
-    args: [{ name: 'id', required: true, hint: 'providers' }],
-    title: 'удалить провайдера',
-    help: 'основной не удалить — сначала /provider set другого',
+    name: 'model.delete',
+    args: [{ name: 'id', required: true, hint: 'models' }],
+    title: 'удалить модель',
+    help: 'основную не удалить — сначала /model set другой',
     run: async (engine, rest) => {
       const id = rest[0] ?? '';
-      if (!id) return [t('Синтаксис: /provider delete <id>')];
-      const report = removeProviderConfig(PROVIDERS_FILE, id, []);
-      const loaded = loadProviders(PROVIDERS_FILE);
-      for (const [k, v] of loaded.providers) engine.app.providers.set(k, v);
-      for (const k of [...engine.app.providers.keys()]) if (!loaded.providers.has(k)) engine.app.providers.delete(k);
+      if (!id) return [t('Синтаксис: /model delete <id>')];
+      const s = engine.app.settings;
+      const report = removeModelConfig(MODELS_DIR, id, [s.model?.id, s.serviceModel?.id, engine.app.mgr.model.id].filter((x): x is string => Boolean(x)));
+      reloadModels(engine);
       return [report];
     },
   },
@@ -913,13 +915,22 @@ export const OPERATIONS: OpSpec[] = [
     args: [{ name: 'поле=значение…', required: true }],
     title: 'поменять настройки',
     help: 'вступают в силу со следующего раунда; запись с валидацией и откатом',
-    run: async (_engine, rest) => {
+    run: async (engine, rest) => {
       if (rest.length === 0) return [t('Синтаксис: /settings set поле=значение… (см. /settings)')];
       const parsed = parsePairs(rest);
       if (Array.isArray(parsed)) return parsed;
       // настройки типизированы: числа и булевы приводим сразу
       const fields: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(parsed)) {
+        if (k === 'model' || k === 'serviceModel') {
+          // ссылки на модели: id строкой → {"id": …}; существование проверено здесь
+          const mid = String(v);
+          if (!engine.app.models.has(mid)) {
+            return [tf('Нет модели «{id}». Доступны: {list}', { id: mid, list: [...engine.app.models.keys()].join(', ') })];
+          }
+          fields[k] = { id: mid };
+          continue;
+        }
         if (v === 'true' || v === 'false') fields[k] = v === 'true';
         else if (typeof v === 'string' && v !== '' && Number.isFinite(Number(v))) fields[k] = Number(v);
         else fields[k] = v;
@@ -930,19 +941,23 @@ export const OPERATIONS: OpSpec[] = [
       writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
       loadSettings(tmp, 0); // валидация
       renameSync(tmp, SETTINGS_FILE);
-      // язык интерфейса вступает в силу сразу (остальное — со следующего раунда)
+      // язык интерфейса и основная модель вступают в силу сразу
       if (typeof fields.ui === 'string') applyLocale(fields.ui, DT_HOME);
+      if (fields.model && typeof fields.model === 'object') engine.app.settings.model = fields.model as ModelRef;
+      if (fields.serviceModel && typeof fields.serviceModel === 'object') {
+        engine.app.settings.serviceModel = fields.serviceModel as ModelRef;
+      }
       return [t('✓ Настройки обновлены (язык и лимиты — со следующего раунда)')];
     },
   },
   {
     name: 'manager.show', implicit: true, title: 'менеджер переговорки',
-    help: 'его провайдер, имя и температура',
+    help: 'его модель, имя и температура',
     run: async (engine) => [
       '',
       tf('Менеджер: {emoji} {name}', { emoji: engine.app.mgr.emoji, name: engine.app.mgr.name }),
-      `    ${t('провайдер:')} ${engine.app.mgr.provider} · ${t('температура:')} ${engine.app.mgr.temperature ?? '—'}`,
-      t('Поменять: /manager set provider=… temperature=… name=… emoji=… color=…'),
+      `    ${t('модель:')} ${engine.app.mgr.model.id} · ${t('температура:')} ${engine.app.mgr.temperature ?? '—'}`,
+      t('Поменять: /manager set model=… temperature=… name=… emoji=… color=…'),
       '',
     ],
   },
@@ -950,12 +965,12 @@ export const OPERATIONS: OpSpec[] = [
     name: 'manager.set',
     args: [{ name: 'поле=значение…', required: true }],
     title: 'настроить менеджера',
-    help: 'provider, temperature, name, emoji, color',
+    help: 'model, temperature, name, emoji, color',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /manager set provider=… temperature=… name=… emoji=… color=…')];
+      if (rest.length === 0) return [t('Синтаксис: /manager set model=… temperature=… name=… emoji=… color=…')];
       const fields = parsePairs(rest);
       if (Array.isArray(fields)) return fields;
-      const known = [...engine.app.providers.keys()];
+      const known = [...engine.app.models.keys()];
       const report = updateManagerConfig(MANAGER_FILE, fields, known);
       engine.app.mgr = loadManagerConfig(MANAGER_FILE, known);
       return [report];

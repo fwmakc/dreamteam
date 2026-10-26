@@ -269,8 +269,8 @@ function completionCtx(): CompletionContext {
       refreshCompletionCache();
       return completionCache?.chat ?? [];
     },
-    providerIds() {
-      return appRef ? [...appRef.providers.keys()] : [];
+    modelIds() {
+      return appRef ? [...appRef.models.keys()] : [];
     },
     managerName() {
       return appRef?.mgr.name ?? 'Менеджер';
@@ -439,12 +439,12 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
 
   const mgrAgent = managerAsAgent(app.mgr);
   console.log(pc.dim(t('\n  Менеджер переговорки (обращение: @менеджер):')));
-  console.log(rosterLine(mgrAgent) + pc.dim(` [${t('провайдер:')} ${app.mgr.provider}]`));
+  console.log(rosterLine(mgrAgent) + pc.dim(` [${t('модель:')} ${app.mgr.model.id}]`));
 
-  console.log(pc.dim(`\n  ${t('Провайдеры:')}`));
-  for (const [pid, status] of app.providers) {
-    const mark = pid === app.defaultProviderId ? pc.cyan(' ★') : '';
-    const mgr = pid === app.mgr.provider ? pc.yellow(` 🛎 ${t('менеджер')}`) : '';
+  console.log(pc.dim(`\n  ${t('Модели:')}`));
+  for (const [pid, status] of app.models) {
+    const mark = pid === app.settings.model?.id ? pc.cyan(' ★') : '';
+    const mgr = pid === app.mgr.model.id ? pc.yellow(` 🛎 ${t('менеджер')}`) : '';
     const state = status.ok
       ? pc.green(t('✓ готов'))
       : pc.yellow(`✗ ${status.note ?? t('не настроен')}`);
@@ -463,7 +463,7 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
     }
   }
 
-  if (app.providers.get(app.defaultProviderId)?.provider.kind === 'mock') {
+  if (app.models.get(app.settings.model?.id ?? '')?.provider.kind === 'mock') {
     console.log(
       pc.yellow(t('\n  ⚠ Работает MOCK-режим: ответы заготовлены. Впишите API-ключ в .env (см. README).')),
     );
@@ -510,7 +510,7 @@ function printTeam(app: App): void {
     const cfg = loadToolsConfig(SETTINGS_FILE, HOSTS_FILE, WORKSPACE);
     console.log(pc.dim(`\n  ${t('Команда:')}`));
     for (const agent of fullTeam) {
-      const own = agent.provider ? pc.dim(` [${t('провайдер:')} ${agent.provider}]`) : '';
+      const own = agent.model?.id ? pc.dim(` [${t('модель:')} ${agent.model.id}]`) : '';
       const access = accessLine(agent, cfg);
       const mark = inChat.has(agent.id) ? '' : pc.dim(` · ${tf('не в этом чате (/add {name})', { name: agent.name })}`);
       console.log(rosterLine(agent) + own + access + mark);
@@ -549,10 +549,10 @@ function accessLine(agent: Agent, cfg: ToolsConfig): string {
 }
 
 function printProviders(app: App): void {
-  console.log(pc.dim(t('\n  Провайдеры (★ — основной):')));
-  for (const [pid, status] of app.providers) {
-    const mark = pid === app.defaultProviderId ? pc.cyan(' ★') : '';
-    const mgr = pid === app.mgr.provider ? pc.yellow(` 🛎 ${t('менеджер')}`) : '';
+  console.log(pc.dim(t('\n  Модели (★ — основная):')));
+  for (const [pid, status] of app.models) {
+    const mark = pid === app.settings.model?.id ? pc.cyan(' ★') : '';
+    const mgr = pid === app.mgr.model.id ? pc.yellow(` 🛎 ${t('менеджер')}`) : '';
     const state = status.ok ? pc.green(t('✓ готов')) : pc.yellow(`✗ ${status.note ?? t('не настроен')}`);
     const vision = status.vision ? pc.magenta(` ◉ ${t('зрение')}`) : '';
     console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${vision}${mark}${mgr}`);
@@ -564,8 +564,8 @@ function printProviders(app: App): void {
       console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}`);
     }
   }
-  printDim(t('  Сменить основной: /provider <id> — он для агентов; у менеджера переговорки свой (manager.json в доме).'));
-  printDim(t('  Свой провайдер агенту — поля "provider", "vision", "image" в agents.json.'));
+  printDim(t('  Сменить основную: /model <id> — она для агентов; у менеджера переговорки своя (manager.json в доме).'));
+  printDim(t('  Своя модель у агента — поля "model", "vision", "image" в его карточке (agents.json).'));
 }
 
 function replaySession(session: Session): void {

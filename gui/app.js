@@ -16,7 +16,7 @@
   const inputEl = $('input');
   const sessionsEl = $('sessions');
   const teamEl = $('team');
-  const providersEl = $('providers');
+  const modelsEl = $('models');
   const connEl = $('conn');
   const statusbarEl = $('statusbar');
   const busyLabelEl = $('busy-label');
@@ -103,8 +103,8 @@
     set('#btn-import-session', 'text', `⬆ ${tr('импорт')}`);
     set('[data-sec="team"] .sec-name', 'text', 'Команда');
     set('[data-sec="team"] .sec-add', 'title', 'Новый агент');
-    set('[data-sec="providers"] .sec-name', 'text', 'Провайдеры');
-    set('[data-sec="providers"] .sec-add', 'title', 'Новый провайдер');
+    set('[data-sec="models"] .sec-name', 'text', 'Модели');
+    set('[data-sec="models"] .sec-add', 'title', 'Новая модель');
     set('[data-sec="schedule"] .sec-name', 'text', 'Расписание');
     set('[data-sec="schedule"] .sec-add', 'title', 'Новая задача');
     set('[data-sec="projects"] .sec-name', 'text', 'Проекты');
@@ -308,7 +308,7 @@
   function openAgentSettings(a) {
     openForm(tr('Настройки агента {name}', { name: a.name }), [
       { key: 'role', label: tr('Роль'), value: a.role ?? '' },
-      { key: 'provider', label: tr('Провайдер'), value: a.provider ?? '' },
+      { key: 'model', label: tr('Модель'), value: a.model ?? '' },
       { key: 'temperature', label: tr('Температура (0–2)'), value: a.temperature ?? '' },
       { key: 'prompt', label: tr('Промпт'), value: a.prompt ?? '' },
       { key: 'tools', label: tr('Тулы через запятую (есть: {list})', { list: (a.tools ?? []).join(', ') || tr('нет') }) },
@@ -333,24 +333,24 @@
     });
   }
 
-  // ── провайдеры: создать/удалить ───────────────────────────────
-  function providerCreate() {
-    openForm(tr('Новый провайдер'), [
+  // ── модели: создать/удалить ──────────────────────────────────
+  function modelCreate() {
+    openForm(tr('Новая модель'), [
       { key: 'id', label: tr('id (латиница)') },
       { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat)'), value: 'openai-compatible' },
       { key: 'baseUrl', label: 'baseUrl' },
       { key: 'model', label: tr('Модель') },
       { key: 'apiKey', label: tr('Ключ API (можно пусто — для локальных API)') },
     ], (v) => {
-      rpc('provider.add', { id: v.id, config: v })
+      rpc('model.add', { id: v.id, config: v })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
   }
-  function providerDelete(p) {
+  function modelDelete(p) {
     if (p.isDefault) return;
-    askDelete(tr('провайдер «{id}»', { id: p.id }), () => {
-      rpc('provider.delete', { id: p.id })
+    askDelete(tr('модель «{id}»', { id: p.id }), () => {
+      rpc('model.delete', { id: p.id })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
@@ -730,7 +730,7 @@
     if (!state) return;
     renderSidebar();
     renderTeam();
-    renderProviders();
+    renderModels();
     renderProjects(state.projects);
     renderAuto();
     renderTopbar();
@@ -739,7 +739,7 @@
   }
 
   function renderTopbar() {
-    const def = state.providers.find((p) => p.isDefault);
+    const def = state.models.find((p) => p.isDefault);
     const badgeUser = $('badge-user');
     const badgeMgr = $('badge-manager');
     const who = state.profile?.name;
@@ -749,7 +749,7 @@
     }
     if (state.manager?.name) {
       badgeMgr.innerHTML = `${esc(state.manager.emoji ?? '🛎')} ${esc(state.manager.name)}`;
-      badgeMgr.title = `${state.manager.name} (${state.manager.provider}) — ${tr('клик: настройки менеджера')}`;
+      badgeMgr.title = `${state.manager.name} (${state.manager.model ?? ""}) — ${tr('клик: настройки менеджера')}`;
     }
     if (def) {
       document.title = `Dream Team — ${def.id}`;
@@ -849,41 +849,41 @@
     }
   }
 
-  function renderProviders() {
-    providersEl.innerHTML = '';
-    for (const p of state.providers ?? []) {
+  function renderModels() {
+    modelsEl.innerHTML = '';
+    for (const p of state.models ?? []) {
       const li = document.createElement('li');
-      li.title = (p.isDefault ? tr('Провайдер по умолчанию') : tr('Сделать основным (для агентов)'))
+      li.title = (p.isDefault ? tr('Модель по умолчанию') : tr('Сделать основной (для агентов)'))
         + (p.isDefault ? '' : ` · ${tr('клик — сделать основным')} · ${tr('правая кнопка — изменить/удалить')}`);
       li.innerHTML =
         `<div class="content">` +
         `<div class="sess-main"><span>${p.ok ? '●' : '○'} ${esc(p.id)}</span>` +
-        (p.isDefault ? `<span class="tag in">${tr('основной')}</span>` : '') + `</div>` +
+        (p.isDefault ? `<span class="tag in">${tr('основная')}</span>` : '') + `</div>` +
         `<div class="sub">${esc(p.model ?? p.kind ?? '')}${p.ok ? '' : ` · ${esc(p.note ?? '')}`}</div>` +
         `</div>` +
-        (p.isDefault ? '' : `<span class="del" title="${esc(tr('Удалить провайдера'))}">✕</span>`);
+        (p.isDefault ? '' : `<span class="del" title="${esc(tr('Удалить модель'))}">✕</span>`);
       if (!p.ok) li.title += ` · ${tr('проблема:')} ${p.note ?? ''}`;
       li.onclick = () => {
         if (roundActive || p.isDefault) return;
-        rpc('provider.set', { id: p.id })
+        rpc('model.set', { id: p.id })
           .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
       };
       li.oncontextmenu = (e) => {
-        const items = [{ label: tr('Изменить'), fn: () => openProviderSettings(p) }];
-        if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => { if (!roundActive) providerDelete(p); } });
+        const items = [{ label: tr('Изменить'), fn: () => openModelSettings(p) }];
+        if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => { if (!roundActive) modelDelete(p); } });
         openCtx(e, items);
       };
       const del = li.querySelector('.del');
       if (del) del.onclick = (e) => {
         e.stopPropagation();
-        if (!roundActive) providerDelete(p);
+        if (!roundActive) modelDelete(p);
       };
-      providersEl.appendChild(li);
+      modelsEl.appendChild(li);
     }
   }
 
-  function openProviderSettings(p) {
-    openForm(tr('Провайдер {id}', { id: p.id }), [
+  function openModelSettings(p) {
+    openForm(tr('Модель {id}', { id: p.id }), [
       { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat / mock)'), value: p.kind },
       { key: 'model', label: tr('Модель'), value: p.model ?? '' },
       { key: 'baseUrl', label: tr('baseUrl (пусто — не менять)'), value: p.baseUrl ?? '' },
@@ -891,7 +891,7 @@
     ], (v) => {
       const fields = {};
       for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = val;
-      rpc('provider.update', { id: p.id, fields })
+      rpc('model.update', { id: p.id, fields })
         .then((r) => addFeed(`<div class="notice">· ${esc(r.text)}</div>`))
         .catch((err) => addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
     });
@@ -968,7 +968,7 @@
       operations: state.completion?.operations ?? [],
       sessions: state.sessions ?? [],
       team: state.team ?? [],
-      providerIds: (state.providers ?? []).map((p) => p.id),
+      modelIds: (state.models ?? []).map((p) => p.id),
       managerName: state.manager?.name ?? tr('Менеджер'),
     };
   }
@@ -1022,8 +1022,8 @@
         { label: 'shared', hint: tr('общая память'), insert: 'shared ' },
       ];
     }
-    if (argName === 'id' && op.cmd.startsWith('/provider')) {
-      return d.providerIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
+    if (argName === 'id' && op.cmd.startsWith('/model')) {
+      return d.modelIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
     }
     if (argName === 'тул') {
       return ['files', 'shell', 'ssh', 'look', 'image'].map((t) => ({ label: t, hint: '', insert: t + ' ' }));
@@ -1245,7 +1245,7 @@
       addFeed(`<div class="errline">✗ ${esc(err.message)}</div>`));
   };
   secAdd('team').onclick = () => { if (!roundActive) openAgentCreate(); };
-  secAdd('providers').onclick = () => { if (!roundActive) providerCreate(); };
+  secAdd('models').onclick = () => { if (!roundActive) modelCreate(); };
   function refreshSchedule() {
     rpc('schedule.list').then((r) => { state.scheduleTasks = r.tasks; renderSchedule(); }).catch(() => {});
   }

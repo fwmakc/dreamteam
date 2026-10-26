@@ -1,5 +1,13 @@
 import type { ImageProvider, ImageRequest, ImageResult } from '../types.js';
-import type { ImageAdapterFactory, ProviderConfig } from './types.js';
+import type { AdapterContract, ImageAdapterFactory, ProviderConfig } from './types.js';
+
+/** Контракт карточки models/<id>.json для адаптера mock-images. */
+export const contract: AdapterContract = {
+  keys: {
+    model: { type: 'string', desc: 'имя модели (косметика)' },
+  },
+  ref: [],
+};
 
 /**
  * Адаптер "mock-images": работает без docker и GPU — отдает 1×1 PNG.

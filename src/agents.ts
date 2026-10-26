@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { normalizeAgentTools } from './tools-api.js';
-import type { Agent, UserProfile } from './types.js';
+import type { Agent, ModelRef, UserProfile } from './types.js';
 
 /**
  * Читает состав команды. Вызывается перед каждым раундом, поэтому правки
- * agents.json в доме подхватываются без перезапуска приложения.
+ * карточек агентов подхватываются без перезапуска приложения.
  */
 export function loadTeam(file: string): Agent[] {
   let raw: unknown;
@@ -33,15 +33,32 @@ export function loadTeam(file: string): Agent[] {
       description: a.description ? String(a.description) : undefined,
       color: String(a.color ?? 'white'),
       prompt: String(a.prompt),
-      provider: a.provider ? String(a.provider) : undefined,
+      model: parseModelRef(`агент ${String(a.id)}`, a.model),
       temperature: typeof a.temperature === 'number' ? a.temperature : undefined,
       tools: normalizeAgentTools(String(a.id), a.tools),
       projects: Array.isArray(a.projects) ? a.projects.map(String) : undefined,
       workspace: typeof a.workspace === 'string' && a.workspace.trim() ? a.workspace.trim() : undefined,
-      vision: typeof a.vision === 'string' && a.vision.trim() ? a.vision.trim() : undefined,
-      image: typeof a.image === 'string' && a.image.trim() ? a.image.trim() : undefined,
+      vision: parseModelRef(`агент ${String(a.id)}: vision`, a.vision),
+      image: parseModelRef(`агент ${String(a.id)}: image`, a.image),
     };
   });
+}
+
+/** Ссылка на модель в карточке: id строкой или объект {id?, …}; форма — только такая. */
+function parseModelRef(where: string, raw: unknown): ModelRef | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === 'string') {
+    if (!raw.trim()) return undefined;
+    return { id: raw.trim() };
+  }
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const ref = { ...(raw as ModelRef) };
+    if (ref.id !== undefined && (typeof ref.id !== 'string' || !ref.id.trim())) {
+      throw new Error(`${where}: "model.id" — непустая строка (id карточки из models/)`);
+    }
+    return ref;
+  }
+  throw new Error(`${where}: "model" — id строкой или объект {"id": "…", "temperature": …}`);
 }
 
 /**

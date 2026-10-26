@@ -1,6 +1,15 @@
 import type { LLMProvider, RoundUsage, StreamRequest } from '../types.js';
 import { sleep } from './utils.js';
-import type { ProviderConfig, ProviderFactory } from './types.js';
+import type { AdapterContract, ProviderConfig, ProviderFactory } from './types.js';
+
+/** Контракт карточки models/<id>.json для адаптера mock. */
+export const contract: AdapterContract = {
+  keys: {
+    model: { type: 'string', desc: 'имя модели (косметика)' },
+    note: { type: 'string', desc: 'текст заготовленного ответа' },
+  },
+  ref: [],
+};
 
 /**
  * Заготовленные ответы участников для работы без API-ключей.

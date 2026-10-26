@@ -53,24 +53,24 @@ function check(name: string, cond: boolean, detail?: string): void {
 const dir = mkdtempSync(join(tmpdir(), 'dt-manager-'));
 const cfgFile = join(dir, 'manager.json');
 const agentsFile = join(dir, 'agents.json');
-// реестр провайдеров для правок команды (как App.providers)
-const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
+// реестр провайдеров для правок команды (как App.models)
+const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   ['openai', null],
   ['claude', null],
 ]);
 
 // --- loadManagerConfig ---
 {
-  writeFileSync(cfgFile, JSON.stringify({ provider: 'openai' }));
+  writeFileSync(cfgFile, JSON.stringify({ model: { id: 'openai' } }));
   const cfg = loadManagerConfig(cfgFile, ['openai', 'mock']);
-  check('конфиг: провайдер сохранён', cfg.provider === 'openai');
+  check('конфиг: модель сохранена', cfg.model.id === 'openai');
   check('конфиг: дефолтное имя', cfg.name === 'Менеджер', cfg.name);
   check('конфиг: дефолтный эмодзи', cfg.emoji === '🛎', cfg.emoji);
   check('конфиг: дефолтный цвет', cfg.color === 'yellow', cfg.color);
   check('конфиг: дефолтная температура', cfg.temperature === 0.2, String(cfg.temperature));
 }
 {
-  writeFileSync(cfgFile, JSON.stringify({ provider: 'mock', name: 'Пчёлка', emoji: '🎩', color: 'magenta', temperature: 0.5 }));
+  writeFileSync(cfgFile, JSON.stringify({ model: { id: 'mock' }, name: 'Пчёлка', emoji: '🎩', color: 'magenta', temperature: 0.5 }));
   const cfg = loadManagerConfig(cfgFile, ['mock']);
   check('конфиг: свои значения читаются', cfg.name === 'Пчёлка' && cfg.emoji === '🎩' && cfg.color === 'magenta' && cfg.temperature === 0.5);
   check('конфиг: обращение по «ё»-имени без «ё»', managerMentioned('@пчелка, добавь', cfg));
@@ -91,22 +91,22 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   writeFileSync(cfgFile, JSON.stringify({ name: 'Менеджер' }));
   let threw = '';
   try { loadManagerConfig(cfgFile, ['openai']); } catch (e) { threw = (e as Error).message; }
-  check('конфиг: нет provider — ошибка', threw.includes('provider'), threw);
+  check('конфиг: нет model — ошибка', threw.includes('model'), threw);
 }
 {
-  writeFileSync(cfgFile, JSON.stringify({ provider: 'чужой' }));
+  writeFileSync(cfgFile, JSON.stringify({ model: { id: 'чужой' } }));
   let threw = '';
   try { loadManagerConfig(cfgFile, ['openai', 'mock']); } catch (e) { threw = (e as Error).message; }
-  check('конфиг: неизвестный провайдер — ошибка со списком', threw.includes('чужой') && threw.includes('openai, mock'), threw);
+  check('конфиг: неизвестная модель — ошибка со списком', threw.includes('чужой') && threw.includes('openai, mock'), threw);
 }
 {
-  writeFileSync(cfgFile, JSON.stringify({ provider: 'openai', color: 'бирюзовый' }));
+  writeFileSync(cfgFile, JSON.stringify({ model: { id: 'openai' }, color: 'бирюзовый' }));
   check('конфиг: незнакомый цвет → yellow', loadManagerConfig(cfgFile, ['openai']).color === 'yellow');
 }
 // конфиг из репозитория валиден
 {
   const repoCfg = loadManagerConfig(join('.dreamteam', 'manager.json'), ['openai', 'mock']);
-  check('конфиг: .dreamteam/manager.json из репозитория читается', repoCfg.provider === 'openai' && repoCfg.name === 'Менеджер');
+  check('конфиг: .dreamteam/manager.json из репозитория читается', repoCfg.model.id === 'openai' && repoCfg.name === 'Менеджер');
 }
 
 // --- managerMentioned ---
@@ -134,7 +134,7 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('псевдо-агент: id/имя/роль/эмодзи/цвет',
     agent.id === 'manager' && agent.name === cfg.name && agent.role === 'менеджер переговорки' &&
     agent.emoji === cfg.emoji && agent.color === cfg.color);
-  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 2450 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
+  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 2550 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
 }
 
 // --- parseManagerReply ---
@@ -190,7 +190,7 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 // --- managerStateInput ---
 {
   const team: Agent[] = [
-    { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'p', provider: 'claude', temperature: 0.3, tools: { files: {}, look: null } },
+    { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'p', model: { id: 'claude' }, temperature: 0.3, tools: { files: {}, look: null } },
     { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'p', projects: ['shop'] },
   ];
   const sessions: SessionMeta[] = [
@@ -210,7 +210,7 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     projects: [{ id: 'shop', hosts: ['prod', 'staging'] }],
     operations: [{ cmd: '/session new', help: 'новый разговор' }, { cmd: '/session open', args: '<номер>', help: 'открыть разговор' }],
   });
-  check('стейт: ростер с провайдером и temp', input.includes('katya — Катя (дизайнер), провайдер: claude, temp 0.3'), input);
+  check('стейт: ростер с провайдером и temp', input.includes('katya — Катя, модель: claude, temp 0.3'), input);
   check('стейт: тула агента в ростере', input.includes('тула: files, look') && input.includes('тула нет'), input);
   check('стейт: состав чата', input.includes('В этом чате: katya'));
   check('стейт: список разговоров с номерами и текущим', input.includes('1. Текущий — 4 сообщ. (текущий)') && input.includes('2. Прошлый — 9 сообщ.'), input);
@@ -226,7 +226,7 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 
   const report = addTeamAgent(agentsFile, {
     id: 'katya', name: 'Катя', role: 'дизайнер', tools: { files: {}, shell: null }, temperature: 0.4,
-  }, providers);
+  }, models);
   check('team.add: отчёт с именем и ролью', report.includes('Катя') && report.includes('дизайнер'), report);
 
   const agents = loadTeam(agentsFile);
@@ -247,50 +247,50 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 
   const before = readFileSync(agentsFile, 'utf8');
   let threw = '';
-  try { addTeamAgent(agentsFile, { id: 'katya', name: 'Дубль' }, providers); } catch (e) { threw = (e as Error).message; }
+  try { addTeamAgent(agentsFile, { id: 'katya', name: 'Дубль' }, models); } catch (e) { threw = (e as Error).message; }
   check('team.add: дубликат id — ошибка', threw.includes('уже есть'), threw);
   check('team.add: неудачная правка файл не меняла', readFileSync(agentsFile, 'utf8') === before);
 
   threw = '';
-  try { addTeamAgent(agentsFile, { id: 'zina', name: 'Зина', tools: ['files'] as unknown as AgentTools }, providers); } catch (e) { threw = (e as Error).message; }
+  try { addTeamAgent(agentsFile, { id: 'zina', name: 'Зина', tools: ['files'] as unknown as AgentTools }, models); } catch (e) { threw = (e as Error).message; }
   check('team.add: массив tools — ошибка с подсказкой', threw.includes('массивов больше нет'), threw);
   check('team.add: отказ из-за tools файл не менял', readFileSync(agentsFile, 'utf8') === before);
 
   threw = '';
-  try { addTeamAgent(agentsFile, { id: 'кривой id', name: 'X' }, providers); } catch (e) { threw = (e as Error).message; }
+  try { addTeamAgent(agentsFile, { id: 'кривой id', name: 'X' }, models); } catch (e) { threw = (e as Error).message; }
   check('team.add: id с пробелами — ошибка', threw.includes('id'), threw);
   threw = '';
-  try { addTeamAgent(agentsFile, { id: 'ok', name: '' }, providers); } catch (e) { threw = (e as Error).message; }
+  try { addTeamAgent(agentsFile, { id: 'ok', name: '' }, models); } catch (e) { threw = (e as Error).message; }
   check('team.add: без имени — ошибка', threw.includes('name') || threw.includes('имя'), threw);
   threw = '';
-  try { addTeamAgent(agentsFile, { id: 'mira', name: 'Мира', provider: 'основной' }, providers); } catch (e) { threw = (e as Error).message; }
-  check('team.add: чужой провайдер — отказ со списком', threw.includes('неизвестный провайдер «основной»') && threw.includes('openai'), threw);
-  check('team.add: отказ из-за провайдера файл не менял', readFileSync(agentsFile, 'utf8') === before);
-  addTeamAgent(agentsFile, { id: 'mira', name: 'Мира', provider: 'claude' }, providers);
-  check('team.add: существующий провайдер записан', loadTeam(agentsFile).find((a) => a.id === 'mira')?.provider === 'claude');
+  try { addTeamAgent(agentsFile, { id: 'mira', name: 'Мира', model: 'основной' }, models); } catch (e) { threw = (e as Error).message; }
+  check('team.add: чужая модель — отказ со списком', threw.includes('неизвестная модель «основной»') && threw.includes('openai'), threw);
+  check('team.add: отказ из-за модели файл не менял', readFileSync(agentsFile, 'utf8') === before);
+  addTeamAgent(agentsFile, { id: 'mira', name: 'Мира', model: 'claude' }, models);
+  check('team.add: существующий провайдер записан', loadTeam(agentsFile).find((a) => a.id === 'mira')?.model?.id === 'claude');
 }
 {
-  const report = updateTeamAgent(agentsFile, 'gleb', { role: 'ведущий разработчик', provider: 'openai', temperature: 0.1 }, providers);
+  const report = updateTeamAgent(agentsFile, 'gleb', { role: 'ведущий разработчик', model: 'openai', temperature: 0.1 }, models);
   check('team.update: отчёт перечисляет правки', report.includes('ведущий разработчик') && report.includes('openai') && report.includes('temperature=0.1'), report);
   const agents = loadTeam(agentsFile);
   const gleb = agents.find((a) => a.id === 'gleb');
-  check('team.update: роль/провайдер/temp применились', gleb?.role === 'ведущий разработчик' && gleb?.provider === 'openai' && gleb?.temperature === 0.1, JSON.stringify(gleb));
+  check('team.update: роль/провайдер/temp применились', gleb?.role === 'ведущий разработчик' && gleb?.model?.id === 'openai' && gleb?.temperature === 0.1, JSON.stringify(gleb));
   check('team.update: остальные поля целы', gleb?.prompt === 'Ты — Глеб.' && gleb?.emoji === '💾');
   check('team.update: loadTeam по-прежнему валиден', agents.length === 3);
 
   const before2 = readFileSync(agentsFile, 'utf8');
   let threw = '';
-  try { updateTeamAgent(agentsFile, 'никого', { role: 'x' }, providers); } catch (e) { threw = (e as Error).message; }
+  try { updateTeamAgent(agentsFile, 'никого', { role: 'x' }, models); } catch (e) { threw = (e as Error).message; }
   check('team.update: чужой id — ошибка', threw.includes('никого'), threw);
   threw = '';
-  try { updateTeamAgent(agentsFile, 'gleb', { projects: ['x'] } as never, providers); } catch (e) { threw = (e as Error).message; }
+  try { updateTeamAgent(agentsFile, 'gleb', { projects: ['x'] } as never, models); } catch (e) { threw = (e as Error).message; }
   check('team.update: вне белого списка — ошибка «не понятно»', threw.includes('не понятно'), threw);
   threw = '';
-  try { updateTeamAgent(agentsFile, 'gleb', {} , providers); } catch (e) { threw = (e as Error).message; }
+  try { updateTeamAgent(agentsFile, 'gleb', {} , models); } catch (e) { threw = (e as Error).message; }
   check('team.update: пустые fields — ошибка', threw.includes('не понятно'), threw);
   threw = '';
-  try { updateTeamAgent(agentsFile, 'gleb', { provider: 'основной' }, providers); } catch (e) { threw = (e as Error).message; }
-  check('team.update: чужой провайдер — отказ, файл цел', threw.includes('неизвестный провайдер «основной»') && readFileSync(agentsFile, 'utf8') === before2, threw);
+  try { updateTeamAgent(agentsFile, 'gleb', { model: 'основной' }, models); } catch (e) { threw = (e as Error).message; }
+  check('team.update: чужая модель — отказ, файл цел', threw.includes('неизвестная модель «основной»') && readFileSync(agentsFile, 'utf8') === before2, threw);
 }
 
 // --- tool.grant: включение тула и карточки, свои тула — только существующие ---
@@ -451,7 +451,7 @@ const providers: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 {
   writeFileSync(agentsFile, JSON.stringify({ agents: [{ id: 'gleb', name: 'Глеб', color: 'green', prompt: 'x' }], note: 'не трогать' }, null, 2) + '\n');
   check('легаси: loadTeam читает обёртку', loadTeam(agentsFile).length === 1);
-  addTeamAgent(agentsFile, { id: 'katya', name: 'Катя' }, providers);
+  addTeamAgent(agentsFile, { id: 'katya', name: 'Катя' }, models);
   const legacy = JSON.parse(readFileSync(agentsFile, 'utf8'));
   check('легаси: правка сохранила обёртку и поля корня', Array.isArray(legacy.agents) && legacy.agents.length === 2 && legacy.note === 'не трогать', JSON.stringify(legacy).slice(0, 120));
 }

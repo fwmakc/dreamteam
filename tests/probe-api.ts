@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
 import { rmTemp } from './rm-tmp.js';
+import { writeModels } from './models.js';
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -39,12 +40,9 @@ process.env.DT_PROJECT = proj;
 // рабочая папка инструментов = cwd на момент импорта: уводим процесс в tmp,
 // чтобы mock-демонстрация писала файлы в песочницу, а не в репозиторий
 process.chdir(base);
-writeFileSync(
-  join(home, 'providers.json'),
-  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
-);
+writeModels(home, { mock: { adapter: 'mock' } }, 'mock');
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
-writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 
 const { startServe, ServerPresenter } = await import('../src/serve.js');
 
@@ -178,7 +176,7 @@ const handle = await startServe({ port: 0 });
 const client = await makeClient(handle.port);
 {
   const first = await client.next((m) => m.type === 'state');
-  const st0 = first.state as { session?: unknown; team?: unknown[]; teamError?: string | null; providers?: { id: string; isDefault: boolean }[] };
+  const st0 = first.state as { session?: unknown; team?: unknown[]; teamError?: string | null; models?: { id: string; isDefault: boolean }[] };
   check('ws: первичный state пришёл', Boolean(st0.session));
   const st0team = (st0.team ?? []) as { id: string }[];
   check('ws: стартовая команда — пять агентов', st0team.length === 5, JSON.stringify(st0team.map((a) => a.id)));
@@ -188,7 +186,7 @@ const client = await makeClient(handle.port);
     JSON.stringify(st0team.map((a) => a.id)),
   );
   check('ws: нет agents.json — без ошибки в state', st0.teamError == null);
-  check('ws: провайдер mock — основной', (st0.providers ?? []).some((p) => p.id === 'mock' && p.isDefault));
+  check('ws: модель mock — основная', (st0.models ?? []).some((p) => p.id === 'mock' && p.isDefault));
 
   client.send({ type: 'hello' });
   const again = await client.next((m) => m.type === 'state');
@@ -280,7 +278,7 @@ const client = await makeClient(handle.port);
     check('ws: /me меняет профиль в state', ((stMe.state as { profile: { role?: string } }).profile.role) === 'инженер');
 
     // user_message с `/…` исполняется так же (перехват в ядре)
-    client.send({ type: 'user_message', text: '/provider' });
+    client.send({ type: 'user_message', text: '/model' });
     const prov = await client.next((m) => m.type === 'notice' && String(m.text).includes('• mock'));
     check('ws: /… в user_message тоже команда', Boolean(prov));
     await client.next((m) => m.type === 'state');
@@ -342,14 +340,14 @@ const client = await makeClient(handle.port);
   const sch = await client.next((m) => m.type === 'rpc_result' && m.id === 'r13');
   check('rpc: schedule.list — задачи расписания', Array.isArray((sch.result as { tasks?: unknown[] }).tasks));
 
-  // rpc: provider.update — правка карточки существующего провайдера
-  client.send({ type: 'rpc', id: 'r14', method: 'provider.update', args: { id: 'mock', fields: { model: 'mock-2' } } });
+  // rpc: model.update — правка карточки существующей модели
+  client.send({ type: 'rpc', id: 'r14', method: 'model.update', args: { id: 'mock', fields: { model: 'mock-2' } } });
   const pu = await client.next((m) => m.type === 'rpc_result' && m.id === 'r14');
-  check('rpc: provider.update — карточка правится', String((pu.result as { text: string }).text).includes('mock-2'));
-  client.send({ type: 'rpc', id: 'r15', method: 'provider.update', args: { id: 'mock', fields: { adapter: 'неттакого' } } });
+  check('rpc: model.update — карточка правится', String((pu.result as { text: string }).text).includes('mock-2'));
+  client.send({ type: 'rpc', id: 'r15', method: 'model.update', args: { id: 'mock', fields: { adapter: 'неттакого' } } });
   const puErr = await client.next((m) => m.type === 'rpc_error' && m.id === 'r15');
-  check('rpc: provider.update — неизвестный адаптер — rpc_error', String(puErr.error).includes('неттакого'));
-  client.send({ type: 'rpc', id: 'r16', method: 'provider.update', args: { id: 'mock', fields: { model: 'mock' } } });
+  check('rpc: model.update — неизвестный адаптер — rpc_error', String(puErr.error).includes('неттакого'));
+  client.send({ type: 'rpc', id: 'r16', method: 'model.update', args: { id: 'mock', fields: { model: 'mock' } } });
   await client.next((m) => m.type === 'rpc_result' && m.id === 'r16');
 
   // rpc: расписание — полный цикл записи в schedule.json проекта
@@ -366,9 +364,9 @@ const client = await makeClient(handle.port);
   check('rpc: schedule_delete — задача удалена', (sd.result as { tasks: unknown[] }).tasks.length === 0);
 
   // rpc: ошибки — честные сообщения
-  client.send({ type: 'rpc', id: 'r5', method: 'provider.set', args: { id: 'nope' } });
+  client.send({ type: 'rpc', id: 'r5', method: 'model.set', args: { id: 'nope' } });
   const err1 = await client.next((m) => m.type === 'rpc_error' && m.id === 'r5');
-  check('rpc: неизвестный провайдер — rpc_error', String(err1.error).includes('nope'));
+  check('rpc: неизвестная модель — rpc_error', String(err1.error).includes('nope'));
   client.send({ type: 'rpc', id: 'r6', method: 'совсем-неизвестное' });
   const err2 = await client.next((m) => m.type === 'rpc_error' && m.id === 'r6');
   check('rpc: неизвестный метод — rpc_error', String(err2.error).includes('совсем-неизвестное'));
@@ -400,8 +398,10 @@ const client = await makeClient(handle.port);
     check(
       'state: ключи верхнего уровня',
       JSON.stringify(Object.keys(st).sort()) ===
-        JSON.stringify(['auto', 'completion', 'images', 'knownProjects', 'manager', 'memory', 'profile', 'project', 'projects', 'providers', 'session', 'sessions', 'settings', 'team', 'teamError', 'ui']),
+        JSON.stringify(['auto', 'completion', 'images', 'knownProjects', 'manager', 'memory', 'models', 'profile', 'project', 'projects', 'session', 'sessions', 'settings', 'team', 'teamError', 'ui']),
     );
+    const models = st.models as { id?: string; kind?: string; ok?: boolean; isDefault?: boolean }[] | undefined;
+    check('state: models — карточки с id/kind/ok/isDefault', Array.isArray(models) && models.length > 0 && models.every((m) => typeof m.id === 'string' && typeof m.ok === 'boolean'), JSON.stringify(models));
     const uiSt = st.ui as { id?: unknown; strings?: unknown } | undefined;
     check('state: ui — id активной локали и словарь строк', Boolean(uiSt) && uiSt!.id === 'ru' && typeof uiSt!.strings === 'object');
     const proj = st.project as { name?: unknown; path?: unknown } | undefined;
@@ -415,10 +415,10 @@ const client = await makeClient(handle.port);
     const team = st.team as Record<string, unknown>[];
     check('state: участник — id/name/role/emoji/color/inChat', team.length > 0 && ['color', 'emoji', 'id', 'inChat', 'name', 'role'].every((k) => k in team[0]));
     const mgr = st.manager as Record<string, unknown>;
-    check('state: менеджер — name/emoji/color/provider', Boolean(mgr) && ['color', 'emoji', 'name', 'provider'].every((k) => k in mgr));
-    const prov = (st.providers as Record<string, unknown>[])[0];
+    check('state: менеджер — name/emoji/color/model', Boolean(mgr) && ['color', 'emoji', 'model', 'name'].every((k) => k in mgr));
+    const prov = (st.models as Record<string, unknown>[])[0];
     check(
-      'state: провайдер — id/kind/model/ok/isDefault/isManager',
+      'state: модель — id/kind/model/ok/isDefault/isManager',
       Boolean(prov) && ['id', 'isDefault', 'isManager', 'kind', 'model', 'ok'].every((k) => k in prov!),
     );
     check('state: images — массив', Array.isArray(st.images));
@@ -485,7 +485,7 @@ const client = await makeClient(handle.port);
 
     b.close();
     await wait(100);
-    client.send({ type: 'command', text: '/provider' });
+    client.send({ type: 'command', text: '/model' });
     const provN = await client.next((m) => m.type === 'notice' && String(m.text).includes('★ основной'));
     check('multi: после отключения B сервер работает с A', Boolean(provN));
     await client.next((m) => m.type === 'state');

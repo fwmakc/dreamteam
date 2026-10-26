@@ -23,7 +23,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import AdmZip from 'adm-zip';
-import { loadProviders } from '../providers/registry.js';
+import { loadModels } from '../providers/registry.js';
 import { loadTeam } from '../agents.js';
 import { loadTeamMemory } from '../memory.js';
 import {
@@ -31,7 +31,7 @@ import {
   DT_HOME,
   MANAGER_FILE,
   MEMORY_FILE,
-  PROVIDERS_FILE,
+  MODELS_DIR,
   TOOLS_DIR,
   USER_FILE,
 } from '../paths.js';
@@ -45,7 +45,7 @@ export interface TransferEntry {
   data: Buffer;
 }
 
-const HOME_FILES = ['settings.json', 'user.json', 'providers.json', 'agents.json', 'manager.json', 'memory.json', 'schedule.json'] as const;
+const HOME_FILES = ['settings.json', 'user.json', 'agents.json', 'manager.json', 'memory.json', 'schedule.json'] as const;
 /** id разговора — метка времени; из архива путь строится только из такого id (zip-slip мимо). */
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -60,6 +60,14 @@ export function homeEntries(app: App): TransferEntry[] {
     for (const name of readdirSync(TOOLS_DIR)) {
       const p = join(TOOLS_DIR, name);
       if (existsSync(p) && statSync(p).isFile()) out.push({ rel: `tools/${name}`, data: readFileSync(p) });
+    }
+  }
+  // карточки моделей: models/<id>.json — по файлу на модель
+  if (existsSync(MODELS_DIR)) {
+    for (const name of readdirSync(MODELS_DIR)) {
+      if (!name.endsWith('.json')) continue;
+      const p = join(MODELS_DIR, name);
+      if (existsSync(p) && statSync(p).isFile()) out.push({ rel: `models/${name}`, data: readFileSync(p) });
     }
   }
   for (const meta of app.store.list()) {
@@ -133,28 +141,37 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     tools++;
   }
   if (tools > 0) report.push(tf('тулов влито: {n}', { n: tools }));
+  // карточки моделей: models/<id>.json — по файлу на модель
+  mkdirSync(MODELS_DIR, { recursive: true });
+  let models = 0;
+  for (const e of entries.filter((x) => x.rel.startsWith('models/'))) {
+    const name = e.rel.slice('models/'.length);
+    if (!name.endsWith('.json') || name.includes('/') || name.includes('..')) continue;
+    writeFileSync(join(MODELS_DIR, name), e.data);
+    models++;
+  }
+  if (models > 0) report.push(tf('моделей влито: {n}', { n: models }));
   // после замены команды перечитываем память команды
   try {
     app.memory = loadTeamMemory(MEMORY_FILE);
   } catch {
     // память необязательна
   }
-  // провайдеры: перечитываем и обновляем карту приложения (ключи теперь в карточках)
-  let providerIds: Iterable<string> = [];
+  // модели: перечитываем и обновляем карты приложения
+  let modelIds: Iterable<string> = [];
   try {
-    const loaded = loadProviders(PROVIDERS_FILE);
-    for (const [k, v] of loaded.providers) app.providers.set(k, v);
-    for (const k of [...app.providers.keys()]) if (!loaded.providers.has(k)) app.providers.delete(k);
-    app.defaultProviderId = loaded.defaultId;
-    providerIds = loaded.providers.keys();
-    report.push(t('провайдеры перечитаны'));
+    const loaded = loadModels(MODELS_DIR);
+    app.models = loaded.models;
+    app.images = loaded.images;
+    modelIds = loaded.models.keys();
+    report.push(t('модели перечитаны'));
   } catch (err) {
-    report.push(tf('провайдеры не перечитались ({err})', { err: err instanceof Error ? err.message : String(err) }));
+    report.push(tf('модели не перечитались ({err})', { err: err instanceof Error ? err.message : String(err) }));
   }
   // manager.json заменён — менеджер в памяти перечитываем сразу, иначе он до
-  // перезапуска живёт со старым именем и провайдером из прежнего дома
+  // перезапуска живёт со старым именем и моделью из прежнего дома
   try {
-    app.mgr = loadManagerConfig(MANAGER_FILE, providerIds);
+    app.mgr = loadManagerConfig(MANAGER_FILE, modelIds);
   } catch (err) {
     report.push(tf('менеджер не перечитался ({err})', { err: err instanceof Error ? err.message : String(err) }));
   }

@@ -4,5 +4,6 @@
   "language": "русский",
   "maxTurns": 3,
   "margin": 2,
-  "screen": true
+  "screen": true,
+  "model": {}
 }

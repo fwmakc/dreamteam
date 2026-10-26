@@ -12,9 +12,9 @@ import {
   DT_HOME,
   MANAGER_FILE,
   MEMORY_FILE,
+  MODELS_DIR,
   PROJECTS_FILE,
   PROVIDERS_DIR,
-  PROVIDERS_FILE,
   SESSIONS_DIR,
   SETTINGS_FILE,
   TOOLS_DIR,
@@ -24,10 +24,39 @@ import {
 import { ensureLayers } from '../wizard.js';
 import { rememberProject } from './projects.js';
 import { applyLocale, preloadLocale } from '../i18n.js';
-import { loadProviders, loadImageProviders, loadUserAdapters, setUserAdapters } from '../providers/registry.js';
+import { loadModels, loadUserAdapters, setUserAdapters } from '../providers/registry.js';
 import { loadTeamMemory } from '../memory.js';
 import { printDim, printError } from '../ui.js';
+import { loadTeamOrEmpty } from '../agents.js';
 import type { App } from './engine.js';
+import type { Agent } from '../types.js';
+
+/** Ссылки на модели должны указывать на существующие карточки: settings.model,
+ *  settings.serviceModel, manager.model, у агентов — model/vision/image. */
+function validateModelRefs(
+  models: Map<string, unknown>,
+  ui: import('../settings.js').SettingsConfig,
+  mgr: import('../types.js').ManagerConfig,
+  agents: Agent[],
+): void {
+  const known = [...models.keys()];
+  const check = (where: string, ref?: { id?: string }): void => {
+    if (!ref?.id) return;
+    if (!models.has(ref.id)) {
+      throw new Error(
+        `${where}: модель «${ref.id}» не найдена — есть: ${known.join(', ') || '(нет)'}`,
+      );
+    }
+  };
+  check('settings.json: model', ui.model);
+  check('settings.json: serviceModel', ui.serviceModel);
+  check('manager.json: model', mgr.model);
+  for (const a of agents) {
+    check(`агент «${a.id}»: model`, a.model);
+    check(`агент «${a.id}»: vision`, a.vision);
+    check(`агент «${a.id}»: image`, a.image);
+  }
+}
 
 /**
  * Общий старт ядра для оболочек (терминал, serve): env дома, миграция,
@@ -54,13 +83,14 @@ export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> 
   // громкая ошибка со списком доступных (до старта оболочки)
   applyLocale(ui.ui, DT_HOME);
   const store = new SessionStore(SESSIONS_DIR);
-  // кастомные адаптеры провайдеров: providers/<id>.ts в доме. До loadProviders:
+  // кастомные адаптеры провайдеров: providers/<id>.ts в доме. До loadModels:
   // битый файл или коллизия со встроенным именем — громкая ошибка до старта
   setUserAdapters(await loadUserAdapters(PROVIDERS_DIR));
-  const loaded = loadProviders(PROVIDERS_FILE);
-  const images = loadImageProviders(PROVIDERS_FILE);
-  // менеджер переговорки: обязательный конфиг, неизвестный провайдер — падение до старта оболочки
-  const mgr = loadManagerConfig(MANAGER_FILE, loaded.providers.keys());
+  // карточки моделей: models/*.json; контракт адаптера валидирует ключи —
+  // отсутствующий обязательный параметр виден здесь, с именем параметра
+  const { models, images } = loadModels(MODELS_DIR);
+  // менеджер переговорки: обязательный конфиг, неизвестная модель — падение до старта оболочки
+  const mgr = loadManagerConfig(MANAGER_FILE, models.keys());
   // тула: fail-fast — кривой файл в tools/ или карточка в agents.json видны до старта оболочки
   // (дальше они перечитываются каждый раунд уже с мягкой обработкой)
   await loadUserTools(TOOLS_DIR);
@@ -70,13 +100,16 @@ export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> 
   const app: App = {
     store,
     session,
-    providers: loaded.providers,
-    images: images.images,
-    defaultProviderId: loaded.defaultId,
+    models,
+    images,
     mgr,
+    settings: ui,
     profile: loadUserProfile(USER_FILE),
     memory: loadTeamMemory(MEMORY_FILE),
   };
+  // ссылки на модели (settings.model.id, агенты, менеджер) должны указывать
+  // на существующие карточки — проверяем сразу, с перечнем доступных
+  validateModelRefs(models, ui, mgr, loadTeamOrEmpty(AGENTS_FILE));
   // реестр проектов: папка старта — текущий проект (смена — /project open).
   // Не критично для старта: сломанный реестр не должен мешать работе.
   try {

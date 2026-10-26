@@ -10,6 +10,7 @@
  * Запуск: npm run probe:scenario
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { writeModels } from './models.js';
 import { tmpdir } from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
@@ -32,12 +33,9 @@ mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
 process.env.DT_PROJECT = proj;
 process.chdir(base);
-writeFileSync(
-  join(home, 'providers.json'),
-  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
-);
+writeModels(home, { mock: { adapter: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
-writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Босс', role: 'руководитель' }, null, 2) + '\n');
 
 const { startServe } = await import('../src/serve.js');

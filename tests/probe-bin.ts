@@ -49,12 +49,13 @@ check('флаги не создали дом', existsSync(home) && readdirSync(h
 {
   const serveDir = mkdtempSync(join(tmpdir(), 'dt-serve-'));
   mkdirSync(join(serveDir, 'home'), { recursive: true });
+  mkdirSync(join(serveDir, 'home', 'models'), { recursive: true });
   writeFileSync(
-    join(serveDir, 'home', 'providers.json'),
-    JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
+    join(serveDir, 'home', 'models', 'mock.json'),
+    JSON.stringify({ adapter: 'mock' }, null, 2) + '\n',
   );
   // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
-  writeFileSync(join(serveDir, 'home', 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
+  writeFileSync(join(serveDir, 'home', 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
   const child = spawn(process.execPath, [BIN, 'serve'], {
     env: {
       ...process.env,

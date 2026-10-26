@@ -26,6 +26,7 @@ const home = join(base, 'home');
 const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
 mkdirSync(proj, { recursive: true });
+mkdirSync(join(home, 'models'), { recursive: true });
 process.env.DT_HOME = home;
 process.env.DT_PROJECT = join(proj, '.dreamteam');
 process.chdir(proj);
@@ -60,11 +61,11 @@ const port = await new Promise<number>((resolve) => {
 server.unref();
 
 writeFileSync(
-  join(home, 'providers.json'),
-  JSON.stringify({ default: 'fake', providers: { fake: { adapter: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake-1' } } }, null, 2) + '\n',
+  join(home, 'models', 'fake.json'),
+  JSON.stringify({ adapter: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake-1' }, null, 2) + '\n',
 );
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
-writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'fake' } }, null, 2) + '\n');
 writeFileSync(
   join(home, 'agents.json'),
   JSON.stringify({ agents: [{ id: 'kirk', name: 'Кир', role: 'тест', prompt: 'Ты — Кир.' }] }, null, 2) + '\n',

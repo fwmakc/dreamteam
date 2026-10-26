@@ -10,6 +10,7 @@ import type {
   ManagerProjectInfo,
   ManagerReply,
   ManagerUpdateFields,
+  ModelRef,
   SessionMeta,
 } from './types.js';
 import { loadTeam, MENTION_TRIGGERS } from './agents.js';
@@ -25,43 +26,48 @@ const AGENT_COLORS = MANAGER_COLORS;
 
 /**
  * Читает manager.json в доме. Файл обязателен: нет файла, битый JSON или
- * неизвестный провайдер — падение на старте с внятной ошибкой.
+ * неизвестная модель — падение на старте с внятной ошибкой.
  */
 /** Правка manager.json из GUI по белому списку; валидация loadManagerConfig после записи. */
 export function updateManagerConfig(
   file: string,
   fields: Record<string, unknown>,
-  knownProviderIds: Iterable<string>,
+  knownModelIds: Iterable<string>,
 ): string {
   const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  const current = loadManagerConfig(file, knownProviderIds);
+  const current = loadManagerConfig(file, knownModelIds);
   const changes: string[] = [];
   const updatable: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields ?? {})) {
-    if (!['name', 'emoji', 'color', 'temperature', 'provider'].includes(key)) continue;
+    if (!['name', 'emoji', 'color', 'temperature', 'model'].includes(key)) continue;
     if (key === 'temperature') {
       const num = Number(value);
       if (!Number.isFinite(num) || num < 0 || num > 2) {
         throw new Error(`temperature — жду число от 0 до 2, а не «${value}»`);
       }
       updatable[key] = num;
+    } else if (key === 'model') {
+      // ссылка на модель: id строкой или объект; существование проверит loadManagerConfig
+      if (typeof value === 'string' && value.trim()) updatable[key] = { id: value.trim() };
+      else if (value && typeof value === 'object' && !Array.isArray(value)) updatable[key] = value;
+      else throw new Error(`model — id модели («"model": {"id": "…"}»)`);
     } else {
       if (typeof value !== 'string' || !value.trim()) throw new Error(`поле «${key}» — непустая строка`);
       updatable[key] = value.trim();
     }
-    changes.push(`${key}="${String(updatable[key])}"`);
+    changes.push(`${key}="${String(JSON.stringify(updatable[key]))}"`);
   }
   if (changes.length === 0) throw new Error('не понятно, что менять — нет узнаваемых полей');
   raw.name = updatable.name ?? current.name;
   raw.emoji = updatable.emoji ?? current.emoji;
   raw.color = updatable.color ?? current.color;
   raw.temperature = updatable.temperature ?? current.temperature;
-  raw.provider = updatable.provider ?? current.provider;
+  raw.model = updatable.model ?? current.model;
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}
 `, 'utf8');
   try {
-    loadManagerConfig(tmp, knownProviderIds);
+    loadManagerConfig(tmp, knownModelIds);
   } catch (err) {
     rmSync(tmp, { force: true });
     throw err;
@@ -70,7 +76,7 @@ export function updateManagerConfig(
   return tf('✓ менеджер: {changes}', { changes: changes.join(', ') });
 }
 
-export function loadManagerConfig(file: string, knownProviderIds: Iterable<string>): ManagerConfig {
+export function loadManagerConfig(file: string, knownModelIds: Iterable<string>): ManagerConfig {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(file, 'utf8'));
@@ -78,15 +84,22 @@ export function loadManagerConfig(file: string, knownProviderIds: Iterable<strin
     throw new Error(`не удалось прочитать ${file}: ${err instanceof Error ? err.message : err}`);
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(`${file}: ожидается JSON-объект с полем "provider"`);
+    throw new Error(`${file}: ожидается JSON-объект с полем "model"`);
   }
   const obj = raw as Record<string, unknown>;
-  const provider = typeof obj.provider === 'string' ? obj.provider.trim() : '';
-  if (!provider) throw new Error(`${file}: не указан "provider" — id провайдера из providers.json в доме`);
-  const known = new Set(knownProviderIds);
-  if (!known.has(provider)) {
+  const rawModel = obj.model;
+  let model: ModelRef;
+  if (typeof rawModel === 'string' && rawModel.trim()) {
+    model = { id: rawModel.trim() };
+  } else if (rawModel && typeof rawModel === 'object' && !Array.isArray(rawModel)) {
+    model = { ...(rawModel as ModelRef) };
+  } else {
+    throw new Error(`${file}: не указан "model" — ссылка на модель из models/ дома ({"id": "…"})`);
+  }
+  const known = new Set(knownModelIds);
+  if (!model.id || !known.has(model.id)) {
     throw new Error(
-      `${file}: провайдер «${provider}» не найден в providers.json дома (есть: ${[...known].join(', ')})`,
+      `${file}: модель «${model.id ?? ''}» не найдена в models/ дома (есть: ${[...known].join(', ')})`,
     );
   }
   const color =
@@ -94,7 +107,7 @@ export function loadManagerConfig(file: string, knownProviderIds: Iterable<strin
   const temperature =
     typeof obj.temperature === 'number' && Number.isFinite(obj.temperature) ? obj.temperature : 0.2;
   return {
-    provider,
+    model,
     name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : 'Менеджер',
     emoji: typeof obj.emoji === 'string' && obj.emoji.trim() ? obj.emoji.trim() : '🛎',
     color,
@@ -134,8 +147,8 @@ export const MANAGER_PROMPT =
   'Формат ответа: сначала короткий текст для человека, затем строго один JSON-объект:\n' +
   '{"say":"текст для человека","actions":[...действия...]}\n' +
   'Действия:\n' +
-  '- {"op":"team.add","id":"логин-латиницей","name":"Имя","role":"роль","prompt":"системный промпт от первого лица","emoji":"🎯","color":"blue","temperature":0.5,"provider":"id-провайдера","tools":{"shell":{},"files":null}} — tools: объект-карточки, имя тула → настройки (объект или null = по умолчанию)\n' +
-  '- {"op":"team.update","id":"id_участника","fields":{"role":"...","prompt":"...","provider":"...","temperature":0.3,"name":"...","emoji":"...","color":"...","description":"..."}}\n' +
+  '- {"op":"team.add","id":"логин-латиницей","name":"Имя","description":"чем занимается, одной фразой","prompt":"системный промпт от первого лица","emoji":"🎯","color":"blue","temperature":0.5,"tools":{"shell":{},"files":null}} — tools: объект-карточки, имя тула → настройки (объект или null = по умолчанию); модель наследуется (переопределить можно полем "model":"id-модели")\n' +
+  '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","temperature":0.3,"name":"...","emoji":"...","color":"..."}}\n' +
   '- {"op":"chat.add","who":"имя или id"} / {"op":"chat.remove","who":"имя или id"} — позвать или вывести из текущего чата\n' +
   '- {"op":"session.list"} — показать разговоры; {"op":"session.open","n":2} — открыть №2; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","n":3} — удалить №3 (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (имя — по краткому содержанию)\n' +
   '- {"op":"tool.grant","agent":"id_участника","tool":"files","card":{"allow":["git *"]}} — включить тул агенту или обновить его карточку; card можно опустить (настройки по умолчанию). Встроенные: files, shell, git, arch, ssh, look, image; свои — имя файла из tools/ (включить можно только существующий, код тулов пишет человек)\n' +
@@ -174,7 +187,7 @@ export function managerStateInput(ctx: ManagerContext): string {
     .map((a) => {
       const tools = agentToolIds(a);
       return (
-        `- ${a.id} — ${a.name} (${a.role}), провайдер: ${a.provider ?? 'основной'}` +
+        `- ${a.id} — ${a.name}${a.description ? ` (${a.description})` : ''}, модель: ${a.model?.id ?? 'основная'}` +
         (a.temperature != null ? `, temp ${a.temperature}` : '') +
         (tools.length > 0 ? `; тула: ${tools.join(', ')}` : '; тула нет')
       );
@@ -307,7 +320,8 @@ export interface ManagerNewAgent {
   color?: string;
   description?: string;
   temperature?: number;
-  provider?: string;
+  /** id модели строкой или объект-ссылка; пусто → settings.model */
+  model?: string | ModelRef;
   tools?: AgentTools;
 }
 
@@ -318,7 +332,7 @@ const UPDATABLE_FIELDS = new Set([
   'role',
   'description',
   'prompt',
-  'provider',
+  'model',
   'temperature',
 ]);
 
@@ -347,15 +361,19 @@ function writeTeamFile(file: string, root: unknown): void {
   renameSync(tmp, file);
 }
 
-/** Провайдер в agents.json — только существующий id: иначе пишется слово («основной») вместо id */
-function requireProvider(providers: ReadonlyMap<string, unknown>, pid: string): void {
-  if (providers.has(pid)) return;
-  const ids = [...providers.keys()].join(', ') || 'нет ни одного';
-  throw new Error(`неизвестный провайдер «${pid}» — есть: ${ids}`);
+/** Модель в карточке агента — только существующий id: иначе в файл уйдёт слово вместо id */
+function requireModel(models: ReadonlyMap<string, unknown>, mid: string): void {
+  if (models.has(mid)) return;
+  const ids = [...models.keys()].join(', ') || 'нет ни одной';
+  throw new Error(`неизвестная модель «${mid}» — есть: ${ids}`);
+}
+
+function normalizeModelRef(value: string | ModelRef): ModelRef {
+  return typeof value === 'string' ? { id: value.trim() } : value;
 }
 
 /** team.add: новый участник в agents.json. Бросает Error с причиной для отчёта «✗ …». */
-export function addTeamAgent(file: string, data: ManagerNewAgent, providers: ReadonlyMap<string, unknown>): string {
+export function addTeamAgent(file: string, data: ManagerNewAgent, models: ReadonlyMap<string, unknown>): string {
   const id = String(data.id ?? '').trim();
   const name = String(data.name ?? '').trim();
   if (!/^[a-z0-9_-]+$/i.test(id)) throw new Error(`неверный id «${data.id}» — нужна латиница, цифры, «-» и «_»`);
@@ -379,10 +397,12 @@ export function addTeamAgent(file: string, data: ManagerNewAgent, providers: Rea
   };
   if (typeof data.description === 'string' && data.description.trim()) agent.description = data.description.trim();
   if (typeof data.temperature === 'number' && Number.isFinite(data.temperature)) agent.temperature = data.temperature;
-  if (typeof data.provider === 'string' && data.provider.trim()) {
-    const pid = data.provider.trim();
-    requireProvider(providers, pid);
-    agent.provider = pid;
+  if (data.model !== undefined && (typeof data.model === 'string' ? data.model.trim() : true)) {
+    const ref = normalizeModelRef(data.model);
+    if (ref.id) {
+      requireModel(models, ref.id);
+      agent.model = ref;
+    }
   }
   if (data.tools !== undefined) agent.tools = normalizeAgentTools(id, data.tools);
   agents.push(agent);
@@ -420,7 +440,7 @@ export function removeTeamAgent(file: string, id: string): string {
 }
 
 /** team.update: правка полей участника по белому списку. */
-export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateFields, providers: ReadonlyMap<string, unknown>): string {
+export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateFields, models: ReadonlyMap<string, unknown>): string {
   const fid = String(id ?? '').trim();
   const { root, agents } = readTeamRoot(file);
   const agent = agents.find((a) => (a as Agent).id === fid) as Agent | undefined;
@@ -432,12 +452,13 @@ export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateF
       if (typeof value !== 'number' || !Number.isFinite(value)) continue;
       agent.temperature = value;
       changes.push(`temperature=${value}`);
-    } else if (key === 'provider') {
-      if (typeof value !== 'string' || !value.trim()) continue;
-      const pid = value.trim();
-      requireProvider(providers, pid);
-      agent.provider = pid;
-      changes.push(`provider="${pid}"`);
+    } else if (key === 'model') {
+      if (value === undefined || value === null) continue;
+      const ref = normalizeModelRef(value as string | ModelRef);
+      if (!ref.id || !ref.id.trim()) continue;
+      requireModel(models, ref.id.trim());
+      agent.model = ref;
+      changes.push(`model="${ref.id.trim()}"`);
     } else if (typeof value === 'string' && value.trim()) {
       (agent as unknown as Record<string, unknown>)[key] = value.trim();
       changes.push(`${key}="${value.trim()}"`);

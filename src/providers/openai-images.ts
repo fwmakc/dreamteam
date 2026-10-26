@@ -1,5 +1,15 @@
 import type { ImageProvider, ImageRequest, ImageResult } from '../types.js';
-import type { ImageAdapterFactory, ProviderConfig } from './types.js';
+import type { AdapterContract, ImageAdapterFactory, ProviderConfig } from './types.js';
+
+/** Контракт карточки models/<id>.json для адаптера openai-images. */
+export const contract: AdapterContract = {
+  keys: {
+    baseUrl: { type: 'string', required: true, desc: 'адрес images API вместе с /v1' },
+    model: { type: 'string', required: true, desc: 'имя модели генерации' },
+    apiKey: { type: 'string' },
+  },
+  ref: [],
+};
 
 /**
  * Адаптер "openai-images": наш facade в docker (по умолчанию) или любой

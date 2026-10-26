@@ -19,6 +19,7 @@
  * Запуск: npm run probe:project
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { writeModels } from './models.js';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
@@ -48,12 +49,9 @@ process.env.DT_HOME = home;
 process.env.DT_PROJECT = join(base, 'proj-env');
 process.chdir(base);
 
-writeFileSync(
-  join(home, 'providers.json'),
-  JSON.stringify({ default: 'mock', providers: { mock: { adapter: 'mock' } } }, null, 2) + '\n',
-);
+writeModels(home, { mock: { adapter: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
-writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100 }, null, 2) + '\n');
+writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 
 // src-модули — строго после подмены слоёв: paths.ts вычисляет пути при загрузке
 const paths = await import('../src/paths.js');
@@ -167,7 +165,7 @@ const { makeCompleter, hintRowsFor } = await import('../src/completion.js');
 
 const { app } = await bootstrapApp();
 const engine = new Engine(app, stub);
-for (const p of app.providers.values()) p.provider = fakeProvider;
+for (const p of app.models.values()) p.provider = fakeProvider;
 const signal = () => new AbortController().signal;
 const run = (line: string): Promise<string[]> => runOperationText(engine, line);
 const flushChain = () => (engine as unknown as { flushChain: Promise<void> }).flushChain;
@@ -272,7 +270,7 @@ const baseSessionId = app.session.id;
     sessions: () => [],
     teamNames: () => [],
     chatAgents: () => [],
-    providerIds: () => [],
+    modelIds: () => [],
     managerName: () => 'Менеджер',
     projectNames: () => registry().projects.map((p) => p.name),
   };
