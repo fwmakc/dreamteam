@@ -172,12 +172,12 @@ export default фабрика `(id, config) => LLMProvider`.
 ### Z.ai (GLM)
 
 1. Получите API-ключ в личном кабинете открытой платформы Z.ai (раздел API keys).
-2. Впишите его в карточку провайдера в `~/.dreamteam/models/`:
+2. Впишите его в карточку модели в `~/.dreamteam/models/`:
    ```json
    "apiKey": "ваш_ключ"
    ```
-3. Там же уже выбран провайдер по умолчанию (`"default"`). Модель меняется
-   рядом (поле `model`).
+3. Там же уже выбран модель по умолчанию задаётся в `settings.json` (`"model": {"id": …}`). Имя модели —
+   рядом (поле `model` в той же карточке).
 
 **Важно про тип ключа.** Например, у Z.ai два разных endpoint'а:
 
@@ -189,7 +189,7 @@ export default фабрика `(id, config) => LLMProvider`.
 Ключ от Coding Plan на обычном endpoint'е даёт ошибку
 `429: Insufficient balance or no resource package` — это нормально: подписка
 не видна платежному балансу. Если у вас подписка — укажите coding-endpoint в
-`baseUrl` провайдера `openai`. Список доступных моделей подписки можно
+`baseUrl` карточки модели. Список доступных моделей подписки можно
 посмотреть: `GET https://api.z.ai/api/coding/paas/v4/models`.
 
 ### Боевой дым: `npm run smoke:live`
@@ -227,7 +227,7 @@ probe`) на боевой API не ходят — они бесплатны и �
 и подставляет российский TLS-сертификат.
 
 1. Получите API-ключ в кабинете GigaChat (developers.sber.ru → GigaChat API).
-2. Впишите его в карточку провайдера `gigachat` в `~/.dreamteam/models/`:
+2. Впишите его в карточку модели `gigachat` в `~/.dreamteam/models/`:
    ```json
    "apiKey": "ваш_ключ_из_кабинета"
    ```
@@ -239,7 +239,7 @@ probe`) на боевой API не ходят — они бесплатны и �
    (небезопасно, только для тестов).
 4. В чате: `/model gigachat`.
 
-Каждый агент может работать на своём провайдере — укажите ему в
+Каждый агент может работать на своей модели — укажите ему в
 `~/.dreamteam/agents/` поле `"model": "ид_провайдера"`. Можно собрать
 команду из разных моделей (например, Марина на Claude, Дмитрий на GLM).
 
@@ -273,11 +273,11 @@ probe`) на боевой API не ходят — они бесплатны и �
 | `team.update <id> поле=знач…` | `/team update yurist role=сметана` | править: name, role, emoji, color, description, prompt, provider, temperature |
 | `team.delete <id…>` | `/team delete yurist, keks` | удалить участников: список через запятую или пробел |
 | `team.grant <агент> <тул>` | `/team grant yurist files` | включить тул: files, shell, ssh, look, image или свой из tools/ |
-| `provider.list` | `/model` | провайдеры и их статус |
-| `model.set <id>` | `/model set glm` | сменить основного провайдера |
-| `model.add <id> поле=знач…` | `/model add glm adapter=openai-compatible …` | новый провайдер (adapter обязателен) |
+| `provider.list` | `/model` | модели и их статус |
+| `model.set <id>` | `/model set glm` | сменить основную модель |
+| `model.add <id> поле=знач…` | `/model add glm adapter=openai-compatible …` | новая модель (adapter обязателен) |
 | `model.update <id> поле=знач…` | `/model update glm model=glm-4.6` | править карточку существующего (adapter, model, baseUrl, apiKey, maxTokens, temperature) |
-| `model.delete <id>` | `/model delete glm` | удалить провайдера; основной не удалить — сначала `/model set` другого |
+| `model.delete <id>` | `/model delete glm` | удалить модель; основной не удалить — сначала `/model set` другого |
 | `profile.show` / `profile.set` | `/profile set Имя; роль; о себе` | как вас видит команда (user.json) |
 | `memory.show [кого\|shared]` | `/memory show Юрист` | что помнит участник; `shared` — общая память |
 | `project.list` | `/project` | текущий проект: серверы (hosts.json) и известные проекты |
@@ -962,7 +962,7 @@ refs: images/poster-2.png
 меняется одной записью в `models/`, не трогая персон. Провайдер
 становится «зрячим» флагом `"vision": true` (адаптеры `openai-compatible` и
 `anthropic` умеют передавать картинки; `mock` — видит по-своему, для демо).
-Image-провайдеры — адаптеры `openai-images` (наш facade в docker или облачный
+Image-модели — адаптеры `openai-images` (наш facade в docker или облачный
 API) и `mock-images` (тестовый, работает без docker).
 
 **Свои модели в docker.** Папка `docker/` самодостаточна: скопируйте её на

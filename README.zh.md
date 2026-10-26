@@ -120,7 +120,7 @@ You > alright Gleb, look at the structure and propose a refactoring plan
    ```json
    "apiKey": "your-key"
    ```
-3. 默认服务商已在其中选好（`"default"`）。模型就在旁边改（`model` 字段）。
+3. 默认模型已在其中选好（`"default"`）。模型就在旁边改（`model` 字段）。
 
 **关于密钥类型。** 例如 Z.ai 有两个不同的端点：
 

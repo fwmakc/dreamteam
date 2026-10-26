@@ -58,7 +58,7 @@ The app is global (like any CLI), but its data is split into layers:
 | Layer | Where | What it holds |
 |---|---|---|
 | **package** | the installation folder | the application code — read-only, it writes nothing |
-| **home** | `~/.dreamteam` | EVERYTHING global: providers with model keys (`models/`), settings (`settings.json`), your profile (`user.json`), **the whole team** — agents (`agents/`), the manager (`manager.json`), tools (`tools/`), the schedule (`schedule.json`), shared memory (`memory.json`) — plus the registry of known projects (`projects.json`). The team simulator belongs to the machine: configured once, it works in any project |
+| **home** | `~/.dreamteam` | EVERYTHING global: model cards (`models/`), settings (`settings.json`), your profile (`user.json`), **the whole team** — agents (`agents/`), the manager (`manager.json`), tools (`tools/`), the schedule (`schedule.json`), shared memory (`memory.json`) — plus the registry of known projects (`projects.json`). The team simulator belongs to the machine: configured once, it works in any project |
 | **project** | `<project folder>/.dreamteam` | EVERYTHING about this specific project: `hosts.json` (ssh servers), the project's mail and bots (`mails.json`, `messengers.json` — project secrets, never in agent cards), the conversations (`sessions/`, `transcripts/`). The agents' work files go into the project folder (inbox and the like) |
 
 The tools' working folder is **always the folder the app was launched from**:
@@ -86,7 +86,7 @@ If there is no home (`~/.dreamteam`), the wizard asks, in order:
    speaks it: `ru`, `en`, `zh` out of the box, plus your own languages from
    `~/.dreamteam/lang/<id>.json` (see "Settings"). Changed later with
    `/settings set ui=<id>`.
-2. **Provider** — from the list of adapters (`mock` works for a trial run, no keys
+2. **Model** — from the list of adapters (`mock` works for a trial run, no keys
    needed).
 3. **API key** — the input is hidden (not displayed and not written to the terminal
    log); the key is saved right into the model card in `models/`
@@ -96,7 +96,7 @@ If there is no home (`~/.dreamteam`), the wizard asks, in order:
 
 Then both layers are created with minimal files and clear starter notes: the home
 gets a starting team of five members (an analyst, a secretary, a developer,
-a designer, a writer) and the manager on the chosen provider, plus the `lang/` shelf
+a designer, a writer) and the manager on the chosen model, plus the `lang/` shelf
 for custom languages. The roster is edited in `agents/` or via a conversation
 with the manager. If the project folder is a git repository without `.dreamteam/` in
 `.gitignore`, the wizard offers to add it. Running the wizard again breaks nothing:
@@ -192,8 +192,8 @@ anywhere else) like a password.
    ```json
    "apiKey": "your-key"
    ```
-3. The default provider is already selected there (`settings.json` `"model": {"id": …}`). The model is
-   changed right next to it (the `model` field).
+3. The default model is already set in `settings.json` (`"model": {"id": …}`). The model name is
+   the `model` field in the same card.
 
 **A note on key types.** For example, Z.ai has two different endpoints:
 
@@ -205,7 +205,7 @@ anywhere else) like a password.
 A Coding Plan key on the regular endpoint gives the error
 `429: Insufficient balance or no resource package` — that's normal: the subscription
 is invisible to the payment balance. If you have a subscription, set the coding
-endpoint in the `baseUrl` of the `openai` provider. The list of models available on
+endpoint in the `baseUrl` of the model card. The list of models available on
 the subscription: `GET https://api.z.ai/api/coding/paas/v4/models`.
 
 ### Live smoke: `npm run smoke:live`
@@ -255,7 +255,7 @@ supplies the Russian TLS certificate.
    `"insecureTLS": true` (insecure, for tests only).
 4. In the chat: `/model gigachat`.
 
-Every agent can run on its own provider — give it a `"model": "<provider id>"`
+Every agent can run on its own model — give it a `"model": {"id": "…"}` in its card
 field in `~/.dreamteam/agents/`. You can assemble a team of different models
 (say, Marina on Claude, Dmitry on GLM).
 
@@ -281,18 +281,18 @@ There are no aliases or short forms: one name — one operation.
 | `session.history [N]` | `/session history 20` | the current session's history (or the last N) |
 | `session.export [number]` | `/session export 2` | archive a session into a zip (no number — the current one) |
 | `session.import <file>` | `/session import dt-session-….zip` | restore a session from an archive (merges in as a new one) |
-| `home.export` | `/home export` | a snapshot of the home for moving: settings, providers with keys, the team's memory, the schedule and all sessions (no .env — a thing of the machine); store it like a password |
+| `home.export` | `/home export` | a snapshot of the home for moving: settings, models with keys, the team's memory, the schedule and all sessions (no .env — a thing of the machine); store it like a password |
 | `home.import <file>` | `/home import dt-home-….zip` | unfold a home from an archive (with keys); sessions merge by id, session dates are preserved |
 | `chat.add <name\|number>` | `/chat add Lawyer` | summon a member into the current conversation |
 | `chat.remove <name\|number>` | `/chat remove Lawyer` | send out of the conversation (the remarks stay in the history) |
 | `team.list` | `/team` | the team roster: roles, tools, who is in the chat |
 | `team.add <id> <Name> [role]` | `/team add lawyer Lawyer law` | a new member (defaults like the manager's) |
-| `team.update <id> field=value…` | `/team update lawyer role=sourcream` | edit: name, role, emoji, color, description, prompt, provider, temperature |
+| `team.update <id> field=value…` | `/team update lawyer role=sourcream` | edit: name, emoji, color, description, prompt, model, temperature |
 | `team.delete <id…>` | `/team delete lawyer, keks` | delete members: a comma- or space-separated list |
 | `team.grant <agent> <tool>` | `/team grant lawyer files` | enable a tool: files, shell, ssh, look, image or a custom one from tools/ |
-| `provider.list` | `/model` | the models and their status |
-| `model.set <id>` | `/model set glm` | change the main provider |
-| `model.add <id> field=value…` | `/model add glm adapter=openai-compatible …` | a new provider (adapter is required) |
+| `model.list` | `/model` | the models and their status |
+| `model.set <id>` | `/model set glm` | change the default model |
+| `model.add <id> field=value…` | `/model add glm adapter=openai-compatible …` | a new model (adapter is required) |
 | `model.update <id> field=value…` | `/model update glm model=glm-4.6` | edit an existing card (adapter, model, baseUrl, apiKey, maxTokens, temperature) |
 | `model.delete <id>` | `/model delete glm` | delete a model; the main one can't be deleted — `/model set` another one first |
 | `profile.show` / `profile.set` | `/profile set Name; role; about you` | how the team sees you (user.json) |
@@ -313,7 +313,7 @@ There are no aliases or short forms: one name — one operation.
 | `schedule.add <task> [minutes]` | `/schedule add "standup" 60` | a new task; the default interval is 10 minutes |
 | `schedule.toggle <id>` / `schedule.delete <id>` | `/schedule toggle task-…` | pause and delete a task |
 | `settings.show` / `settings.set field=value…` | `/settings set maxTurns=2` | settings (take effect from the next round) |
-| `manager.show` / `manager.set field=value…` | `/manager set model=glm` | the war-room manager: provider, temperature, name |
+| `manager.show` / `manager.set field=value…` | `/manager set model=glm` | the war-room manager: model, temperature, name |
 | `auto.on [N]` / `auto.off` | `/auto on 5`, `/auto off` | autonomous mode: the agents decide on their own for up to N turns |
 | `/help` | `/help` | help on the operations (the same manifest) |
 | `/exit` | `/exit` | quit (in the terminal only) |
@@ -335,7 +335,7 @@ input line (a short description for each); as you type, the list is filtered.
 **Tab** autocompletes the command, and for commands with arguments it hints and
 completes them too: session numbers (with titles) for `/session open` and
 `/session delete`, member names for `/chat add` and `/chat remove`, `who|shared`
-for `/memory`, provider ids for `/model set`.
+for `/memory`, model ids for `/model set`.
 
 The same for mentions: type `@` in the middle of a message — a popup with the
 members of the current chat and `@session` opens above the input line (each with
@@ -961,7 +961,7 @@ table with `docs write passports.xlsx` and sends it out with `max send` +
 ## Vision and images: `look` and `image`
 
 An agent can be given "eyes" and "hands" separate from its "brain": it talks to
-you with a regular LLM (the `provider` field), looks at pictures with a vision
+you with its model (the `model` field in its card), looks at pictures with a vision
 model (the `vision` field) and draws with an image model (the `image` field):
 
 ```json
@@ -996,7 +996,7 @@ agent wants, so an over-ambitious artist can be stopped before the spending.
 **The eyes and hands are configured independently.** For the artist — cloud
 vision (GLM-4.6V), for the layout person — local (Qwen-VL in docker); the
 generator changes with one record in `models/` without touching the
-personas. A provider becomes "seeing" with the `"vision": true` flag (the
+personas. A model becomes "seeing" with the `"vision": true` flag in its card (the
 `openai-compatible` and `anthropic` adapters can pass pictures; `mock` — sees in
 its own way, for the demo). Image providers — the `openai-images` adapters (our
 facade in docker or a cloud API) and `mock-images` (a test one, works without
@@ -1143,8 +1143,8 @@ Through it — and only through it — the app changes the configuration:
 
 | What you ask | What it does |
 |---|---|
-| "add … to the team" | a new member in `agents/`: id, name, role, prompt, emoji, color, provider, temperature, tools |
-| "assign …" | a member edit: role, prompt, model (provider), temperature, name, emoji, color |
+| "add … to the team" | a new member in `agents/`: id, name, description, prompt, emoji, color, model, temperature, tools |
+| "assign …" | a member edit: description, prompt, model, temperature, name, emoji, color |
 | "bring in …" / "send out …" | the current chat roster (like `/chat add` and `/chat remove`) |
 | "show the sessions", "open #2", "new session …", "delete #3" | session management (like `/sessions`, `/session open`, `/session new`, `/session delete`) |
 | "rename the session to …", "come up with a name for this conversation" | renaming (like `/session rename`); for inventing names the manager uses the short summary or the beginning of the conversation |
@@ -1174,25 +1174,25 @@ It is configured in `.dreamteam/manager.json` (the file is required, like
 { "model": "openai", "name": "Manager", "emoji": "🛎", "color": "yellow", "temperature": 0.2 }
 ```
 
-- `provider` — an id from `models/`, the model is taken from the
-  provider's record. An unknown id — the app won't start, with a clear error.
+- `model` — a reference to a card in `models/`; the model is taken from the
+  card's record. An unknown id — the app won't start, with a clear error.
 - `name` — the name for addressing. `@manager` and `!manager` always work,
   regardless of the name; in the `@` popup it is offered first.
 - `emoji`, `color` — the look of the lines; `temperature` by default is stricter
   than the members' (0.2): careful actions are expected from the manager, not
   creativity.
 
-`/model` changes the main provider of the **agents**; the manager has its own
-provider (from `manager.json`) — `/model` doesn't affect it.
+`/model` changes the default model of the **agents**; the manager has its own
+model (from `manager.json`) — `/model` doesn't affect it.
 
 ## Custom roles and your own API
 
 **Change the team** — edit `~/.dreamteam/agents/` (saved on the fly): the
 `id`, `name`, `emoji`, `role`, `description`, `color`
 (red/green/yellow/blue/magenta/cyan/white/gray), `prompt` (persona) fields,
-optionally `provider` and `temperature`; access to real actions — `tools`,
+optionally `model` and `temperature`; access to real actions — `tools`,
 `projects`, `workspace`, eyes and hands — `vision` and `image` (see "Tools"
-and "Vision and images"). The `provider` field — only an existing id from
+and "Vision and images"). The `model` field — a reference to a card in
 `models/`: the `/team add|update` commands, the web shell and the manager
 will reject a foreign id with the list of available ones instead of writing
 garbage into the config.
