@@ -3,6 +3,50 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow
 semver while pre-1.0 (breaking changes may land in minors).
 
+## [0.0.8] — 2026-10-26
+
+### Breaking
+
+- **Projects move into the app home** — each project is a folder
+  `~/.dreamteam/projects/<id>/` with `project.json` (`path` — the working
+  folder, `createdAt`, `lastOpened`, plus the secrets: `hosts`, `mails`,
+  `messengers`). The registry **is** the folders themselves — `projects.json`
+  is gone. Sessions and transcripts live there too.
+- **No `.dreamteam` anywhere** — the per-project service folder is gone:
+  `hosts.json`/`mails.json`/`messengers.json` are now fields of `project.json`;
+  `scaffold/project/` is removed. `DT_PROJECT` is gone — probes isolate with
+  `DT_HOME` only.
+- **The app starts with no project selected** — you pick one:
+  `/project new <name> [folder]` (creates the project and the working folder;
+  the folder may not be inside the home) or `/project open <name|path>` — an
+  unknown folder registers itself (id = folder name). No auto-migration of old
+  `./.dreamteam` data — a clean start.
+- **Import/export in exactly four levels** — the whole home
+  (`home.export`/`import`), settings only (`settings.export`/`import`, new),
+  one project with its conversations (`project.export`/`import`, new) and one
+  session (`session.export`/`import`).
+
+### Added
+
+- **Project CRUD** — `/project new|open|rename|path|remove`; the current
+  project can't be removed; `remove` deletes `projects/<id>/` wholesale and
+  never touches the working folder.
+- **GUI**: with no project chosen the "Projects" panel is expanded and comes
+  first; the "＋" button creates a project (rpc `project.new`).
+
+### Changed
+
+- Switching a project or a session now renders the conversation history into
+  the TUI panel (as on startup), and the concierge greets after
+  `/project new` / `project.open` in an empty session.
+- Wizard: home only, no gitignore step. README ×3 + CONTRIBUTING rewritten for
+  the folders-as-registry model; `scripts/check-readme.mjs` keeps the three
+  READMEs in sync, `scripts/i18n-diff.mjs` harvests `t()`/`tf()` keys against
+  `en.ts`.
+- Probes rewritten for the new model: `probe-project` (folders instead of a
+  registry file), `probe-transfer` (all four levels), no-project start in
+  `probe-startup`/`probe-tui`/`probe-scenario-tui`/`probe-api`.
+
 ## [0.0.7] — 2026-10-26
 
 ### Breaking
