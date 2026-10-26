@@ -5,11 +5,14 @@ on:
     tags: ['v*']
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
+    env:
+      # без секрета NPM_TOKEN шаг публикации пропускается — тогда в npm публикуем руками (npm publish)
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,6 +24,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run build:gui
       - run: npm publish --provenance
+        if: env.HAS_NPM_TOKEN == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - uses: softprops/action-gh-release@v2

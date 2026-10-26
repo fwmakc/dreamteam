@@ -77,13 +77,14 @@ git commit -m "Версия 0.0.x" && git push
 git tag -a v0.0.x -m "dreamteam 0.0.x" && git push origin v0.0.x
 ```
 
-That is the whole release: pushing a `v*` tag triggers
-`.github/workflows/release.yml`, which runs typecheck + `build:gui`, then
-`npm publish --provenance` and creates the GitHub Release with generated
-notes. Don't run `npm publish` by hand — it would race the workflow.
+Pushing a `v*` tag triggers `.github/workflows/release.yml`: typecheck +
+`build:gui` + a GitHub Release with generated notes. With the repo secret
+`NPM_TOKEN` set, the workflow also runs `npm publish --provenance` — then
+don't publish by hand. Without the secret the publish step is skipped and
+the package lands on npm manually: run `npm publish` on the tagged commit.
 
-`gui-dist/` is gitignored but must ship — the workflow builds it before
-packing. Check what goes out locally with `npm publish --dry-run`.
+`gui-dist/` is gitignored but must ship — `prepublishOnly` builds it before
+packing. Check what goes out with `npm publish --dry-run`.
 
 ## Probes
 
