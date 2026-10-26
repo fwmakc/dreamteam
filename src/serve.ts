@@ -26,7 +26,7 @@ import {
 import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from './providers/registry.js';
 import { openBrowser } from './open.js';
 import { loadSettings } from './settings.js';
-import { AGENTS_FILE, APP_VERSION, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, MODELS_DIR, PROJECTS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
+import { AGENTS_DIR, APP_VERSION, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, MODELS_DIR, PROJECTS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
 import { loadProjectRegistry, projectLabel } from './core/projects.js';
 import { agentToolIds } from './tools-api.js';
 import { safePath } from './actions.js';
@@ -94,7 +94,7 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
   let team: Agent[] = [];
   let teamError: string | null = null;
   try {
-    team = loadTeamOrEmpty(AGENTS_FILE);
+    team = loadTeamOrEmpty(AGENTS_DIR);
   } catch (err) {
     // битый agents.json: в снимке пусто, а ошибка — отдельным полем,
     // чтобы оболочка показала её, а не молчаливую пустую команду
@@ -563,22 +563,22 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text: res.text };
       }
       case 'team.add': {
-        const report = addTeamAgent(AGENTS_FILE, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined }, engine.app.models);
+        const report = addTeamAgent(AGENTS_DIR, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined }, engine.app.models);
         broadcastState();
         return { text: report };
       }
       case 'team.delete': {
-        const report = removeTeamAgent(AGENTS_FILE, String(args.id ?? ''));
+        const report = removeTeamAgent(AGENTS_DIR, String(args.id ?? ''));
         broadcastState();
         return { text: report };
       }
       case 'team.update': {
-        const report = updateTeamAgent(AGENTS_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>, engine.app.models);
+        const report = updateTeamAgent(AGENTS_DIR, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>, engine.app.models);
         broadcastState();
         return { text: report };
       }
       case 'team.grant': {
-        const report = grantTool(AGENTS_FILE, String(args.agent ?? ''), String(args.tool ?? ''), args.card, TOOLS_DIR);
+        const report = grantTool(AGENTS_DIR, String(args.agent ?? ''), String(args.tool ?? ''), args.card, TOOLS_DIR);
         broadcastState();
         return { text: report };
       }

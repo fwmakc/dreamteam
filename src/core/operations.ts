@@ -36,7 +36,7 @@ import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from
 import { resolveEndpoints } from '../mail.js';
 import { agentToolIds } from '../tools-api.js';
 import { t, tf, applyLocale } from '../i18n.js';
-import { AGENTS_FILE, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, MODELS_DIR, PROJECTS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
+import { AGENTS_DIR, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, MODELS_DIR, PROJECTS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
 import { loadProjectRegistry, projectLabel } from './projects.js';
 import { loadSettings } from '../settings.js';
 import { chatTeam, isSessionRef, type App, type Engine } from './engine.js';
@@ -97,7 +97,7 @@ function reloadModels(engine: Engine): void {
 function teamText(app: App): string[] {
   let fullTeam: Agent[] = [];
   try {
-    fullTeam = loadTeam(AGENTS_FILE);
+    fullTeam = loadTeam(AGENTS_DIR);
   } catch {
     return [t('agents.json недоступен.')];
   }
@@ -162,7 +162,7 @@ function historyText(app: App, nStr?: string): string[] {
 function memoryText(app: App, arg: string): string[] {
   let memTeam: Agent[] = [];
   try {
-    memTeam = loadTeam(AGENTS_FILE);
+    memTeam = loadTeam(AGENTS_DIR);
   } catch {
     // без agents.json показываем только общую память
   }
@@ -254,7 +254,7 @@ function chatChangeText(engine: Engine, arg: string, verb: string): string[] {
   if (!arg) return [tf('Кого {verb}? /chat {cmd} <имя или номер> (список — /team)', { verb, cmd: verb === 'позвать' ? 'add' : 'remove' })];
   let fullTeam: Agent[];
   try {
-    fullTeam = loadTeam(AGENTS_FILE);
+    fullTeam = loadTeam(AGENTS_DIR);
   } catch {
     return [tf('agents.json недоступен — {verb} никого не получится.', { verb })];
   }
@@ -475,7 +475,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine, rest) => {
       const [id, name, ...roleParts] = rest;
       if (!id || !name) return [t('Синтаксис: /team add <id> <Имя> [роль]')];
-      return [addTeamAgent(AGENTS_FILE, { id, name, role: roleParts.join(' ') || undefined }, engine.app.models)];
+      return [addTeamAgent(AGENTS_DIR, { id, name, role: roleParts.join(' ') || undefined }, engine.app.models)];
     },
   },
   {
@@ -499,7 +499,7 @@ export const OPERATIONS: OpSpec[] = [
       // поля агента в нижнем регистре (белый список updateTeamAgent точный)
       const fields: Record<string, string | number> = {};
       for (const [k, v] of Object.entries(parsed)) fields[k.toLowerCase()] = v;
-      return [updateTeamAgent(AGENTS_FILE, id, fields, engine.app.models)];
+      return [updateTeamAgent(AGENTS_DIR, id, fields, engine.app.models)];
     },
   },
   {
@@ -514,7 +514,7 @@ export const OPERATIONS: OpSpec[] = [
       const lines: string[] = [];
       for (const id of ids) {
         try {
-          lines.push(removeTeamAgent(AGENTS_FILE, id));
+          lines.push(removeTeamAgent(AGENTS_DIR, id));
         } catch (err) {
           lines.push(`✗ ${err instanceof Error ? err.message : err}`);
         }
@@ -533,7 +533,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (_engine, rest) => {
       const [who, tool] = rest;
       if (!who || !tool) return [t('Синтаксис: /team grant <агент> <тул> (files, shell, ssh, look, image или свой из tools/)')];
-      return [grantTool(AGENTS_FILE, who, tool, undefined, TOOLS_DIR)];
+      return [grantTool(AGENTS_DIR, who, tool, undefined, TOOLS_DIR)];
     },
   },
 

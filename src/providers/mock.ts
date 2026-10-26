@@ -7,8 +7,10 @@ export const contract: AdapterContract = {
   keys: {
     model: { type: 'string', desc: 'имя модели (косметика)' },
     note: { type: 'string', desc: 'текст заготовленного ответа' },
+    temperature: { type: 'number' },
+    maxTokens: { type: 'number' },
   },
-  ref: [],
+  ref: ['temperature', 'maxTokens'],
 };
 
 /**

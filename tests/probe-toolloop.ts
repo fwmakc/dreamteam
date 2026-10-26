@@ -57,12 +57,10 @@ writeFileSync(
 );
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'fake' } }, null, 2) + '\n');
+mkdirSync(join(home, 'agents'), { recursive: true });
 writeFileSync(
-  join(home, 'agents.json'),
-  JSON.stringify(
-    { agents: [{ id: 'kirk', name: 'Кир', role: 'документы', prompt: 'Ты — Кир.', tools: { files: {}, docs: {} } }] },
-    null, 2,
-  ) + '\n',
+  join(home, 'agents', 'kirk.json'),
+  JSON.stringify({ name: 'Кир', prompt: 'Ты — Кир.', tools: { files: {}, docs: {} } }, null, 2) + '\n',
 );
 
 const notices: string[] = [];

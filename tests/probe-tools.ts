@@ -4,7 +4,7 @@
  *    цепочки (полностью разрешённые текут молча), deny по сегментам,
  *    подстановки/перенаправления — всегда вопрос;
  *  - parseCommandRules: валидация правил из карточки (fail-fast);
- *  - normalizeAgentTools/loadTeam: карточки тулов в agents.json;
+ *  - normalizeAgentTools/loadTeam: карточки тулов в agents/;
  *  - loadUserTools: загрузка <проект>/tools/*.ts, кривые файлы, резерв имён,
  *    переимпорт без перезапуска;
  *  - buildToolset + встроенные тула: check() файлов/консоли по карточке,
@@ -108,7 +108,7 @@ const tctx: ToolContext = {
   bad({ allow: [''] }, '"allow"', 'пустое правило');
 }
 
-// --- normalizeAgentTools / loadTeam: карточки тулов в agents.json ---
+// --- normalizeAgentTools / loadTeam: карточки тулов в agents/ ---
 {
   check('tools отсутствуют — ок', normalizeAgentTools('a', undefined) === undefined);
   const cards = normalizeAgentTools('a', { shell: { allow: ['ls'] }, files: null });
@@ -126,20 +126,21 @@ const tctx: ToolContext = {
   try { normalizeAgentTools('a', 42); } catch (e) { threw = (e as Error).message; }
   check('tools не объект — ошибка', threw.includes('tools'), threw);
 
-  const teamFile = join(dir, 'agents.json');
+  const teamDir = join(dir, 'agents');
+  mkdirSync(teamDir, { recursive: true });
   writeFileSync(
-    teamFile,
-    JSON.stringify([{ id: 'gleb', name: 'Глеб', prompt: 'Ты — Глеб.', tools: { shell: { allow: ['echo *'] } } }], null, 2) + '\n',
+    join(teamDir, 'gleb.json'),
+    JSON.stringify({ name: 'Глеб', prompt: 'Ты — Глеб.', tools: { shell: { allow: ['echo *'] } } }, null, 2) + '\n',
   );
-  const team = loadTeam(teamFile);
+  const team = loadTeam(teamDir);
   const tools = team[0]!.tools;
   check('loadTeam: карточка дошла до агента', !!tools && !Array.isArray(tools) && 'shell' in tools, JSON.stringify(tools));
   writeFileSync(
-    teamFile,
-    JSON.stringify([{ id: 'gleb', name: 'Глеб', prompt: 'x', tools: { git: 5 } }]),
+    join(teamDir, 'gleb.json'),
+    JSON.stringify({ name: 'Глеб', prompt: 'x', tools: { git: 5 } }),
   );
   threw = '';
-  try { loadTeam(teamFile); } catch (e) { threw = (e as Error).message; }
+  try { loadTeam(teamDir); } catch (e) { threw = (e as Error).message; }
   check('loadTeam: битая карточка — внятная ошибка', threw.includes('tools.git'), threw);
 }
 

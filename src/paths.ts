@@ -58,7 +58,8 @@ export function setProjectRoot(workspaceDir: string): void {
 export const MODELS_DIR = join(DT_HOME, 'models');
 export const SETTINGS_FILE = join(DT_HOME, 'settings.json');
 export const USER_FILE = join(DT_HOME, 'user.json');
-export const AGENTS_FILE = join(DT_HOME, 'agents.json');
+/** Полка агентов: agents/<id>.json — по файлу на агента, ростер по алфавиту id. */
+export const AGENTS_DIR = join(DT_HOME, 'agents');
 export const MANAGER_FILE = join(DT_HOME, 'manager.json');
 export const TOOLS_DIR = join(DT_HOME, 'tools');
 /** Полка кастомных адаптеров провайдеров: providers/<id>.ts — export default фабрика. */

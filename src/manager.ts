@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
   Agent,
@@ -336,29 +336,32 @@ const UPDATABLE_FIELDS = new Set([
   'temperature',
 ]);
 
-/** Корень agents.json: массив или объект { agents } — неизвестные поля сохраняем как есть */
-function readTeamRoot(file: string): { root: unknown; agents: unknown[] } {
-  const root: unknown = JSON.parse(readFileSync(file, 'utf8'));
-  const agents = Array.isArray(root)
-    ? root
-    : root && typeof root === 'object' && Array.isArray((root as { agents?: unknown }).agents)
-      ? (root as { agents: unknown[] }).agents
-      : undefined;
-  if (!agents) throw new Error('в agents.json нет списка участников');
-  return { root, agents };
+/** Корень полки агентов: один файл — один агент (tmp-файл → валидация loadTeam → rename). */
+function readAgentFile(dir: string, id: string): Record<string, unknown> {
+  const path = join(dir, `${id}.json`);
+  if (!existsSync(path)) throw new Error(`участника с id «${id}» нет в команде`);
+  return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
 }
 
-/** Запись agents.json: tmp-файл → валидация loadTeam → rename. Ошибка — исходник не тронут. */
-function writeTeamFile(file: string, root: unknown): void {
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(root, null, 2)}\n`, 'utf8');
+/** Запись карточки агента: tmp → валидация loadTeam(dir) → rename. Ошибка — файл не тронут. */
+function writeAgentFile(dir: string, id: string, card: Record<string, unknown>): void {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${id}.json`);
+  const tmp = `${path}.tmp`;
+  const forCheck = { id, ...card };
+  writeFileSync(tmp, `${JSON.stringify(forCheck, null, 2)}\n`, 'utf8');
   try {
-    loadTeam(tmp);
+    // валидация: прочитаем все карточки — битые соседи тоже всплывут
+    loadTeam(dir);
   } catch (err) {
     rmSync(tmp, { force: true });
     throw err;
   }
-  renameSync(tmp, file);
+  renameSync(tmp, path);
+}
+
+function agentPathExists(dir: string, id: string): boolean {
+  return existsSync(join(dir, `${id}.json`));
 }
 
 /** Модель в карточке агента — только существующий id: иначе в файл уйдёт слово вместо id */
@@ -372,20 +375,17 @@ function normalizeModelRef(value: string | ModelRef): ModelRef {
   return typeof value === 'string' ? { id: value.trim() } : value;
 }
 
-/** team.add: новый участник в agents.json. Бросает Error с причиной для отчёта «✗ …». */
-export function addTeamAgent(file: string, data: ManagerNewAgent, models: ReadonlyMap<string, unknown>): string {
+/** team.add: новый участник — файл agents/<id>.json. Бросает Error с причиной для отчёта «✗ …». */
+export function addTeamAgent(dir: string, data: ManagerNewAgent, models: ReadonlyMap<string, unknown>): string {
   const id = String(data.id ?? '').trim();
   const name = String(data.name ?? '').trim();
   if (!/^[a-z0-9_-]+$/i.test(id)) throw new Error(`неверный id «${data.id}» — нужна латиница, цифры, «-» и «_»`);
   if (!name) throw new Error('не указано имя участника (name)');
-  const { root, agents } = readTeamRoot(file);
-  if (agents.some((a) => (a as Agent).id === id)) throw new Error(`участник с id «${id}» уже есть`);
+  if (agentPathExists(dir, id)) throw new Error(`участник с id «${id}» уже есть`);
   const role = typeof data.role === 'string' && data.role.trim() ? data.role.trim() : 'участник';
-  const agent: Agent = {
-    id,
+  const card: Record<string, unknown> = {
     name,
     emoji: typeof data.emoji === 'string' && data.emoji.trim() ? data.emoji.trim() : '🤖',
-    role,
     color:
       typeof data.color === 'string' && AGENT_COLORS.has(data.color.toLowerCase())
         ? data.color.toLowerCase()
@@ -395,78 +395,69 @@ export function addTeamAgent(file: string, data: ManagerNewAgent, models: Readon
         ? data.prompt.trim()
         : `Ты — ${name}, ${role}.`,
   };
-  if (typeof data.description === 'string' && data.description.trim()) agent.description = data.description.trim();
-  if (typeof data.temperature === 'number' && Number.isFinite(data.temperature)) agent.temperature = data.temperature;
+  if (typeof data.description === 'string' && data.description.trim()) card.description = data.description.trim();
+  if (typeof data.temperature === 'number' && Number.isFinite(data.temperature)) card.temperature = data.temperature;
   if (data.model !== undefined && (typeof data.model === 'string' ? data.model.trim() : true)) {
     const ref = normalizeModelRef(data.model);
     if (ref.id) {
       requireModel(models, ref.id);
-      agent.model = ref;
+      card.model = ref;
     }
   }
-  if (data.tools !== undefined) agent.tools = normalizeAgentTools(id, data.tools);
-  agents.push(agent);
-  writeTeamFile(file, root);
+  if (data.tools !== undefined) card.tools = normalizeAgentTools(id, data.tools);
+  writeAgentFile(dir, id, card);
   return tf('✓ {name} (id «{id}», роль «{role}») добавлен в команду', { name, id, role });
 }
 
-/** Импорт: вливает входящих агентов по id — новых добавляет, совпавших не трогает.
- *  Валидация и откат — те же (tmp → loadTeam → rename). Возвращает число добавленных. */
-export function mergeTeamAgents(file: string, incoming: Agent[]): number {
-  const { root, agents } = readTeamRoot(file);
-  const known = new Set(agents.map((a) => (a as Agent).id));
+/** Импорт: вливает входящих агентов по id — новых добавляет, совпавших не трогает. */
+export function mergeTeamAgents(dir: string, incoming: Agent[]): number {
   let added = 0;
   for (const a of incoming) {
-    if (!a?.id || known.has(a.id)) continue;
-    agents.push(a);
-    known.add(a.id);
+    if (!a?.id || agentPathExists(dir, a.id)) continue;
+    const { id: _id, ...card } = a;
+    writeAgentFile(dir, a.id, card as Record<string, unknown>);
     added++;
   }
-  if (added > 0) writeTeamFile(file, root);
   return added;
 }
 
-/** Удаление участника по id (для /team delete и GUI). Валидация+откат — как везде. */
-export function removeTeamAgent(file: string, id: string): string {
+/** Удаление участника по id (для /team delete и GUI). */
+export function removeTeamAgent(dir: string, id: string): string {
   const fid = String(id ?? '').trim();
   if (!fid) throw new Error('не указан id участника');
-  const { root, agents } = readTeamRoot(file);
-  const idx = agents.findIndex((a) => (a as Agent).id === fid);
-  if (idx === -1) throw new Error(`участника с id «${fid}» нет в команде`);
-  const gone = agents[idx] as Agent;
-  agents.splice(idx, 1);
-  writeTeamFile(file, root);
-  return tf('✓ {emoji} {name} (id «{id}») удалён из команды', { emoji: gone.emoji, name: gone.name, id: fid });
+  const path = join(dir, `${fid}.json`);
+  if (!existsSync(path)) throw new Error(`участника с id «${fid}» нет в команде`);
+  const card = JSON.parse(readFileSync(path, 'utf8')) as { emoji?: string; name?: string };
+  rmSync(path);
+  return tf('✓ {emoji} {name} (id «{id}») удалён из команды', { emoji: card.emoji ?? '🤖', name: card.name ?? fid, id: fid });
 }
 
-/** team.update: правка полей участника по белому списку. */
-export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateFields, models: ReadonlyMap<string, unknown>): string {
+/** team.update: правка полей участника по белому списку (read-modify-write одного файла). */
+export function updateTeamAgent(dir: string, id: string, fields: ManagerUpdateFields, models: ReadonlyMap<string, unknown>): string {
   const fid = String(id ?? '').trim();
-  const { root, agents } = readTeamRoot(file);
-  const agent = agents.find((a) => (a as Agent).id === fid) as Agent | undefined;
-  if (!agent) throw new Error(`участника с id «${fid}» нет в команде`);
+  const card = readAgentFile(dir, fid);
   const changes: string[] = [];
   for (const [key, value] of Object.entries(fields ?? {})) {
     if (!UPDATABLE_FIELDS.has(key)) continue;
     if (key === 'temperature') {
       if (typeof value !== 'number' || !Number.isFinite(value)) continue;
-      agent.temperature = value;
+      card.temperature = value;
       changes.push(`temperature=${value}`);
     } else if (key === 'model') {
       if (value === undefined || value === null) continue;
       const ref = normalizeModelRef(value as string | ModelRef);
       if (!ref.id || !ref.id.trim()) continue;
       requireModel(models, ref.id.trim());
-      agent.model = ref;
+      card.model = ref;
       changes.push(`model="${ref.id.trim()}"`);
     } else if (typeof value === 'string' && value.trim()) {
-      (agent as unknown as Record<string, unknown>)[key] = value.trim();
+      card[key] = value.trim();
       changes.push(`${key}="${value.trim()}"`);
     }
   }
   if (changes.length === 0) throw new Error('не понятно, что менять — в fields нет узнаваемых полей');
-  writeTeamFile(file, root);
-  return tf('✓ {name}: {changes}', { name: agent.name, changes: changes.join(', ') });
+  writeAgentFile(dir, fid, card);
+  return tf('✓ {name}: {changes}', { name: String(card.name ?? fid), changes: changes.join(', ') });
 }
 
 // ─── tool.grant: тулы участников (agents.json); файлы в tools/ менеджер не пишет ──
@@ -476,7 +467,7 @@ export function updateTeamAgent(file: string, id: string, fields: ManagerUpdateF
  * тулов, у своего тула файл tools/<id>.ts должен существовать (включать можно
  * только то, что человек положил на полку). Запись — tmp → loadTeam → rename.
  */
-export function grantTool(file: string, agentId: string, tool: string, card?: unknown, toolsDir?: string): string {
+export function grantTool(dir: string, agentId: string, tool: string, card?: unknown, toolsDir?: string): string {
   const fid = String(agentId ?? '').trim();
   const tid = String(tool ?? '').trim().toLowerCase();
   if (!TOOL_ID_RE.test(tid)) {
@@ -492,15 +483,14 @@ export function grantTool(file: string, agentId: string, tool: string, card?: un
   if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) {
     throw new Error(`карточка тула «${tid}» — объект настроек (или пусто = по умолчанию)`);
   }
-  const { root, agents } = readTeamRoot(file);
-  const agent = agents.find((a) => (a as Agent).id === fid) as Agent | undefined;
-  if (!agent) throw new Error(`участника с id «${fid}» нет в команде`);
-  const had = Boolean(agent.tools?.[tid]);
-  agent.tools = { ...(agent.tools ?? {}), [tid]: normalized as Record<string, unknown> };
-  writeTeamFile(file, root);
+  const agentCard = readAgentFile(dir, fid);
+  const tools = (agentCard.tools ?? {}) as Record<string, unknown>;
+  const had = Boolean(tools[tid]);
+  agentCard.tools = { ...tools, [tid]: normalized };
+  writeAgentFile(dir, fid, agentCard);
   return had
-    ? tf('✓ {name}: карточку тула «{tool}» обновил', { name: agent.name, tool: tid })
-    : tf('✓ {name}: тул «{tool}» включён', { name: agent.name, tool: tid });
+    ? tf('✓ {name}: карточку тула «{tool}» обновил', { name: String(agentCard.name ?? fid), tool: tid })
+    : tf('✓ {name}: тул «{tool}» включён', { name: String(agentCard.name ?? fid), tool: tid });
 }
 
 // ─── hosts.json: серверы текущего проекта ────────────────────────────────────

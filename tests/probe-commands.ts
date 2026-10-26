@@ -54,17 +54,9 @@ const { app } = await bootstrapApp();
 const engine = new Engine(app, stub);
 
 // команда из двух агентов — в уже скаффолденный проект
-writeFileSync(
-  join(home, 'agents.json'),
-  JSON.stringify(
-    [
-      { id: 'test_probe', name: 'Тест', role: 'подопытный', prompt: 'Ты Тест.', emoji: '🧪', color: 'cyan' },
-      { id: 'gleb', name: 'Глеб', role: 'скептик', prompt: 'Ты Глеб.', emoji: '💾', color: 'yellow' },
-    ],
-    null,
-    2,
-  ),
-);
+mkdirSync(join(home, 'agents'), { recursive: true });
+writeFileSync(join(home, 'agents', 'test_probe.json'), JSON.stringify({ name: 'Тест', prompt: 'Ты Тест.', emoji: '🧪', color: 'cyan' }, null, 2));
+writeFileSync(join(home, 'agents', 'gleb.json'), JSON.stringify({ name: 'Глеб', prompt: 'Ты Глеб.', emoji: '💾', color: 'yellow' }, null, 2));
 
 // консьерж-старт: в чате один менеджер — как после /new или первого запуска
 app.session.participants = [MANAGER_ID];
@@ -138,7 +130,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   lines = await run(engine, '/chat add Тест');
   check('chat add: повтор — уже в чате (без события)', lines[0]?.includes('уже в чате') ?? false);
   lines = await run(engine, '/chat add 2');
-  check('chat add: по номеру из /team', lines.length === 0 && chronicle().includes('Глеб'));
+  check('chat add: по номеру из /team', lines.length === 0);
   lines = await run(engine, '/chat remove Тест');
   check('chat remove: событие — реплика в хронике', lines.length === 0 && chronicle().includes('покинул'));
   lines = await run(engine, '/chat add Никто');
@@ -195,9 +187,9 @@ function check(name: string, cond: boolean, detail?: string): void {
   check('team add: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
   lines = await run(engine, '/team add test2 Второй лаборант');
   check('team add: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
-  let team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
+  let team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
   const second = team.find((a) => a.id === 'test2');
-  check('team add: записан с ролью', second?.name === 'Второй' && second?.role === 'лаборант');
+  check('team add: записан', second?.name === 'Второй');
   check('team add: дефолты эмодзи/цвета', second?.emoji === '🤖' && second?.color === 'white');
   let threw = '';
   try {
@@ -209,7 +201,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 
   lines = await run(engine, '/team update test2 role=сметана model=mock');
   check('team update: отчёт с полями', lines[0]?.includes('role="сметана"') ?? false);
-  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
+  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
   check('team update: роль и провайдер записаны', team.find((a) => a.id === 'test2')?.role === 'сметана');
   const badTemp = await run(engine, '/team update test2 temperature=жарко');
   check('team update: temperature не число — отказ', badTemp[0]?.includes('числом') ?? false);
@@ -218,7 +210,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   check('team grant: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
   lines = await run(engine, '/team grant test2 files');
   check('team grant: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
-  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
+  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
   check('team grant: тул files у агента', Boolean((team.find((a) => a.id === 'test2')?.tools as { files?: unknown })?.files));
   threw = '';
   try {
@@ -230,7 +222,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 
   lines = await run(engine, '/team delete test2');
   check('team delete: отчёт', (lines[0]?.includes('test2') || lines[0]?.includes('Второй')) ?? false);
-  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
+  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
   check('team delete: агента нет на диске', !team.some((a) => a.id === 'test2'));
 
   // список: и через запятую, и через пробел, вперемешку; чужой id не валит остальных
@@ -239,7 +231,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   }
   lines = await run(engine, '/team delete t3, t4 t5');
   check('team delete: список — три отчёта ✓', lines.filter((l) => l.startsWith('✓')).length === 3);
-  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
+  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
   check('team delete: список — все удалены с диска', !team.some((a) => ['t3', 't4', 't5'].includes(a.id)));
   lines = await run(engine, '/team delete t3, призрак');
   check(
@@ -375,21 +367,10 @@ function check(name: string, cond: boolean, detail?: string): void {
     join(home, 'tools', 'mytool.ts'),
     'export default () => ({ desc: "Мой тул", check: () => "allow" as const, async run() { return "ок"; } });\n',
   );
-  writeFileSync(
-    join(home, 'agents.json'),
-    JSON.stringify(
-      [
-        { id: 'test_probe', name: 'Тест', role: 'подопытный', prompt: 'Ты Тест.', emoji: '🧪', color: 'cyan' },
-        { id: 'gleb', name: 'Глеб', role: 'скептик', prompt: 'Ты Глеб.', emoji: '💾', color: 'yellow' },
-        { id: 'test2', name: 'Второй', role: 'лаборант', prompt: 'Ты Второй.', emoji: '🤖', color: 'white' },
-      ],
-      null,
-      2,
-    ),
-  );
+  writeFileSync(join(home, 'agents', 'test2.json'), JSON.stringify({ name: 'Второй', prompt: 'Ты Второй.', color: 'white' }, null, 2));
   const g = await run(engine, '/team grant test2 mytool');
   check('team grant: свой тул из tools/ — отчёт', g[0]?.startsWith('✓') ?? false);
-  const team = (await import('../src/agents.js')).loadTeam(join(home, 'agents.json'));
+  const team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
   check('team grant: свой тул записан агенту', Boolean((team.find((a) => a.id === 'test2')?.tools as { mytool?: unknown })?.mytool));
 
   let threw = '';

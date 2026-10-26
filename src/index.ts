@@ -12,7 +12,7 @@ import { loadProjectRegistry } from './core/projects.js';
 import { Editor } from './editor.js';
 import { Screen } from './screen.js';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
-import { AGENTS_FILE, APP_VERSION, DT_HOME, HOSTS_FILE, PROJECTS_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
+import { AGENTS_DIR, APP_VERSION, DT_HOME, HOSTS_FILE, PROJECTS_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
 import { agentHeader, colorFn, printDim, printError, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 // ядро: раунды, менеджер, инструменты, память — общение только через Presenter
 import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
@@ -245,7 +245,7 @@ function refreshCompletionCache(): void {
   let team: string[] = [];
   let chat: { name: string; role?: string }[] = [];
   try {
-    const agents = loadTeam(AGENTS_FILE);
+    const agents = loadTeam(AGENTS_DIR);
     team = agents.map((a) => a.name);
     // всплывашка @упоминаний предлагает только позванных в текущий чат
     if (appRef) chat = chatTeam(appRef.session, agents).map((a) => ({ name: a.name, role: a.role }));
@@ -427,7 +427,7 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
   console.log(pc.dim(tf('  версия {v} · дом: {home} · проект: {project}', { v: APP_VERSION, home: DT_HOME, project: WORKSPACE })));
 
   try {
-    const team = loadTeam(AGENTS_FILE);
+    const team = loadTeam(AGENTS_DIR);
     console.log(pc.dim(`\n  ${t('Команда:')}`));
     if (team.length === 0) {
       console.log(pc.dim(t('  (пока пусто — новый разговор начнётся один на один с менеджером)')));
@@ -505,7 +505,7 @@ function printHelp(): void {
 
 function printTeam(app: App): void {
   try {
-    const fullTeam = loadTeam(AGENTS_FILE);
+    const fullTeam = loadTeam(AGENTS_DIR);
     const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
     const cfg = loadToolsConfig(SETTINGS_FILE, HOSTS_FILE, WORKSPACE);
     console.log(pc.dim(`\n  ${t('Команда:')}`));
@@ -603,7 +603,7 @@ function printHistory(app: App, nStr?: string): void {
   }
   let team: Agent[] = [];
   try {
-    team = loadTeam(AGENTS_FILE);
+    team = loadTeam(AGENTS_DIR);
   } catch {
     // без agents.json печатаем без фирменных цветов
   }
@@ -777,7 +777,7 @@ async function main(): Promise<void> {
   if (screen && app.session.messages.length > 0) {
     let team: Agent[] = [];
     try {
-      team = loadTeam(AGENTS_FILE);
+      team = loadTeam(AGENTS_DIR);
     } catch {
       // без agents.json история засеивается без фирменных цветов агентов
     }

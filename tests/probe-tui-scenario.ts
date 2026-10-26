@@ -52,7 +52,7 @@ mkdirSync(join(home, 'models'), { recursive: true });
 writeFileSync(join(home, 'models', 'mock.json'), JSON.stringify({ adapter: 'mock' }, null, 2) + '\n');
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000, model: { id: 'mock' } }, null, 2) + '\n');
 writeFileSync(join(home, 'manager.json'), JSON.stringify({ model: { id: 'mock' } }, null, 2) + '\n');
-writeFileSync(join(home, 'agents.json'), '[]\n');
+writeFileSync(join(home, 'agents'), '[]\n');
 writeFileSync(join(dt, 'hosts.json'), '{}\n');
 // скаффолд руками: команда и manager — в доме, hosts.json — в проекте
 mkdirSync(join(home, 'tools'), { recursive: true });
@@ -61,7 +61,7 @@ process.on('SIGINT', () => process.exit(130));
 process.on('SIGTERM', () => process.exit(143));
 
 const sessionsDir = join(dt, 'sessions'); // переписка — в проекте
-const agentsFile = join(home, 'agents.json');
+const agentsFile = join(home, 'agents');
 const readJson = (p: string): any => JSON.parse(readFileSync(p, 'utf8'));
 const readSessions = (): any[] =>
   readdirSync(sessionsDir).filter((f) => f.endsWith('.json')).map((f) => readJson(join(sessionsDir, f)));
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
 
   // ── 2. агент-юрист ───────────────────────────────────────────────────────
   await type('/team add yurist Юрист право и договоры');
-  await waitDisk(() => readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист в agents.json');
+  await waitDisk(() => readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист в agents/');
   const yurist = readJson(agentsFile).find((a: any) => a.id === 'yurist');
   check('2: /team add — юрист на диске с дефолтами',
     yurist?.name === 'Юрист' && yurist?.emoji === '🤖' && String(yurist?.prompt).startsWith('Ты — Юрист'),

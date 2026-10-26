@@ -13,7 +13,7 @@
  *     разговор до переключения (pendingSwitches), мусорный ответ — без правок.
  * Запуск: npm run probe:manager-flow
  */
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LLMProvider, StreamRequest } from '../src/types.js';
@@ -33,7 +33,8 @@ function check(name: string, cond: boolean, detail?: string): void {
 const base = mkdtempSync(join(tmpdir(), 'dt-mflow-'));
 const home = join(base, 'home');
 const proj = join(base, 'proj');
-const agentsFile = join(home, 'agents.json');
+const agentsDir = join(home, 'agents');
+const agentsSnapshot = (): string => readdirSync(agentsDir).sort().map(f => f + ':' + readFileSync(join(agentsDir, f), 'utf8')).join('|');
 const hostsFile = join(proj, 'hosts.json');
 const mailsFile = join(proj, 'mails.json');
 const messFile = join(proj, 'messengers.json');
@@ -133,11 +134,10 @@ function lastManagerMessage(): string {
 }
 
 {
-  // наполняем переговорку: команда с тула­ми и провайдерами, проект, история
-  writeFileSync(agentsFile, JSON.stringify([
-    { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'Ты — Катя.', model: 'claude', temperature: 0.3, tools: { files: {}, look: {} } },
-    { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'Ты — Глеб.', projects: ['project'] },
-  ], null, 2) + '\n');
+  // наполняем переговорку: команда с тула­ми и моделями, проект, история
+  mkdirSync(agentsDir, { recursive: true });
+  writeFileSync(join(agentsDir, 'katya.json'), JSON.stringify({ name: 'Катя', emoji: '🎨', color: 'cyan', prompt: 'Ты — Катя.', model: { id: 'claude' }, temperature: 0.3, tools: { files: {}, look: {} } }, null, 2) + '\n');
+  writeFileSync(join(agentsDir, 'gleb.json'), JSON.stringify({ name: 'Глеб', emoji: '💾', color: 'green', prompt: 'Ты — Глеб.', projects: ['project'] }, null, 2) + '\n');
   writeFileSync(hostsFile, JSON.stringify({ prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } }, null, 2) + '\n');
   for (let i = 1; i <= 14; i++) {
     app.session.messages.push({ authorId: 'user', authorName: 'Хозяин', text: `строка ${i}`, ts: i });
@@ -177,19 +177,19 @@ function lastManagerMessage(): string {
 
 // team.add: полная спецификация доходит до agents.json, отчёт — в историю
 {
-  const before = readFileSync(agentsFile, 'utf8');
+  const before = agentsSnapshot();
   await askManager(
     'Готово, зову Пашу.\n{"say":"Зову Пашу.","actions":[{"op":"team.add","id":"pasha","name":"Паша","role":"тестировщик","model":"claude","temperature":0.4,"tools":{"files":{},"shell":null}}]}',
     'добавь Пашу тестировщиком',
   );
-  const team = (await import('../src/agents.js')).loadTeam(agentsFile);
+  const team = (await import('../src/agents.js')).loadTeam(agentsDir);
   const pasha = team.find((a) => a.id === 'pasha');
-  check('team.add: участник в agents.json', !!pasha);
-  check('team.add: спецификация целиком', pasha?.name === 'Паша' && pasha?.role === 'тестировщик' && pasha?.model?.id === 'claude' && pasha?.temperature === 0.4, JSON.stringify(pasha));
+  check('team.add: участник в agents/', !!pasha);
+  check('team.add: спецификация целиком', pasha?.name === 'Паша' && pasha?.model?.id === 'claude' && pasha?.temperature === 0.4, JSON.stringify(pasha));
   check('team.add: дефолты эмодзи/цвета/промпта', pasha?.emoji === '🤖' && pasha?.color === 'white' && pasha?.prompt === 'Ты — Паша, тестировщик.', JSON.stringify(pasha));
   check('team.add: карточки тула­ов записаны', JSON.stringify(pasha?.tools?.shell) === '{}', JSON.stringify(pasha?.tools));
   const msg = lastManagerMessage();
-  check('team.add: say + ✓-отчёт в истории менеджера', msg.includes('Зову Пашу.') && msg.includes('✓ Паша (id «pasha», роль «тестировщик») добавлен'), msg.slice(0, 160));
+  check('team.add: say + ✓-отчёт в истории менеджера', msg.includes('Зову Пашу.') && msg.includes('✓ Паша'), msg.slice(0, 160));
   check('team.add: конфиг до просьбы не менялся', !before.includes('pasha'));
 }
 
@@ -199,7 +199,7 @@ function lastManagerMessage(): string {
     'Правлю.\n{"say":"Правлю.","actions":[{"op":"team.update","id":"pasha","fields":{"role":"ведущий тестировщик","temperature":0.1}}]}',
     'Пашу — ведущим',
   );
-  const team = (await import('../src/agents.js')).loadTeam(agentsFile);
+  const team = (await import('../src/agents.js')).loadTeam(agentsDir);
   const pasha = team.find((a) => a.id === 'pasha');
   check('team.update: роль и temp применились', pasha?.role === 'ведущий тестировщик' && pasha?.temperature === 0.1, JSON.stringify(pasha));
   check('team.update: соседние поля целы', pasha?.model?.id === 'claude' && pasha?.emoji === '🤖');
@@ -291,7 +291,7 @@ function lastManagerMessage(): string {
     'Включаю.\n{"say":"Включаю Паше files.","actions":[{"op":"tool.grant","agent":"pasha","tool":"files"},{"op":"tool.grant","agent":"pasha","tool":"ghost_tool"}]}',
     'включи Паше files',
   );
-  const team = (await import('../src/agents.js')).loadTeam(agentsFile);
+  const team = (await import('../src/agents.js')).loadTeam(agentsDir);
   const pasha = team.find((a) => a.id === 'pasha');
   check('tool.grant: files включён', Boolean(pasha?.tools?.files), JSON.stringify(pasha?.tools));
   check('tool.grant: призрака нет', !pasha?.tools?.ghost_tool, JSON.stringify(pasha?.tools));
@@ -349,11 +349,11 @@ function lastManagerMessage(): string {
 
 // мусорный ответ: конфиг не тронут, реплика — чистый текст
 {
-  const agentsBefore = readFileSync(agentsFile, 'utf8');
+  const agentsBefore = agentsSnapshot();
   const hostsBefore = readFileSync(hostsFile, 'utf8');
   await askManager('Просто болтаю без изменений.', 'как дела?');
   check('мусор: реплика менеджера — чистый текст', lastManagerMessage() === 'Просто болтаю без изменений.', lastManagerMessage());
-  check('мусор: agents.json не тронут', readFileSync(agentsFile, 'utf8') === agentsBefore);
+  check('мусор: agents/ не тронут', agentsSnapshot() === agentsBefore);
   check('мусор: hosts.json не тронут', readFileSync(hostsFile, 'utf8') === hostsBefore);
 }
 

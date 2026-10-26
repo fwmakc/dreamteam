@@ -5,12 +5,12 @@
  * выполнилось реально (файлы изменились), а не только отклик сервера.
  *
  *  1. новая сессия            → +файл в sessions/, приветствие менеджера внутри
- *  2. агент-юрист             → запись в agents.json с дефолтами
+ *  2. агент-юрист             → запись в agents/ с дефолтами
  *  3. позвать в сессию        → participants в файле сессии
  *  4. переименовать           → title на диске
  *  5. несколько сообщений     → messages растут, есть реплики юриса и менеджера
  *  6. экспорт сессии          → zip читается, внутри session.json с юристом
- *  7. удалить агента и сессию → agents.json и sessions/ обратно
+ *  7. удалить агента и сессию → agents/ и sessions/ обратно
  *  8. импорт                  → сессия вернулась «как новая», юрист влит по id
  *  9. снова удалить           → песочница в исходном состоянии
  *
@@ -20,6 +20,7 @@
  * Запуск: npm run probe:scenario-gui
  */
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { loadTeam } from '../src/agents.js';
 import { writeModels } from './models.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,7 +53,7 @@ process.on('SIGINT', () => process.exit(130));
 process.on('SIGTERM', () => process.exit(143));
 
 const sessionsDir = join(proj, 'sessions'); // переписка — в проекте
-const agentsFile = join(home, 'agents.json'); // команда — в доме // DT_PROJECT — сама папка .dreamteam
+const agentsDir = join(home, 'agents'); // команда — в доме (agents/<id>.json)
 const readJson = (p: string): any => JSON.parse(readFileSync(p, 'utf8'));
 const sessionFile = (id: string): string => join(sessionsDir, `${id}.json`);
 const readSessions = (): any[] =>
@@ -143,8 +144,8 @@ try {
   client.send({ type: 'rpc', id: rpcId(), method: 'team.add', args: { id: 'yurist', name: 'Юрист', role: 'право и договоры' } });
   const r2 = await client.next<{ result: { text: string } }>((m) => m.type === 'rpc_result' && m.id === `c${rpc}`);
   check('2: team.add — отчёт о добавлении', String(r2.result.text).includes('Юрист'));
-  await waitDisk(() => existsSync(agentsFile) && readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист в agents.json');
-  const yurist = readJson(agentsFile).find((a: any) => a.id === 'yurist');
+  await waitDisk(() => { try { return loadTeam(agentsDir).some((a) => a.id === 'yurist'); } catch { return false; } }, 'юрист в agents/');
+  const yurist = loadTeam(agentsDir).find((a) => a.id === 'yurist');
   check('2: юрист на диске с дефолтами (эмодзи/цвет/автопромпт)',
     yurist?.emoji === '🤖' && yurist?.color === 'white' && String(yurist?.prompt).startsWith('Ты — Юрист'),
     JSON.stringify(yurist).slice(0, 160));
@@ -185,13 +186,13 @@ try {
   const ex = await client.next<{ dataB64: string }>((m) => m.type === 'export_data');
   const zip = new AdmZip(Buffer.from(ex.dataB64, 'base64'));
   const names = zip.getEntries().map((e) => e.entryName);
-  check('6: zip читается, внутри session.json и agents.json', names.includes('session.json') && names.includes('agents.json'), names.join(', '));
+  check('6: zip читается, внутри session.json и agents/', names.includes('session.json') && names.some((n) => n.startsWith('agents/')), names.join(', '));
   const exported = JSON.parse(zip.readAsText('session.json'));
   check('6: в архиве тот разговор (имя, юрист, сообщения)',
     exported.title === 'Юридический вопрос' &&
     (exported.participants ?? []).includes('yurist') &&
     exported.messages.length === msgs.length);
-  const inZip = JSON.parse(zip.readAsText('agents.json')) as Array<{ id: string }>;
+  const inZip = zip.getEntries().filter((e) => e.entryName.startsWith('agents/')).map((e) => JSON.parse(zip.readAsText(e)) as { id: string });
   check('6: в архиве только участники — юрист едет, чужие агенты нет',
     inZip.some((a) => a.id === 'yurist') && inZip.every((a) => (exported.participants ?? []).includes(a.id)),
     JSON.stringify(inZip.map((a) => a.id)));
@@ -207,8 +208,8 @@ try {
   client.send({ type: 'rpc', id: rpcId(), method: 'team.delete', args: { id: 'yurist' } });
   const r7a = await client.next<{ result: { text: string } }>((m) => m.type === 'rpc_result' && m.id === `c${rpc}`);
   check('7: team.delete — отчёт', String(r7a.result.text).toLowerCase().includes('юрист'));
-  await waitDisk(() => !readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист удалён из agents.json');
-  check('7: юриста нет на диске', !readJson(agentsFile).some((a: any) => a.id === 'yurist'));
+  await waitDisk(() => { try { return !loadTeam(agentsDir).some((a) => a.id === 'yurist'); } catch { return false; } }, 'юрист удалён из agents/');
+  check('7: юриста нет на диске', !loadTeam(agentsDir).some((a: any) => a.id === 'yurist'));
   const deletedId = st1.session.id;
   client.send({ type: 'rpc', id: rpcId(), method: 'session.delete', args: { n: 1 } });
   const r7b = await client.next<{ result: { text: string } }>((m) => m.type === 'rpc_result' && m.id === `c${rpc}`);
@@ -224,14 +225,14 @@ try {
   const restored = readSessions().find((s) => s.title === 'Юридический вопрос');
   check('8: разговор вернулся «как новый» (другой id, всё содержимое)',
     Boolean(restored) && restored.id !== deletedId && (restored.participants ?? []).includes('yurist'));
-  await waitDisk(() => readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист влит из архива');
+  await waitDisk(() => loadTeam(agentsDir).some((a: any) => a.id === 'yurist'), 'юрист влит из архива');
   check('8: юрист влит в команду по id (без дублей)',
-    readJson(agentsFile).filter((a: any) => a.id === 'yurist').length === 1);
+    loadTeam(agentsDir).filter((a) => a.id === 'yurist').length === 1);
 
   // ── 9. снова удалить ─────────────────────────────────────────────────────
   client.send({ type: 'rpc', id: rpcId(), method: 'team.delete', args: { id: 'yurist' } });
   await client.next<{ result: { text: string } }>((m) => m.type === 'rpc_result' && m.id === `c${rpc}`);
-  await waitDisk(() => !readJson(agentsFile).some((a: any) => a.id === 'yurist'), 'юрист снова удалён');
+  await waitDisk(() => { try { return !loadTeam(agentsDir).some((a) => a.id === 'yurist'); } catch { return false; } }, 'юрист снова удалён');
   // текущим делаем исходный разговор, потом удаляем импортированный (он свежее — №1)
   client.send({ type: 'rpc', id: rpcId(), method: 'session.open', args: { n: 2 } });
   await client.next((m) => m.type === 'session_opened');
@@ -239,7 +240,7 @@ try {
   const r9 = await client.next<{ result: { text: string } }>((m) => m.type === 'rpc_result' && m.id === `c${rpc}`);
   await waitDisk(() => readSessions().length === 1, 'импортированная сессия удалена');
   check('9: песочница в исходном состоянии (1 разговор, без юриста)',
-    readSessions().length === 1 && !readJson(agentsFile).some((a: any) => a.id === 'yurist') &&
+    readSessions().length === 1 && !loadTeam(agentsDir).some((a: any) => a.id === 'yurist') &&
     readSessions()[0].id !== restored.id,
     String(r9.result?.text ?? ''));
 } finally {

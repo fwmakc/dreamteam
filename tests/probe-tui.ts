@@ -13,7 +13,7 @@
  * (слой дома), в проекте — hosts.json. Сценарий —
  * консьерж-поток: пустой разговор → приветствие менеджера на старте → первая
  * реплика менеджеру (team.add «Теста» с тулами) → chat.add → раунд с
- * инструментами. team.add реально пишет в agents.json дома — зонд
+ * инструментами. team.add реально пишет в agents/ дома — зонд
  * проверяет это по файлу и убирает за собой всё при любом завершении.
  */
 import { createRequire } from 'node:module';
@@ -211,8 +211,8 @@ const code = await Promise.race([
 check('tui: процесс завершился сам', code === 0, String(code));
 if (code === null) term.kill();
 writeFileSync('/tmp/dt-tui-raw.txt', out, 'utf8');
-// team.add менеджера писал в agents.json дома (команда — вещь машины) — проверяем по файлу
-check('tui: «Тест» записан в агенты дома', readFileSync(join(home, 'agents.json'), 'utf8').includes('test_probe'));
+// team.add менеджера писал в agents/ дома (команда — вещь машины) — проверяем по файлу
+check('tui: «Тест» записан в агенты дома', readFileSync(join(home, 'agents'), 'utf8').includes('test_probe'));
 check('tui: разговор сохранился в проекте', readdirSync(join(proj, '.dreamteam', 'sessions')).length === 1);
 
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);

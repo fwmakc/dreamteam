@@ -74,8 +74,9 @@ const {
   check('настройки: язык интерфейса из ответа мастера', settings.ui === 'ru', JSON.stringify(settings));
   check('настройки: модель по умолчанию из мастера', settings.model?.id === 'mock', JSON.stringify(settings));
   check('команда: стартовая пятёрка в доме', (() => {
-    const team = JSON.parse(readFileSync(join(home, 'agents.json'), 'utf8')) as { id: string }[];
-    return ['analyst', 'secretary', 'developer', 'designer', 'writer'].every((id) => team.some((a) => a.id === id));
+    const teamDir = join(home, 'agents');
+    const cards = readdirSync(teamDir).filter((f) => f.endsWith('.json'));
+    return ['analyst', 'secretary', 'developer', 'designer', 'writer'].every((id) => cards.includes(`${id}.json`));
   })());
   check('команда: менеджер в доме на модели mock', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).model?.id === 'mock');
   check('команда: полка тулов в доме', existsSync(join(home, 'tools')));
@@ -114,9 +115,9 @@ const {
     check('скелет: интерфейс по умолчанию английский (ui:"en")', (() => {
       try { return JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'home', 'settings.json'), 'utf8')).ui === 'en'; } catch { return false; }
     })());
-    check('скелет: home/agents.json валиден по loadTeam, стартовая пятёрка', (() => {
+    check('скелет: home/agents/ валиден по loadTeam, стартовая пятёрка', (() => {
       try {
-        const team = loadTeam(join(SCAFFOLD_DIR, 'home', 'agents.json'));
+        const team = loadTeam(join(SCAFFOLD_DIR, 'home', 'agents'));
         return ['analyst', 'secretary', 'developer', 'designer', 'writer'].every((id) => team.some((a) => a.id === id));
       } catch { return false; }
     })());

@@ -185,7 +185,7 @@ const client = await makeClient(handle.port);
     ['analyst', 'secretary', 'developer', 'designer', 'writer'].every((id) => st0team.some((a) => a.id === id)),
     JSON.stringify(st0team.map((a) => a.id)),
   );
-  check('ws: нет agents.json — без ошибки в state', st0.teamError == null);
+  check('ws: нет agents/ — без ошибки в state', st0.teamError == null);
   check('ws: модель mock — основная', (st0.models ?? []).some((p) => p.id === 'mock' && p.isDefault));
 
   client.send({ type: 'hello' });
@@ -214,8 +214,8 @@ const client = await makeClient(handle.port);
   check('ws: реплика менеджера в истории', st1.session.messages.some((m) => m.authorId === 'manager'));
   check('ws: «Тест» появился в команде', st1.team.some((a) => a.id === 'test_probe'));
   check(
-    'ws: agents.json временного проекта получил «Теста»',
-    readFileSync(join(home, 'agents.json'), 'utf8').includes('test_probe'),
+    'ws: agents/ временного проекта получил «Теста»',
+    readFileSync(join(home, 'agents'), 'utf8').includes('test_probe'),
   );
 
   // chat.add менеджером (обращение явное: в чате уже есть Тест — без @ раунд ушёл бы модератору)
@@ -493,7 +493,7 @@ const client = await makeClient(handle.port);
 
   // --- CONFIRM ЖИВОГО РАУНДА: у Теста shell с узким allow — echo уйдёт в вопрос ---
   {
-    const teamFile = join(home, 'agents.json');
+    const teamFile = join(home, 'agents');
     type TeamAgent = { id: string; tools?: Record<string, unknown> };
     const team = JSON.parse(readFileSync(teamFile, 'utf8')) as TeamAgent[];
     const tester = team.find((a) => a.id === 'test_probe');
@@ -619,24 +619,24 @@ const client = await makeClient(handle.port);
   // наши hello не глотали state-события идущих раундов; предикаты прицельные:
   // в очереди к этому месту копятся несвежие state от прошлых секций) ---
   {
-    writeFileSync(join(home, 'agents.json'), '{ это не json');
+    writeFileSync(join(home, 'agents'), '{ это не json');
     client.send({ type: 'hello' });
     const bad = await client.next((m) => m.type === 'state' && (m.state as { teamError?: unknown }).teamError != null);
     const stBad = bad.state as { teamError: string; team: unknown[] };
     check('ws: битый json — teamError в state', stBad.teamError.includes('не удалось прочитать'));
     check('ws: битый json — команда в снимке пуста', Array.isArray(stBad.team) && stBad.team.length === 0);
 
-    writeFileSync(join(home, 'agents.json'), JSON.stringify([{ id: 'x' }]));
+    writeFileSync(join(home, 'agents'), JSON.stringify([{ id: 'x' }]));
     client.send({ type: 'hello' });
     const bad2 = await client.next((m) => m.type === 'state' && String((m.state as { teamError?: string }).teamError ?? '').includes('обязательны поля'));
     check('ws: агент без name/prompt — ошибка называет поля', Boolean(bad2));
 
-    writeFileSync(join(home, 'agents.json'), JSON.stringify([{ id: 'boss', name: 'Босс', prompt: 'Ты руководитель.' }]));
+    writeFileSync(join(home, 'agents'), JSON.stringify([{ id: 'boss', name: 'Босс', prompt: 'Ты руководитель.' }]));
     client.send({ type: 'hello' });
     const good = await client.next((m) => m.type === 'state' && (m.state as { team?: { id: string }[] }).team?.some((a) => a.id === 'boss') === true);
     const stGood = good.state as { teamError?: string | null };
     check('ws: починили — teamError ушёл, команда в снимке', stGood.teamError == null);
-    rmSync(join(home, 'agents.json')); // песочнице возвращаем отсутствие файла
+    rmSync(join(home, 'agents')); // песочнице возвращаем отсутствие файла
     client.send({ type: 'hello' });
     const none = await client.next((m) => m.type === 'state' && (m.state as { team?: unknown[] }).team?.length === 0 && (m.state as { teamError?: unknown }).teamError == null);
     check('ws: файла нет — пусто и без ошибки', Boolean(none));

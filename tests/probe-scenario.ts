@@ -120,8 +120,8 @@ await gui.next((m) => m.type === 'state');
     (m) => m.type === 'state' && (m.state as { team: { id: string }[] }).team.some((a) => a.id === 'lawyer'),
   );
   check('GUI/TUI 2: агент-юрист создан', Boolean(st.state));
-  const agentsFile = join(home, 'agents.json'); // команда — в доме
-  check('GUI/TUI 2: юрист записан в agents.json', readFileSync(agentsFile, 'utf8').includes('lawyer'));
+  const agentsDir = join(home, 'agents'); // команда — в доме
+  check('GUI/TUI 2: юрист записан в agents/', existsSync(join(agentsDir, 'lawyer.json')));
 }
 
 // ── Шаг 3: позвать юриста в сессию ───────────────────────────────────────────

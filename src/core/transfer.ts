@@ -27,7 +27,7 @@ import { loadModels } from '../providers/registry.js';
 import { loadTeam } from '../agents.js';
 import { loadTeamMemory } from '../memory.js';
 import {
-  AGENTS_FILE,
+  AGENTS_DIR,
   DT_HOME,
   MANAGER_FILE,
   MEMORY_FILE,
@@ -45,7 +45,7 @@ export interface TransferEntry {
   data: Buffer;
 }
 
-const HOME_FILES = ['settings.json', 'user.json', 'agents.json', 'manager.json', 'memory.json', 'schedule.json'] as const;
+const HOME_FILES = ['settings.json', 'user.json', 'manager.json', 'memory.json', 'schedule.json'] as const;
 /** id разговора — метка времени; из архива путь строится только из такого id (zip-slip мимо). */
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -70,6 +70,14 @@ export function homeEntries(app: App): TransferEntry[] {
       if (existsSync(p) && statSync(p).isFile()) out.push({ rel: `models/${name}`, data: readFileSync(p) });
     }
   }
+  // карточки агентов: agents/<id>.json — по файлу на агента
+  if (existsSync(AGENTS_DIR)) {
+    for (const name of readdirSync(AGENTS_DIR)) {
+      if (!name.endsWith('.json')) continue;
+      const p = join(AGENTS_DIR, name);
+      if (existsSync(p) && statSync(p).isFile()) out.push({ rel: `agents/${name}`, data: readFileSync(p) });
+    }
+  }
   for (const meta of app.store.list()) {
     const s = app.store.load(meta.id);
     if (s && SESSION_ID_RE.test(s.id)) out.push({ rel: `sessions/${s.id}.json`, data: Buffer.from(JSON.stringify(s, null, 2) + '\n') });
@@ -89,10 +97,12 @@ export function sessionEntriesById(app: App, id: string): TransferEntry[] {
   if (!s) throw new Error(tf('разговор «{id}» не читается', { id }));
   const out: TransferEntry[] = [{ rel: 'session.json', data: Buffer.from(JSON.stringify(s, null, 2) + '\n') }];
   const wanted = participantIds(s);
-  if (wanted.size === 0 || !existsSync(AGENTS_FILE)) return out;
-  const team = JSON.parse(readFileSync(AGENTS_FILE, 'utf8')) as Agent[];
-  const cards = team.filter((a) => wanted.has(a.id));
-  if (cards.length > 0) out.push({ rel: 'agents.json', data: Buffer.from(JSON.stringify(cards, null, 2) + '\n') });
+  if (wanted.size === 0 || !existsSync(AGENTS_DIR)) return out;
+  const team = loadTeam(AGENTS_DIR);
+  for (const a of team.filter((x) => wanted.has(x.id))) {
+    const { id: _id, ...card } = a;
+    out.push({ rel: `agents/${a.id}.json`, data: Buffer.from(JSON.stringify({ id: a.id, ...card }, null, 2) + '\n') });
+  }
   return out;
 }
 
@@ -151,6 +161,16 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     models++;
   }
   if (models > 0) report.push(tf('моделей влито: {n}', { n: models }));
+  // карточки агентов: agents/<id>.json — по файлу на агента
+  mkdirSync(AGENTS_DIR, { recursive: true });
+  let agents = 0;
+  for (const e of entries.filter((x) => x.rel.startsWith('agents/'))) {
+    const name = e.rel.slice('agents/'.length);
+    if (!name.endsWith('.json') || name.includes('/') || name.includes('..')) continue;
+    writeFileSync(join(AGENTS_DIR, name), e.data);
+    agents++;
+  }
+  if (agents > 0) report.push(tf('агентов влито: {n}', { n: agents }));
   // после замены команды перечитываем память команды
   try {
     app.memory = loadTeamMemory(MEMORY_FILE);
@@ -243,14 +263,20 @@ export function applySessionImport(app: App, entries: TransferEntry[]): string {
   const pos = list.findIndex((m) => m.id === newSession.id) + 1;
   report.push(tf('разговор импортирован как №{n} («{title}»)', { n: pos, title: newSession.title }));
 
-  const agentsEntry = entries.find((x) => x.rel === 'agents.json');
+  const agentEntries = entries.filter((x) => x.rel.startsWith('agents/') && x.rel.endsWith('.json'));
   const wanted = participantIds(imported);
-  if (agentsEntry && wanted.size > 0) {
-    const wholeTeam = JSON.parse(agentsEntry.data.toString('utf8')) as Agent[];
+  if (agentEntries.length > 0 && wanted.size > 0) {
+    mkdirSync(AGENTS_DIR, { recursive: true });
+    const incoming: Agent[] = [];
+    for (const e of agentEntries) {
+      try {
+        const card = JSON.parse(e.data.toString('utf8')) as Agent;
+        if (card?.id && wanted.has(card.id)) incoming.push(card);
+      } catch { /* мусорная карточка — пропускаем */ }
+    }
     // только участники разговора — не вся команда машины-экспортёра
-    const incoming = wholeTeam.filter((a) => wanted.has(a.id));
-    const added = mergeTeamAgents(AGENTS_FILE, incoming);
-    void loadTeam(AGENTS_FILE); // валидность после записи
+    const added = mergeTeamAgents(AGENTS_DIR, incoming);
+    void loadTeam(AGENTS_DIR); // валидность после записи
     report.push(tf('участников влито: {n}', { n: added }));
   } else if (wanted.size === 0) {
     report.push(t('состав разговора не указан — команда не менялась'));

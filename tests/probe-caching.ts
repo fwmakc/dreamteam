@@ -67,7 +67,7 @@ writeFileSync(
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'fake' } }, null, 2) + '\n');
 writeFileSync(
-  join(home, 'agents.json'),
+  join(home, 'agents'),
   JSON.stringify({ agents: [{ id: 'kirk', name: 'Кир', role: 'тест', prompt: 'Ты — Кир.' }] }, null, 2) + '\n',
 );
 

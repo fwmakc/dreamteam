@@ -260,17 +260,20 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     notes.push(tf('создал {file} (язык и экран по умолчанию)', { file: settingsFile }));
   }
   // команда — вещь машины: скаффолдим один раз, дальше живёт между проектами
-  const agentsFile = join(homeDir, 'agents.json');
-  if (!existsSync(agentsFile)) {
-    mkdirSync(homeDir, { recursive: true });
-    const roster = readScaffold(join('home', 'agents.json'));
-    writeFileSync(agentsFile, JSON.stringify(roster, null, 2) + '\n');
-    const names = Array.isArray(roster)
-      ? roster.map((a) => (typeof a === 'object' && a !== null && 'name' in a ? String((a as { name: unknown }).name) : '')).filter(Boolean)
-      : [];
-    notes.push(names.length > 0
-      ? tf('создал {file} (стартовая команда: {names})', { file: agentsFile, names: names.join(', ') })
-      : tf('создал {file} (пустая команда — менеджер позовёт и настроит)', { file: agentsFile }));
+  const agentsDir = join(homeDir, 'agents');
+  if (!existsSync(agentsDir)) {
+    mkdirSync(agentsDir, { recursive: true });
+    try {
+      for (const f of readdirSync(join(SCAFFOLD_DIR, 'home', 'agents')).filter((x) => x.endsWith('.json'))) {
+        writeFileSync(join(agentsDir, f), readFileSync(join(SCAFFOLD_DIR, 'home', 'agents', f)));
+      }
+      const names = readdirSync(agentsDir).filter((x) => x.endsWith('.json')).map((x) => {
+        try { return String(JSON.parse(readFileSync(join(agentsDir, x), 'utf8')).name ?? ''); } catch { return ''; }
+      }).filter(Boolean);
+      notes.push(names.length > 0
+        ? tf('создал {file} (стартовая команда: {names})', { file: agentsDir, names: names.join(', ') })
+        : tf('создал {file} (пустая команда — менеджер позовёт и настроит)', { file: agentsDir }));
+    } catch { /* scaffold agents/ отсутствует — не беда */ }
   }
   const toolsDir = join(homeDir, 'tools');
   if (!existsSync(toolsDir)) {

@@ -41,7 +41,7 @@ import { operationHints, runOperationText } from './operations.js';
 import { join, resolve } from 'node:path';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
 import {
-  AGENTS_FILE,
+  AGENTS_DIR,
   HOSTS_FILE,
   MAIL_FILE,
   MEMORY_FILE,
@@ -282,7 +282,7 @@ export class Engine {
 
   /** Полная команда из agents.json (свежая, не кэш). */
   team(): Agent[] {
-    return loadTeam(AGENTS_FILE);
+    return loadTeam(AGENTS_DIR);
   }
 
   // ── сборка запроса ──────────────────────────────────────────────────────
@@ -796,9 +796,9 @@ export class Engine {
   ): Promise<string | ChatEvent> {
     switch (action.op) {
       case 'team.add':
-        return addTeamAgent(AGENTS_FILE, action, this.app.models);
+        return addTeamAgent(AGENTS_DIR, action, this.app.models);
       case 'team.update':
-        return updateTeamAgent(AGENTS_FILE, action.id, action.fields, this.app.models);
+        return updateTeamAgent(AGENTS_DIR, action.id, action.fields, this.app.models);
       case 'chat.add': {
         const res = this.addToChat(action.who, fullTeam);
         if (!res.changed) return res.text;
@@ -814,7 +814,7 @@ export class Engine {
       case 'session.rename':
         return this.renameSession(String(action.title ?? ''));
       case 'tool.grant':
-        return grantTool(AGENTS_FILE, action.agent, action.tool, action.card, TOOLS_DIR);
+        return grantTool(AGENTS_DIR, action.agent, action.tool, action.card, TOOLS_DIR);
       case 'project.host.add':
         return addProjectHosts(HOSTS_FILE, { [String(action.name ?? 'main')]: action });
       case 'project.open': {
@@ -1123,7 +1123,7 @@ export class Engine {
       return tf('{emoji} {name} — конфигурация через разговор', { emoji: this.app.mgr.emoji, name: this.app.mgr.name });
     }
     try {
-      const full = loadTeam(AGENTS_FILE);
+      const full = loadTeam(AGENTS_DIR);
       return chatTeam(session, full).map((a) => `${a.emoji} ${a.name}`).join(', ');
     } catch {
       return null;

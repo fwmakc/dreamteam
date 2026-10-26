@@ -8,7 +8,7 @@ import { SessionStore } from '../sessions.js';
 import { loadSettings, type SettingsConfig } from '../settings.js';
 // пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
 import {
-  AGENTS_FILE,
+  AGENTS_DIR,
   DT_HOME,
   MANAGER_FILE,
   MEMORY_FILE,
@@ -109,7 +109,7 @@ export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> 
   };
   // ссылки на модели (settings.model.id, агенты, менеджер) должны указывать
   // на существующие карточки — проверяем сразу, с перечнем доступных
-  validateModelRefs(models, ui, mgr, loadTeamOrEmpty(AGENTS_FILE));
+  validateModelRefs(models, ui, mgr, loadTeamOrEmpty(AGENTS_DIR));
   // реестр проектов: папка старта — текущий проект (смена — /project open).
   // Не критично для старта: сломанный реестр не должен мешать работе.
   try {

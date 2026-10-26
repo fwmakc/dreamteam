@@ -17,10 +17,11 @@
  * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер, confirm-заглушка.
  * Запуск: npm run probe:transfer
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Presenter, SpeakerRef, TurnSink } from '../src/core/presenter.js';
+import { loadTeam } from '../src/agents.js';
 import { rmTemp } from './rm-tmp.js';
 
 let fails = 0;
@@ -122,7 +123,7 @@ app.store.save(s2);
   check('экспорт дома: память и расписание в архиве',
     entries.some((e) => e.rel === 'memory.json') && entries.some((e) => e.rel === 'schedule.json'),
     JSON.stringify(entries.map((e) => e.rel)));
-  check('экспорт дома: команда внутри', entries.some((e) => e.rel === 'agents.json') && entries.some((e) => e.rel === 'manager.json'));
+  check('экспорт дома: команда внутри', entries.some((e) => e.rel.startsWith('agents/')) && entries.some((e) => e.rel === 'manager.json'));
   const sessRels = entries.filter((e) => e.rel.startsWith('sessions/')).map((e) => e.rel);
   check('экспорт дома: оба разговора в архиве',
     sessRels.some((r) => r.includes(s1.id)) && sessRels.some((r) => r.includes(s2.id)) && sessRels.length === app.store.list().length,
@@ -194,10 +195,9 @@ app.store.save(s2);
 // ── экспорт сессии: разговор + агенты ─────────────────────────────────────────
 {
   // агент «юрист» в команде — должен уехать в архив сессии
-  const agents = JSON.parse(readFileSync(join(home, 'agents.json'), 'utf8'));
-  agents.push({ id: 'lawyer', name: 'Юрист', emoji: '⚖', role: 'право', color: 'blue', prompt: 'Ты юрист.' });
-  agents.push({ id: 'observer', name: 'Наблюдатель', emoji: '👁', role: 'контроль', color: 'white', prompt: 'Ты наблюдатель.' });
-  writeFileSync(join(home, 'agents.json'), JSON.stringify(agents, null, 2) + '\n');
+  mkdirSync(join(home, 'agents'), { recursive: true });
+  writeFileSync(join(home, 'agents', 'lawyer.json'), JSON.stringify({ name: 'Юрист', emoji: '⚖', color: 'blue', prompt: 'Ты юрист.' }, null, 2) + '\n');
+  writeFileSync(join(home, 'agents', 'observer.json'), JSON.stringify({ name: 'Наблюдатель', emoji: '👁', color: 'white', prompt: 'Ты наблюдатель.' }, null, 2) + '\n');
   const alpha = app.store.load(s1.id)!;
   alpha.participants = [MANAGER_ID, 'lawyer'];
   alpha.createdAt = 1_700_000_000_000;
@@ -209,10 +209,10 @@ app.store.save(s2);
   const entries = sessionEntries(app, n);
   const rels = entries.map((e) => e.rel);
   check('экспорт сессии: session.json + agents.json, настроек в архиве нет',
-    rels.includes('session.json') && rels.includes('agents.json') && !rels.includes('settings.json'), JSON.stringify(rels));
+    rels.includes('session.json') && rels.some((r) => r.startsWith('agents/')) && !rels.includes('settings.json'), JSON.stringify(rels));
   const session = JSON.parse(entries.find((e) => e.rel === 'session.json')!.data.toString('utf8'));
   check('экспорт сессии: история внутри', session.messages.some((m: { text: string }) => m.text.includes('сообщение альфы 1')));
-  const agentsInZip = JSON.parse(entries.find((e) => e.rel === 'agents.json')!.data.toString('utf8')) as Array<{ id: string }>;
+  const agentsInZip = entries.filter((e) => e.rel.startsWith('agents/')).map((e) => JSON.parse(e.data.toString('utf8')) as { id: string });
   check('экспорт сессии: в архиве только участники — юрист едет, наблюдатель остаётся',
     agentsInZip.some((a) => a.id === 'lawyer') && !agentsInZip.some((a) => a.id === 'observer'),
     JSON.stringify(agentsInZip.map((a) => a.id)));
@@ -224,7 +224,7 @@ app.store.save(s2);
   app.store.save(stale);
   const staleEntries = sessionEntries(app, app.store.list().findIndex((m) => m.id === stale.id) + 1);
   check('экспорт сессии: без participants агенты в архив не пакуются',
-    staleEntries.some((e) => e.rel === 'session.json') && !staleEntries.some((e) => e.rel === 'agents.json'),
+    staleEntries.some((e) => e.rel === 'session.json') && !staleEntries.some((e) => e.rel.startsWith('agents/')),
     JSON.stringify(staleEntries.map((e) => e.rel)));
 
   let badNum = '';
@@ -242,10 +242,8 @@ app.store.save(s2);
   const nA = app.store.list().findIndex((m) => m.title === 'Альфа') + 1;
   const archive = packEntriesZip(sessionEntries(app, nA));
   // убираем юриста и наблюдателя: импорт должен вернуть только участника
-  const agentsPath = join(home, 'agents.json');
-  const agents = JSON.parse(readFileSync(agentsPath, 'utf8'))
-    .filter((a: { id: string }) => a.id !== 'lawyer' && a.id !== 'observer');
-  writeFileSync(agentsPath, JSON.stringify(agents, null, 2) + '\n');
+  rmSync(join(home, 'agents', 'lawyer.json'), { force: true });
+  rmSync(join(home, 'agents', 'observer.json'), { force: true });
   const before = app.store.list().length;
 
   const report = applySessionImport(app, readZipEntries(archive));
@@ -253,7 +251,7 @@ app.store.save(s2);
   const list = app.store.list();
   check('импорт сессии: разговор появился как новый', list.length === before + 1, JSON.stringify(list.map((s) => s.title)));
   check('импорт сессии: история внутри новой сессии', list.filter((m) => m.title === 'Альфа').length === 2);
-  const team = JSON.parse(readFileSync(agentsPath, 'utf8'));
+  const team = loadTeam(join(home, 'agents'));
   check('импорт сессии: участник вернулся в команду (merge по id)', team.some((a: { id: string }) => a.id === 'lawyer'));
   check('импорт сессии: чужая команда не переезжает (наблюдатель не влит)', !team.some((a: { id: string }) => a.id === 'observer'));
   const dupe = team.filter((a: { name: string }) => a.name === 'Юрист').length;
@@ -276,11 +274,11 @@ app.store.save(s2);
   // архив без агентов: разговор вливается, команда не трогается
   const bare = packEntriesZip(sessionEntries(app, app.store.list().findIndex((m) => m.title === 'Альфа' && m.id !== s1.id) + 1)
     .filter((e) => e.rel === 'session.json'));
-  const beforeTeam = JSON.parse(readFileSync(agentsPath, 'utf8')).length;
+  const beforeTeam = loadTeam(join(home, 'agents')).length;
   const bareReport = applySessionImport(app, readZipEntries(bare));
   check('импорт сессии: архив без агентов — разговор влит, команда не тронута',
     bareReport.includes('Импорт сессии выполнен') && !bareReport.includes('участников влито')
-      && JSON.parse(readFileSync(agentsPath, 'utf8')).length === beforeTeam, bareReport);
+      && loadTeam(join(home, 'agents')).length === beforeTeam, bareReport);
 }
 
 // ── zip-slip и мусор в архиве — мимо ──────────────────────────────────────────
