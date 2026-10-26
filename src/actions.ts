@@ -80,10 +80,14 @@ export interface ActionResult {
 /**
  * Доступ агента к «глазам» и «рукам»: провайдеры решаются в index.ts (там
  * живёт реестр), actions.ts только получает готовое или текст отказа.
+ * model(id?) — LLM-провайдер для кастомных тулов: без id — модель агента,
+ * с id — конкретная модель из models/.
  */
 export interface ToolContext {
   getVisionProvider(agent: Agent | undefined): { provider: LLMProvider } | { error: string };
   getImageProvider(agent: Agent | undefined): { provider: ImageProvider } | { error: string };
+  /** LLM-провайдер для кастомных тулов: model() → модель агента, model('id') → конкретная. */
+  model(id?: string): { provider: LLMProvider } | { error: string };
 }
 
 /** Читает settings.json (лимиты) + hosts.json (серверы); settings обязателен, hosts.json нет — серверов нет. */
@@ -695,6 +699,7 @@ function executeProcess(
 const noCtx: ToolContext = {
   getVisionProvider: () => ({ error: 'vision-провайдеры не подключены' }),
   getImageProvider: () => ({ error: 'image-провайдеры не подключены' }),
+  model: () => ({ error: 'модели не подключены' }),
 };
 
 export function executeAction(

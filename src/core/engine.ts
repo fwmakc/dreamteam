@@ -267,6 +267,16 @@ export class Engine {
         if (!status.ok) return { error: `image-модель «${id}» не настроена: ${status.note ?? ''}` };
         return { provider: status.provider };
       },
+      model(mid?: string) {
+        const id = mid ?? app.settings.model?.id;
+        if (!id) return { error: 'модель не указана (нет id и settings.model.id)' };
+        const status = app.models.get(id);
+        if (!status) {
+          const known = [...app.models.keys()].join(', ') || 'нет ни одной';
+          return { error: `модель «${id}» не найдена — есть: ${known}` };
+        }
+        return { provider: status.provider };
+      },
     };
   }
 

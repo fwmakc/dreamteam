@@ -50,6 +50,7 @@ const cfg: ToolsConfig = {
 const tctx: ToolContext = {
   getVisionProvider: () => ({ error: 'в пробнике провайдеров нет' }),
   getImageProvider: () => ({ error: 'в пробнике провайдеров нет' }),
+  model: () => ({ error: 'в пробнике моделей нет' }),
 };
 
 // --- splitChain: цепочки команд режутся на самостоятельные сегменты ---
