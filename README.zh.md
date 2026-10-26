@@ -12,7 +12,7 @@
 
 界面与本文档提供三种语言：英语、俄语和中文（`README.md`、`README.ru.md`、`README.zh.md`）。界面语言在首次启动（向导）时选择，之后随时可用 `/settings set ui=en`（`ru`、`zh`，或 `~/.dreamteam/lang/<id>.json` 中自定义语言的 id）更改。
 
-团队属于这台机器：它住在主目录（`~/.dreamteam/agents/ (карточки агентов)`）里，被所有项目共享。初始为空 —— 迎接你的是**会议室经理**：按需召集成员、为某人开启工具、配置项目和服务器。某场谈话里究竟由谁回答，由聊天名单决定 —— 即会话文件里的 `participants` 列表：空列表表示你召来的所有人都会回答（`/add`、`/out`，或请经理“把 Elena 叫进来”）。
+团队属于这台机器：它住在主目录（`~/.dreamteam/agents/`）里，被所有项目共享。初始为空 —— 迎接你的是**会议室经理**：按需召集成员、为某人开启工具、配置项目和服务器。某场谈话里究竟由谁回答，由聊天名单决定 —— 即会话文件里的 `participants` 列表：空列表表示你召来的所有人都会回答（`/add`、`/out`，或请经理“把 Elena 叫进来”）。
 
 ## 快速开始
 
@@ -28,7 +28,7 @@ dreamteam
 
 首次启动时向导会带你完成设置（见“首次启动向导”）：选择界面语言和服务商，输入 API 密钥（输入隐藏），并自我介绍 —— 随之创建 `~/.dreamteam`（家目录：设置与团队）和 `./.dreamteam`（项目：hosts.json、mails.json、messengers.json 注册表以及谈话记录）。之后就是你和会议室经理的对话：直接告诉它你需要什么。
 
-没有配置密钥时，应用以 **mock 模式**运行 —— 智能体给出预置回答，可以先用它熟悉界面和机制。密钥由向导输入，或之后在服务商卡片里填写（`~/.dreamteam/models/ (карточки моделей)` 的 `"apiKey"` 字段）。
+没有配置密钥时，应用以 **mock 模式**运行 —— 智能体给出预置回答，可以先用它熟悉界面和机制。密钥由向导输入，或之后在服务商卡片里填写（`~/.dreamteam/models/` 的 `"apiKey"` 字段）。
 
 ## 两层结构：家目录与项目
 
@@ -37,7 +37,7 @@ dreamteam
 | 层 | 位置 | 存放内容 |
 |---|---|---|
 | **package** | 安装文件夹 | 应用代码 —— 只读，什么都不写 |
-| **home** | `~/.dreamteam` | 所有全局内容：带模型密钥的服务商（`models/ (карточки моделей)`）、设置（`settings.json`）、你的资料（`user.json`）、**整个团队** —— 智能体（`agents/ (карточки агентов)`）、经理（`manager.json`）、工具（`tools/`）、日程（`schedule.json`）、共享记忆（`memory.json`），外加已知项目注册表（`projects.json`）。团队模拟器属于机器：配置一次，任何项目通用 |
+| **home** | `~/.dreamteam` | 所有全局内容：带模型密钥的服务商（`models/`）、设置（`settings.json`）、你的资料（`user.json`）、**整个团队** —— 智能体（`agents/`）、经理（`manager.json`）、工具（`tools/`）、日程（`schedule.json`）、共享记忆（`memory.json`），外加已知项目注册表（`projects.json`）。团队模拟器属于机器：配置一次，任何项目通用 |
 | **project** | `<项目文件夹>/.dreamteam` | 这个项目的全部内容：`hosts.json`（ssh 服务器）、项目的邮件与机器人（`mails.json`、`messengers.json` —— 项目机密，绝不放进智能体卡片）、谈话（`sessions/`、`transcripts/`）。智能体的工作文件写入项目文件夹（inbox 等） |
 
 工具的工作文件夹**始终是应用启动时所在的文件夹**：在项目文件夹里运行 `dreamteam`，团队就在这个项目上工作。任何地方都不用配置路径 —— 在仓库里启动，团队就在仓库上干活。
@@ -52,10 +52,10 @@ dreamteam
 
 1. **界面语言** —— 第一个问题，向导本身已经会用它：开箱即用 `ru`、`en`、`zh`，加上来自 `~/.dreamteam/lang/<id>.json` 的自定义语言（见“设置”）。之后用 `/settings set ui=<id>` 更改。
 2. **服务商** —— 从适配器列表选择（`mock` 无需密钥即可试用）。
-3. **API 密钥** —— 输入隐藏（不显示、也不进终端日志）；密钥直接保存到 `models/ (карточки моделей)` 的服务商卡片里（`"apiKey"` 字段）并立即生效。
+3. **API 密钥** —— 输入隐藏（不显示、也不进终端日志）；密钥直接保存到 `models/` 的服务商卡片里（`"apiKey"` 字段）并立即生效。
 4. **如何向团队介绍你** —— 名字、角色、几句介绍（可跳过）。
 
-之后两层都以最小文件和清晰的初始提示创建：家目录获得五人初始团队（分析师、秘书、开发者、设计师、文案）和运行在所选服务商上的经理，外加自定义语言的 `lang/` 架子。名单在 `agents/ (карточки агентов)` 里编辑，或通过与经理对话编辑。如果项目文件夹是 git 仓库而 `.gitignore` 里没有 `.dreamteam/`，向导会建议加上。重复运行向导不会破坏任何东西：已存在的文件原样保留。在非交互模式（管道）下向导会诚实地拒绝运行 —— 设置需要真实终端。
+之后两层都以最小文件和清晰的初始提示创建：家目录获得五人初始团队（分析师、秘书、开发者、设计师、文案）和运行在所选服务商上的经理，外加自定义语言的 `lang/` 架子。名单在 `agents/` 里编辑，或通过与经理对话编辑。如果项目文件夹是 git 仓库而 `.gitignore` 里没有 `.dreamteam/`，向导会建议加上。重复运行向导不会破坏任何东西：已存在的文件原样保留。在非交互模式（管道）下向导会诚实地拒绝运行 —— 设置需要真实终端。
 
 ## 第一场对话：礼宾经理
 
@@ -79,9 +79,9 @@ You > alright Gleb, look at the structure and propose a refactoring plan
 
 ### 工作方式
 
-- **模型密钥** —— 直接放在 `~/.dreamteam/models/ (карточки моделей)` 的服务商卡片里（`"apiKey"` 字段；GigaChat 也可以改用 `"clientId"`/`"clientSecret"` 对）。
+- **模型密钥** —— 直接放在 `~/.dreamteam/models/` 的服务商卡片里（`"apiKey"` 字段；GigaChat 也可以改用 `"clientId"`/`"clientSecret"` 对）。
 - **serve 设置** —— `~/.dreamteam/.env`（`TOKEN`、`PORT`、`HOST`；项目文件夹里的 `.env` 刻意不读 —— 变量只有单一来源）。这些是具体机器的设置：不会进入 `/home export` 归档。向导在新机器上首次启动时会创建 `.env`；经 `/home import` 迁移来的家目录不带该文件 —— 没有它 serve 只是监听 `127.0.0.1`；要外部访问，就按包里的样例（`scaffold/home/env.example`）创建 `.env` 并填入 `TOKEN`（见“外部访问”）。
-- **API 描述** —— 同一个 `models/ (карточки моделей)`：哪个适配器、URL、模型和密钥。
+- **API 描述** —— 同一个 `models/`：哪个适配器、URL、模型和密钥。
 - 应用通过统一的 `LLMProvider` 接口与 LLM 通信（`src/models/types.ts`）。具体协议藏在适配器里：
 
 | 适配器 | 适用 API |
@@ -96,7 +96,7 @@ You > alright Gleb, look at the structure and propose a refactoring plan
 ### Z.ai (GLM)
 
 1. 在 Z.ai 开放平台控制台（API 密钥分区）获取 API 密钥。
-2. 填入 `~/.dreamteam/models/ (карточки моделей)` 的服务商卡片：
+2. 填入 `~/.dreamteam/models/` 的服务商卡片：
    ```json
    "apiKey": "your-key"
    ```
@@ -113,7 +113,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 
 ### 冒烟实测：`npm run smoke:live`
 
-对着真实（非 mock）服务商的快速检查：经理的实时回答、经理确实按请求创建智能体、带 `files` 的智能体确实写出文件。家目录是真实的（密钥和 `models/ (карточки моделей)`），项目是临时沙箱 —— 真实项目里什么都不会变。密封探针（`npm run probe`）绝不触碰真实 API —— 免费且确定。
+对着真实（非 mock）服务商的快速检查：经理的实时回答、经理确实按请求创建智能体、带 `files` 的智能体确实写出文件。家目录是真实的（密钥和 `models/`），项目是临时沙箱 —— 真实项目里什么都不会变。密封探针（`npm run probe`）绝不触碰真实 API —— 免费且确定。
 
 ### 提示缓存（同样的对话，更少的 tokens）
 
@@ -125,20 +125,20 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 
 ### Anthropic (Claude)
 
-来自 Anthropic 控制台的密钥放进 `claude` 服务商卡片（`~/.dreamteam/models/ (карточки моделей)`）：
+来自 Anthropic 控制台的密钥放进 `claude` 服务商卡片（`~/.dreamteam/models/`）：
 
 ```json
 "apiKey": "your-key"
 ```
 
-然后在聊天里：`/model claude`（或改 `models/ (карточки моделей)` 里的 `"default"`）。
+然后在聊天里：`/model claude`（或改 `models/` 里的 `"default"`）。
 
 ### Sber GigaChat
 
 适配器自己就做好了人们通常要搭代理服务才有的全套事情：用 API 密钥换取 `access_token`、缓存它、提前刷新（过期前一分钟）、扛住突发的 401（静默刷新 + 重试），并挂上俄罗斯 TLS 证书。
 
 1. 在 GigaChat 控制台获取 API 密钥（developers.sber.ru → GigaChat API）。
-2. 填入 `~/.dreamteam/models/ (карточки моделей)` 的 `gigachat` 服务商卡片：
+2. 填入 `~/.dreamteam/models/` 的 `gigachat` 服务商卡片：
    ```json
    "apiKey": "your-console-key"
    ```
@@ -146,7 +146,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 3. 按 GigaChat 说明下载数字部根证书，放到 `caCertPath` 指定的路径（默认 `certs/russian_trusted_root_ca.pem`）。快速验证可改设 `"insecureTLS": true`（不安全，仅用于测试）。
 4. 在聊天里：`/model gigachat`。
 
-每个智能体都可以跑在独立服务商上 —— 在 `~/.dreamteam/agents/ (карточки агентов)` 里给它一个 `"model": "<服务商 id>"` 字段。可以组一支混合模型队伍（比如 Marina 用 Claude，Dmitry 用 GLM）。
+每个智能体都可以跑在独立服务商上 —— 在 `~/.dreamteam/agents/` 里给它一个 `"model": "<服务商 id>"` 字段。可以组一支混合模型队伍（比如 Marina 用 Claude，Dmitry 用 GLM）。
 
 ## 操作：命令 = rpc
 
@@ -309,7 +309,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 ## 工具：智能体写文件、跑命令
 
-默认团队只会讨论。但可以给智能体真实的动作权限 —— `~/.dreamteam/agents/ (карточки агентов)` 里的 `"tools"` 字段。形式统一 —— 卡片对象：工具名 → 它的设置（对象；`null` 或 `{}` — 默认设置）：
+默认团队只会讨论。但可以给智能体真实的动作权限 —— `~/.dreamteam/agents/` 里的 `"tools"` 字段。形式统一 —— 卡片对象：工具名 → 它的设置（对象；`null` 或 `{}` — 默认设置）：
 
 ```json
 "tools": { "files": {}, "shell": null }
@@ -323,7 +323,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 - `look` — 智能体可以“看”图（视觉模型），`image` — 生成/重绘图片（见“视觉与图片”）；
 - `docs`、`ocr`、`web`、`mail`、`telegram`、`max` — 文档、扫描件、网页、邮件和即时通讯（见下文“文档、扫描件、网页与通讯”）；这些工具的机密放在家目录文件里，不进智能体卡片。
 
-工具也可以通过经理开启：“给 Gleb 开 shell” —— 它会把卡片写进 `agents/ (карточки агентов)`（之后也能编辑：“给 Gleb 开 docker compose 权限”）。
+工具也可以通过经理开启：“给 Gleb 开 shell” —— 它会把卡片写进 `agents/`（之后也能编辑：“给 Gleb 开 docker compose 权限”）。
 
 **工作方式。** 智能体在回答里插入动作块，应用先检查结构性权限（该智能体是否启用了此工具、项目/服务器是否匹配），然后由**工具自己**决定 —— 它必需的 `check()` 方法返回三种裁决之一：
 
@@ -356,7 +356,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 扁平字典：服务器名 → 连接，每条必有 `host` 字段。块里按名字引用服务器（`ssh prod uptime`）；也认识 `project:prod` 长格式。
 
-`agents/ (карточки агентов)` 里给智能体分配项目并开启工具：
+`agents/` 里给智能体分配项目并开启工具：
 
 ```json
 "tools": { "files": {}, "ssh": null }, "projects": ["project"]
@@ -533,9 +533,9 @@ refs: images/poster-2.png
 
 `refs` 开启“以样本重绘”模式（以你选中的变体为基础）。文件保存到工作文件夹的 `images/`，路径作为结果发给智能体，并在看图器里为你打开。确认与其他工具一致 — 该行会显示智能体想要多少张、什么尺寸，因此过于野心勃勃的画师能在烧钱之前被拦下。
 
-**眼睛和双手独立配置。** 画师用云端视觉（GLM-4.6V），排版师用本地（docker 里的 Qwen-VL）；改一行 `models/ (карточки моделей)` 即换生成器，人设不动。服务商加 `"vision": true` 即“能看”（`openai-compatible` 和 `anthropic` 适配器可传图片；`mock` — 用自己的方式“看”，用于演示）。图像服务商 — `openai-images` 适配器（docker 里的我们的门面或云端 API）和 `mock-images`（测试用，无需 docker）。
+**眼睛和双手独立配置。** 画师用云端视觉（GLM-4.6V），排版师用本地（docker 里的 Qwen-VL）；改一行 `models/` 即换生成器，人设不动。服务商加 `"vision": true` 即“能看”（`openai-compatible` 和 `anthropic` 适配器可传图片；`mock` — 用自己的方式“看”，用于演示）。图像服务商 — `openai-images` 适配器（docker 里的我们的门面或云端 API）和 `mock-images`（测试用，无需 docker）。
 
-**docker 里自己的模型。** `docker/` 文件夹自给自足：拷到任何机器，按名字拉起模型 — `docker compose --profile qwen2-vl-2b --profile bk-sdm up -d`（最轻的一对，各约 3 GB 内存，完全不需要 GPU），更宽裕的机器 — `sd-turbo`，有 GPU — `qwen3-vl-8b`、`flux-dev`、`photomaker`（人脸控制）等。容器总是手动启动 — 应用只通过 HTTP 与它们通信，自己从不启动任何东西。创作三人组（Marta、Nika、Pasha）出厂即指向 CPU 模型，所以手动启动轻量一对后循环立刻就绪，无需改配置；只有容器住在另一台电脑上时才需要改 `models/ (карточки моделей)` 里的机器地址。细节与模型表 — `docker/README.md`。
+**docker 里自己的模型。** `docker/` 文件夹自给自足：拷到任何机器，按名字拉起模型 — `docker compose --profile qwen2-vl-2b --profile bk-sdm up -d`（最轻的一对，各约 3 GB 内存，完全不需要 GPU），更宽裕的机器 — `sd-turbo`，有 GPU — `qwen3-vl-8b`、`flux-dev`、`photomaker`（人脸控制）等。容器总是手动启动 — 应用只通过 HTTP 与它们通信，自己从不启动任何东西。创作三人组（Marta、Nika、Pasha）出厂即指向 CPU 模型，所以手动启动轻量一对后循环立刻就绪，无需改配置；只有容器住在另一台电脑上时才需要改 `models/` 里的机器地址。细节与模型表 — `docker/README.md`。
 
 **草图协议。** 创作成员的人设固化了规则：新任务 → 便宜的低分辨率草图若干变体 → 展示给你并询问 → 以选中的变体为参考修改 → 批准后才出高分辨率成品。选择权永远在你：智能体不得悄悄废掉一个方向。
 
@@ -620,7 +620,7 @@ You > @manager add the router server — admin@192.168.1.1
 
 | 你请求什么 | 它做什么 |
 |---|---|
-| “把 … 加进团队” | `agents/ (карточки агентов)` 里的新成员：id、名字、角色、提示词、表情、颜色、服务商、温度、工具 |
+| “把 … 加进团队” | `agents/` 里的新成员：id、名字、角色、提示词、表情、颜色、服务商、温度、工具 |
 | “指派 …” | 编辑成员：角色、提示词、模型（服务商）、温度、名字、表情、颜色 |
 | “叫进来 …” / “请出去 …” | 当前聊天名单（同 `/chat add` 和 `/chat remove`） |
 | “显示会话”、“打开 #2”、“新会话 …”、“删除 #3” | 会话管理（同 `/sessions`、`/session open`、`/session new`、`/session delete`） |
@@ -630,7 +630,7 @@ You > @manager add the router server — admin@192.168.1.1
 | “添加邮箱 …”、“移除邮箱 …” | `mails.json` 邮箱注册表（同 `/mail add` 和 `/mail remove`） |
 | “添加 telegram 机器人 …”、“移除机器人 …” | `messengers.json` 里的机器人令牌（同 `/messenger add` 和 `/messenger remove`） |
 
-对 `agents/ (карточки агентов)` 和项目注册表（`hosts.json`、`mails.json`、`messengers.json`）的编辑是安全的：文件经临时文件带有效性校验地重写 — 失败的编辑不会毁掉配置，未知字段被保留。如果你手动弄坏了 `agents/ (карточки агентов)`（JSON 损坏、缺 `name` 或 `prompt` 的智能体），团队不会无声消失：错误在一轮中可见，也出现在网页外壳团队面板的红行里。文件缺失不是错误 — 就是从与经理一对一的空状态开始。
+对 `agents/` 和项目注册表（`hosts.json`、`mails.json`、`messengers.json`）的编辑是安全的：文件经临时文件带有效性校验地重写 — 失败的编辑不会毁掉配置，未知字段被保留。如果你手动弄坏了 `agents/`（JSON 损坏、缺 `name` 或 `prompt` 的智能体），团队不会无声消失：错误在一轮中可见，也出现在网页外壳团队面板的红行里。文件缺失不是错误 — 就是从与经理一对一的空状态开始。
 
 经理能做的一切也都有显式的清单操作 — `/team add`、`/team grant`、`/project host add`、`/project open`（同一批执行器：神经网络和命令都经同一批经过验证的助手写配置）。经理的价值在命令覆盖不到的地方 — 比如为新成员构思提示词，或决定谁该拿到哪个工具。
 
@@ -640,7 +640,7 @@ You > @manager add the router server — admin@192.168.1.1
 { "model": "openai", "name": "Manager", "emoji": "🛎", "color": "yellow", "temperature": 0.2 }
 ```
 
-- `provider` — `models/ (карточки моделей)` 里的 id，模型取自服务商记录。未知 id — 应用不启动，并给出明确错误。
+- `provider` — `models/` 里的 id，模型取自服务商记录。未知 id — 应用不启动，并给出明确错误。
 - `name` — 称呼用的名字。`@manager` 和 `!manager` 始终可用，与名字无关；在 `@` 面板里它排第一。
 - `emoji`、`color` — 行的外观；`temperature` 默认比成员更严格（0.2）：期待经理谨慎行事，而不是发挥创意。
 
@@ -648,10 +648,10 @@ You > @manager add the router server — admin@192.168.1.1
 
 ## 自定义角色与自己的 API
 
-**更换团队** — 编辑 `~/.dreamteam/agents/ (карточки агентов)`（即时生效）：字段 `id`、`name`、`emoji`、`role`、`description`、`color`（red/green/yellow/blue/magenta/cyan/white/gray）、`prompt`（人设），可选 `provider` 和 `temperature`；真实动作的权限 — `tools`、`projects`、`workspace`，眼睛和双手 — `vision` 和 `image`（见“工具”与“视觉与图片”）。`provider` 字段只能是 `models/ (карточки моделей)` 里存在的 id：`/team add|update` 命令、网页外壳和经理都会拒绝陌生的 id 并给出可用列表，而不是把垃圾写进配置。
+**更换团队** — 编辑 `~/.dreamteam/agents/`（即时生效）：字段 `id`、`name`、`emoji`、`role`、`description`、`color`（red/green/yellow/blue/magenta/cyan/white/gray）、`prompt`（人设），可选 `provider` 和 `temperature`；真实动作的权限 — `tools`、`projects`、`workspace`，眼睛和双手 — `vision` 和 `image`（见“工具”与“视觉与图片”）。`provider` 字段只能是 `models/` 里存在的 id：`/team add|update` 命令、网页外壳和经理都会拒绝陌生的 id 并给出可用列表，而不是把垃圾写进配置。
 
 **接入新 API — 一个文件，无需 fork。** 把适配器放进家目录的架子
-`~/.dreamteam/models/`：文件名即适配器 id，`models/ (карточки моделей)` 里的服务商卡片用 `"adapter": "<id>"` 引用它。架子在首次启动时创建；代码在启动时加载 — 文件损坏或与内置适配器（含 image-）重名，都会在启动时给出明确错误：
+`~/.dreamteam/models/`：文件名即适配器 id，`models/` 里的服务商卡片用 `"adapter": "<id>"` 引用它。架子在首次启动时创建；代码在启动时加载 — 文件损坏或与内置适配器（含 image-）重名，都会在启动时给出明确错误：
 
 ```ts
 // ~/.dreamteam/models/my-api.ts
@@ -694,10 +694,10 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 
 ```
 ~/.dreamteam/                 # 家目录：一台机器 — 一个家
-├── models/ (карточки моделей)            # 服务商：适配器、URL、模型、密钥（"apiKey"）
+├── models/            # 服务商：适配器、URL、模型、密钥（"apiKey"）
 ├── settings.json             # 通用设置：界面语言（ui）、谈话语言、屏幕（width/margin/screen）、工具限制
 ├── user.json                 # 你对团队的资料（/me）
-├── agents/ (карточки агентов)               # 团队：角色、人设、颜色、工具
+├── agents/               # 团队：角色、人设、颜色、工具
 ├── manager.json              # 会议室经理：服务商、名字、外观（@manager）
 ├── projects.json             # 已知项目注册表（/project open 按名字）
 ├── memory.json               # 团队共享记忆
@@ -734,10 +734,12 @@ dreamteam/
 │   │   └── bootstrap.ts      # 各外壳共用的启动：层、配置、服务商、会话
 │   ├── serve.ts              # 本地服务器：127.0.0.1 上的 HTTP+WS、gui/ 静态、第二个 Presenter
 │   ├── paths.ts              # 三层路径：家目录、项目、工作文件夹
-│   ├── wizard.ts             # 首次启动向导：语言、服务商、密钥、资料、骨架
+│   ├── wizard.ts             # 首次启动向导：语言、模型、密钥、资料、骨架
 │   ├── orchestrator.ts       # 主持人：谁回答、聚焦什么
+│   ├── shortcut.ts           # 快速启动快捷方式 (.lnk/.desktop/.command)
+│   ├── open.ts               # 浏览器打开 (serve --open)
 │   ├── manager.ts            # 会议室经理：配置、提示词、动作（团队/聊天/会话/工具/项目）
-│   ├── agents.ts             # agents/ (карточки агентов) 加载
+│   ├── agents.ts             # agents/ 加载
 │   ├── actions.ts            # 智能体动作块、项目、结构性权限、执行
 │   ├── docs.ts               # 文档栈：pdf/docx/xlsx — 读与写 + LibreOffice 桥
 │   ├── ocr.ts                # 识别：tesseract、pdf 页、按坐标的表格

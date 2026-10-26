@@ -543,7 +543,10 @@ export async function executeLookAction(
     out = out.trim();
     if (!out) return { ok: false, label, output: 'vision-модель вернула пустой ответ' };
     if (out.length > cfg.maxOutputChars) {
-      out = out.slice(0, cfg.maxOutputChars) + '… (описание обрезано)';
+      // голова + хвост: ошибки обычно в конце вывода, начало даёт контекст
+      const head = Math.floor(cfg.maxOutputChars * 0.4);
+      const tail = cfg.maxOutputChars - head;
+      out = out.slice(0, head) + `\n…(${out.length - cfg.maxOutputChars} символов пропущено)…\n` + out.slice(-tail);
     }
     return { ok: true, label, output: `смотрю «${action.path}»:\n${out}` };
   } catch (err) {
@@ -683,9 +686,14 @@ function executeProcess(
     child.on('close', (code) => {
       if (timer) clearTimeout(timer);
       const full = out.trim();
+      // голова + хвост: ошибки обычно в конце вывода
       const output =
         full.length > cfg.maxOutputChars
-          ? full.slice(0, cfg.maxOutputChars) + `\n… (вывод обрезан, всего ${full.length} символов)`
+          ? (() => {
+              const head = Math.floor(cfg.maxOutputChars * 0.4);
+              const tail = cfg.maxOutputChars - head;
+              return full.slice(0, head) + `\n…(${full.length - cfg.maxOutputChars} символов пропущено)…\n` + full.slice(-tail);
+            })()
           : full || '(команда не вывела ничего)';
       const status = timedOut
         ? `превышен таймаут ${Math.round(cfg.runTimeoutMs / 1000)} с — процесс прерван`

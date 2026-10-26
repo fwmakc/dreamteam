@@ -19,7 +19,7 @@ first launch (in the wizard) and can be changed at any time with
 `~/.dreamteam/lang/<id>.json`).
 
 The team belongs to the machine: it lives in your home directory
-(`~/.dreamteam/agents/ (карточки агентов)`) and is shared by all projects. It starts out empty — you
+(`~/.dreamteam/agents/`) and is shared by all projects. It starts out empty — you
 are greeted by the **war-room manager**, who will summon members on request, enable
 tools for someone, and set up projects with servers. Who exactly answers in a given
 conversation is decided by the chat roster — the `participants` list in the session
@@ -48,7 +48,7 @@ manager: tell it what you need.
 
 Without a configured key the app runs in **mock mode** — the agents give canned
 answers, so you can try out the interface and the mechanics. The key is entered by
-the wizard or later in the provider card (`~/.dreamteam/models/ (карточки моделей)`, the
+the wizard or later in the provider card (`~/.dreamteam/models/`, the
 `"apiKey"` field).
 
 ## Two layers: home and project
@@ -58,7 +58,7 @@ The app is global (like any CLI), but its data is split into layers:
 | Layer | Where | What it holds |
 |---|---|---|
 | **package** | the installation folder | the application code — read-only, it writes nothing |
-| **home** | `~/.dreamteam` | EVERYTHING global: providers with model keys (`models/ (карточки моделей)`), settings (`settings.json`), your profile (`user.json`), **the whole team** — agents (`agents/ (карточки агентов)`), the manager (`manager.json`), tools (`tools/`), the schedule (`schedule.json`), shared memory (`memory.json`) — plus the registry of known projects (`projects.json`). The team simulator belongs to the machine: configured once, it works in any project |
+| **home** | `~/.dreamteam` | EVERYTHING global: providers with model keys (`models/`), settings (`settings.json`), your profile (`user.json`), **the whole team** — agents (`agents/`), the manager (`manager.json`), tools (`tools/`), the schedule (`schedule.json`), shared memory (`memory.json`) — plus the registry of known projects (`projects.json`). The team simulator belongs to the machine: configured once, it works in any project |
 | **project** | `<project folder>/.dreamteam` | EVERYTHING about this specific project: `hosts.json` (ssh servers), the project's mail and bots (`mails.json`, `messengers.json` — project secrets, never in agent cards), the conversations (`sessions/`, `transcripts/`). The agents' work files go into the project folder (inbox and the like) |
 
 The tools' working folder is **always the folder the app was launched from**:
@@ -89,7 +89,7 @@ If there is no home (`~/.dreamteam`), the wizard asks, in order:
 2. **Provider** — from the list of adapters (`mock` works for a trial run, no keys
    needed).
 3. **API key** — the input is hidden (not displayed and not written to the terminal
-   log); the key is saved right into the provider card in `models/ (карточки моделей)`
+   log); the key is saved right into the provider card in `models/`
    (the `"apiKey"` field) and picked up immediately.
 4. **How to introduce you to the team** — name, role, a couple of words (can be
    skipped).
@@ -97,7 +97,7 @@ If there is no home (`~/.dreamteam`), the wizard asks, in order:
 Then both layers are created with minimal files and clear starter notes: the home
 gets a starting team of five members (an analyst, a secretary, a developer,
 a designer, a writer) and the manager on the chosen provider, plus the `lang/` shelf
-for custom languages. The roster is edited in `agents/ (карточки агентов)` or via a conversation
+for custom languages. The roster is edited in `agents/` or via a conversation
 with the manager. If the project folder is a git repository without `.dreamteam/` in
 `.gitignore`, the wizard offers to add it. Running the wizard again breaks nothing:
 existing files are left untouched. In non-interactive mode (a pipe) the wizard
@@ -132,7 +132,7 @@ exist in its protocol.
 
 ### How it works
 
-- **Model keys** — right in the provider card in `~/.dreamteam/models/ (карточки моделей)`
+- **Model keys** — right in the provider card in `~/.dreamteam/models/`
   (the `"apiKey"` field; for GigaChat you can set a `"clientId"`/`"clientSecret"`
   pair instead).
 - **serve settings** — `~/.dreamteam/.env` (`TOKEN`, `PORT`, `HOST`; the `.env`
@@ -143,7 +143,7 @@ exist in its protocol.
   it serve simply listens on `127.0.0.1`, and for outside access create `.env` from
   the sample in the package (`scaffold/home/env.example`) and put in a `TOKEN`
   (see "Access from outside").
-- **API description** — the same `models/ (карточки моделей)`: which adapter, URL, model
+- **API description** — the same `models/`: which adapter, URL, model
   and key.
 - The app talks to LLMs through a single `LLMProvider` interface
   (`src/models/types.ts`). The concrete protocols are hidden in the adapters:
@@ -164,7 +164,7 @@ anywhere else) like a password.
 ### Z.ai (GLM)
 
 1. Get an API key in the console of the Z.ai open platform (the API keys section).
-2. Put it into the provider card in `~/.dreamteam/models/ (карточки моделей)`:
+2. Put it into the provider card in `~/.dreamteam/models/`:
    ```json
    "apiKey": "your-key"
    ```
@@ -188,7 +188,7 @@ the subscription: `GET https://api.z.ai/api/coding/paas/v4/models`.
 
 A quick check against a real (non-mock) provider: a live answer from the manager,
 the manager actually creates an agent on request, an agent with `files` actually
-writes a file. The home is the real one (keys and `models/ (карточки моделей)`), the project is
+writes a file. The home is the real one (keys and `models/`), the project is
 a temporary sandbox — nothing in a real project changes. The hermetic probes
 (`npm run probe`) never touch the live API — they are free and deterministic.
 
@@ -203,13 +203,13 @@ Conversation rounds grow the history at the tail, so providers can reuse the cac
 ### Anthropic (Claude)
 
 The key from the Anthropic console goes into the `claude` provider card
-(`~/.dreamteam/models/ (карточки моделей)`):
+(`~/.dreamteam/models/`):
 
 ```json
 "apiKey": "your-key"
 ```
 
-Then in the chat: `/model claude` (or change `"default"` in `models/ (карточки моделей)`).
+Then in the chat: `/model claude` (or change `"default"` in `models/`).
 
 ### Sber GigaChat
 
@@ -219,7 +219,7 @@ gets an `access_token` with your API key, caches it, refreshes it ahead of time
 supplies the Russian TLS certificate.
 
 1. Get an API key in the GigaChat console (developers.sber.ru → GigaChat API).
-2. Put it into the `gigachat` provider card in `~/.dreamteam/models/ (карточки моделей)`:
+2. Put it into the `gigachat` provider card in `~/.dreamteam/models/`:
    ```json
    "apiKey": "your-console-key"
    ```
@@ -232,7 +232,7 @@ supplies the Russian TLS certificate.
 4. In the chat: `/model gigachat`.
 
 Every agent can run on its own provider — give it a `"model": "<provider id>"`
-field in `~/.dreamteam/agents/ (карточки агентов)`. You can assemble a team of different models
+field in `~/.dreamteam/agents/`. You can assemble a team of different models
 (say, Marina on Claude, Dmitry on GLM).
 
 ## Operations: commands = rpc
@@ -539,7 +539,7 @@ composite characters in half.
 ## Tools: agents write files and run commands
 
 By default the team only discusses. But an agent can be trusted with real actions —
-the `"tools"` field in `~/.dreamteam/agents/ (карточки агентов)`. There is a single form — an
+the `"tools"` field in `~/.dreamteam/agents/`. There is a single form — an
 object of cards: tool name → its settings (an object; `null` or `{}` — default
 settings):
 
@@ -573,7 +573,7 @@ settings):
   secrets of these tools live in home files, not in agent cards.
 
 A tool can also be enabled through the manager: "enable shell for Gleb" — it will
-add the card to `agents/ (карточки агентов)` (and can edit it later: "give Gleb permission for
+add the card to `agents/` (and can edit it later: "give Gleb permission for
 docker compose").
 
 **How it works.** The agent inserts an action block into its answer, the app
@@ -629,7 +629,7 @@ A flat dictionary: server name → connection, each with a mandatory `host` fiel
 In a block the server is addressed by name (`ssh prod uptime`); the long
 `project:prod` form is understood too.
 
-In `agents/ (карточки агентов)` projects are assigned to the agent and its tools are enabled:
+In `agents/` projects are assigned to the agent and its tools are enabled:
 
 ```json
 "tools": { "files": {}, "ssh": null }, "projects": ["project"]
@@ -971,7 +971,7 @@ agent wants, so an over-ambitious artist can be stopped before the spending.
 
 **The eyes and hands are configured independently.** For the artist — cloud
 vision (GLM-4.6V), for the layout person — local (Qwen-VL in docker); the
-generator changes with one record in `models/ (карточки моделей)` without touching the
+generator changes with one record in `models/` without touching the
 personas. A provider becomes "seeing" with the `"vision": true` flag (the
 `openai-compatible` and `anthropic` adapters can pass pictures; `mock` — sees in
 its own way, for the demo). Image providers — the `openai-images` adapters (our
@@ -986,7 +986,7 @@ all), on richer machines — `sd-turbo`, and on GPU — `qwen3-vl-8b`, `flux-dev
 hand — the app only talks to them over HTTP and never starts anything itself.
 The creative trio (Marta, Nika, Pasha) points at the CPU models out of the
 factory, so after manually starting the light pair the cycle checks out right
-away, no config edits; the machine's address in `models/ (карточки моделей)` changes only if
+away, no config edits; the machine's address in `models/` changes only if
 the containers live on another PC. Details and the model table —
 `docker/README.md`.
 
@@ -1119,7 +1119,7 @@ Through it — and only through it — the app changes the configuration:
 
 | What you ask | What it does |
 |---|---|
-| "add … to the team" | a new member in `agents/ (карточки агентов)`: id, name, role, prompt, emoji, color, provider, temperature, tools |
+| "add … to the team" | a new member in `agents/`: id, name, role, prompt, emoji, color, provider, temperature, tools |
 | "assign …" | a member edit: role, prompt, model (provider), temperature, name, emoji, color |
 | "bring in …" / "send out …" | the current chat roster (like `/chat add` and `/chat remove`) |
 | "show the sessions", "open #2", "new session …", "delete #3" | session management (like `/sessions`, `/session open`, `/session new`, `/session delete`) |
@@ -1129,10 +1129,10 @@ Through it — and only through it — the app changes the configuration:
 | "add a mailbox …", "remove the mailbox …" | the `mails.json` mailbox registry (like `/mail add` and `/mail remove`) |
 | "add a telegram bot …", "remove the bot …" | a bot token in `messengers.json` (like `/messenger add` and `/messenger remove`) |
 
-Edits of `agents/ (карточки агентов)` and of the project registries (`hosts.json`, `mails.json`,
+Edits of `agents/` and of the project registries (`hosts.json`, `mails.json`,
 `messengers.json`) are safe: the file is rewritten through a temporary file with
 a validity check — a failed edit doesn't ruin the config, unknown fields are
-preserved. And if you ruin `agents/ (карточки агентов)` by hand (broken JSON, an agent without
+preserved. And if you ruin `agents/` by hand (broken JSON, an agent without
 `name` or `prompt`), the team doesn't vanish silently: the error is visible
 during a round and as a red line in the team panel of the web shell. A missing
 file is not an error — it's an empty start one-on-one with the manager.
@@ -1150,7 +1150,7 @@ It is configured in `.dreamteam/manager.json` (the file is required, like
 { "model": "openai", "name": "Manager", "emoji": "🛎", "color": "yellow", "temperature": 0.2 }
 ```
 
-- `provider` — an id from `models/ (карточки моделей)`, the model is taken from the
+- `provider` — an id from `models/`, the model is taken from the
   provider's record. An unknown id — the app won't start, with a clear error.
 - `name` — the name for addressing. `@manager` and `!manager` always work,
   regardless of the name; in the `@` popup it is offered first.
@@ -1163,19 +1163,19 @@ provider (from `manager.json`) — `/model` doesn't affect it.
 
 ## Custom roles and your own API
 
-**Change the team** — edit `~/.dreamteam/agents/ (карточки агентов)` (saved on the fly): the
+**Change the team** — edit `~/.dreamteam/agents/` (saved on the fly): the
 `id`, `name`, `emoji`, `role`, `description`, `color`
 (red/green/yellow/blue/magenta/cyan/white/gray), `prompt` (persona) fields,
 optionally `provider` and `temperature`; access to real actions — `tools`,
 `projects`, `workspace`, eyes and hands — `vision` and `image` (see "Tools"
 and "Vision and images"). The `provider` field — only an existing id from
-`models/ (карточки моделей)`: the `/team add|update` commands, the web shell and the manager
+`models/`: the `/team add|update` commands, the web shell and the manager
 will reject a foreign id with the list of available ones instead of writing
 garbage into the config.
 
 **Add a new API — a file, no fork.** Drop an adapter into the home shelf
 `~/.dreamteam/models/`: the file name becomes the adapter id, and a provider card in
-`models/ (карточки моделей)` references it with "adapter": "<id>". The shelf is scaffolded on first
+`models/` references it with "adapter": "<id>". The shelf is scaffolded on first
 launch; the code loads at startup — a broken file or a name colliding with a
 built-in adapter (including the image ones) fails the startup with a clear
 error:
@@ -1265,15 +1265,17 @@ The package installs globally, the data lives in two layers next to you:
 
 ```
 ~/.dreamteam/                 # home: one machine — one home
-├── models/ (карточки моделей)            # providers: adapter, URL, model, key ("apiKey")
-├── settings.json             # general settings: UI language (ui), conversation language, screen (width/margin/screen), tool limits
+├── models/                   # model cards: adapter, URL, model, key ("apiKey")
+├── settings.json             # general settings: UI language (ui), default model, conversation language, screen, tool limits
 ├── user.json                 # your profile for the team (/me)
-├── agents/ (карточки агентов)               # the team: roles, personas, colors, tools
-├── manager.json              # the war-room manager: provider, name, look (@manager)
+├── agents/                   # the team: one card per agent (agents/<id>.json)
+├── manager.json              # the war-room manager: model, name, look (@manager)
+├── providers/                # custom adapters: providers/<id>.ts → the "<id>" adapter
 ├── projects.json             # the registry of known projects (/project open by name)
 ├── memory.json               # the team's shared memory
 ├── lang/                     # custom UI languages: lang/<id>.json
 ├── tools/                    # custom tools: tools/name.ts → the "name" tool
+├── bin/                      # quick-launch scripts (desktop shortcut)
 ├── .env                      # serve settings: TOKEN, PORT, HOST (a thing of the machine)
 └── cache/                    # local caches (tesseract models for ocr)
 
@@ -1307,10 +1309,12 @@ dreamteam/
 │   │   └── bootstrap.ts      # the shells' shared start: layers, configs, providers, session
 │   ├── serve.ts              # the local server: HTTP+WS on 127.0.0.1, gui/ statics, a second Presenter
 │   ├── paths.ts              # the three layers of paths: home, project, working folder
-│   ├── wizard.ts             # the first-launch wizard: language, provider, key, profile, scaffolding
+│   ├── wizard.ts             # the first-launch wizard: language, model, key, profile, scaffolding
 │   ├── orchestrator.ts       # the moderator: who answers and what to focus on
+│   ├── shortcut.ts           # quick-launch shortcuts (.lnk/.desktop/.command)
+│   ├── open.ts               # browser opening (serve --open)
 │   ├── manager.ts            # the war-room manager: config, prompt, actions (team/chat/session/tool/project)
-│   ├── agents.ts             # loading agents/ (карточки агентов)
+│   ├── agents.ts             # loading agents/
 │   ├── actions.ts            # agents' action blocks, projects, structural permissions, execution
 │   ├── docs.ts               # the document stack: pdf/docx/xlsx — reading and writing + the LibreOffice bridge
 │   ├── ocr.ts                # recognition: tesseract, pdf pages, tables by coordinates
