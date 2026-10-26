@@ -50,6 +50,8 @@ const moderatorPrompt = (maxTurns: number) => `Ты — модератор со�
 export async function planTurns(input: PlanInput): Promise<PlanResult> {
   const cap = input.maxTurns === 0 ? input.team.length : (input.maxTurns ?? MAX_TURNS);
   if (input.mentioned.length > 0) return { turns: input.mentioned.slice(0, cap || input.team.length).map((agent) => ({ agent })) };
+  // один участник — модератор не нужен: экономим вызов LLM на каждый раунд
+  if (input.team.length === 1) return { turns: [{ agent: input.team[0] }] };
   // mock-модератор не умеет планировать — работаем по эвристике
   if (input.moderator.kind === 'mock') return { turns: mockPlan(input, cap) };
   try {

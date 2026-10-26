@@ -241,8 +241,7 @@ export class Engine {
 
   /** Служебная модель (модератор, нейминг, сжатие, память); пусто — основная. */
   private serviceModel(): LLMProvider {
-    if (this.app.settings.serviceModel) return this.resolveProvider(this.app.settings.serviceModel);
-    return this.resolveProvider(undefined);
+    return this.resolveProvider(this.app.settings.serviceModel);
   }
 
   /** Глаза и руки агентов: vision-модель для look и image-модель для image. */
@@ -550,7 +549,7 @@ export class Engine {
       session.title = flat.slice(0, 42) + (flat.length > 42 ? '…' : '');
       // у живого менеджера спрашиваем имя по первому сообщению; в mock-режиме
       // остаётся имя по первому сообщению (болтовня в имя не годится)
-      if (this.managerProvider().kind !== 'mock') {
+      if (this.serviceModel().kind !== 'mock') {
         const name = await this.generateSessionName(`Нужно дать имя сессии. Вот первое сообщение:\n${userText.slice(0, 800)}`);
         if (name) session.title = name;
       }
@@ -565,7 +564,8 @@ export class Engine {
       return;
     }
 
-    const moderator = this.managerProvider();
+    // модератор и сжатие едут на служебной модели (serviceModel), не на флагмане
+    const moderator = this.serviceModel();
 
     // не даём контексту расти бесконечно: старые сообщения сворачиваются в конспект
     const compressing = this.presenter.busy(t('Проверяю длину разговора…'));
@@ -991,10 +991,11 @@ export class Engine {
     const busy = this.presenter.busy(t('Придумываю имя разговору…'));
     try {
       let full = '';
-      for await (const chunk of this.managerProvider().stream({
+      for await (const chunk of this.serviceModel().stream({
         system: NAMING_SYSTEM,
         messages: [{ role: 'user', content: context }],
         temperature: 0.4,
+        maxTokens: 64,
       })) {
         full += chunk;
       }
