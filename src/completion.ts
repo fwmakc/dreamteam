@@ -17,8 +17,8 @@ export interface CompletionContext {
   modelIds(): string[];
   /** Имя менеджера переговорки (~/.dreamteam/manager.json) — первый пункт всплывашки @ */
   managerName(): string;
-  /** Имена известных проектов (реестр projects.json) — для /project open|remove.
-   *  Опционально: старые вызовы и пробы без реестра подсказывать не обязаны. */
+  /** Имена проектов дома (папки в projects/) — для /project open|remove.
+   *  Опционально: старые вызовы и пробы без дома подсказывать не обязаны. */
   projectNames?(): string[];
 }
 

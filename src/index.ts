@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline/promises';
 import { spawn } from 'node:child_process';
 import { format } from 'node:util';
+import { basename } from 'node:path';
 import pc from 'picocolors';
 import { loadTeam } from './agents.js';
 import { managerAsAgent } from './manager.js';
@@ -8,11 +9,11 @@ import { agentToolIds } from './tools-api.js';
 import { loadToolsConfig, type ToolsConfig } from './actions.js';
 import { HintPanel, MentionPicker, hintRowsFor, makeCompleter, type CompletionContext } from './completion.js';
 import { OPERATIONS, operationArgs, operationCommand } from './core/operations.js';
-import { loadProjectRegistry } from './core/projects.js';
+import { listProjects } from './core/projects.js';
 import { Editor } from './editor.js';
 import { Screen } from './screen.js';
-// пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
-import { AGENTS_DIR, APP_VERSION, DT_HOME, HOSTS_FILE, PROJECTS_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
+// дом и текущий проект — только в paths.ts (проект переключается на лету)
+import { AGENTS_DIR, APP_VERSION, DT_HOME, PROJECT_DIR, PROJECT_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
 import { agentHeader, colorFn, printDim, printError, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 // ядро: раунды, менеджер, инструменты, память — общение только через Presenter
 import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
@@ -241,14 +242,14 @@ let completionCache: {
 function refreshCompletionCache(): void {
   const now = Date.now();
   if (completionCache && now - completionCache.at < 1000) return;
-  const sessions = appRef ? appRef.store.list().map((s) => ({ title: s.title })) : [];
+  const sessions = appRef?.store ? appRef.store.list().map((s) => ({ title: s.title })) : [];
   let team: string[] = [];
   let chat: { name: string; role?: string }[] = [];
   try {
     const agents = loadTeam(AGENTS_DIR);
     team = agents.map((a) => a.name);
     // всплывашка @упоминаний предлагает только позванных в текущий чат
-    if (appRef) chat = chatTeam(appRef.session, agents).map((a) => ({ name: a.name, role: a.role }));
+    if (appRef?.session) chat = chatTeam(appRef.session, agents).map((a) => ({ name: a.name, role: a.role }));
   } catch {
     // без agents.json дополняем без имён
   }
@@ -277,7 +278,7 @@ function completionCtx(): CompletionContext {
     },
     projectNames() {
       try {
-        return loadProjectRegistry(PROJECTS_FILE).projects.map((p) => p.name);
+        return listProjects().map((p) => p.id);
       } catch {
         return [];
       }
@@ -404,6 +405,22 @@ class CliPresenter implements Presenter {
 
 // ─── Рендер: баннер, справки, история ───────────────────────────────────────
 
+/** Строки истории разговора для панели (пустая команда — без карточек, без цветов). */
+function historyRows(messages: ChatMessage[]): string[] {
+  let team: Agent[] = [];
+  try {
+    team = loadTeam(AGENTS_DIR);
+  } catch {
+    // без карточек агентов история печатается без фирменных цветов
+  }
+  const rows: string[] = [];
+  for (const m of messages) {
+    rows.push('');
+    rows.push(...messageRows(m, team));
+  }
+  return rows;
+}
+
 /** Строки одного сообщения в фирменном формате (шапка с автором и текст) */
 function messageRows(m: ChatMessage, team: Agent[]): string[] {
   const agent = m.authorId === 'manager' && appRef
@@ -424,7 +441,15 @@ function messageRows(m: ChatMessage, team: Agent[]): string[] {
 function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔══════════════════════════════════════════════╗')));
   console.log(pc.bold(pc.cyan(`  ║   🎬  DREAM TEAM — ${t('совещание начинается')}     ║`)));
   console.log(pc.bold(pc.cyan('  ╚══════════════════════════════════════════════╝')));
-  console.log(pc.dim(tf('  версия {v} · дом: {home} · проект: {project}', { v: APP_VERSION, home: DT_HOME, project: WORKSPACE })));
+  console.log(
+    pc.dim(
+      tf('  версия {v} · дом: {home} · проект: {project}', {
+        v: APP_VERSION,
+        home: DT_HOME,
+        project: PROJECT_DIR ? `${basename(PROJECT_DIR)} (${WORKSPACE || t('без рабочей папки')})` : t('не выбран'),
+      }),
+    ),
+  );
 
   try {
     const team = loadTeam(AGENTS_DIR);
@@ -506,8 +531,9 @@ function printHelp(): void {
 function printTeam(app: App): void {
   try {
     const fullTeam = loadTeam(AGENTS_DIR);
-    const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
-    const cfg = loadToolsConfig(SETTINGS_FILE, HOSTS_FILE, WORKSPACE);
+    // без открытого проекта чата нет — никто не отмечен как «в этом чате»
+    const inChat = new Set(app.session ? chatTeam(app.session, fullTeam).map((a) => a.id) : []);
+    const cfg = loadToolsConfig(SETTINGS_FILE, PROJECT_FILE || null, WORKSPACE);
     console.log(pc.dim(`\n  ${t('Команда:')}`));
     for (const agent of fullTeam) {
       const own = agent.model?.id ? pc.dim(` [${t('модель:')} ${agent.model.id}]`) : '';
@@ -526,8 +552,7 @@ function accessLine(agent: Agent, cfg: ToolsConfig): string {
   const toolIds = agentToolIds(agent);
   if (toolIds.length === 0) return '';
   const parts: string[] = [];
-  // серверы — из hosts.json текущего проекта: агентам доступен весь его реестр
-  // проект один — текущий: берём его серверы независимо от ключа реестра
+  // серверы — из поля "hosts" project.json текущего проекта: агентам доступен весь его реестр
   const servers = [...new Set([...cfg.projects.values()].flatMap((p) => [...p.hosts.keys()]))];
   if (servers.length > 0) parts.push(`${t('серверы:')} ${servers.join(', ')}`);
   if (agent.vision) parts.push(`${t('глаза:')} ${agent.vision}`);
@@ -594,6 +619,10 @@ type CommandVerdict = 'exit' | 'handled' | 'unknown';
 
 /** Цветная история разговора — /session history. */
 function printHistory(app: App, nStr?: string): void {
+  if (!app.session) {
+    printDim(t('  Нет открытого проекта — /project new <имя> [папка] или /project open <имя|путь>.'));
+    return;
+  }
   const n = Number.parseInt(nStr ?? '', 10);
   const all = app.session.messages;
   const shown = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
@@ -631,21 +660,30 @@ function runCommand(engine: Engine, line: string): CommandVerdict {
       printHelp();
       return 'handled';
     case 'sessions': {
+      if (!app.store || !app.session) {
+        printDim(t('  Нет открытого проекта — /project new <имя> [папка] или /project open <имя|путь>.'));
+        return 'handled';
+      }
       const list = app.store.list();
       if (list.length === 0) {
         printDim(t('  Разговоров пока нет.'));
         return 'handled';
       }
+      const currentId = app.session.id;
       console.log(pc.dim(`\n  ${t('Разговоры (свежие сверху):')}`));
       list.forEach((s, i) => {
         const date = fmtDate(s.updatedAt);
-        const cur = s.id === app.session.id ? pc.cyan(` ${t('← текущий')}`) : '';
+        const cur = s.id === currentId ? pc.cyan(` ${t('← текущий')}`) : '';
         console.log(`    ${i + 1}. ${s.title} — ${tf('{n} сообщ.', { n: s.count })}, ${date}${cur}`);
       });
       console.log();
       return 'handled';
     }
     case 'team':
+      if (!app.store || !app.session) {
+        printDim(t('  Нет открытого проекта — /project new <имя> [папка] или /project open <имя|путь>.'));
+        return 'handled';
+      }
       printTeam(app);
       return 'handled';
     case 'providers':
@@ -772,21 +810,14 @@ async function main(): Promise<void> {
     tf('  Вы — {name}{role}', { name: app.profile.name, role: app.profile.role ? ` (${app.profile.role})` : '' }) + '. ' +
     t('Представиться команде: /profile set Имя; роль; о себе'),
   );
+  // Проект человек выбирает сам — стартуем без него и показываем путь.
+  if (!app.session) {
+    printDim(t('  Проект не выбран — /project new <имя> [папка] создаст, /project open <имя|путь> откроет, /project — список.'));
+  }
   // Прошлый разговор сразу в панель: внизу виден хвост, вся старая история —
   // колесом/PgUp. В линейном режиме не нужно — там прокручивает сам терминал.
-  if (screen && app.session.messages.length > 0) {
-    let team: Agent[] = [];
-    try {
-      team = loadTeam(AGENTS_DIR);
-    } catch {
-      // без agents.json история засеивается без фирменных цветов агентов
-    }
-    const rows: string[] = [];
-    for (const m of app.session.messages) {
-      rows.push('');
-      rows.push(...messageRows(m, team));
-    }
-    screen.seed(rows);
+  if (screen && app.session && app.session.messages.length > 0) {
+    screen.seed(historyRows(app.session.messages));
     printDim(
       tf('  Продолжаю разговор «{title}» ({n} сообщ.) — /session new для нового, /sessions для списка', { title: app.session.title, n: app.session.messages.length }),
     );
@@ -797,7 +828,7 @@ async function main(): Promise<void> {
 
   // Пустой разговор на старте (первый запуск или неиспользованная сессия) —
   // менеджер здоровается сам, как по /session new. Только в TTY: в пайпе LLM не зовём.
-  if (editor && app.session.messages.length === 0) {
+  if (editor && app.session && app.session.messages.length === 0) {
     const ac = new AbortController();
     abortActiveRound = () => ac.abort();
     try {
@@ -809,8 +840,9 @@ async function main(): Promise<void> {
 
   // Цветной промпт передаём самому readline: иначе при перерисовке строки
   // (например, при стирании текста) он подставит свой дефолтный белый '> '.
-  // Название текущего разговора видно прямо в промпте.
-  const promptFor = (session: Session): string => {
+  // Название текущего разговора видно прямо в промпте; без проекта — метка.
+  const promptFor = (session: Session | null): string => {
+    if (!session) return pc.dim(t('  [без проекта] ')) + pc.cyan(t('Ты > '));
     const title = session.title.length > 24 ? session.title.slice(0, 24) + '…' : session.title;
     return pc.dim(`[${title}] `) + pc.cyan(t('Ты > '));
   };
@@ -932,11 +964,38 @@ async function main(): Promise<void> {
     if (raw === null) break; // stdin закрыт: конец пайпа, Ctrl+D
     const line = raw.trim();
     if (!line) continue;
+    const sessionBefore = app.session?.id ?? null;
+    // команда открыла проект в пустой разговор — консьерж здоровается сам
+    // (как на старте приложения и как по /session new); приветствие само
+    // пишет сообщение, поэтому повторно не срабатывает
+    const greetIfEmpty = async (): Promise<void> => {
+      if (app.session && app.session.messages.length === 0) {
+        const ac = new AbortController();
+        abortActiveRound = () => ac.abort();
+        try {
+          await engine.startupWelcome(ac.signal);
+        } finally {
+          abortActiveRound = null;
+        }
+      }
+    };
+    // команда переключила разговор — его история сменяет старую в панели
+    // (как при старте приложения)
+    const reseedIfSwitched = (): void => {
+      if (screen && app.session && app.session.id !== sessionBefore && app.session.messages.length > 0) {
+        screen.reseed(historyRows(app.session.messages));
+      }
+    };
     try {
       if (line.startsWith('/')) {
         const verdict = runCommand(engine, line);
         if (verdict === 'exit') break;
-        if (verdict === 'handled') continue;
+        if (verdict === 'handled') {
+          reseedIfSwitched();
+          await greetIfEmpty();
+          continue;
+        }
+        // остальное (/project new …, /session …) исполняет ядро — см. ниже
       }
       // Весь путь — команды и разговоры — под одним AbortController:
       // Esc/Ctrl+C прерывают раунд, а уже сказанное остаётся в истории.
@@ -944,6 +1003,13 @@ async function main(): Promise<void> {
       abortActiveRound = () => ac.abort();
       try {
         await engine.handleMessage(line, ac.signal);
+        // манифест-команда могла открыть проект/разговор (тогда консьерж
+        // здоровается, а история сменяется в панели); обычная реплика
+        // сообщение уже добавила — guards не сработают
+        if (line.startsWith('/')) {
+          reseedIfSwitched();
+          await greetIfEmpty();
+        }
       } finally {
         abortActiveRound = null;
       }
@@ -961,7 +1027,7 @@ async function main(): Promise<void> {
   }
   // плавный /exit: вливаем итоги, только если конспект свежий (дешёвый путь),
   // иначе откладываем до следующего /session new — выход не должен ждать LLM
-  if (exitRequested) {
+  if (exitRequested && app.session) {
     try {
       await engine.flushChatMemory(app.session, { onlyIfFreshDigest: true });
     } catch {

@@ -2,14 +2,14 @@
  * Проверка первого запуска (без TUI и LLM):
  *  - runWizard: выбор провайдера, параметры, ключ (не эхоится в вывод),
  *    запись models/<id>.json (ключ прямо в карточке, поле "apiKey");
- *  - ensureLayers: пустой дом + пустой проект → wizard, настройки с дефолтами,
- *    .dreamteam (стартовая команда из скаффолда, менеджер на дефолтном
- *    провайдере, пустые серверы, tools/); существующие слои не трогаются;
- *  - не-TTY без models/<id>.json — внятный отказ, а не тихий mock;
- *  - gitignoreNotice: git без .gitignore / без строки / уже скрыто / без git.
+ *  - ensureLayers: пустой дом → wizard, настройки с дефолтами, стартовая
+ *    команда, менеджер, tools/, .env из примера; существующие слои не
+ *    трогаются; проект wizard не выбирает и ничего кроме дома не создаёт
+ *    (проекты заводит человек: /project new);
+ *  - не-TTY без models/<id>.json — внятный отказ, а не тихий mock.
  *
- * Все функции принимают явные пути (дом/проект) — каждый сценарий в своём
- * временном каталоге. Импорт src — после выставления DT_HOME/DT_PROJECT,
+ * Все функции принимают явные пути (дом) — каждый сценарий в своём
+ * временном каталоге. Импорт src — после выставления DT_HOME,
  * чтобы случайное обращение к дефолтам тоже попало в песочницу.
  * Запуск: npm run probe (входит в общий прогон).
  */
@@ -50,21 +50,17 @@ function makeIo(lines: string[], isTTY = false) {
 
 const root = mkdtempSync(join(tmpdir(), 'dt-wizard-'));
 process.env.DT_HOME = join(root, 'home');
-process.env.DT_PROJECT = join(root, 'proj', '.dreamteam');
 const {
   runWizard,
   ensureLayers,
-  ensureProject,
   defaultModelId,
-  gitignoreNotice,
 } = await import('../src/wizard.js');
 
-// --- ensureLayers на пустых слоях: wizard (mock) + настройки + скаффолдинг проекта ---
+// --- ensureLayers на пустом доме: wizard (mock) + настройки + скаффолдинг дома ---
 {
   const home = join(root, 'h1');
-  const proj = join(root, 'p1', '.dreamteam');
   const { io, out } = makeIo(['ru', '4', 'n'], true);
-  const notes = await ensureLayers(io, home, proj);
+  const notes = await ensureLayers(io, home);
   const mockCard = JSON.parse(readFileSync(join(home, 'models', 'mock.json'), 'utf8'));
   check('wizard mock: карточка mock, адаптер mock', mockCard.adapter === 'mock', JSON.stringify(mockCard));
   check('wizard: заметка о карточке модели', notes.some((n) => n.includes('mock.json')), notes.join(' | '));
@@ -80,18 +76,9 @@ const {
   })());
   check('команда: менеджер в доме на модели mock', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).model?.id === 'mock');
   check('команда: полка тулов в доме', existsSync(join(home, 'tools')));
-  check('проект: hosts.json — пустой реестр серверов', (() => {
-    const p = JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as Record<string, unknown>;
-    return typeof p === 'object' && p !== null && Object.keys(p).length === 0;
-  })());
-  check('проект: mails.json — пустой реестр ящиков', (() => {
-    const p = JSON.parse(readFileSync(join(proj, 'mails.json'), 'utf8')) as Record<string, unknown>;
-    return typeof p === 'object' && p !== null && Object.keys(p).length === 0;
-  })());
-  check('проект: messengers.json — пустой реестр ботов', (() => {
-    const p = JSON.parse(readFileSync(join(proj, 'messengers.json'), 'utf8')) as Record<string, unknown>;
-    return typeof p === 'object' && p !== null && Object.keys(p).length === 0;
-  })());
+  check('дом: отдельных hosts/mails/messengers больше нет — секреты в project.json',
+    !existsSync(join(home, 'hosts.json')) && !existsSync(join(home, 'mails.json')) && !existsSync(join(home, 'messengers.json')));
+  check('дом: wizard не заводит проекты — их создаёт человек', !existsSync(join(home, 'projects')));
 
   // --- .env создаётся из примера: только настройки serve, права 600 ---
   const envFile = join(home, '.env');
@@ -108,7 +95,6 @@ const {
     const { SCAFFOLD_DIR } = await import('../src/wizard.js');
     const { loadSettings } = await import('../src/settings.js');
     const { loadTeam } = await import('../src/agents.js');
-    const { loadHosts } = await import('../src/actions.js');
     check('скелет: home/settings.json валиден по loadSettings', (() => {
       try { return loadSettings(join(SCAFFOLD_DIR, 'home', 'settings.json'), 0).language === 'русский'; } catch { return false; }
     })());
@@ -121,16 +107,7 @@ const {
         return ['analyst', 'secretary', 'developer', 'designer', 'writer'].every((id) => team.some((a) => a.id === id));
       } catch { return false; }
     })());
-    check('скелет: project/hosts.json валиден по loadHosts', (() => {
-      try { return loadHosts(join(SCAFFOLD_DIR, 'project', 'hosts.json')).size === 0; } catch { return false; }
-    })());
-    check('скелет: project/mails.json и messengers.json — пустые словари', (() => {
-      try {
-        const mails = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'project', 'mails.json'), 'utf8')) as Record<string, unknown>;
-        const mess = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'project', 'messengers.json'), 'utf8')) as Record<string, unknown>;
-        return Object.keys(mails).length === 0 && Object.keys(mess).length === 0;
-      } catch { return false; }
-    })());
+    check('скелет: project/ в скаффолде больше нет — один уровень владения', !existsSync(join(SCAFFOLD_DIR, 'project')));
     const mgrTpl = JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'home', 'manager.json'), 'utf8'));
     check('скелет: home/manager.json — менеджер без id модели (проставит мастер)', typeof mgrTpl.model === 'object' && !mgrTpl.model?.id && typeof mgrTpl.name === 'string', JSON.stringify(mgrTpl));
     check('скелет: models/ — карточки моделей', (() => {
@@ -140,11 +117,10 @@ const {
     })());
   }
   check('wizard: в выводе меню и приветствие', out().includes('Тип адаптера') && out().includes('живой менеджер'), out().slice(-200));
-  check('gitignore: без git — тишина', !notes.some((n) => n.includes('.gitignore')), notes.join(' | '));
 
   // --- повторный ensureLayers: всё на месте — тишина, файлы не переписываются ---
   const before = readFileSync(join(home, 'settings.json'), 'utf8');
-  const notes2 = await ensureLayers(makeIo([]).io, home, proj);
+  const notes2 = await ensureLayers(makeIo([]).io, home);
   check('повтор: без заметок', notes2.length === 0, notes2.join(' | '));
   check('повтор: настройки не тронуты', readFileSync(join(home, 'settings.json'), 'utf8') === before);
 }
@@ -152,9 +128,8 @@ const {
 // --- openai-compatible: baseUrl/модель/ключ; ключ не эхоится и лежит в карточке ---
 {
   const home = join(root, 'h2');
-  const proj = join(root, 'p2', '.dreamteam');
   const { io, out } = makeIo(['ru', '1', 'https://api.test/v1', 'test-model', 'секрет-ключ-42', 'n'], true);
-  const notes = await ensureLayers(io, home, proj);
+  const notes = await ensureLayers(io, home);
   const main = JSON.parse(readFileSync(join(home, 'models', 'main.json'), 'utf8'));
   check('openai-совместимый: карточка main', main.adapter === 'openai-compatible', JSON.stringify(main));
   check('openai-совместимый: baseUrl и модель', main.baseUrl === 'https://api.test/v1' && main.model === 'test-model', JSON.stringify(main));
@@ -164,7 +139,6 @@ const {
   const envText = readFileSync(join(home, '.env'), 'utf8');
   check('ключ в .env не дублируется', !envText.includes('секрет-ключ-42'), envText);
   check('менеджер в доме: на main', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).model?.id === 'main');
-  check('проект: .env не создаётся', !existsSync(join(proj, '.env')));
 }
 
 // --- обязательный ключ: пустой ввод переспрашивается (anthropic/gigachat) ---
@@ -187,7 +161,7 @@ const {
   const home = join(root, 'h5');
   let threw = '';
   try {
-    await ensureLayers({ input: new PassThrough(), output: new PassThrough(), isTTY: false }, home, join(root, 'p5', '.dreamteam'));
+    await ensureLayers({ input: new PassThrough(), output: new PassThrough(), isTTY: false }, home);
   } catch (e) {
     threw = (e as Error).message;
   }
@@ -195,36 +169,11 @@ const {
   check('не-TTY: settings.model.id не задан', (() => { try { const s = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')); return !s.model?.id; } catch { return true; } })());
 }
 
-// --- пустой models/: реестр моделей отдаёт fallback, проект всё равно скаффолдится ---
+// --- пустой models/: реестр моделей отдаёт fallback ---
 {
   const home = join(root, 'h6');
-  mkdirSync(home, { recursive: true });
+  mkdirSync(join(home, 'models'), { recursive: true });
   check('пустой models/: defaultModelId → mock', defaultModelId(join(home, 'models')) === 'mock');
-  const proj = join(root, 'p6', '.dreamteam');
-  const notes = ensureProject('mock', proj);
-  check('пустой models/: проект всё равно скаффолдится', notes.some((n) => n.includes('hosts.json')), notes.join(' | '));
-}
-
-// --- gitignoreNotice: состояния ---
-{
-  const p = join(root, 'gitproj');
-  mkdirSync(join(p, '.git'), { recursive: true });
-  check('gitignore: git есть, .gitignore нет — предупреждение', (gitignoreNotice(p) ?? '').includes('.dreamteam/'));
-  writeFileSync(join(p, '.gitignore'), 'node_modules/\n# .dreamteam не трогаем — коммент\n');
-  check('gitignore: без нужной строки (комментарий не считается)', (gitignoreNotice(p) ?? '').includes('.dreamteam/'));
-  writeFileSync(join(p, '.gitignore'), 'node_modules/\n.dreamteam/\n');
-  check('gitignore: строка есть — тишина', gitignoreNotice(p) === null);
-  writeFileSync(join(p, '.gitignore'), '/.dreamteam\n');
-  check('gitignore: форма со слэшем тоже считается', gitignoreNotice(p) === null);
-  const nogit = join(root, 'nogit');
-  mkdirSync(nogit, { recursive: true });
-  check('gitignore: без git — null', gitignoreNotice(nogit) === null);
-}
-
-// --- ensureProject на существующем проекте: ничего не делает ---
-{
-  const proj = join(root, 'p1', '.dreamteam');
-  check('существующий проект: не трогается', ensureProject('mock', proj).length === 0);
 }
 
 rmSync(root, { recursive: true, force: true });

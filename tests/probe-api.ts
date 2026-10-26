@@ -7,11 +7,12 @@
  *  - ServerPresenter: вопрос без клиентов — сразу отказ, ответ клиента —
  *    подтверждение, выбор разговора, таймаут-отказ.
  *
- * Герметичность: DT_HOME/DT_PROJECT выставляются до импорта serve (пути
- * замораживаются на импорте) во временные каталоги; сервер — на порту 0.
+ * Герметичность: DT_HOME выставляется до импорта serve (пути замораживаются
+ * на импорте) во временный каталог; сервер — на порту 0; проект открывается
+ * rpc-ом, тем же ходом, что и GUI.
  * Запуск: npm run probe:api
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
@@ -29,14 +30,13 @@ function check(name: string, cond: boolean, detail?: string): void {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// --- песочница: слои во временных каталогах, провайдер только mock ---
-// proj заранее не существует: ensureLayers скаффолдит его сам (как на живом проекте)
+// --- песочница: дом во временном каталоге, провайдер только mock ---
 const base = mkdtempSync(join(tmpdir(), 'dt-api-'));
 const home = join(base, 'home');
 const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
+mkdirSync(proj, { recursive: true }); // project.open открывает существующую папку (создание — project.new)
 process.env.DT_HOME = home;
-process.env.DT_PROJECT = proj;
 // рабочая папка инструментов = cwd на момент импорта: уводим процесс в tmp,
 // чтобы mock-демонстрация писала файлы в песочницу, а не в репозиторий
 process.chdir(base);
@@ -176,8 +176,10 @@ const handle = await startServe({ port: 0 });
 const client = await makeClient(handle.port);
 {
   const first = await client.next((m) => m.type === 'state');
-  const st0 = first.state as { session?: unknown; team?: unknown[]; teamError?: string | null; models?: { id: string; isDefault: boolean }[] };
-  check('ws: первичный state пришёл', Boolean(st0.session));
+  const st0 = first.state as { session?: unknown; project?: unknown; knownProjects?: unknown; team?: unknown[]; teamError?: string | null; models?: { id: string; isDefault: boolean }[] };
+  // старт без проекта: ни разговора, ни проекта — GUI обязан показать выбор проекта
+  check('ws: старт без проекта — session и project пусты', st0.session === null && st0.project === null, JSON.stringify({ session: st0.session, project: st0.project }));
+  check('ws: известные проекты дома — пустой список', Array.isArray(st0.knownProjects) && st0.knownProjects.length === 0);
   const st0team = (st0.team ?? []) as { id: string }[];
   check('ws: стартовая команда — пять агентов', st0team.length === 5, JSON.stringify(st0team.map((a) => a.id)));
   check(
@@ -188,16 +190,20 @@ const client = await makeClient(handle.port);
   check('ws: нет agents/ — без ошибки в state', st0.teamError == null);
   check('ws: модель mock — основная', (st0.models ?? []).some((p) => p.id === 'mock' && p.isDefault));
 
+  // открываем проект rpc-ом — тем же ходом, что и GUI (папка не была
+  // зарегистрирована — авто-регистрация; пустой разговор создаётся сам)
+  client.send({ type: 'rpc', id: 'open0', method: 'project.open', args: { path: proj } });
+  // пустой разговор — консьерж здоровается сам (как на старте терминала)
+  await client.next((m) => m.type === 'say' && String(m.text).includes('менеджер переговорки'));
+  const opened = await client.next(
+    (m) => m.type === 'state' && (m.state as { session?: { messages: unknown[] } | null }).session?.messages.length === 1,
+  );
+  const stOpen = opened.state as { project: { id: string } | null; session: { messages: unknown[] } };
+  check('ws: project.open — разговор создан, консьерж поздоровался', stOpen.project?.id === 'proj' && stOpen.session.messages.length === 1, JSON.stringify(stOpen.project));
+
   client.send({ type: 'hello' });
   const again = await client.next((m) => m.type === 'state');
   check('ws: hello возвращает свежий state', Boolean((again.state as { session?: unknown }).session));
-
-  // пустой разговор: менеджер здоровается сам (как в терминале) — ждём приветствие
-  await client.next((m) => m.type === 'say' && String(m.text).includes('менеджер переговорки'));
-  await client.next(
-    (m) => m.type === 'state' && (m.state as { session: { messages: unknown[] } }).session.messages.length > 0,
-  );
-  check('ws: консьерж поздоровался в пустом разговоре', true);
 
   // первая реплика уходит менеджеру: mock исполняет team.add Тест
   client.send({ type: 'user_message', text: 'привет, команда' });
@@ -207,16 +213,15 @@ const client = await makeClient(handle.port);
   check('ws: менеджер ответил заготовкой', String(say.text).includes('Позываю'));
   const report = await client.next((m) => m.type === 'notice' && String(m.text).includes('Тест'));
   check('ws: отчёт о действии пришёл', String(report.text).includes('Тест'));
+  // ждём состояние ПОСЛЕ раунда: «Тест» уже в команде (промежуточные state
+  // раунда насеяны в очередь — по сообщениям только не отличить)
   const state1 = await client.next(
-    (m) => m.type === 'state' && (m.state as { session: { messages: unknown[] } }).session.messages.length > 0,
+    (m) => m.type === 'state' && (m.state as { team: { id: string }[] }).team.some((a) => a.id === 'test_probe'),
   );
   const st1 = state1.state as { session: { messages: { authorId: string }[] }; team: { id: string }[] };
   check('ws: реплика менеджера в истории', st1.session.messages.some((m) => m.authorId === 'manager'));
   check('ws: «Тест» появился в команде', st1.team.some((a) => a.id === 'test_probe'));
-  check(
-    'ws: agents/ временного проекта получил «Теста»',
-    readFileSync(join(home, 'agents'), 'utf8').includes('test_probe'),
-  );
+  check('ws: agents/ дома получил карточку «Теста»', existsSync(join(home, 'agents', 'test_probe.json')));
 
   // chat.add менеджером (обращение явное: в чате уже есть Тест — без @ раунд ушёл бы модератору)
   client.send({ type: 'user_message', text: '!менеджер, позови Теста в чат' });
@@ -493,12 +498,11 @@ const client = await makeClient(handle.port);
 
   // --- CONFIRM ЖИВОГО РАУНДА: у Теста shell с узким allow — echo уйдёт в вопрос ---
   {
-    const teamFile = join(home, 'agents');
-    type TeamAgent = { id: string; tools?: Record<string, unknown> };
-    const team = JSON.parse(readFileSync(teamFile, 'utf8')) as TeamAgent[];
-    const tester = team.find((a) => a.id === 'test_probe');
-    tester!.tools = { files: {}, shell: { allow: ['git *'] } };
-    writeFileSync(teamFile, JSON.stringify(team, null, 2));
+    const cardFile = join(home, 'agents', 'test_probe.json');
+    type TeamAgent = { tools?: Record<string, unknown> };
+    const card = JSON.parse(readFileSync(cardFile, 'utf8')) as TeamAgent;
+    card.tools = { files: {}, shell: { allow: ['git *'] } };
+    writeFileSync(cardFile, JSON.stringify(card, null, 2));
 
     client.send({ type: 'rpc', id: 'c9', method: 'chat.add', args: { name: 'Тест' } });
     await client.next((m) => m.type === 'rpc_result' && m.id === 'c9');
@@ -520,7 +524,7 @@ const client = await makeClient(handle.port);
       `пришло: ${JSON.stringify(tools2.results).slice(0, 200)}`,
     );
     await client.waitState(sRound + 1); // раунд с подтверждением закрылся
-    check('confirm: демо-файл на диске песочницы', readFileSync(join(base, 'demo-agent.txt'), 'utf8').includes('mock-агента'));
+    check('confirm: демо-файл на диске песочницы', readFileSync(join(proj, 'demo-agent.txt'), 'utf8').includes('mock-агента'));
 
     // «отказать»: в новом разговоре ступеньки демо сбрасываются
     const sNew = client.stateCount();
@@ -586,8 +590,8 @@ const client = await makeClient(handle.port);
     client.send({ type: 'command', text: '/project host add main=root@127.0.0.1:2223' });
     const p = await client.next((m) => m.type === 'notice' && String(m.text).includes('main'));
     check('ws: /project host add — отчёт', Boolean(p));
-    const pf = JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as Record<string, { host: string; user?: string; port?: number }>;
-    check('ws: /project host add — hosts.json на диске', pf.main?.host === '127.0.0.1' && pf.main?.user === 'root' && pf.main?.port === 2223, JSON.stringify(pf));
+    const pcfg = JSON.parse(readFileSync(join(home, 'projects', 'proj', 'project.json'), 'utf8')) as { hosts?: Record<string, { host?: string; user?: string; port?: number }> };
+    check('ws: /project host add — hosts в project.json', pcfg.hosts?.main?.host === '127.0.0.1' && pcfg.hosts?.main?.user === 'root' && pcfg.hosts?.main?.port === 2223, JSON.stringify(pcfg.hosts));
     await client.waitState(sProj + 1);
 
     const sHost = client.stateCount();
@@ -615,31 +619,33 @@ const client = await makeClient(handle.port);
     check('ws: юникод, html и 8КБ — дошли без искажений', saved?.text === sent);
   }
 
-  // --- БИТЫЙ agents.json: команда не может молча исчезнуть (в конце — чтобы
-  // наши hello не глотали state-события идущих раундов; предикаты прицельные:
-  // в очереди к этому месту копятся несвежие state от прошлых секций) ---
+  // --- БИТАЯ КАРТОЧКА в agents/: команда не может молча исчезнуть (в конце —
+  // чтобы наши hello не глотали state-события идущих раундов; предикаты
+  // прицельные: в очереди к этому месту копятся несвежие state прошлых секций) ---
   {
-    writeFileSync(join(home, 'agents'), '{ это не json');
+    const broken = join(home, 'agents', 'broken.json');
+    writeFileSync(broken, '{ это не json');
     client.send({ type: 'hello' });
     const bad = await client.next((m) => m.type === 'state' && (m.state as { teamError?: unknown }).teamError != null);
     const stBad = bad.state as { teamError: string; team: unknown[] };
-    check('ws: битый json — teamError в state', stBad.teamError.includes('не удалось прочитать'));
-    check('ws: битый json — команда в снимке пуста', Array.isArray(stBad.team) && stBad.team.length === 0);
+    check('ws: битая карточка — teamError в state', stBad.teamError.includes('не удалось прочитать'), stBad.teamError);
+    check('ws: битая карточка — команда в снимке пуста', Array.isArray(stBad.team) && stBad.team.length === 0);
 
-    writeFileSync(join(home, 'agents'), JSON.stringify([{ id: 'x' }]));
+    writeFileSync(broken, JSON.stringify({ id: 'x' }));
     client.send({ type: 'hello' });
     const bad2 = await client.next((m) => m.type === 'state' && String((m.state as { teamError?: string }).teamError ?? '').includes('обязательны поля'));
-    check('ws: агент без name/prompt — ошибка называет поля', Boolean(bad2));
+    check('ws: карточка без name/prompt — ошибка называет поля', Boolean(bad2));
 
-    writeFileSync(join(home, 'agents'), JSON.stringify([{ id: 'boss', name: 'Босс', prompt: 'Ты руководитель.' }]));
+    rmSync(broken);
+    writeFileSync(join(home, 'agents', 'boss.json'), JSON.stringify({ name: 'Босс', prompt: 'Ты руководитель.' }));
     client.send({ type: 'hello' });
     const good = await client.next((m) => m.type === 'state' && (m.state as { team?: { id: string }[] }).team?.some((a) => a.id === 'boss') === true);
     const stGood = good.state as { teamError?: string | null };
     check('ws: починили — teamError ушёл, команда в снимке', stGood.teamError == null);
-    rmSync(join(home, 'agents')); // песочнице возвращаем отсутствие файла
+    rmSync(join(home, 'agents'), { recursive: true }); // песочнице возвращаем отсутствие папки
     client.send({ type: 'hello' });
     const none = await client.next((m) => m.type === 'state' && (m.state as { team?: unknown[] }).team?.length === 0 && (m.state as { teamError?: unknown }).teamError == null);
-    check('ws: файла нет — пусто и без ошибки', Boolean(none));
+    check('ws: папки нет — пусто и без ошибки', Boolean(none));
   }
 
   client.close();

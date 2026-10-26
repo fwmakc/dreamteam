@@ -236,13 +236,13 @@ export type ManagerAction =
   | { op: 'project.host.add'; project?: string; name: string } & ManagerHostSpec
   /** Сменить проект: путь к папке или имя из реестра (/project open) */
   | { op: 'project.open'; path: string }
-  /** Ящик в mails.json проекта (поля как в конфиге тула mail) */
+  /** Ящик в поле "mails" project.json проекта (поля как в конфиге тула mail) */
   | { op: 'mail.add'; name: string; user: string; password: string; imap: string; smtp: string; port?: number; smtpPort?: number; tlsNoVerify?: boolean }
-  /** Убрать ящик из mails.json проекта */
+  /** Убрать ящик из поля "mails" project.json проекта */
   | { op: 'mail.remove'; name: string }
-  /** Токен бота в messengers.json проекта */
+  /** Токен бота в поле "messengers" project.json проекта */
   | { op: 'messenger.add'; key: 'telegram' | 'max'; token: string }
-  /** Убрать бота из messengers.json */
+  /** Убрать бота из поля "messengers" project.json проекта */
   | { op: 'messenger.remove'; key: 'telegram' | 'max' };
 
 /** Сервер в действии менеджера (project.host.add) */

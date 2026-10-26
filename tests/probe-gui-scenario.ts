@@ -4,6 +4,7 @@
  * import_session. Девять шагов; после КАЖДОГО — проверка на диске, что действие
  * выполнилось реально (файлы изменились), а не только отклик сервера.
  *
+ *  0. открыть проект          → project.json в доме, разговор создан
  *  1. новая сессия            → +файл в sessions/, приветствие менеджера внутри
  *  2. агент-юрист             → запись в agents/ с дефолтами
  *  3. позвать в сессию        → participants в файле сессии
@@ -16,7 +17,8 @@
  *
  * Удаление агента здесь идёт rpc-методом (так делает кнопка ✕ в GUI); в TUI
  * этой команды нет — там путь через менеджера (LLM), см. probe-tui-scenario.
- * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер, порт 0.
+ * Герметично: временный DT_HOME, mock-провайдер, порт 0; проект открывается
+ * rpc-ом, как это делает GUI.
  * Запуск: npm run probe:scenario-gui
  */
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
@@ -37,13 +39,13 @@ const check = (name: string, cond: boolean, detail?: unknown): void => {
 };
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// --- герметичные слои; proj НЕ создаём: ensureLayers скаффолдит сам (как в жизни)
+// --- герметичные слои ---
 const base = mkdtempSync(join(tmpdir(), 'dt-gui-scn-'));
 const home = join(base, 'home');
 const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
+mkdirSync(proj, { recursive: true }); // project.open открывает существующую папку
 process.env.DT_HOME = home;
-process.env.DT_PROJECT = proj;
 process.chdir(base); // рабочая папка тулов — песочница
 writeModels(home, { mock: { adapter: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
@@ -52,7 +54,7 @@ process.on('exit', () => { try { rmSync(base, { recursive: true, force: true });
 process.on('SIGINT', () => process.exit(130));
 process.on('SIGTERM', () => process.exit(143));
 
-const sessionsDir = join(proj, 'sessions'); // переписка — в проекте
+const sessionsDir = join(home, 'projects', 'proj', 'sessions'); // переписка — в доме, в проекте
 const agentsDir = join(home, 'agents'); // команда — в доме (agents/<id>.json)
 const readJson = (p: string): any => JSON.parse(readFileSync(p, 'utf8'));
 const sessionFile = (id: string): string => join(sessionsDir, `${id}.json`);
@@ -118,11 +120,19 @@ let rpc = 0;
 const rpcId = () => `c${++rpc}`;
 
 try {
-  const st0 = await client.awaitState<{ sessions: unknown[]; team: { id: string }[] }>((s) => Array.isArray(s.sessions));
+  // ── 0. открыть проект (старт приложения — без проекта) ──────────────────
+  const st0 = await client.awaitState<{ sessions: unknown[]; project: unknown }>((s) => Array.isArray(s.sessions));
+  check('старт: без проекта — разговоров нет, project пуст', st0.sessions.length === 0 && st0.project === null,
+    JSON.stringify({ sessions: st0.sessions.length, project: st0.project }));
+  client.send({ type: 'rpc', id: rpcId(), method: 'project.open', args: { path: proj } });
+  await client.next((m) => (m.type === 'rpc_result' || m.type === 'rpc_error') && m.id === `c${rpc}`);
   const START_IDS = ['analyst', 'secretary', 'developer', 'designer', 'writer'];
-  check('старт: один разговор, стартовая пятёрка в команде',
-    st0.sessions.length === 1 && st0.team.length === 5 && START_IDS.every((id) => st0.team.some((a) => a.id === id)),
-    JSON.stringify(st0.team.map((a) => a.id)));
+  const stP = await client.awaitState<{ sessions: unknown[]; team: { id: string }[]; project: { id: string } | null }>(
+    (s) => Array.isArray(s.sessions) && s.sessions.length === 1,
+  );
+  check('старт: проект открыт — пятёрка в команде, разговор создан',
+    stP.team.length === 5 && START_IDS.every((id) => stP.team.some((a) => a.id === id)) && stP.project?.id === 'proj',
+    JSON.stringify({ team: stP.team.map((a) => a.id), project: stP.project }));
   check('старт: файл сессии на диске', readSessions().length === 1);
 
   // ── 1. новая сессия ──────────────────────────────────────────────────────

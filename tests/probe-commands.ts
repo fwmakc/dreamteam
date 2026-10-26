@@ -1,7 +1,7 @@
 /**
  * Проба канонических команд: ядро исполняет `/…` для любой оболочки —
  * терминал, сервер (WS-тип command) и перехват в handleMessage.
- * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер, команды не пишутся
+ * Герметично: временный DT_HOME, mock-провайдер, команды не пишутся
  * в историю разговора. Запуск: npm run probe:commands
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,7 +14,6 @@ const home = join(base, 'home');
 const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
-process.env.DT_PROJECT = proj;
 // рабочая папка инструментов = cwd на момент импорта: уводим процесс в tmp
 process.chdir(base);
 
@@ -52,6 +51,11 @@ const stub: Presenter = {
 
 const { app } = await bootstrapApp();
 const engine = new Engine(app, stub);
+// старт без проекта — открываем свой: разговоры живут в доме
+engine.newProject('dev', join(base, 'ws'));
+// project.json открытого проекта — сюда все helpers пишут секреты (hosts/mails/messengers)
+const readProj = (): Record<string, unknown> =>
+  JSON.parse(readFileSync(join(home, 'projects', 'dev', 'project.json'), 'utf8')) as Record<string, unknown>;
 
 // команда из двух агентов — в уже скаффолденный проект
 mkdirSync(join(home, 'agents'), { recursive: true });
@@ -59,8 +63,8 @@ writeFileSync(join(home, 'agents', 'test_probe.json'), JSON.stringify({ name: '�
 writeFileSync(join(home, 'agents', 'gleb.json'), JSON.stringify({ name: 'Глеб', prompt: 'Ты Глеб.', emoji: '💾', color: 'yellow' }, null, 2));
 
 // консьерж-старт: в чате один менеджер — как после /new или первого запуска
-app.session.participants = [MANAGER_ID];
-app.store.save(app.session);
+app.session!.participants = [MANAGER_ID];
+app.store!.save(app.session!);
 
 const run = (_e: unknown, line: string): Promise<string[]> => runOperationText(engine, line);
 let failed = 0;
@@ -86,7 +90,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   check('sessions: id показан', lines.some((l) => l.includes(' · id ')) ?? false);
 
   lines = await run(engine, '/session new');
-  check('session new: новый разговор (сессий 2)', app.store.list().length === 2);
+  check('session new: новый разговор (сессий 2)', app.store!.list().length === 2);
   lines = await run(engine, '/session rename Пристрелочный разговор');
   check('session rename: отчёт', lines[0]?.includes('Пристрелочный разговор') ?? false);
   check('session rename: заголовок изменился', (await run(engine, '/sessions')).some((l) => l.includes('Пристрелочный разговор')));
@@ -114,7 +118,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 // ── чат: add/remove ──────────────────────────────────────────────────────────
 {
   // событие чата — реплика менеджера в хронике разговора, а не заметка
-  const chronicle = () => app.session.messages.at(-1)?.text ?? '';
+  const chronicle = () => app.session!.messages.at(-1)?.text ?? '';
   let lines = await run(engine, '/chat add');
   check('chat add: без аргумента — подсказка', lines[0]?.includes('Кого позвать?') ?? false);
   lines = await run(engine, '/chat add Тест');
@@ -125,7 +129,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   );
   check(
     'chat add: автор события — менеджер-модератор',
-    app.session.messages.at(-1)?.authorId === MANAGER_ID && app.session.messages.at(-1)?.authorRole === 'менеджер переговорки',
+    app.session!.messages.at(-1)?.authorId === MANAGER_ID && app.session!.messages.at(-1)?.authorRole === 'менеджер переговорки',
   );
   lines = await run(engine, '/chat add Тест');
   check('chat add: повтор — уже в чате (без события)', lines[0]?.includes('уже в чате') ?? false);
@@ -252,7 +256,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   check('project host add: отчёт ✓', lines[0]?.includes('prod') ?? false);
   lines = await run(engine, '/project host add backup=10.0.0.2');
   check('project host add: второй сервер — отчёт ✓', lines[0]?.includes('backup') ?? false);
-  const hosts = JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as Record<string, { host: string; user?: string; port?: number }>;
+  const hosts = readProj().hosts as Record<string, { host: string; user?: string; port?: number }>
   check(
     'project host add: user и порт разобраны',
     hosts.prod?.user === 'deploy' && hosts.prod.port === 2202 && hosts.backup?.host === '10.0.0.2',
@@ -262,7 +266,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   lines = await run(engine, '/project');
   check('project: обзор — список серверов', lines.some((l) => l.includes('prod: deploy@10.0.0.1:2202')) ?? false);
   lines = await run(engine, '/project host delete staging');
-  check('project host delete: сервер убран', !(JSON.parse(readFileSync(join(proj, 'hosts.json'), 'utf8')) as typeof hosts).staging);
+  check('project host delete: сервер убран', !(readProj().hosts as typeof hosts).staging);
 }
 
 // ── почта: list/add/remove ───────────────────────────────────────────────────
@@ -272,7 +276,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 
   lines = await run(engine, '/mail add работа user=робот@corp.ru password=пароль-приложения imap=imap.corp.ru smtp=smtp.corp.ru smtpPort=587 tlsNoVerify');
   check('mail add: отчёт ✓', lines[0]?.includes('работа') ?? false);
-  const mails = JSON.parse(readFileSync(join(proj, 'mails.json'), 'utf8')) as Record<string, { user?: string; smtpPort?: number; tlsNoVerify?: boolean }>;
+  const mails = readProj().mails as Record<string, { user?: string; smtpPort?: number; tlsNoVerify?: boolean }>
   check(
     'mail add: пары разобраны (порт числом, флаг булевым)',
     mails['работа']?.user === 'робот@corp.ru' && mails['работа']?.smtpPort === 587 && mails['работа']?.tlsNoVerify === true,
@@ -293,7 +297,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   } catch (err) { threw = err instanceof Error ? err.message : String(err); }
   check('mail add: нет imap — отказ валидатора', threw.includes('imap'));
   lines = await run(engine, '/mail remove работа');
-  check('mail remove: ящик убран', !(JSON.parse(readFileSync(join(proj, 'mails.json'), 'utf8')) as typeof mails)['работа']);
+  check('mail remove: ящик убран', !(readProj().mails as typeof mails)['работа']);
 }
 
 // ── мессенджеры: list/add/remove ─────────────────────────────────────────────
@@ -303,7 +307,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 
   lines = await run(engine, '/messenger add telegram 123456:ABC-cmd');
   check('messenger add: отчёт ✓', lines[0]?.includes('telegram') ?? false);
-  const mess = JSON.parse(readFileSync(join(proj, 'messengers.json'), 'utf8')) as Record<string, { token?: string } | undefined>;
+  const mess = readProj().messengers as Record<string, { token?: string } | undefined>
   check('messenger add: токен на диске', mess.telegram?.token === '123456:ABC-cmd');
   lines = await run(engine, '/messenger');
   check('messenger: обзор — бот виден', lines.some((l) => l.includes('telegram')) ?? false);
@@ -318,7 +322,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   } catch (err) { threw = err instanceof Error ? err.message : String(err); }
   check('messenger add: дубликат — ошибка', threw.includes('уже есть'));
   lines = await run(engine, '/messenger remove telegram');
-  check('messenger remove: бот убран', !(JSON.parse(readFileSync(join(proj, 'messengers.json'), 'utf8')) as typeof mess).telegram);
+  check('messenger remove: бот убран', !(readProj().messengers as typeof mess).telegram);
 }
 
 // ── расписание: list/add/toggle/delete ───────────────────────────────────────
@@ -399,12 +403,12 @@ function check(name: string, cond: boolean, detail?: string): void {
 
 // ── перехват в handleMessage: команда исполняется, сам текст не пишется ──────
 {
-  app.session.participants = [MANAGER_ID];
-  app.store.save(app.session);
-  const before = app.session.messages.length;
+  app.session!.participants = [MANAGER_ID];
+  app.store!.save(app.session!);
+  const before = app.session!.messages.length;
   await engine.handleMessage('/chat add Тест', new AbortController().signal);
   check('handleMessage: /chat add исполнен (строка через presenter.service)', notices.some((t) => t.includes('присоединился')) ?? false);
-  const msgs = app.session.messages;
+  const msgs = app.session!.messages;
   check(
     'handleMessage: событие чата — в хронике репликой менеджера',
     msgs.length === before + 1 && msgs.at(-1)?.authorId === MANAGER_ID && (msgs.at(-1)?.text.includes('присоединился') ?? false),

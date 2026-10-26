@@ -8,7 +8,7 @@
  *  - коллизия providers/mock.ts со встроенным адаптером — громкая ошибка;
  *  - битый файл providers/broken.ts — громкая ошибка с путём.
  *
- * Герметично: временные DT_HOME/DT_PROJECT.
+ * Герметично: временный DT_HOME.
  * Запуск: npm run probe:providers
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,11 +29,9 @@ process.on('exit', () => { try { rmSync(root, { recursive: true, force: true });
 function makeHome(name: string, extra: void): string {
   void extra;
   const home = join(root, name);
-  const proj = join(root, `${name}-proj`);
   mkdirSync(join(home, 'providers'), { recursive: true });
   mkdirSync(join(home, 'models'), { recursive: true });
   process.env.DT_HOME = home;
-  process.env.DT_PROJECT = proj;
   writeFileSync(
     join(home, 'models', 'echo.json'),
     JSON.stringify({ adapter: 'echo', model: 'mirror' }, null, 2) + '\n',

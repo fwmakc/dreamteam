@@ -7,17 +7,16 @@
  * scroll-region — эти коды здесь не проверить, см. tests/probe-screen.ts.
  *
  * Изоляция: зонд полностью герметичен и реальные данные не трогает. Приложение
- * запускается во временном проекте (cwd) с переменными DT_HOME/DT_PROJECT во
- * временные папки: там свои providers.json (всё на mock — ни одного настоящего
- * запроса к API), settings.json, user.json, менеджер и копия боевой команды
- * (слой дома), в проекте — hosts.json. Сценарий —
- * консьерж-поток: пустой разговор → приветствие менеджера на старте → первая
- * реплика менеджеру (team.add «Теста» с тулами) → chat.add → раунд с
- * инструментами. team.add реально пишет в agents/ дома — зонд
- * проверяет это по файлу и убирает за собой всё при любом завершении.
+ * запускается с DT_HOME во временную папку (там свои модели — всё на mock, ни
+ * одного настоящего запроса к API, settings.json, user.json, менеджер; команда
+ * и разговоры скаффолдит само приложение). Сценарий — консьерж-поток:
+ * старт без проекта → /project new dev (пустой разговор, приветствие
+ * менеджера) → первая реплика менеджеру (team.add «Теста» с тулами) →
+ * chat.add → раунд с инструментами. team.add реально пишет карточку в agents/
+ * дома — зонд проверяет это по файлу и убирает за собой всё при завершении.
  */
 import { createRequire } from 'node:module';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -41,34 +40,21 @@ function check(name: string, cond: boolean, detail?: string): void {
   }
 }
 
-// --- герметичные слои: временный дом и временный проект ---
+// --- герметичный дом: модели, настройки, менеджер; команда и проекты — дома ---
 const root = mkdtempSync(join(tmpdir(), 'dt-tui-'));
 const home = join(root, 'home');
-const proj = join(root, 'proj');
+const proj = join(root, 'proj'); // рабочая папка проекта (cwd процесса)
 mkdirSync(home, { recursive: true });
-mkdirSync(join(proj, '.dreamteam'), { recursive: true });
+mkdirSync(proj, { recursive: true });
 const j = (p: string, v: unknown): void =>
   writeFileSync(join(home, p), JSON.stringify(v, null, 2) + '\n');
-const pj = (p: string, v: unknown): void =>
-  writeFileSync(join(proj, '.dreamteam', p), JSON.stringify(v, null, 2) + '\n');
 mkdirSync(join(home, 'models'), { recursive: true });
 j('models/mock.json', { adapter: 'mock' });
 j('models/mock-images.json', { adapter: 'mock-images' });
 j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000, model: { id: 'mock' } });
 j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
-// команда — вещь машины: менеджер и команда в доме
+// менеджер — вещь машины: в доме, на mock-модели
 j('manager.json', { model: { id: 'mock' }, name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
-// проект — только свой hosts.json (серверы)
-pj('hosts.json', { dev: { host: '192.0.2.1' } });
-// команда — копия боевой (фикстура в репозитории): имена и роли важны для
-// сценария, модели сажаем на mock
-const team = JSON.parse(readFileSync('.dreamteam/agents.json', 'utf8')) as Array<Record<string, unknown>>;
-for (const a of team) {
-  if (a.provider) { a.model = { id: 'mock' }; delete a.provider; }
-  if (a.vision) a.vision = { id: 'mock' };
-  if (a.image) a.image = { id: 'mock-images' };
-}
-j('agents.json', team);
 import { rmTemp } from './rm-tmp.js';
 
 process.on('exit', () => rmTemp(root));
@@ -82,7 +68,7 @@ const term = pty.spawn(
     name: 'xterm-256color',
     cols: 100,
     rows: 30,
-    env: { ...process.env, DT_HOME: home, DT_PROJECT: join(proj, '.dreamteam') },
+    env: { ...process.env, DT_HOME: home },
     cwd: proj,
   },
 );
@@ -127,9 +113,16 @@ await write('\x1b[6~');
 check('tui: промпт редактора', out.includes('Ты >'), out.slice(-200));
 check('tui: подсказки операций', out.includes('/help — операции'), out.slice(-400));
 
-// Пустой разговор на старте: менеджер-консьерж здоровается сам (без действий).
+// Стартуем без проекта — создаём: /project new откроет пустой разговор,
+// консьерж здоровается сам (как по /session new).
+check('tui: старт без проекта — метка в промпте', out.includes('без проекта'), out.slice(-200));
+await write('/project new dev\r');
 check(
-  'tui: менеджер поприветствовал на старте',
+  'tui: проект создан и открыт',
+  await waitFor('отчёт о проекте', (s) => s.includes('Проект: dev'), 15000),
+);
+check(
+  'tui: менеджер поприветствовал в пустом разговоре',
   await waitFor('стартовое приветствие', (s) => s.includes('Я менеджер переговорки'), 15000),
 );
 
@@ -211,9 +204,9 @@ const code = await Promise.race([
 check('tui: процесс завершился сам', code === 0, String(code));
 if (code === null) term.kill();
 writeFileSync('/tmp/dt-tui-raw.txt', out, 'utf8');
-// team.add менеджера писал в agents/ дома (команда — вещь машины) — проверяем по файлу
-check('tui: «Тест» записан в агенты дома', readFileSync(join(home, 'agents'), 'utf8').includes('test_probe'));
-check('tui: разговор сохранился в проекте', readdirSync(join(proj, '.dreamteam', 'sessions')).length === 1);
+// team.add менеджера писал карточку в agents/ дома (команда — вещь машины)
+check('tui: «Тест» записан в агенты дома', existsSync(join(home, 'agents', 'test_probe.json')));
+check('tui: разговор сохранился в проекте дома', readdirSync(join(home, 'projects', 'dev', 'sessions')).length === 1);
 
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);

@@ -25,7 +25,7 @@ import {
   splitChain,
   type ToolConfig,
 } from '../src/tools-api.js';
-import { checkPermission, loadHosts, parseActions, type ToolContext, type ToolsConfig } from '../src/actions.js';
+import { checkPermission, loadHostsRecord, parseActions, type ToolContext, type ToolsConfig } from '../src/actions.js';
 import { buildToolset, loadUserTools } from '../src/tools-registry.js';
 import { loadTeam } from '../src/agents.js';
 import gitFactory from '../src/tools/git/git.js';
@@ -480,27 +480,18 @@ const tctx: ToolContext = {
   check('маски: пустой массив — это «нет масок»', threw === '', threw);
 }
 
-// --- loadHosts: пароль и папка проекта на сервере ---
+// --- loadHostsRecord: пароль и папка проекта на сервере ---
 {
-  const root = mkdtempSync(join(tmpdir(), 'dt-hosts-'));
-  const file = join(root, 'hosts.json');
-  writeFileSync(
-    file,
-    JSON.stringify({
-      prod: { host: '203.0.113.10', user: 'deploy', port: 2222, password: 'p @ w', dir: '/var/www/app' },
-    }),
-  );
-  const host = loadHosts(file).get('prod')!;
-  check('loadHosts: пароль и папка хоста дошли', host.password === 'p @ w' && host.dir === '/var/www/app', JSON.stringify(host));
-  writeFileSync(file, JSON.stringify({ prod: { host: 'h', password: 5 } }));
+  const host = loadHostsRecord({
+    prod: { host: '203.0.113.10', user: 'deploy', port: 2222, password: 'p @ w', dir: '/var/www/app' },
+  }).get('prod')!;
+  check('loadHostsRecord: пароль и папка хоста дошли', host.password === 'p @ w' && host.dir === '/var/www/app', JSON.stringify(host));
   let threw = '';
-  try { loadHosts(file); } catch (e) { threw = (e as Error).message; }
-  check('loadHosts: кривой password — отказ', threw.includes('"password"'), threw);
-  writeFileSync(file, JSON.stringify({ prod: { host: 'h', dir: '  ' } }));
+  try { loadHostsRecord({ prod: { host: 'h', password: 5 } }); } catch (e) { threw = (e as Error).message; }
+  check('loadHostsRecord: кривой password — отказ', threw.includes('"password"'), threw);
   threw = '';
-  try { loadHosts(file); } catch (e) { threw = (e as Error).message; }
-  check('loadHosts: пустой dir — отказ', threw.includes('"dir"'), threw);
-  rmSync(root, { recursive: true, force: true });
+  try { loadHostsRecord({ prod: { host: 'h', dir: '  ' } }); } catch (e) { threw = (e as Error).message; }
+  check('loadHostsRecord: пустой dir — отказ', threw.includes('"dir"'), threw);
 }
 
 // --- ssh: папка сервера как рамка, маски, put/get (scp) ---

@@ -52,7 +52,7 @@ export interface ProjectInfo {
   hosts: ProjectHost[];
 }
 
-/** Проект из реестра машины (projects.json в доме) — для переключения */
+/** Проект дома (папка в projects/) — для переключения */
 export interface ProjectRecordInfo {
   path: string;
   name: string;
@@ -75,7 +75,8 @@ export interface OpHint {
 }
 
 export interface StateSnapshot {
-  session: { id: string; title: string; messages: ChatMessage[] };
+  /** null — проект не выбран: оболочка показывает панель выбора проекта */
+  session: { id: string; title: string; messages: ChatMessage[] } | null;
   sessions: SessionMeta[];
   /** битый agents.json: текст ошибки (нет файла — пустая команда, ошибки нет) */
   teamError?: string | null;
@@ -85,9 +86,9 @@ export interface StateSnapshot {
   images: { id: string; ok: boolean; note?: string }[];
   profile: { name: string; role?: string; about?: string };
   projects: ProjectInfo[];
-  /** текущий проект (папка запуска serve) */
-  project?: { path: string; name: string };
-  /** известные проекты машины — клик = переключение (rpc project.open) */
+  /** текущий проект (id = папка в projects/ дома); null — не выбран */
+  project?: { id: string; name: string; path: string } | null;
+  /** проекты дома — клик = переключение (rpc project.open) */
   knownProjects?: ProjectRecordInfo[];
   auto: { mode: boolean; left: number };
   settings: { width: number; language: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string };
@@ -139,8 +140,12 @@ export type WsMessage =
   | { type: 'confirm_response'; id: string; approved: boolean }
   | { type: 'choose_response'; id: string; index: number | null }
   | { type: 'export_home' }
+  | { type: 'export_settings' }
+  | { type: 'export_project'; name?: string }
   | { type: 'export_session'; n: number }
   | { type: 'import_home'; dataB64: string }
+  | { type: 'import_settings'; dataB64: string }
+  | { type: 'import_project'; dataB64: string; name?: string }
   | { type: 'import_session'; dataB64: string }
   | { type: 'file'; name: string; dataB64: string; text?: string }
   | { type: 'rpc'; id: string; method: string; args?: Record<string, unknown> };

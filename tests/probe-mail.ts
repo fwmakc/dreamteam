@@ -1,7 +1,7 @@
 /**
  * Проба тула «mail» — офлайн: реальных серверов не касаемся.
- *   конфиг mails.json проекта (служебная папка .dreamteam): нет файла, битые
- *   поля, пресеты, custom;
+ *   ящики — поле "mails" в project.json проекта (в доме): нет поля, битые
+ *   поля, custom;
  *   boxes — имена и хосты, пароли не светятся; выбор ящика при нескольких;
  *   check(): чтение — allow, send — ask, ерунда — deny;
  *   send: шапка кому:/тема:/файлы:, пустое тело, пути наружу и секреты;
@@ -12,11 +12,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// DT_HOME и DT_PROJECT читаются при импорте paths — подменяем до загрузки модулей
+// DT_HOME читается при импорте paths — подменяем до загрузки модулей
 const home = mkdtempSync(join(tmpdir(), 'dt-mail-home-'));
 process.env.DT_HOME = home;
-const proj = mkdtempSync(join(tmpdir(), 'dt-mail-proj-'));
-process.env.DT_PROJECT = proj;
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -28,7 +26,15 @@ function check(name: string, cond: boolean, detail?: string): void {
 }
 
 const cwd = mkdtempSync(join(tmpdir(), 'dt-mail-cwd-'));
-const mailFile = join(proj, 'mails.json');
+// проект «открыт»: слой путей указывает в project.json дома — там живут ящики
+const { setProjectRoot } = await import('../src/paths.js');
+const projFile = join(home, 'projects', 'dev', 'project.json');
+mkdirSync(join(home, 'projects', 'dev'), { recursive: true });
+setProjectRoot(join(home, 'projects', 'dev'), '');
+const writeMails = (mails: unknown): void => {
+  writeFileSync(projFile, JSON.stringify({ id: 'dev', createdAt: 1, hosts: {}, messengers: {}, mails }));
+};
+writeMails({});
 const { default: makeTool } = await import('../src/tools/mail/mail.js');
 const { resolveEndpoints, loadAccounts } = await import('../src/mail.js');
 
@@ -46,34 +52,35 @@ const errOf = async (body: string): Promise<string> => {
 
 // ─── нет mails.json ──────────────────────────────────────────────────────────
 {
+  writeFileSync(projFile, JSON.stringify({ id: 'dev', createdAt: 1, hosts: {} })); // поля mails нет
   const msg = await errOf('boxes');
-  check('нет mails.json — отказ с примером', msg.includes('mails.json') && msg.includes('imap.yandex.ru') && msg.includes('smtp'), msg.slice(0, 160));
+  check('нет поля mails — отказ с примером', msg.includes('нет поля "mails"') && msg.includes('imap.yandex.ru') && msg.includes('smtp'), msg.slice(0, 160));
 }
 
 // ─── битый конфиг: каждое поле со своей ошибкой ──────────────────────────────
 {
-  writeFileSync(mailFile, JSON.stringify({ a: { preset: 'yandex', user: 'x@x.ru', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru' } }));
+  writeMails({ a: { preset: 'yandex', user: 'x@x.ru', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru' } });
   check('поле preset больше не знает — отказ', (await errOf('boxes')).includes('неизвестные поля "preset"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x@x.ru' } }));
+  writeMails({ a: { user: 'x@x.ru' } });
   check('нет password/imap/smtp — сначала user/password', (await errOf('boxes')).includes('"user" и "password"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x@corp.ru', password: 'p' } }));
+  writeMails({ a: { user: 'x@corp.ru', password: 'p' } });
   check('без imap/smtp — отказ', (await errOf('boxes')).includes('"imap" (входящая почта) и "smtp"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru', fromName: 'Я' } }));
+  writeMails({ a: { user: 'x', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru', fromName: 'Я' } });
   check('лишнее поле в ящике', (await errOf('boxes')).includes('неизвестные поля "fromName"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru', port: 'девятьсот' } }));
+  writeMails({ a: { user: 'x', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru', port: 'девятьсот' } });
   check('порт не число', (await errOf('boxes')).includes('"port"'));
-  writeFileSync(mailFile, JSON.stringify({ a: { user: 'x', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru', tlsNoVerify: 'конечно' } }));
+  writeMails({ a: { user: 'x', password: 'p', imap: 'imap.x.ru', smtp: 'smtp.x.ru', tlsNoVerify: 'конечно' } });
   check('tlsNoVerify не булево — отказ', (await errOf('boxes')).includes('"tlsNoVerify" должен быть true или false'));
-  writeFileSync(mailFile, 'это не json');
+  writeFileSync(projFile, 'это не json'); // битый project.json
   check('битый json', (await errOf('boxes')).includes('кривой JSON'));
 }
 
 // ─── валидный конфиг: два ящика ──────────────────────────────────────────────
 {
-  writeFileSync(mailFile, JSON.stringify({
+  writeMails({
     личное: { user: 'я@yandex.ru', password: 'секрет-1', imap: 'imap.yandex.ru', smtp: 'smtp.yandex.ru' },
     работа: { user: 'я@corp.ru', password: 'секрет-2', imap: 'imap.corp.ru', smtp: 'smtp.corp.ru', smtpPort: 587, tlsNoVerify: true },
-  }));
+  });
   const boxes = await run('boxes');
   check('boxes: оба ящика с хостами', boxes.includes('личное — я@yandex.ru (imap: imap.yandex.ru') && boxes.includes('smtp.corp.ru'), boxes);
   check('boxes: пароли не светятся', !boxes.includes('секрет-1') && !boxes.includes('секрет-2'), boxes);
@@ -122,4 +129,3 @@ process.exitCode = fails === 0 ? 0 : 1;
 const { rmTemp } = await import('./rm-tmp.js');
 rmTemp(cwd);
 rmTemp(home);
-rmTemp(proj);

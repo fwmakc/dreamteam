@@ -493,15 +493,16 @@ export function grantTool(dir: string, agentId: string, tool: string, card?: unk
     : tf('✓ {name}: тул «{tool}» включён', { name: String(agentCard.name ?? fid), tool: tid });
 }
 
-// ─── hosts.json: серверы текущего проекта ────────────────────────────────────
+// ─── hosts: серверы проекта (поле "hosts" в project.json) ───────────────────
 
-/** Файл серверов: { "prod": { host, user?, password?, dir?, port? } } — плоский словарь. */
+/** Серверы проекта: { "prod": { host, user?, password?, dir?, port? } } — плоский словарь. */
 export type HostsFile = Record<string, ManagerHostSpec>;
 
-/** Читает hosts.json; нет файла или он битый — пусто (просмотр не падает). */
+/** Читает поле "hosts" из project.json; нет файла/поля или поле битое — пусто (просмотр не падает). */
 export function loadHostsFile(file: string): HostsFile {
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    const cfg = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    const raw = cfg?.hosts;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
     return raw as HostsFile;
   } catch {
@@ -509,10 +510,16 @@ export function loadHostsFile(file: string): HostsFile {
   }
 }
 
-/** Запись hosts.json: tmp → rename. */
+/** Запись поля "hosts" в project.json (остальные поля нетронуты): tmp → rename. */
 function saveHostsFile(file: string, hosts: HostsFile): void {
+  let cfg: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) cfg = parsed as Record<string, unknown>;
+  } catch { /* файла нет — начнём project.json с чистого */ }
+  cfg.hosts = hosts;
   const tmp = `${file}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(hosts, null, 2)}\n`, 'utf8');
+  writeFileSync(tmp, `${JSON.stringify(cfg, null, 2)}\n`, 'utf8');
   renameSync(tmp, file);
 }
 
@@ -541,7 +548,7 @@ function normalizeHost(where: string, spec: unknown): ManagerHostSpec {
   return out;
 }
 
-/** project host add: сервер(а) в hosts.json; файла нет — создаём. */
+/** project host add: сервер(а) в поле "hosts" project.json; поля нет — создаём. */
 export function addProjectHosts(
   file: string,
   hosts: Record<string, ManagerHostSpec>,
@@ -563,7 +570,7 @@ export function addProjectHosts(
   return tf('✓ сервер(а) добавлены в проект: {list}', { list: added.join(', ') });
 }
 
-/** project host delete: убрать сервер из hosts.json. */
+/** project host delete: убрать сервер из поля "hosts" project.json. */
 export function removeProjectHost(file: string, name: string): string {
   const hid = String(name ?? '').trim();
   const registry = loadHostsFile(file);
@@ -575,15 +582,16 @@ export function removeProjectHost(file: string, name: string): string {
   return tf('✓ сервер «{id}» убран из проекта', { id: hid });
 }
 
-// ─── mails.json: ящики проекта ───────────────────────────────────────────────
+// ─── mails: ящики проекта (поле "mails" в project.json) ──────────────────────
 
-/** Реестр ящиков: { "работа": { user, password, imap, smtp, … } } — плоский словарь. */
+/** Ящики проекта: { "работа": { user, password, imap, smtp, … } } — плоский словарь. */
 export type MailsFile = Record<string, MailAccount>;
 
-/** Читает mails.json; нет файла или он битый — пусто (просмотр не падает). */
+/** Читает поле "mails" из project.json; нет файла/поля или поле битое — пусто (просмотр не падает). */
 export function loadMailsFile(file: string): MailsFile {
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    const cfg = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    const raw = cfg?.mails;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
     return raw as MailsFile;
   } catch {
@@ -591,16 +599,22 @@ export function loadMailsFile(file: string): MailsFile {
   }
 }
 
-/** Запись mails.json: tmp → rename. */
+/** Запись поля "mails" в project.json (остальные поля нетронуты): tmp → rename. */
 function saveMailsFile(file: string, mails: MailsFile): void {
+  let cfg: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) cfg = parsed as Record<string, unknown>;
+  } catch { /* файла нет — начнём project.json с чистого */ }
+  cfg.mails = mails;
   const tmp = `${file}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(mails, null, 2)}\n`, 'utf8');
+  writeFileSync(tmp, `${JSON.stringify(cfg, null, 2)}\n`, 'utf8');
   renameSync(tmp, file);
 }
 
 /**
- * mail add: ящик в mails.json; файла нет — создаём. Валидация та же, что у
- * тула mail (readAccount), до записи; пароль в отчёте не светится.
+ * mail add: ящик в поле "mails" project.json; поля нет — создаём. Валидация
+ * та же, что у тула mail (readAccount), до записи; пароль в отчёте не светится.
  */
 export function addMailAccount(file: string, name: string, spec: unknown): string {
   const box = String(name ?? '').trim();
@@ -618,7 +632,7 @@ export function addMailAccount(file: string, name: string, spec: unknown): strin
   return tf('✓ ящик «{box}» добавлен ({user} — imap {imap}, smtp {smtp})', { box, user: acc.user, imap: acc.imap, smtp: acc.smtp });
 }
 
-/** mail remove: убрать ящик из mails.json. */
+/** mail remove: убрать ящик из поля "mails" project.json. */
 export function removeMailAccount(file: string, name: string): string {
   const box = String(name ?? '').trim();
   const mails = loadMailsFile(file);
@@ -630,14 +644,15 @@ export function removeMailAccount(file: string, name: string): string {
   return tf('✓ ящик «{box}» убран', { box });
 }
 
-// ─── messengers.json: боты telegram/max ──────────────────────────────────────
+// ─── messengers: боты telegram/max (поле "messengers" в project.json) ────────
 
 const MESSENGER_KEYS = ['telegram', 'max'] as const;
 
-/** Читает messengers.json; нет файла или он битый — пусто (просмотр не падает). */
+/** Читает поле "messengers" из project.json; нет файла/поля или поле битое — пусто (просмотр не падает). */
 export function loadMessengersFile(file: string): Record<string, unknown> {
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    const cfg = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    const raw = cfg?.messengers;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
     return raw as Record<string, unknown>;
   } catch {
@@ -645,14 +660,20 @@ export function loadMessengersFile(file: string): Record<string, unknown> {
   }
 }
 
-/** Запись messengers.json: tmp → rename. */
-function saveMessengersFile(file: string, cfg: Record<string, unknown>): void {
+/** Запись поля "messengers" в project.json (остальные поля нетронуты): tmp → rename. */
+function saveMessengersFile(file: string, msngrs: Record<string, unknown>): void {
+  let cfg: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) cfg = parsed as Record<string, unknown>;
+  } catch { /* файла нет — начнём project.json с чистого */ }
+  cfg.messengers = msngrs;
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(cfg, null, 2)}\n`, 'utf8');
   renameSync(tmp, file);
 }
 
-/** messenger add: токен бота в messengers.json; файла нет — создаём. Токен в отчёте не светится. */
+/** messenger add: токен бота в поле "messengers" project.json; поля нет — создаём. Токен в отчёте не светится. */
 export function addMessengerBot(file: string, key: string, token: string): string {
   const k = String(key ?? '').trim().toLowerCase();
   if (!(MESSENGER_KEYS as readonly string[]).includes(k)) {
@@ -666,10 +687,10 @@ export function addMessengerBot(file: string, key: string, token: string): strin
   }
   cfg[k] = { token: tok };
   saveMessengersFile(file, cfg);
-  return tf('✓ токен бота «{key}» сохранён в messengers.json', { key: k });
+  return tf('✓ токен бота «{key}» сохранён в project.json проекта', { key: k });
 }
 
-/** messenger remove: убрать бота из messengers.json. */
+/** messenger remove: убрать бота из поля "messengers" project.json. */
 export function removeMessengerBot(file: string, key: string): string {
   const k = String(key ?? '').trim().toLowerCase();
   if (!(MESSENGER_KEYS as readonly string[]).includes(k)) {
@@ -681,5 +702,5 @@ export function removeMessengerBot(file: string, key: string): string {
   }
   delete cfg[k];
   saveMessengersFile(file, cfg);
-  return tf('✓ бот «{key}» убран из messengers.json', { key: k });
+  return tf('✓ бот «{key}» убран из проекта', { key: k });
 }

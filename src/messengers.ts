@@ -1,11 +1,11 @@
 /**
  * Мессенджеры: Telegram и MAX — общая механика для тулов `telegram` и `max`.
- * Токены живут в messengers.json в служебной папке проекта (.dreamteam),
- * не в карточках агентов:
+ * Токены живут в поле "messengers" в project.json проекта (в доме,
+ * projects/<id>/), не в карточках агентов:
  *
- *   { "telegram": { "token": "123456:ABC-DEF…" },
- *     "max":      { "token": "…" },
- *     "api":      { "telegram": "http://127.0.0.1:8081", "max": "http://127.0.0.1:8082" } }
+ *   { "messengers": { "telegram": { "token": "123456:ABC-DEF…" },
+ *                     "max":      { "token": "…" },
+ *                     "api":      { "telegram": "http://127.0.0.1:8081", "max": "http://127.0.0.1:8082" } } }
  *
  * "api" — необязательная подмена базового адреса: для проб с локальным
  * mock-сервером и для корпоративных прокси. По умолчанию Telegram —
@@ -16,9 +16,9 @@
  * {token}; в сообщении attachment {type, payload: {token}}. Telegram: файлы
  * уходят multipart-ом в sendDocument, текст — JSON-ом в sendMessage.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { MESSENGERS_FILE } from './paths.js';
+import { PROJECT_FILE } from './paths.js';
 
 export const TELEGRAM_API = 'https://api.telegram.org';
 export const MAX_API = 'https://platform-api2.max.ru';
@@ -34,22 +34,23 @@ export interface MessengersConfig {
   api?: { telegram?: string; max?: string };
 }
 
-/** Читает и валидирует messengers.json; нет файла — отказ с примером. */
-export function loadMessengers(file = MESSENGERS_FILE): MessengersConfig {
-  if (!existsSync(file)) {
-    throw new Error(
-      `нет файла ${file} — опишите ботов, например:\n` +
-      '{ "telegram": { "token": "123456:ABC…" }, "max": { "token": "…" } }\n' +
-      'токен Telegram — @BotFather, токен MAX — dev.max.ru (раздел «Чат-боты»)',
-    );
-  }
+/** Читает и валидирует ботов проекта — поле "messengers" в project.json; поля нет — отказ с примером. */
+export function loadMessengers(file = PROJECT_FILE): MessengersConfig {
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8'));
+    const cfg = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    raw = cfg?.messengers;
   } catch (e) {
     throw new Error(`${file} — кривой JSON: ${e instanceof Error ? e.message : e}`);
   }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${file} — ожидается объект`);
+  if (raw === undefined) {
+    throw new Error(
+      `нет поля "messengers" в ${file} (project.json проекта) — опишите ботов, например:\n` +
+      '{ "messengers": { "telegram": { "token": "123456:ABC…" }, "max": { "token": "…" } } }\n' +
+      'токен Telegram — @BotFather, токен MAX — dev.max.ru (раздел «Чат-боты»)',
+    );
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${file} — поле "messengers" ожидается объектом`);
   const cfg = raw as Record<string, unknown>;
   for (const key of ['telegram', 'max'] as const) {
     if (cfg[key] === undefined) continue;
@@ -66,7 +67,7 @@ export function loadMessengers(file = MESSENGERS_FILE): MessengersConfig {
 /** Аккаунт мессенджера: токен из его блока, api — из блока или из общего "api". */
 export function pickMessenger(cfg: MessengersConfig, key: 'telegram' | 'max', defaultApi: string): { token: string; api: string } {
   const acc = cfg[key];
-  if (!acc) throw new Error(`в messengers.json нет блока "${key}" — добавьте { "${key}": { "token": "…" } }`);
+  if (!acc) throw new Error(`в поле "messengers" (project.json проекта) нет блока "${key}" — добавьте { "${key}": { "token": "…" } }`);
   return { token: acc.token, api: acc.api ?? cfg.api?.[key] ?? defaultApi };
 }
 

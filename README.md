@@ -41,42 +41,48 @@ launch modes (TUI, `serve`).
 
 On first launch the wizard walks you through the setup (see "First-launch wizard"):
 you pick the interface language and a model, enter an API key (the input is hidden)
-and introduce yourself — `~/.dreamteam` (the home: settings and the team) and
-`./.dreamteam` (the project: the hosts.json, mails.json, messengers.json registries
-and the conversations) are created. After that it's just you and the war-room
-manager: tell it what you need.
+and introduce yourself — the home `~/.dreamteam` (settings and the team) is
+created. The app starts **without a project** — you pick one: `/project new
+myproj .` creates a project (the data lives in the home,
+`~/.dreamteam/projects/myproj/`; the working folder is the current one) and opens
+it. After that it's just you and the war-room manager: tell it what you need.
 
 Without a configured key the app runs in **mock mode** — the agents give canned
 answers, so you can try out the interface and the mechanics. The key is entered by
 the wizard or later in the model card (`~/.dreamteam/models/`, the
 `"apiKey"` field).
 
-## Two layers: home and project
+## The home and the projects
 
 The app is global (like any CLI), but its data is split into layers:
 
 | Layer | Where | What it holds |
 |---|---|---|
 | **package** | the installation folder | the application code — read-only, it writes nothing |
-| **home** | `~/.dreamteam` | EVERYTHING global: model cards (`models/`), settings (`settings.json`), your profile (`user.json`), **the whole team** — agents (`agents/`), the manager (`manager.json`), tools (`tools/`), the schedule (`schedule.json`), shared memory (`memory.json`) — plus the registry of known projects (`projects.json`). The team simulator belongs to the machine: configured once, it works in any project |
-| **project** | `<project folder>/.dreamteam` | EVERYTHING about this specific project: `hosts.json` (ssh servers), the project's mail and bots (`mails.json`, `messengers.json` — project secrets, never in agent cards), the conversations (`sessions/`, `transcripts/`). The agents' work files go into the project folder (inbox and the like) |
+| **home** | `~/.dreamteam` | EVERYTHING global: model cards (`models/`), settings (`settings.json`), your profile (`user.json`), **the whole team** — agents (`agents/`), the manager (`manager.json`), tools (`tools/`), the schedule (`schedule.json`), shared memory (`memory.json`) — plus the project folders (`projects/`): the registry of projects is the folders themselves, there is no separate list. The team simulator belongs to the machine: configured once, it works in any project |
+| **project** | `~/.dreamteam/projects/<id>/` | EVERYTHING about this specific project: `project.json` (the working folder `"path"`, servers `"hosts"`, mail `"mails"`, bots `"messengers"` — project secrets, never in agent cards) and the conversations (`sessions/`, `transcripts/`). The agents' work files go into the project's working folder (inbox and the like) |
 
-The tools' working folder is **always the folder the app was launched from**:
-`dreamteam` run inside a project folder works on that project. No paths to configure
-anywhere — launch it in a repository, and the team works on it.
+The tools' working folder is the `"path"` field of project.json: you set it when
+creating the project (`/project new <name> [folder]` — the folder is created if it
+doesn't exist) and change it later (`/project path <folder>`). A path inside the
+home is forbidden — that's where the model keys and settings live. Usually it is
+the git repository you launched the app from: the team works on it, nothing to
+configure anywhere.
 
-You can switch projects without leaving the app: `/project open <path or name>`
-changes the working folder, the list of conversations and the project registries
-(servers, mail, bots) — the team, the models and the shared memory stay with you.
-Overview: `/project` (the current project with its servers and the known projects),
-`/project add <path>` adds a new path to the registry, `/project remove <name>`
-forgets it (the current project can't be removed this way). In the web shell there
-is a "Projects" panel: click an entry to switch, the "＋" button by the section opens
-a form with a path field. You can also ask the manager to switch projects.
+You can switch projects without leaving the app: `/project open <name or path>`
+changes the working folder, the list of conversations and the project's secrets —
+the team, the models and the shared memory stay with you. An unknown folder
+registers itself (the id is the folder name). Overview: `/project` (the projects of
+the home and the servers of the current one), rename with `/project rename <new
+name>`, forget with `/project remove <name>` (the current project can't be removed
+this way; the working folder is left untouched). In the web shell there is a
+"Projects" panel: with no project chosen it is expanded and comes first, a click
+switches, the "＋" button creates a new project. You can also ask the manager to
+switch projects.
 
-The layers are overridden by the `DT_HOME` and `DT_PROJECT` environment variables —
-that's how the probes and isolation work (add `.dreamteam/` to the project's
-`.gitignore`: the wizard will remind you when creating it).
+The layers are overridden by the `DT_HOME` environment variable — that's how the
+probes and isolation work: all of the app's data lives in one folder, and nothing
+extra appears in your working repository.
 
 ## First-launch wizard
 
@@ -94,12 +100,12 @@ If there is no home (`~/.dreamteam`), the wizard asks, in order:
 4. **How to introduce you to the team** — name, role, a couple of words (can be
    skipped).
 
-Then both layers are created with minimal files and clear starter notes: the home
-gets a starting team of five members (an analyst, a secretary, a developer,
-a designer, a writer) and the manager on the chosen model, plus the `lang/` shelf
-for custom languages. The roster is edited in `agents/` or via a conversation
-with the manager. If the project folder is a git repository without `.dreamteam/` in
-`.gitignore`, the wizard offers to add it. Running the wizard again breaks nothing:
+Then the home is created with minimal files and clear starter notes: a starting
+team of five members (an analyst, a secretary, a developer, a designer, a writer)
+and the manager on the chosen model, plus the `lang/` shelf for custom languages.
+The roster is edited in `agents/` or via a conversation with the manager. No project
+is picked at startup — the app honestly starts without one, and the first
+`/project new` opens a conversation. Running the wizard again breaks nothing:
 existing files are left untouched. In non-interactive mode (a pipe) the wizard
 honestly refuses to run — setup requires a live terminal.
 
@@ -279,10 +285,12 @@ There are no aliases or short forms: one name — one operation.
 | `session.delete <number>` | `/session delete 2` | delete a session (not the current one) |
 | `session.rename [name]` | `/session rename Morning standup` | rename the current one; with no name the manager will invent one |
 | `session.history [N]` | `/session history 20` | the current session's history (or the last N) |
-| `session.export [number]` | `/session export 2` | archive a session into a zip (no number — the current one) |
+| `session.export [number]` | `/session export 2` | archive a session into a zip (no number — the current one); lands in the project's working folder, or in the home when there is none |
 | `session.import <file>` | `/session import dt-session-….zip` | restore a session from an archive (merges in as a new one) |
-| `home.export` | `/home export` | a snapshot of the home for moving: settings, models with keys, the team's memory, the schedule and all sessions (no .env — a thing of the machine); store it like a password |
-| `home.import <file>` | `/home import dt-home-….zip` | unfold a home from an archive (with keys); sessions merge by id, session dates are preserved |
+| `home.export` | `/home export` | a snapshot of the whole app for moving: settings, the team, models with keys, memory, the schedule and ALL projects with their conversations (no .env — a thing of the machine); store it like a password |
+| `home.import <file>` | `/home import dt-home-….zip` | unfold a home from an archive (with keys); projects and conversations merge by id |
+| `settings.export` | `/settings export` | settings without projects: settings.json, the profile, the manager and the models with keys |
+| `settings.import <file>` | `/settings import dt-settings-….zip` | replace settings/profile/manager/models (projects untouched); asks for confirmation |
 | `chat.add <name\|number>` | `/chat add Lawyer` | summon a member into the current conversation |
 | `chat.remove <name\|number>` | `/chat remove Lawyer` | send out of the conversation (the remarks stay in the history) |
 | `team.list` | `/team` | the team roster: roles, tools, who is in the chat |
@@ -297,17 +305,21 @@ There are no aliases or short forms: one name — one operation.
 | `model.delete <id>` | `/model delete glm` | delete a model; the main one can't be deleted — `/model set` another one first |
 | `profile.show` / `profile.set` | `/profile set Name; role; about you` | how the team sees you (user.json) |
 | `memory.show [who\|shared]` | `/memory show Lawyer` | what a member remembers; `shared` — the shared memory |
-| `project.list` | `/project` | the current project: servers (hosts.json) and known projects |
-| `project.open <path\|name>` | `/project open ../other` | switch project: the working folder and sessions; a name — from the `/project` overview |
-| `project.add <path>` | `/project add ../other` | remember a project in the registry without opening it |
-| `project.remove <name>` | `/project remove other` | forget a project (the current one can't be removed this way) |
+| `project.list` | `/project` | the projects of the home and the servers of the current one (the "hosts" field of project.json) |
+| `project.new <name> [folder]` | `/project new shop .` | create a project in the home and open it; the working folder is created if missing |
+| `project.open <name\|path>` | `/project open ../other` | switch project: conversations and the working folder; an unknown folder registers itself |
+| `project.rename <new name>` | `/project rename shop2` | rename the current project (its folder in the home) |
+| `project.path <folder>` | `/project path ../other` | change the current project's working folder (created if missing) |
+| `project.remove <name>` | `/project remove old` | delete a project from the home (projects/<id>/ whole, with conversations); the working folder is untouched; the current one can't be removed |
 | `project.host.add <name=host>` | `/project host add backup=deploy@10.0.0.2` | a server in the current project; the host format is [user@]host[:port] |
 | `project.host.delete <name>` | `/project host delete backup` | remove a server from the current project |
-| `mail.list` | `/mail` | the mailbox registry (mails.json) |
-| `mail.add <name> field=value…` | `/mail add work user=… password=… imap=… smtp=…` | a mailbox into mails.json; ports and `tlsNoVerify` — optional |
+| `project.export [name]` | `/project export shop` | a project archive: project.json (secrets included) and all conversations; into the working folder |
+| `project.import <file> [name]` | `/project import dt-project-….zip` | unfold a project from an archive; a taken id merges conversations by id |
+| `mail.list` | `/mail` | the mailbox registry (the "mails" field of project.json) |
+| `mail.add <name> field=value…` | `/mail add work user=… password=… imap=… smtp=…` | a mailbox into the "mails" field; ports and `tlsNoVerify` — optional |
 | `mail.remove <name>` | `/mail remove work` | remove a mailbox |
-| `messenger.list` | `/messenger` | bots (messengers.json) |
-| `messenger.add <telegram\|max> <token>` | `/messenger add telegram 123456:ABC…` | a bot token into messengers.json |
+| `messenger.list` | `/messenger` | bots (the "messengers" field of project.json) |
+| `messenger.add <telegram\|max> <token>` | `/messenger add telegram 123456:ABC…` | a bot token into the "messengers" field |
 | `messenger.remove <telegram\|max>` | `/messenger remove max` | remove a bot |
 | `schedule.list` | `/schedule` | the tasks serve runs by itself |
 | `schedule.add <task> [minutes]` | `/schedule add "standup" 60` | a new task; the default interval is 10 minutes |
@@ -585,7 +597,7 @@ settings):
   the same on Windows and Linux (``arch pack out.zip src/``, ``arch unpack
   archive.zip``, ``arch list archive.zip``). Protection: zip-slip and symlinks in
   an archive — refused; entry-count and size limits from the card (`maxEntries`,
-  `maxTotalBytes`) against archive bombs; secrets and `.dreamteam` are never
+  `maxTotalBytes`) against archive bombs; secrets (`.env`, keys) are never
   packed. rar/7z are deliberately unsupported;
 - `ssh` — the agent can run commands **on configured servers** (see below) without
   a local console: `"tools": { "files": {}, "ssh": null }` — and `run` blocks from
@@ -627,14 +639,15 @@ At most three "action → result → continuation" cycles per answer. Everything
 happens stays in the history: `/session history` shows the actions as "⚙ tools"
 entries.
 
-**The working folder is the launch folder.** The agents work in the folder the app
-was launched from (and in subfolders assigned to an agent via its `"workspace"`
-field — a path relative to the launch folder). Files are written and commands run
-only there.
+**The working folder comes from project.json.** The agents work in the folder the
+project points to via its `"path"` field (set at `/project new`, changed with
+`/project path`; usually the repository you launched the app from — and in
+subfolders assigned to an agent via its `"workspace"` field, a path relative to
+the working folder). Files are written and commands run only there.
 
-**The server registry.** `.dreamteam/hosts.json` — the ssh servers of the current
-project (the file is created by the scaffold). The project is the folder the app
-was launched from; servers are added with the command
+**The server registry.** The `"hosts"` field of the project's project.json — the
+ssh servers (in the home: `~/.dreamteam/projects/<id>/project.json`). Servers are
+added with the command
 `/project host add prod=deploy@203.0.113.10`, through the manager ("add the prod
 server — deploy@203.0.113.10") or by hand; removed with
 `/project host delete prod`:
@@ -681,7 +694,7 @@ A host can have two more fields:
   environment variable, not in the process list); no sshpass on PATH — a clear
   refusal. The password sits in the config in plain text: it's your machine, but
   keep it in mind. Better not dictate the password in a conversation with the
-  manager — put it into `hosts.json` by hand.
+  manager — put it into the `"hosts"` field of project.json by hand.
 
 File exchange — the same block: a body of `put local remote` or
 `get remote local` goes to the regular `scp`. The local side must be inside the
@@ -897,12 +910,12 @@ where to go without reading every page; the filter searches the address and the
 title. Redirects are followed, but every hop is checked against the list;
 JavaScript is not executed — a page drawn by scripts will honestly say so.
 
-**mail — email.** Mailboxes live in the project's `mails.json` (the `.dreamteam`
-service folder; passwords only there, never in the cards; **app passwords** are
-required). A mailbox is created with the command
-`/mail add work user=… password=… imap=… smtp=…`, a conversation with the manager
-("add the work mailbox…") or by hand — one format, everything explicit, no
-presets:
+**mail — email.** Mailboxes live in the `"mails"` field of the project's
+project.json (in the home: `~/.dreamteam/projects/<id>/`; passwords only there,
+never in the cards; **app passwords** are required). A mailbox is created with the
+command `/mail add work user=… password=… imap=… smtp=…`, a conversation with the
+manager ("add the work mailbox…") or by hand — one format, everything explicit, no
+presets. The contents of the `"mails"` field is a dict of mailboxes:
 
 ```json
 {
@@ -934,10 +947,11 @@ folder's `mail/`; `send <box>` — the block body holds the header `to:` /
 `y/n`; attachments — only files from the working folder; secrets (`.env`, keys,
 `.pem`) are never read or sent.
 
-**telegram and max — messengers.** Bots live in the project's `messengers.json`
-(the `.dreamteam` service folder; the Telegram token — @BotFather, the MAX token
-— dev.max.ru). A bot is created with the command
-`/messenger add telegram <token>` or a conversation with the manager:
+**telegram and max — messengers.** Bots live in the `"messengers"` field of the
+project's project.json (in the home; the Telegram token — @BotFather, the MAX
+token — dev.max.ru). A bot is created with the command
+`/messenger add telegram <token>` or a conversation with the manager. The contents
+of the field is a dict of bots:
 
 ```json
 { "telegram": { "token": "123456:ABC…" }, "max": { "token": "…" } }
@@ -1027,10 +1041,10 @@ redraw" scenario can be checked on any machine.
 ## History, logs and context compaction
 
 - **The full history of every conversation** is kept in two forms:
-  - `<project>/.dreamteam/transcripts/<id>.md` — a human-readable log (open it
-    in any editor), updated as the conversation goes;
-  - `<project>/.dreamteam/sessions/<id>.json` — the machine-readable state (used
-    for `/session`).
+  - `~/.dreamteam/projects/<id>/transcripts/<id>.md` — a human-readable log
+    (open it in any editor), updated as the conversation goes;
+  - `~/.dreamteam/projects/<id>/sessions/<id>.json` — the machine-readable state
+    (used for `/session`).
 - **`/history [N]`** prints the current conversation's history to the terminal
   with the members' colors.
 - **Context compaction.** When a conversation gets long (more than ~24 messages),
@@ -1091,9 +1105,9 @@ each other, and each understands their task in the current conversation.
 
 To peek: `/memory Gleb` — what Gleb remembers in this conversation (the task,
 the attitude to you, the connections), `/memory shared` — the team's shared
-memory. Storage: `.dreamteam/memory.json` (the team's memory — a thing of the
-project) + the `memories` field in the session JSON
-(`<project>/.dreamteam/sessions/`).
+memory. Storage: `~/.dreamteam/memory.json` (the team's shared memory — a thing
+of the home) + the `memories` field in the session JSON
+(`~/.dreamteam/projects/<id>/sessions/`).
 
 ## Links to other sessions: `@session`
 
@@ -1149,12 +1163,13 @@ Through it — and only through it — the app changes the configuration:
 | "show the sessions", "open #2", "new session …", "delete #3" | session management (like `/sessions`, `/session open`, `/session new`, `/session delete`) |
 | "rename the session to …", "come up with a name for this conversation" | renaming (like `/session rename`); for inventing names the manager uses the short summary or the beginning of the conversation |
 | "enable … tool …" / "grant permissions …" | a tool for a member: enable or update the card (`shell`, `ssh`, a custom tool from `tools/`…) |
-| "add the server …" | the `hosts.json` server registry: a new server in the current project |
-| "add a mailbox …", "remove the mailbox …" | the `mails.json` mailbox registry (like `/mail add` and `/mail remove`) |
-| "add a telegram bot …", "remove the bot …" | a bot token in `messengers.json` (like `/messenger add` and `/messenger remove`) |
+| "add the server …" | the project's servers (the "hosts" field of project.json): a new server in the current project |
+| "add a mailbox …", "remove the mailbox …" | the mailboxes (the "mails" field of project.json; like `/mail add` and `/mail remove`) |
+| "add a telegram bot …", "remove the bot …" | a bot token (the "messengers" field of project.json; like `/messenger add` and `/messenger remove`) |
 
-Edits of `agents/` and of the project registries (`hosts.json`, `mails.json`,
-`messengers.json`) are safe: the file is rewritten through a temporary file with
+Edits of `agents/` and of the current project's project.json (the `"hosts"`,
+`"mails"`, `"messengers"` fields) are safe: the file is rewritten through a
+temporary file with
 a validity check — a failed edit doesn't ruin the config, unknown fields are
 preserved. And if you ruin `agents/` by hand (broken JSON, an agent without
 `name` or `prompt`), the team doesn't vanish silently: the error is visible
@@ -1167,7 +1182,7 @@ through the same proven helpers). The manager is needed for whatever the command
 don't cover — e.g. thinking through a new member's prompt or choosing who gets
 which tool.
 
-It is configured in `.dreamteam/manager.json` (the file is required, like
+It is configured in `~/.dreamteam/manager.json` (the file is required, like
 `settings.json`):
 
 ```json
@@ -1236,47 +1251,53 @@ interface in `src/providers/` and register it in `src/providers/registry.ts`.
 
 The project is checked by probes in `tests/` — no test framework, each file runs
 directly and prints `ok`/`FAIL` per check. All probes are hermetic: real data is
-untouched, the layers are redirected into temporary folders
-(`DT_HOME`/`DT_PROJECT`).
+untouched, the home is redirected into a temporary folder (`DT_HOME`).
 
 - `npm run probe` — quick checks without a real terminal: line wrapping
-  (`probe-screen`), `settings.json` and `hosts.json` validation, "project:host"
+  (`probe-screen`), `settings.json` validation, "project:host"
   ssh addressing and permissions through projects, screen zone math, live
   multi-line streaming, mouse and Shift+key selection, scrollback
   (`probe-editor`: keys, cursor, history, input), the war-room manager
   (`probe-manager`: config validation, answer parsing, new actions
-  `tool.grant`/`project.add`/`project.host.add` with rollback, state) and the
+  `tool.grant`/`project.host.add` with rollback, state) and the
   end-to-end manager pipeline as the configuration gateway (`probe-manager-flow`:
-  the state snapshot for the LLM, the JSON protocol, all 11 operations down to
+  the state snapshot for the LLM, the JSON protocol, all operations down to
   files with rollbacks, ✓/✗ reports in the history, a remark staying in the old
   session when switching), the canonical commands (`probe-commands`: all `/…` in
   the core, interception without history records, `/team`/`/project` control),
-  project switching (`probe-project`: the registry in the home,
-  `/project open/add/remove`, switching the core to another folder with session
-  and hosts isolation, the manager's `project.open`, the web shell's rpc and
-  state, autocompletion), import-export (`probe-transfer`: the home snapshot —
-  card keys inside, .env not transferred, merging sessions by id,
-  a session as a new one with agents by id, zip-slip blocked, cancellation via
+  projects in the home (`probe-project`: folder-projects instead of a registry
+  file, the "no project" state at startup, `/project new/open/remove/rename/path`,
+  a working folder can't be inside the home, switching the core with session and
+  secrets isolation, the manager's `project.open`, the web shell's rpc and
+  state, autocompletion), four-level import-export (`probe-transfer`: the whole
+  home, settings only, one project with conversations, one conversation —
+  card keys inside, .env not transferred, merging by id,
+  zip-slip blocked, cancellation via
   confirm), GUI/TUI data equivalence (`probe-consistency`: the serve snapshot ≡
   the home-layer files, a GUI round visible to the TUI, a restart picks things
   up), the first-launch wizard and scaffolding (`probe-wizard`, including API-key
-  hiding), migrating the old layout to layers (`probe-migrate`: file moves, no
-  overwriting, probe protection via `DT_HOME`/`DT_PROJECT`), the outer-world
+  hiding), the outer-world
   tools — all hermetic: `probe-docs` (reads and writes real pdf/docx/xlsx in
   temporary folders), `probe-ocr` (draws pictures with text with a local canvas
   and recognizes them), `probe-web` (whitelist and a local stub site),
-  `probe-mail` (mailbox validation, send parsing, no network),
-  `probe-messengers` (telegram and max against local mock servers of both APIs); the UI language system — `probe-i18n` (built-in en/zh, external lang/, live switching).
+  `probe-mail` (mailbox validation in the "mails" field of project.json, send
+  parsing, no network),
+  `probe-messengers` (telegram and max against local mock servers of both APIs);
+  the UI language system — `probe-i18n` (built-in en/zh, external lang/, live
+  switching).
 - `npm run probe:e2e` — the same zones under a real pseudo-TTY on Windows
   (ConPTY): what actually reaches the app (`probe-input`) and the rendered screen
-  through a mini VT emulator (`probe-startup`). It installs and removes node-pty
-  itself.
-- `npm run probe:tui` — a full run of the app in a pseudo-TTY: no wizard needed
-  (layers substituted), start with the manager's greeting, `team.add`,
+  through a mini VT emulator (`probe-startup`: starting without a project,
+  `/project open` with a past conversation, history in the panel,
+  wheel/PgUp/mouse/selection). It installs and removes node-pty itself.
+- `npm run probe:tui` — a full run of the app in a pseudo-TTY: starting without
+  a project → `/project new` → the concierge's greeting, `team.add`,
   `chat.add`, a round with tools, `/team`, exit — all on the mock provider in
-  temporary folders.
+  temporary folders. `probe:scenario-tui` — the same scenario with on-disk file
+  checks after every step (sessions, agents/, the export archive).
 - `npm run probe:api` — the server API (`dreamteam serve`) on the mock provider
-  in temporary folders: gui/ statics, a WS concierge scenario (greeting,
+  in temporary folders: gui/ statics, the no-project state in the snapshot,
+  a WS concierge scenario (`project.open` → greeting,
   remarks, team.add through a conversation), rpc (chat.add/remove, model.set,
   session.new/delete with fresh states after them), live confirm/choose
   questions — a client answer, a timeout refusal and a refusal with no clients.
@@ -1295,22 +1316,21 @@ The package installs globally, the data lives in two layers next to you:
 ├── agents/                   # the team: one card per agent (agents/<id>.json)
 ├── manager.json              # the war-room manager: model, name, look (@manager)
 ├── providers/                # custom adapters: providers/<id>.ts → the "<id>" adapter
-├── projects.json             # the registry of known projects (/project open by name)
 ├── memory.json               # the team's shared memory
 ├── lang/                     # custom UI languages: lang/<id>.json
 ├── tools/                    # custom tools: tools/name.ts → the "name" tool
 ├── bin/                      # quick-launch scripts (desktop shortcut)
 ├── .env                      # serve settings: TOKEN, PORT, HOST (a thing of the machine)
-└── cache/                    # local caches (tesseract models for ocr)
+├── cache/                    # local caches (tesseract models for ocr)
+└── projects/                 # the registry of projects = the folders themselves (projects/<id>/)
+    └── <id>/
+        ├── project.json      # the working folder "path", servers "hosts",
+        │                     # mail "mails", bots "messengers"
+        ├── sessions/         # the project's conversations (JSON)
+        └── transcripts/      # the same conversations as human-readable logs (.md)
 
-my-project/
-├── .dreamteam/               # the project: servers, mail and conversations of this project (in .gitignore)
-│   ├── hosts.json            # the project's ssh servers
-│   ├── mails.json            # mailboxes for the mail tool (app passwords)
-│   ├── messengers.json       # Telegram and MAX bot tokens
-│   ├── sessions/             # the project's conversations (JSON)
-│   └── transcripts/          # the same conversations as human-readable logs (.md)
-└── …                         # the project itself: the agents write files and run commands here
+my-project/                   # the working folder ("path" from project.json):
+└── …                         # the agents write files and run commands here
 ```
 
 Each conversation's chat roster — in its `sessions/<id>.json` file (the
@@ -1323,7 +1343,7 @@ The package code (what gets installed via npm):
 dreamteam/
 ├── bin/dreamteam.js          # the global command: a tsx loader; serve → src/serve.ts
 ├── gui/                      # the web shell for `dreamteam serve`: HTML+JS+CSS, no build
-├── scaffold/                 # first-launch config skeletons: home/, project/ — JSON, unfolded by the wizard
+├── scaffold/                 # first-launch config skeletons: home/ — JSON, unfolded by the wizard
 ├── src/
 │   ├── index.ts              # the terminal shell: the REPL loop, chat commands, screen and editor
 │   ├── core/

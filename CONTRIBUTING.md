@@ -16,13 +16,14 @@ npm run probe       # all hermetic probes (~1-2 min)
 ```
 
 Run the app from the clone with `npm run dev` (TUI) or `npm run serve` (web).
-Point the data layers away from your real home with `DT_HOME`/`DT_PROJECT`
-environment variables — the probes do this automatically.
+Point the app's data away from your real home with the `DT_HOME` environment
+variable — everything, projects included, lives in that one folder; the probes
+do this automatically.
 
 ## Ground rules
 
 - **Hermetic changes.** Never touch a real `~/.dreamteam` from tests or probes —
-  always redirect the layers into temp folders (`DT_HOME`/`DT_PROJECT`).
+  always redirect the home into a temp folder (`DT_HOME`).
 - **Fail fast, loudly.** Broken configs crash with a clear error mentioning the
   file; no silent fallbacks, no silently ignored unknown fields.
 - **Canonical operations.** Anything the manager (LLM) can change must also
@@ -31,9 +32,9 @@ environment variables — the probes do this automatically.
 - **One core, two shells.** Terminal (`src/index.ts`) and web (`src/serve.ts`)
   are Presenters over `src/core/engine.ts`; shell-specific code stays out of
   the core.
-- **Secrets live in data files, not code.** Provider keys in
-  `providers.json`, machine settings in `~/.dreamteam/.env`; never in agent
-  cards, never in the repo.
+- **Secrets live in data files, not code.** Model keys in the model cards
+  (`~/.dreamteam/models/`), project secrets in its `project.json`, machine
+  settings in `~/.dreamteam/.env`; never in agent cards, never in the repo.
 
 ## UI strings and i18n
 
@@ -60,7 +61,7 @@ Follow the existing style — a short **Russian one-line subject** describing th
 behavior, not the file list:
 
 ```
-Смена проекта не выходя из приложения: /project open/add/remove, реестр projects.json в доме
+Проекты в доме: реестр — сами папки (~/.dreamteam/projects/<id>/), секреты — поля project.json
 Перенос дома: разговоры действительно едут в архиве
 ```
 

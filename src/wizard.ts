@@ -1,12 +1,11 @@
 /**
- * Первый запуск: wizard и скаффолдинг слоёв.
+ * Первый запуск: wizard и скаффолдинг дома.
  *
  * В доме (DT_HOME) обязательна хотя бы одна модель — карточка models/<id>.json.
  * Нет ни одной → мастер в обычном терминале (до TUI): тип адаптера, параметры,
  * ключ (ввод не отображается) — карточка сохраняется в models/<id>.json,
  * settings.model получает id, manager.json — ту же модель. Остальное добирается
- * само: settings.json с дефолтами, в проекте — .dreamteam с пустой командой
- * и пустым реестром серверов.
+ * само: settings.json с дефолтами, полки команды (агенты, тула, адаптеры, языки).
  *
  * Не молча: каждый созданный файл — заметка, которую печатает вызывающий.
  * Битый конфиг мастером не лечится: чтение конфигов позже уронит приложение
@@ -16,12 +15,12 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { PassThrough } from 'node:stream';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 import { applyLocale, knownLanguages, t, tf } from './i18n.js';
 import { createShortcut } from './shortcut.js';
-import { DT_HOME, DT_PROJECT, WORKSPACE } from './paths.js';
+import { DT_HOME } from './paths.js';
 
 /** Куда мастер читает вопросы и пишет ответы (в пробах — потоки, не TTY). */
 export interface WizardIo {
@@ -214,28 +213,6 @@ export function defaultModelId(dir: string = join(DT_HOME, 'models')): string {
   }
 }
 
-/**
- * Предупреждение про git: в projects.json бывают пароли серверов. Есть смысл
- * показывать один раз — при создании .dreamteam (первый запуск в проекте).
- */
-export function gitignoreNotice(projectDir: string = WORKSPACE): string | null {
-  if (!existsSync(join(projectDir, '.git'))) return null;
-  const gi = join(projectDir, '.gitignore');
-  let lines: string[] = [];
-  try {
-    lines = readFileSync(gi, 'utf8').split(/\r?\n/);
-  } catch {
-    return t('в проекте git, но нет .gitignore — добавь строку «.dreamteam/»: в hosts.json бывают пароли серверов');
-  }
-  const ignored = lines.some((l) => {
-    const tr = l.trim().replace(/\/+$/, '');
-    return tr && !tr.startsWith('#') && (tr === '.dreamteam' || tr === '/.dreamteam' || tr === '**/.dreamteam');
-  });
-  return ignored
-    ? null
-    : t('в .dreamteam бывают пароли серверов (hosts.json), а git её не игнорирует — добавь в .gitignore строку «.dreamteam/»');
-}
-
 /** Каталог скелетов конфигов рядом с src/ — как gui/, едет с пакетом. */
 export const SCAFFOLD_DIR = fileURLToPath(new URL('../scaffold/', import.meta.url));
 
@@ -342,22 +319,6 @@ function defaultModelOf(homeDir: string): string {
   return defaultModelId(join(homeDir, 'models'));
 }
 
-/** Проект: нет .dreamteam — создать реестры (серверы, ящики, боты) и предупредить про git. */
-export function ensureProject(defaultProvider: string, projectDir: string = DT_PROJECT): string[] {
-  void defaultProvider;
-  if (existsSync(projectDir)) return [];
-  mkdirSync(projectDir, { recursive: true });
-  for (const f of ['hosts.json', 'mails.json', 'messengers.json']) {
-    writeFileSync(join(projectDir, f), JSON.stringify(readScaffold(join('project', f)), null, 2) + '\n');
-  }
-  const notes = [
-    tf('создал {dir} (реестры проекта: hosts.json — ssh-серверы, mails.json — почтовые ящики, messengers.json — боты; заполняются руками или через менеджера)', { dir: projectDir }),
-  ];
-  const gi = gitignoreNotice(dirname(projectDir));
-  if (gi) notes.push(gi);
-  return notes;
-}
-
 export function defaultIo(): WizardIo {
   return {
     input: process.stdin,
@@ -366,13 +327,8 @@ export function defaultIo(): WizardIo {
   };
 }
 
-/** Всё сразу: дом + проект; заметки печатает вызывающий. */
-export async function ensureLayers(
-  io: WizardIo = defaultIo(),
-  homeDir: string = DT_HOME,
-  projectDir: string = DT_PROJECT,
-): Promise<string[]> {
-  const notes = await ensureHome(io, homeDir);
-  notes.push(...ensureProject(defaultModelId(join(homeDir, 'models')), projectDir));
-  return notes;
+/** Всё сразу — дом; заметки печатает вызывающий. Проект человек выбирает сам:
+ *  /project new или /project open (стартуем в состоянии «без проекта»). */
+export async function ensureLayers(io: WizardIo = defaultIo(), homeDir: string = DT_HOME): Promise<string[]> {
+  return ensureHome(io, homeDir);
 }

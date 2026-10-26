@@ -1,7 +1,6 @@
 /**
  * Проба тулов «telegram» и «max» — офлайн: оба API подменяются локальными
- * mock-серверами через "api" в messengers.json проекта (служебная папка
- * .dreamteam).
+ * mock-серверами через "api" в поле "messengers" project.json проекта (в доме).
  *   конфиг: нет файла, пустой токен, лишние поля, кривой json, нет блока;
  *   telegram: list/in из getUpdates, send текстом и файлом (sendDocument),
  *     ошибки API (ok:false) и неверный токен;
@@ -10,16 +9,14 @@
  *   check(): чтение — allow, send — ask, ерунда — deny; карточки строгие.
  * Запуск: npx tsx tests/probe-messengers.ts
  */
-import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http from 'node:http';
 
-// DT_HOME и DT_PROJECT читаются при импорте paths — подменяем до загрузки модулей
+// DT_HOME читается при импорте paths — подменяем до загрузки модулей
 const home = mkdtempSync(join(tmpdir(), 'dt-msg-home-'));
 process.env.DT_HOME = home;
-const proj = mkdtempSync(join(tmpdir(), 'dt-msg-proj-'));
-process.env.DT_PROJECT = proj;
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -99,13 +96,20 @@ await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 const port = (server.address() as { port: number }).port;
 
 // ─── конфиг и импорты ────────────────────────────────────────────────────────
-const messengersFile = join(proj, 'messengers.json');
+// проект «открыт»: боты — поле "messengers" в project.json дома
+const { setProjectRoot } = await import('../src/paths.js');
+const projFile = join(home, 'projects', 'dev', 'project.json');
+mkdirSync(join(home, 'projects', 'dev'), { recursive: true });
+setProjectRoot(join(home, 'projects', 'dev'), '');
 const goodConfig = {
   telegram: { token: 'TESTTOKEN' },
   max: { token: 'MAXTOKEN' },
   api: { telegram: `http://127.0.0.1:${port}/tg`, max: `http://127.0.0.1:${port}/max` },
 };
-writeFileSync(messengersFile, JSON.stringify(goodConfig));
+function writeConfig(obj: unknown): void {
+  writeFileSync(projFile, JSON.stringify({ id: 'dev', createdAt: 1, hosts: {}, mails: {}, messengers: obj }));
+}
+writeConfig(goodConfig);
 
 const { default: makeTg } = await import('../src/tools/telegram/telegram.js');
 const { default: makeMax } = await import('../src/tools/max/max.js');
@@ -135,28 +139,19 @@ check('дефолт platform-api2.max.ru', MAX_API === 'https://platform-api2.ma
 
 // ─── конфиг: валидация ───────────────────────────────────────────────────────
 {
-  unlinkQuiet(messengersFile);
-  check('нет messengers.json — отказ с примером', (await errOf(tg, 'list')).includes('messengers.json') && (await errOf(tg, 'list')).includes('BotFather'));
+  writeFileSync(projFile, JSON.stringify({ id: 'dev', createdAt: 1, hosts: {}, mails: {} })); // поля messengers нет
+  check('нет поля messengers — отказ с примером', (await errOf(tg, 'list')).includes('нет поля "messengers"') && (await errOf(tg, 'list')).includes('BotFather'));
   writeConfig({ telegram: { token: '' } });
   check('пустой token', (await errOf(tg, 'list')).includes('пустой "token"'));
   writeConfig({ telegram: { token: 'x', бот: 1 } });
   check('лишнее поле в блоке', (await errOf(tg, 'list')).includes('неизвестные поля "бот"'));
-  writeFileSync(messengersFile, 'это не json');
+  writeFileSync(projFile, 'это не json'); // битый project.json
   check('кривой json', (await errOf(mx, 'me')).includes('кривой JSON'));
   writeConfig({ max: { token: 'x' } });
   check('нет блока telegram', (await errOf(tg, 'list')).includes('нет блока "telegram"'));
   writeConfig(goodConfig);
 }
-function writeConfig(obj: unknown): void {
-  writeFileSync(messengersFile, JSON.stringify(obj));
-}
-function unlinkQuiet(f: string): void {
-  try {
-    unlinkSync(f);
-  } catch {
-    /* нет — и ладно */
-  }
-}
+
 
 // ─── telegram: list / in ─────────────────────────────────────────────────────
 {
@@ -246,4 +241,3 @@ process.exitCode = fails === 0 ? 0 : 1;
 const { rmTemp } = await import('./rm-tmp.js');
 rmTemp(cwd);
 rmTemp(home);
-rmTemp(proj);

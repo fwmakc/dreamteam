@@ -26,25 +26,25 @@ dreamteam
 
 检查安装：`dreamteam -v` — 版本号，`dreamteam -h` — 启动模式帮助（TUI、`serve`）。
 
-首次启动时向导会带你完成设置（见“首次启动向导”）：选择界面语言和服务商，输入 API 密钥（输入隐藏），并自我介绍 —— 随之创建 `~/.dreamteam`（家目录：设置与团队）和 `./.dreamteam`（项目：hosts.json、mails.json、messengers.json 注册表以及谈话记录）。之后就是你和会议室经理的对话：直接告诉它你需要什么。
+首次启动时向导会带你完成设置（见“首次启动向导”）：选择界面语言和服务商，输入 API 密钥（输入隐藏），并自我介绍 —— 随之创建家目录 `~/.dreamteam`（设置与团队）。应用以**无项目**状态启动 —— 项目由你选择：`/project new myproj .` 创建项目（数据存于家目录 `~/.dreamteam/projects/myproj/`，工作文件夹是当前目录）并打开它。之后就是你和会议室经理的对话：直接告诉它你需要什么。
 
 没有配置密钥时，应用以 **mock 模式**运行 —— 智能体给出预置回答，可以先用它熟悉界面和机制。密钥由向导输入，或之后在模型卡片里填写（`~/.dreamteam/models/` 的 `"apiKey"` 字段）。
 
-## 两层结构：家目录与项目
+## 家目录与项目
 
 应用是全局的（像任何 CLI 一样），但数据分为几层：
 
 | 层 | 位置 | 存放内容 |
 |---|---|---|
 | **package** | 安装文件夹 | 应用代码 —— 只读，什么都不写 |
-| **home** | `~/.dreamteam` | 所有全局内容：带模型密钥的服务商（`models/`）、设置（`settings.json`）、你的资料（`user.json`）、**整个团队** —— 智能体（`agents/`）、经理（`manager.json`）、工具（`tools/`）、日程（`schedule.json`）、共享记忆（`memory.json`），外加已知项目注册表（`projects.json`）。团队模拟器属于机器：配置一次，任何项目通用 |
-| **project** | `<项目文件夹>/.dreamteam` | 这个项目的全部内容：`hosts.json`（ssh 服务器）、项目的邮件与机器人（`mails.json`、`messengers.json` —— 项目机密，绝不放进智能体卡片）、谈话（`sessions/`、`transcripts/`）。智能体的工作文件写入项目文件夹（inbox 等） |
+| **home** | `~/.dreamteam` | 所有全局内容：带模型密钥的服务商（`models/`）、设置（`settings.json`）、你的资料（`user.json`）、**整个团队** —— 智能体（`agents/`）、经理（`manager.json`）、工具（`tools/`）、日程（`schedule.json`）、共享记忆（`memory.json`），以及项目文件夹（`projects/`）：项目注册表就是这些文件夹本身，没有单独的列表。团队模拟器属于机器：配置一次，任何项目通用 |
+| **project** | `~/.dreamteam/projects/<id>/` | 这个项目的全部内容：`project.json`（工作文件夹 `"path"`、服务器 `"hosts"`、邮件 `"mails"`、机器人 `"messengers"` —— 项目机密，绝不放进智能体卡片）和谈话（`sessions/`、`transcripts/`）。智能体的工作文件写入项目的工作文件夹（inbox 等） |
 
-工具的工作文件夹**始终是应用启动时所在的文件夹**：在项目文件夹里运行 `dreamteam`，团队就在这个项目上工作。任何地方都不用配置路径 —— 在仓库里启动，团队就在仓库上干活。
+工具的工作文件夹是 project.json 里的 `"path"`：创建项目时指定（`/project new <名字> [文件夹]`，文件夹不存在则创建），之后可用 `/project path <文件夹>` 更改。家目录内部禁止作为工作文件夹 —— 那里是模型密钥和设置。通常它是你启动应用所在的 git 仓库：团队直接为它干活，无需在任何地方配置路径。
 
-可以不退出应用切换项目：`/project open <路径或名字>` 会更换工作文件夹、谈话列表和项目注册表（服务器、邮件、机器人）—— 团队、服务商和共享记忆跟着你走。总览：`/project`（当前项目及其服务器、已知项目），`/project add <路径>` 把新路径加入注册表，`/project remove <名字>` 遗忘它（当前项目不能这样移除）。网页外壳里有“项目”面板：点条目切换，分节旁的“＋”按钮打开带路径输入框的表单。也可以请经理切换项目。
+可以不退出应用切换项目：`/project open <名字或路径>` 更换工作文件夹、谈话列表和项目机密 —— 团队、服务商和共享记忆跟着你走。陌生文件夹自动注册（id 即文件夹名）。总览：`/project`（家目录中的项目与当前项目的服务器），重命名 —— `/project rename <新名字>`，遗忘 —— `/project remove <名字>`（当前项目不能这样移除；工作文件夹不受影响）。网页外壳里有“项目”面板：未选择项目时它展开并居首，点条目切换，“＋”按钮创建新项目。也可以请经理切换项目。
 
-各层可被环境变量 `DT_HOME` 和 `DT_PROJECT` 覆盖 —— 探针和隔离就是这样工作的（把 `.dreamteam/` 加进项目的 `.gitignore`：创建时向导会提醒你）。
+各层可被环境变量 `DT_HOME` 覆盖 —— 探针和隔离就是这样工作的：应用的所有数据都在一个文件夹里，工作仓库里不会多出任何东西。
 
 ## 首次启动向导
 
@@ -55,7 +55,7 @@ dreamteam
 3. **API 密钥** —— 输入隐藏（不显示、也不进终端日志）；密钥直接保存到 `models/` 的模型卡片里（`"apiKey"` 字段）并立即生效。
 4. **如何向团队介绍你** —— 名字、角色、几句介绍（可跳过）。
 
-之后两层都以最小文件和清晰的初始提示创建：家目录获得五人初始团队（分析师、秘书、开发者、设计师、文案）和运行在所选服务商上的经理，外加自定义语言的 `lang/` 架子。名单在 `agents/` 里编辑，或通过与经理对话编辑。如果项目文件夹是 git 仓库而 `.gitignore` 里没有 `.dreamteam/`，向导会建议加上。重复运行向导不会破坏任何东西：已存在的文件原样保留。在非交互模式（管道）下向导会诚实地拒绝运行 —— 设置需要真实终端。
+之后创建家目录，附带最小文件和清晰的初始说明：五人初始团队（分析师、秘书、开发者、设计师、文案）和运行在所选服务商上的经理，外加自定义语言的 `lang/` 架子。名单在 `agents/` 里编辑，或通过与经理对话编辑。项目在启动时不被选择 —— 应用诚实地以无项目状态启动，第一个 `/project new` 就会打开对话。重复运行向导不会破坏任何东西：已存在的文件原样保留。在非交互模式（管道）下向导会诚实地拒绝运行 —— 设置需要真实终端。
 
 ## 第一场对话：礼宾经理
 
@@ -111,7 +111,6 @@ You > alright Gleb, look at the structure and propose a refactoring plan
 
 换机器 —— `/home export` 和 `/home import`：设置、团队和模型连同卡片密钥一起迁移，无需重新输入；当前项目的谈话也在同一个归档里并按 id 合并（重名的替换）。归档里有密钥 —— 无论在云端还是别处，都当密码保管。
 
-换机器 —— `/home export` 和 `/home import`：设置、团队和服务商连同卡片密钥一起迁移，无需重新输入；当前项目的谈话也在同一个归档里并按 id 合并（重名的替换）。归档里有密钥 —— 无论在云端还是别处，都当密码保管。
 
 ### Z.ai (GLM)
 
@@ -186,10 +185,12 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `session.delete <number>` | `/session delete 2` | 删除会话（不能是当前的） |
 | `session.rename [name]` | `/session rename Morning standup` | 重命名当前会话；不填名字经理自己起 |
 | `session.history [N]` | `/session history 20` | 当前会话的历史（或最后 N 条） |
-| `session.export [number]` | `/session export 2` | 会话打包为 zip（不带编号 — 当前会话） |
+| `session.export [number]` | `/session export 2` | 会话打包为 zip（不带编号 — 当前会话）；存到项目的工作文件夹，没有则存到家目录 |
 | `session.import <file>` | `/session import dt-session-….zip` | 从归档恢复会话（作为新会话并入） |
-| `home.export` | `/home export` | 搬家用的家目录快照：设置、带密钥的服务商、团队记忆、日程和全部会话（不含 .env —— 属于机器的东西）；像密码一样保管 |
-| `home.import <file>` | `/home import dt-home-….zip` | 从归档展开家目录（含密钥）；会话按 id 合并，会话日期保留 |
+| `home.export` | `/home export` | 搬家用的全应用快照：设置、团队、带密钥的服务商、记忆、日程和**所有项目**及其谈话（不含 .env —— 属于机器的东西）；像密码一样保管 |
+| `home.import <file>` | `/home import dt-home-….zip` | 从归档展开家目录（含密钥）；项目与谈话按 id 合并 |
+| `settings.export` | `/settings export` | 不含项目的设置：settings.json、个人资料、经理和带密钥的服务商 |
+| `settings.import <file>` | `/settings import dt-settings-….zip` | 替换设置/资料/经理/服务商（项目不动）；需确认 |
 | `chat.add <name\|number>` | `/chat add Lawyer` | 把成员叫进当前谈话 |
 | `chat.remove <name\|number>` | `/chat remove Lawyer` | 请出谈话（发言保留在历史里） |
 | `team.list` | `/team` | 团队名单：角色、工具、谁在聊天 |
@@ -204,17 +205,21 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `model.delete <id>` | `/model delete glm` | 删除服务商；默认的不能删 —— 先 `/model set` 换一个 |
 | `profile.show` / `profile.set` | `/profile set Name; role; about you` | 团队如何看你（user.json） |
 | `memory.show [who\|shared]` | `/memory show Lawyer` | 某成员记得什么；`shared` — 共享记忆 |
-| `project.list` | `/project` | 当前项目：服务器（hosts.json）和已知项目 |
-| `project.open <path\|name>` | `/project open ../other` | 切换项目：工作文件夹与会话；名字来自 `/project` 总览 |
-| `project.add <path>` | `/project add ../other` | 只记住项目到注册表，不切换 |
-| `project.remove <name>` | `/project remove other` | 遗忘项目（当前项目不能这样移除） |
+| `project.list` | `/project` | 家目录中的项目与当前项目的服务器（project.json 的 "hosts" 字段） |
+| `project.new <名字> [文件夹]` | `/project new shop .` | 在家目录创建项目并打开；工作文件夹不存在则创建 |
+| `project.open <名字\|路径>` | `/project open ../other` | 切换项目：谈话与工作文件夹；陌生文件夹自动注册 |
+| `project.rename <新名字>` | `/project rename shop2` | 重命名当前项目（家目录中的文件夹） |
+| `project.path <文件夹>` | `/project path ../other` | 更改当前项目的工作文件夹（不存在则创建） |
+| `project.remove <名字>` | `/project remove old` | 从家目录删除项目（整个 projects/<id>/，连同谈话）；工作文件夹不受影响；当前项目不能这样移除 |
+| `project.export [名字]` | `/project export shop` | 项目归档：project.json（含机密）和全部谈话；存到工作文件夹 |
+| `project.import <文件> [名字]` | `/project import dt-project-….zip` | 从归档展开项目；id 已被占用则按 id 合并谈话 |
 | `project.host.add <name=host>` | `/project host add backup=deploy@10.0.0.2` | 当前项目里的服务器；主机格式 [user@]host[:port] |
 | `project.host.delete <name>` | `/project host delete backup` | 从当前项目移除服务器 |
-| `mail.list` | `/mail` | 邮箱注册表（mails.json） |
-| `mail.add <name> field=value…` | `/mail add work user=… password=… imap=… smtp=…` | 邮箱写入 mails.json；端口和 `tlsNoVerify` 可选 |
+| `mail.list` | `/mail` | 邮箱注册表（project.json 的 "mails" 字段） |
+| `mail.add <name> field=value…` | `/mail add work user=… password=… imap=… smtp=…` | 邮箱写入 "mails" 字段；端口和 `tlsNoVerify` 可选 |
 | `mail.remove <name>` | `/mail remove work` | 移除邮箱 |
-| `messenger.list` | `/messenger` | 机器人（messengers.json） |
-| `messenger.add <telegram\|max> <token>` | `/messenger add telegram 123456:ABC…` | 机器人令牌写入 messengers.json |
+| `messenger.list` | `/messenger` | 机器人（project.json 的 "messengers" 字段） |
+| `messenger.add <telegram\|max> <token>` | `/messenger add telegram 123456:ABC…` | 机器人令牌写入 "messengers" 字段 |
 | `messenger.remove <telegram\|max>` | `/messenger remove max` | 移除机器人 |
 | `schedule.list` | `/schedule` | serve 自动按间隔运行的任务 |
 | `schedule.add <task> [minutes]` | `/schedule add "standup" 60` | 新任务；间隔默认 10 分钟 |
@@ -254,7 +259,7 @@ dreamteam serve --open  # + 在浏览器中打开网页外壳
 
 本地服务器启动：`http://127.0.0.1:8080` 提供 `gui/` 的网页外壳（纯 HTML/JS/CSS，无需构建）并通过 WebSocket 与之通信。默认只监听 127.0.0.1 —— 机器外部看不到服务器。端口和地址由 `PORT` 和 `HOST` 变量设置 —— 可以放进 `~/.dreamteam/.env`：全局重装和切换项目后设置仍在。**注意：** `HOST=0.0.0.0` 会把服务器暴露到网络 —— API 没有鉴权，只在自己的网络里这样做。谈话、团队和配置与终端共享 `--open` 标志让 serve 自己打开浏览器；首次启动时向导会提议在桌面创建「Dream Team」快捷方式 — 它运行的就是这条命令（Windows、Linux、macOS 上行为一致）。：可以在 TUI 工作，再到浏览器继续。
 
-- 左侧 —— 谈话（点击切换，“＋”新建）、团队名单（点击成员召唤/请出聊天）、服务商（点击设为智能体的默认）和项目（点击切换项目，分节旁“＋” —— 带路径输入框的表单）；
+- 左侧 —— 谈话（点击切换，“＋”新建）、团队名单（点击成员召唤/请出聊天）、服务商（点击设为智能体的默认）和项目（未选择项目时面板展开居首；点击切换项目，“＋”按钮创建新项目）；
 - 网页界面没有双击：右键条目打开“编辑”和“删除”菜单（谈话多一项“重命名”）；删除总要经过“确定删除这条记录？”确认 —— “是”/“否”；
 - 中间 —— 同样的聊天：回答流式输出、经理行（包括聊天事件 —— 加入/离开）、工具结果、`@session` 摘要附件；
 - 工具的“是否允许？”问题显示为 ✓/✗ 按钮；5 分钟无回答按拒绝计 —— 一轮永远不会永久卡住；
@@ -338,7 +343,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 - `files` — 智能体可以创建和覆盖文件；
 - `shell` — 智能体可以通过**系统 shell** 在这台电脑上运行命令：Windows 上是 cmd.exe（`dir`、`type`、`findstr`），Linux/macOS 上是 `/bin/sh`（`ls`、`cat`、`grep`）。智能体的速查表里明确写明所处环境，因此不会在 Windows 下写 bash 命令。Git 有单独的工具；
 - `git` — 仓库工作作为独立工具（``git status``、``git commit -m "…"``），不走本地 shell：只读 —— 静默放行，改写 —— 按卡片规则或提问（仓库由卡片的 `"repo"` 字段固定，否则是项目工作文件夹）；
-- `arch` — **zip / tar / tar.gz** 归档，不依赖外部程序 —— 纯 Node，Windows 和 Linux 表现一致（``arch pack out.zip src/``、``arch unpack archive.zip``、``arch list archive.zip``）。防护：拒绝 zip-slip 和归档内符号链接；按卡片限制条目数与总大小（`maxEntries`、`maxTotalBytes`）防归档炸弹；机密和 `.dreamteam` 永不打包。刻意不支持 rar/7z；
+- `arch` — **zip / tar / tar.gz** 归档，不依赖外部程序 —— 纯 Node，Windows 和 Linux 表现一致（``arch pack out.zip src/``、``arch unpack archive.zip``、``arch list archive.zip``）。防护：拒绝 zip-slip 和归档内符号链接；按卡片限制条目数与总大小（`maxEntries`、`maxTotalBytes`）防归档炸弹；机密（`.env`、密钥）永不打包。刻意不支持 rar/7z；
 - `ssh` — 智能体可以在**已配置的服务器**上运行命令（见下文），无需本地控制台：`"tools": { "files": {}, "ssh": null }` —— 而且这种智能体的 `run` 块会被自动拒绝；
 - `look` — 智能体可以“看”图（视觉模型），`image` — 生成/重绘图片（见“视觉与图片”）；
 - `docs`、`ocr`、`web`、`mail`、`telegram`、`max` — 文档、扫描件、网页、邮件和即时通讯（见下文“文档、扫描件、网页与通讯”）；这些工具的机密放在家目录文件里，不进智能体卡片。
@@ -360,9 +365,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 内置默认：`files` 静默放行工作文件夹内的路径，越界则提问；`look` 和 `image` 总是放行；`shell` 和 `ssh` 对每条命令都提问，直到工具卡片定义了规则（见下文“工具卡片”）。结果作为“⚙ tools”的消息返回给智能体，它继续工作 —— 就这样一步一步，“程序员”真的在写文件，“运维”真的在跑 `docker ps` 并阅读输出而不是编造。每次回答最多三个“动作 → 结果 → 继续”循环。发生的一切都留在历史里：`/session history` 把动作显示为“⚙ tools”条目。
 
-**工作文件夹即启动文件夹。** 智能体在应用启动所在的文件夹工作（以及通过其 `"workspace"` 字段分配的子文件夹 —— 相对启动文件夹的路径）。文件只写在那里，命令只在那里跑。
+**工作文件夹来自 project.json。** 智能体在项目 `"path"` 字段指定的文件夹工作（创建项目时经 `/project new` 设置，用 `/project path` 更改；通常是你启动应用的仓库 —— 以及通过智能体 `"workspace"` 字段分配的子文件夹，相对工作文件夹的路径）。文件只写在那里，命令只在那里跑。
 
-**服务器注册表。** `.dreamteam/hosts.json` — 当前项目的 ssh 服务器（文件由骨架创建）。项目即应用启动的文件夹；服务器用命令 `/project host add prod=deploy@203.0.113.10`、通过经理（“添加 prod 服务器 —— deploy@203.0.113.10”）或手动添加；用 `/project host delete prod` 移除：
+**服务器注册表。** 项目 project.json 里的 `"hosts"` 字段 —— ssh 用的服务器（位于家目录：`~/.dreamteam/projects/<id>/project.json`）。服务器用命令 `/project host add prod=deploy@203.0.113.10`、通过经理（“添加 prod 服务器 —— deploy@203.0.113.10”）或手动添加；用 `/project host delete prod` 移除：
 
 ```json
 {
@@ -389,7 +394,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 主机还可以有两个字段：
 
 - `dir` — 服务器上的项目文件夹。连接后一切从它开始：命令以 `cd '<dir>' && pwd && <command>` 发往服务器 —— cd 失败（没有该文件夹）命令就不会启动，pwd 在输出里确认文件夹。ssh 工具的路径检查也从这个文件夹起算：绝对路径、`..` 或 `~` 越界 —— 连接前就给出带理由的拒绝；
-- `password` — 用密码代替密钥。常规 ssh 不从配置读密码，所以命令经 `sshpass -e` 执行（密码在环境变量里，不进进程列表）；PATH 上没有 sshpass —— 明确拒绝。密码以明文放在配置里：这是你的机器，但要心里有数。最好不要在经理对话里口述密码 —— 手动写进 `hosts.json`。
+- `password` — 用密码代替密钥。常规 ssh 不从配置读密码，所以命令经 `sshpass -e` 执行（密码在环境变量里，不进进程列表）；PATH 上没有 sshpass —— 明确拒绝。密码以明文放在配置里：这是你的机器，但要心里有数。最好不要在经理对话里口述密码 —— 手动写进 project.json 的 `"hosts"` 字段。
 
 文件交换 —— 同样的块：`put local remote` 或 `get remote local` 正文交给常规 `scp`。本地一侧必须在工作文件夹内，远端一侧 — 在主机 `dir` 内；默认传输要问你 `y/n`，卡片规则（`"allow": ["put *"]`）可以静默放行。
 
@@ -498,7 +503,7 @@ mock 模式下带工具的智能体会演示：写出 `demo-agent.txt` 并运行
 
 **web — 读取允许的网站。** `web` 块，地址只来自卡片白名单：`"web": { "sites": ["example.com", "docs.corp.ru"] }`（本地地址同样只走清单）。`read address` — 页面转文本（文章阅读器 + 兜底路径），`links address [filter]` — 页面链接及其文字（“第 9 章。交易 — https://…”）：标题告诉你去哪而无需逐页读取；过滤器搜索地址和标题。跟随重定向，但每一跳都对着清单检查；不执行 JavaScript — 脚本绘制的页面会诚实说明。
 
-**mail — 电子邮件。** 邮箱放在项目的 `mails.json`（`.dreamteam` 服务文件夹；密码只放那里，绝不放卡片；必须用**应用专用密码**）。邮箱用命令 `/mail add work user=… password=… imap=… smtp=…`、与经理对话（“添加 work 邮箱…”）或手动创建 — 格式唯一，一切显式，没有预设：
+**mail — 电子邮件。** 邮箱放在项目 project.json 的 `"mails"` 字段（位于家目录：`~/.dreamteam/projects/<id>/`；密码只放在那里，绝不放进卡片；必须用**应用专用密码**）。邮箱用命令 `/mail add work user=… password=… imap=… smtp=…`、与经理对话（“添加 work 邮箱…”）或手动创建 — 格式唯一，一切显式，没有预设。`"mails"` 字段的内容是邮箱字典：
 
 ```json
 {
@@ -519,7 +524,7 @@ mock 模式下带工具的智能体会演示：写出 `demo-agent.txt` 并运行
 
 如果服务商服务器出示的证书与名称不符（共享主机上的 `mail.my-site.ru` 常见），连接会被名称校验拒绝 — 此时在该邮箱设 `"tlsNoVerify": true`：加密保留，只校验密码，但这样的配置不再察觉服务器替换，请有意识地启用。`mail` 块：`boxes` — 不带密码的邮箱列表；`list [box] [N]`、`find <box> <text>` — 收信；`read <box> <uid>` — 整封信，附件存到工作文件夹的 `mail/`；`send <box>` — 块正文开头是 `to:` / `subject:` / `files:` 头部、空行、信件正文。发送总要问 `y/n`；附件 — 只能是工作文件夹里的文件；机密（`.env`、密钥、`.pem`）永不读取或发送。
 
-**telegram 与 max — 即时通讯。** 机器人放在项目的 `messengers.json`（`.dreamteam` 服务文件夹；Telegram 令牌 — @BotFather，MAX 令牌 — dev.max.ru）。机器人用命令 `/messenger add telegram <token>` 或与经理对话创建：
+**telegram 与 max — 即时通讯。** 机器人放在项目 project.json 的 `"messengers"` 字段（位于家目录；Telegram 令牌 — @BotFather，MAX 令牌 — dev.max.ru）。机器人用命令 `/messenger add telegram <token>` 或与经理对话创建。字段的内容是机器人字典：
 
 ```json
 { "telegram": { "token": "123456:ABC…" }, "max": { "token": "…" } }
@@ -564,8 +569,8 @@ mock 模式下整个循环无需模型即可工作：`mock` 按模板描述图�
 ## 历史、日志与上下文压缩
 
 - **每场谈话的完整历史**以两种形式保存：
-  - `<project>/.dreamteam/transcripts/<id>.md` — 人类可读的日志（任意编辑器可开），随谈话更新；
-  - `<project>/.dreamteam/sessions/<id>.json` — 机器可读的状态（`/session` 用它）。
+  - `~/.dreamteam/projects/<id>/transcripts/<id>.md` — 人类可读的日志（任意编辑器可开），随谈话更新；
+  - `~/.dreamteam/projects/<id>/sessions/<id>.json` — 机器可读的状态（`/session` 用它）。
 - **`/history [N]`** 在终端打印当前谈话的历史，带成员颜色。
 - **上下文压缩。** 谈话变长时（超过约 24 条消息），旧消息由 LLM 自动卷成简短摘要（`session.summary`），上下文只进摘要 + 最后 16 条消息。完整历史在任何地方都不会被删除 — 它留在 JSON 和 transcript 里。聊天里会出现“旧消息已卷成摘要”的提示，智能体继续记得讨论的要点。
 
@@ -603,7 +608,7 @@ You > /me Alexey; startup founder; values brevity and specifics
 - 关闭谈话（`/session new`、`/exit`）时其摘要并入共享日志和共享记忆 — 通常 0–2 次调用，摘要已缓存；
 - 每份文档都有硬性词数上限，记忆以紧凑块（约 150–250 token）进入智能体上下文。
 
-偷看一眼：`/memory Gleb` — Gleb 在本谈话中记得什么（任务、对你的态度、关联），`/memory shared` — 团队共享记忆。存储：`.dreamteam/memory.json`（团队记忆 — 属于项目）+ 会话 JSON 里的 `memories` 字段（`<project>/.dreamteam/sessions/`）。
+偷看一眼：`/memory Gleb` — Gleb 在本谈话中记得什么（任务、对你的态度、关联），`/memory shared` — 团队共享记忆。存储位置：`~/.dreamteam/memory.json`（团队共享记忆 —— 属于家目录）+ 会话 JSON 里的 `memories` 字段（`~/.dreamteam/projects/<id>/sessions/`）。
 
 ## 链接其他会话：`@session`
 
@@ -646,15 +651,15 @@ You > @manager add the router server — admin@192.168.1.1
 | “显示会话”、“打开 #2”、“新会话 …”、“删除 #3” | 会话管理（同 `/sessions`、`/session open`、`/session new`、`/session delete`） |
 | “把会话重命名为 …”、“给这场谈话起个名字” | 重命名（同 `/session rename`）；起名时经理用简短摘要或谈话开头 |
 | “开启 … 工具 …” / “给 … 权限 …” | 成员的工具：启用或更新卡片（`shell`、`ssh`、`tools/` 里的自定义工具…） |
-| “添加服务器 …” | `hosts.json` 服务器注册表：当前项目里的新服务器 |
-| “添加邮箱 …”、“移除邮箱 …” | `mails.json` 邮箱注册表（同 `/mail add` 和 `/mail remove`） |
-| “添加 telegram 机器人 …”、“移除机器人 …” | `messengers.json` 里的机器人令牌（同 `/messenger add` 和 `/messenger remove`） |
+| “添加服务器 …” | 项目服务器（project.json 的 "hosts" 字段）：在当前项目添加新服务器 |
+| “添加邮箱 …”、“移除邮箱 …” | 邮箱（project.json 的 "mails" 字段；同 `/mail add` 和 `/mail remove`） |
+| “添加 telegram 机器人 …”、“移除机器人 …” | 机器人令牌（project.json 的 "messengers" 字段；同 `/messenger add` 和 `/messenger remove`） |
 
-对 `agents/` 和项目注册表（`hosts.json`、`mails.json`、`messengers.json`）的编辑是安全的：文件经临时文件带有效性校验地重写 — 失败的编辑不会毁掉配置，未知字段被保留。如果你手动弄坏了 `agents/`（JSON 损坏、缺 `name` 或 `prompt` 的智能体），团队不会无声消失：错误在一轮中可见，也出现在网页外壳团队面板的红行里。文件缺失不是错误 — 就是从与经理一对一的空状态开始。
+对 `agents/` 和当前项目 project.json（"hosts"、"mails"、"messengers" 字段）的编辑是安全的：文件经临时文件带有效性校验地重写 — 失败的编辑不会毁掉配置，未知字段被保留。如果你手动弄坏了 `agents/`（JSON 损坏、缺 `name` 或 `prompt` 的智能体），团队不会无声消失：错误在一轮中可见，也出现在网页外壳团队面板的红行里。文件缺失不是错误 — 就是从与经理一对一的空状态开始。
 
 经理能做的一切也都有显式的清单操作 — `/team add`、`/team grant`、`/project host add`、`/project open`（同一批执行器：神经网络和命令都经同一批经过验证的助手写配置）。经理的价值在命令覆盖不到的地方 — 比如为新成员构思提示词，或决定谁该拿到哪个工具。
 
-它的配置在 `.dreamteam/manager.json`（文件必需，如同 `settings.json`）：
+它的配置在 `~/.dreamteam/manager.json`（文件必需，如同 `settings.json`）：
 
 ```json
 { "model": "openai", "name": "Manager", "emoji": "🛎", "color": "yellow", "temperature": 0.2 }
@@ -699,12 +704,12 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 
 ## 检查
 
-项目由 `tests/` 里的探针检查 — 不用测试框架，每个文件直接运行并对每项检查打印 `ok`/`FAIL`。所有探针都是密封的：真实数据不被触碰，各层重定向到临时文件夹（`DT_HOME`/`DT_PROJECT`）。
+项目由 `tests/` 里的探针检查 — 不用测试框架，每个文件直接运行并对每项检查打印 `ok`/`FAIL`。所有探针都是密封的：真实数据不被触碰，家目录重定向到临时文件夹（`DT_HOME`）。
 
-- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 与 `hosts.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、新动作 `tool.grant`/`project.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部 11 种操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/team`/`/project` 控制）、项目切换（`probe-project`：家目录注册表、`/project open/add/remove`、内核连同会话与 hosts 隔离切换到另一文件夹、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、导入导出（`probe-transfer`：家目录快照 — 卡片密钥在内、.env 不随行、会话按 id 合并、会话作为新会话带智能体按 id 并入、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、旧布局向各层的迁移（`probe-migrate`：文件搬移、不覆盖、经 `DT_HOME`/`DT_PROJECT` 的探针保护）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。
-- `npm run probe:e2e` — Windows 真实伪终端（ConPTY）下的同样区域：真正到达应用的东西（`probe-input`）与经迷你 VT 仿真器的渲染屏幕（`probe-startup`）。它自行安装并移除 node-pty。
-- `npm run probe:tui` — 伪终端里完整跑一遍应用：无需向导（各层已替换）、经理问候开场、`team.add`、`chat.add`、带工具的一轮、`/team`、退出 — 全在 mock 服务商和临时文件夹上进行。
-- `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui/ 静态、WS 礼宾场景（问候、发言、经对话的 team.add）、rpc（chat.add/remove、model.set、session.new/delete 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。
+- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `tool.grant`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部 11 种操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/team`/`/project` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/remove/rename/path`、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。
+- `npm run probe:e2e` — Windows 真实伪终端（ConPTY）下的同样区域：真正到达应用的东西（`probe-input`）与经迷你 VT 仿真器的渲染屏幕（`probe-startup`：无项目启动、打开带旧谈话的项目、面板中的历史、滚轮/PgUp/鼠标/选择）。它自行安装并移除 node-pty。
+- `npm run probe:tui` — 伪终端里完整跑一遍应用：无项目启动 → `/project new` → 礼宾经理问候、`team.add`、`chat.add`、带工具的一轮、`/team`、退出 — 全在 mock 服务商和临时文件夹上进行。`probe:scenario-tui` —— 同一场景，每步之后还校验磁盘上的文件（会话、agents/、导出归档）。
+- `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui/ 静态资源、快照中的无项目启动、WS 礼宾场景（`project.open` → 问候、发言、经对话的 team.add）、rpc（chat.add/remove、model.set、session.new/delete 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。
 
 `npm run typecheck` — 类型检查（src 与 tests）。
 
@@ -714,26 +719,27 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 
 ```
 ~/.dreamteam/                 # 家目录：一台机器 — 一个家
-├── models/            # 服务商：适配器、URL、模型、密钥（"apiKey"）
+├── models/                   # 服务商：适配器、URL、模型、密钥（"apiKey"）
 ├── settings.json             # 通用设置：界面语言（ui）、谈话语言、屏幕（width/margin/screen）、工具限制
 ├── user.json                 # 你对团队的资料（/me）
-├── agents/               # 团队：角色、人设、颜色、工具
+├── agents/                   # 团队：每名成员一张卡片（id 即文件名）
 ├── manager.json              # 会议室经理：服务商、名字、外观（@manager）
-├── projects.json             # 已知项目注册表（/project open 按名字）
+├── providers/                # 自定义服务商适配器：providers/<id>.ts
 ├── memory.json               # 团队共享记忆
 ├── lang/                     # 自定义界面语言：lang/<id>.json
 ├── tools/                    # 自定义工具：tools/name.ts → 工具 "name"
+├── bin/                      # 快速启动脚本（桌面快捷方式）
 ├── .env                      # serve 设置：TOKEN、PORT、HOST（属于机器的东西）
-└── cache/                    # 本地缓存（ocr 的 tesseract 模型）
+├── cache/                    # 本地缓存（ocr 的 tesseract 模型）
+└── projects/                 # 项目注册表 = 文件夹本身（projects/<id>/）
+    └── <id>/
+        ├── project.json      # 工作文件夹 "path"、服务器 "hosts"、
+        │                     # 邮件 "mails"、机器人 "messengers"
+        ├── sessions/         # 项目的谈话（JSON）
+        └── transcripts/      # 同样这些谈话的人类可读日志（.md）
 
-my-project/
-├── .dreamteam/               # 项目：本项目的服务器、邮件与谈话（在 .gitignore 里）
-│   ├── hosts.json            # 项目的 ssh 服务器
-│   ├── mails.json            # mail 工具的邮箱（应用专用密码）
-│   ├── messengers.json       # Telegram 与 MAX 机器人令牌
-│   ├── sessions/             # 项目的谈话（JSON）
-│   └── transcripts/          # 同样这些谈话的人类可读日志（.md）
-└── …                         # 项目本身：智能体在这里写文件、跑命令
+my-project/                   # 工作文件夹（project.json 的 "path"）：
+└── …                         # 智能体在这里写文件、跑命令
 ```
 
 每场谈话的聊天名单 — 在其 `sessions/<id>.json` 文件里（`participants` 字段）：成员 id 对照家目录里的完整团队；空 — 全员回答。
@@ -744,7 +750,7 @@ my-project/
 dreamteam/
 ├── bin/dreamteam.js          # 全局命令：tsx 加载器；serve → src/serve.ts
 ├── gui/                      # `dreamteam serve` 的网页外壳：HTML+JS+CSS，无需构建
-├── scaffold/                 # 首次启动配置骨架：home/、project/ — JSON，由向导展开
+├── scaffold/                 # 首次启动配置骨架：home/ — JSON，由向导展开
 ├── src/
 │   ├── index.ts              # 终端外壳：REPL 循环、聊天命令、屏幕与编辑器
 │   ├── core/

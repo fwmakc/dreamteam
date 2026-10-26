@@ -292,22 +292,65 @@ function openManagerForm(): void {
 }
 
 // ── проекты ──────────────────────────────────────────────────────────────────
-/** Открыть другой проект: папка на диске — смена рабочей папки и разговоров. */
+/** Открыть другой проект: имя из списка или папка на диске (смена разговоров). */
 function openProjectForm(): void {
   if (roundActive.value) return;
   openForm(tr('Открыть проект'), [
-    { key: 'path', label: tr('Путь к папке проекта (или имя из списка)') },
+    { key: 'path', label: tr('Имя из списка или путь к папке') },
   ], (v) => {
     const path = String(v.path ?? '').trim();
     if (path) rpcReport(rpc('project.open', { path }));
   });
 }
+/** Новый проект: дом создаст projects/<id>/ и откроет его. */
+function newProjectForm(): void {
+  if (roundActive.value) return;
+  openForm(tr('Новый проект'), [
+    { key: 'name', label: tr('Имя проекта (без пробелов)') },
+    { key: 'path', label: tr('Рабочая папка (создастся, если нет — можно пропустить)') },
+  ], (v) => {
+    const name = String(v.name ?? '').trim();
+    if (!name) return;
+    rpcReport(rpc('project.new', { name, path: String(v.path ?? '').trim() || undefined }));
+  });
+}
 function switchProject(p: ProjectRecordInfo): void {
   if (roundActive.value) return;
-  if (currentProject.value && p.path === currentProject.value.path) return;
-  rpcReport(rpc('project.open', { path: p.path }));
+  if (currentProject.value && p.name === currentProject.value.id) return;
+  rpcReport(rpc('project.open', p.path ? { path: p.path } : { name: p.name }));
 }
-/** Первый сервер проекта (когда список серверов ещё пуст). */
+/** Переименовать текущий проект (папка в доме + id). */
+function renameProjectForm(): void {
+  if (roundActive.value) return;
+  openForm(tr('Переименовать проект'), [
+    { key: 'name', label: tr('Новое имя (без пробелов)'), value: currentProject.value?.name ?? '' },
+  ], (v) => {
+    const name = String(v.name ?? '').trim();
+    if (name) rpcReport(rpc('project.rename', { name }));
+  });
+}
+/** Сменить рабочую папку текущего проекта. */
+function projectPathForm(): void {
+  if (roundActive.value) return;
+  openForm(tr('Рабочая папка проекта'), [
+    { key: 'path', label: tr('Путь к папке (создастся, если нет)'), value: currentProject.value?.path ?? '' },
+  ], (v) => {
+    const path = String(v.path ?? '').trim();
+    if (path) rpcReport(rpc('project.path', { path }));
+  });
+}
+function ctxProjectCurrent(e: MouseEvent): void {
+  if (!currentProject.value) return;
+  openCtx(e, [
+    { label: tr('Переименовать'), fn: renameProjectForm },
+    { label: tr('Сменить рабочую папку'), fn: projectPathForm },
+  ]);
+}
+function ctxProjectKnown(e: MouseEvent, p: ProjectRecordInfo): void {
+  openCtx(e, [{ label: tr('Удалить из дома (разговоры тоже)'), fn: () =>
+    askDelete(tr('проект «{name}»', { name: p.name }), () => rpcReport(rpc('project.remove', { name: p.name }))) }]);
+}
+/** Первый сервер проекта (когда список серверов ещё пуст): из контекстного меню. */
 function projectAdd(): void {
   openForm(tr('Новый сервер проекта'), [
     { key: 'hostName', label: tr('Имя сервера (напр. prod)') },
@@ -395,11 +438,25 @@ function toggleSec(sec: string): void {
   else collapsed.add(sec);
   localStorage.setItem(LS_COLLAPSED, JSON.stringify([...collapsed]));
 }
+/** Секция свёрнута? Без открытого проекта панель проектов всегда развёрнута:
+ *  выбор проекта — первое действие в оболочке. */
+function isCollapsed(sec: string): boolean {
+  if (sec === 'projects' && !currentProject.value) return false;
+  return collapsed.has(sec);
+}
 
 // ── экспорт / импорт ─────────────────────────────────────────────────────────
 const importFileEl = ref<HTMLInputElement | null>(null);
-let importKind: 'home' | 'session' = 'home';
-function pickImport(kind: 'home' | 'session'): void {
+type ImportKind = 'home' | 'settings' | 'project' | 'session';
+let importKind: ImportKind = 'home';
+/** Какое сообщение серверу соответствует каждому уровню импорта. */
+const IMPORT_TYPE: Record<ImportKind, 'import_home' | 'import_settings' | 'import_project' | 'import_session'> = {
+  home: 'import_home',
+  settings: 'import_settings',
+  project: 'import_project',
+  session: 'import_session',
+};
+function pickImport(kind: ImportKind): void {
   if (roundActive.value) return;
   importKind = kind;
   importFileEl.value?.click();
@@ -410,8 +467,8 @@ async function onImportFile(e: Event): Promise<void> {
   if (!f) return;
   try {
     const b64 = await fileToBase64(f);
-    send({ type: importKind === 'home' ? 'import_home' : 'import_session', dataB64: b64 });
-    addFeed('notice', `· ${tr(importKind === 'home' ? 'Импорт настроек из {file}…' : 'Импорт разговора из {file}…', { file: f.name })}`);
+    send({ type: IMPORT_TYPE[importKind], dataB64: b64 });
+    addFeed('notice', `· ${tr('Импорт из {file}…', { file: f.name })}`);
   } catch (err) {
     addFeed('error', `✗ ${(err as Error).message}`);
   }
@@ -419,6 +476,12 @@ async function onImportFile(e: Event): Promise<void> {
 }
 function exportHome(): void {
   if (!roundActive.value) send({ type: 'export_home' });
+}
+function exportSettings(): void {
+  if (!roundActive.value) send({ type: 'export_settings' });
+}
+function exportProject(): void {
+  if (!roundActive.value) send({ type: 'export_project' });
 }
 function exportSession(): void {
   const cur = sessions.value.findIndex((s) => s.id === currentSessionId.value) + 1;
@@ -704,8 +767,10 @@ onMounted(connectWs);
       @click="openManagerForm()"
     >{{ manager.emoji ?? '🛎' }} {{ manager.name }}</span>
     <button class="tb-btn" :title="tr('Настройки')" @click="openSettingsForm()">⚙</button>
-    <button class="tb-btn" :title="tr('Экспорт дома (настройки + история, без .env)')" @click="exportHome">⬇</button>
-    <button class="tb-btn" :title="tr('Импорт дома из zip')" @click="pickImport('home')">⬆</button>
+    <button class="tb-btn" :title="tr('Экспорт всего приложения (дом и все проекты, без .env)')" @click="exportHome">⬇</button>
+    <button class="tb-btn" :title="tr('Импорт всего приложения из zip')" @click="pickImport('home')">⬆</button>
+    <button class="tb-btn" :title="tr('Экспорт настроек (без проектов)')" @click="exportSettings">⬇⚙</button>
+    <button class="tb-btn" :title="tr('Импорт настроек из zip (проекты не трогаются)')" @click="pickImport('settings')">⬆⚙</button>
     <input ref="importFileEl" type="file" accept=".zip" class="hidden" @change="onImportFile">
     <span class="spacer"></span>
     <span class="conn" :class="{ on: conn === 'on', off: conn !== 'on' }">
@@ -847,23 +912,33 @@ onMounted(connectWs);
         </ul>
       </section>
 
-      <section class="side-sec" :class="{ collapsed: collapsed.has('projects') }" data-sec="projects">
+      <section class="side-sec" :class="{ collapsed: isCollapsed('projects') }" data-sec="projects">
         <div class="side-head" @click="toggleSec('projects')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
           <span class="sec-name">{{ tr('Проекты') }}</span>
-          <button class="sec-add" :title="tr('Открыть проект (папка)')" @click.stop="openProjectForm">📂</button>
-          <button class="sec-add" :title="tr('Новый сервер проекта')" @click.stop="projectAdd">＋</button>
+          <button class="sec-add" :title="tr('Новый проект')" @click.stop="newProjectForm">📁＋</button>
+          <button class="sec-add" :title="tr('Открыть проект (имя или папка)')" @click.stop="openProjectForm">📂</button>
+        </div>
+        <div class="sec-btns">
+          <button :title="tr('Экспорт текущего проекта в zip (project.json и разговоры)')" @click="exportProject">⬇ {{ tr('проект') }}</button>
+          <button :title="tr('Импорт проекта из zip')" @click="pickImport('project')">⬆ {{ tr('импорт') }}</button>
         </div>
         <ul id="projects">
-          <li class="proj-current" data-project-current :title="tr('Текущий проект — папка, где запущен сервер')">
-            <span>📁 {{ currentProject?.name ?? '—' }}</span><span class="meta">{{ currentProject?.path }}</span>
+          <li
+            class="proj-current"
+            data-project-current
+            :title="tr('Текущий проект — его данные в доме, projects/<id>/ · правая кнопка — переименовать/папка')"
+            @contextmenu.prevent="ctxProjectCurrent($event)"
+          >
+            <span>📁 {{ currentProject?.name ?? tr('не выбран — выберите или создайте') }}</span><span class="meta">{{ currentProject?.path }}</span>
           </li>
           <li
-            v-for="p in knownProjects.filter((k) => k.path !== currentProject?.path)"
-            :key="p.path"
+            v-for="p in knownProjects.filter((k) => k.name !== currentProject?.id)"
+            :key="p.name"
             class="proj-row"
-            :title="p.path + ' — ' + tr('переключиться')"
+            :title="p.path + ' — ' + tr('переключиться · правая кнопка — удалить из дома')"
             @click.stop="switchProject(p)"
+            @contextmenu.prevent="ctxProjectKnown($event, p)"
           >
             <span>{{ p.name }}</span><span class="meta">{{ p.path }}</span>
           </li>

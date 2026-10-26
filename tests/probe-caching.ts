@@ -7,7 +7,7 @@
  *    сообщение), usage из message_start (cache_read_input_tokens), опция
  *    карточки "cache": false убирает маркеры.
  *
- * Герметично: временные DT_HOME/DT_PROJECT, локальный заглушечный сервер.
+ * Герметично: временный DT_HOME, локальный заглушечный сервер.
  * Запуск: npm run probe:caching
  */
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -28,8 +28,7 @@ mkdirSync(home, { recursive: true });
 mkdirSync(proj, { recursive: true });
 mkdirSync(join(home, 'models'), { recursive: true });
 process.env.DT_HOME = home;
-process.env.DT_PROJECT = join(proj, '.dreamteam');
-process.chdir(proj);
+process.chdir(base);
 
 // ── заглушечный сервер: /v1/chat/completions (openai) и /v1/messages (anthropic)
 const bodies: Record<string, string> = {}; // path → последнее тело запроса
@@ -97,9 +96,11 @@ import type { Presenter } from '../src/core/presenter.js';
 {
   const { app } = await bootstrapApp();
   const engine = new Engine(app, stub as unknown as Presenter);
-  app.session.title = 'Проба кэша';
-  app.session.participants = ['kirk'];
-  app.store.save(app.session);
+  // старт без проекта — открываем свой: разговоры живут в доме
+  engine.newProject('dev', join(base, 'ws'));
+  app.session!.title = 'Проба кэша';
+  app.session!.participants = ['kirk'];
+  app.store!.save(app.session!);
 
   await engine.handleMessage('Кир, привет: @kirk', AbortSignal.timeout(30_000));
 

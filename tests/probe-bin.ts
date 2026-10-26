@@ -60,7 +60,6 @@ check('флаги не создали дом', existsSync(home) && readdirSync(h
     env: {
       ...process.env,
       DT_HOME: join(serveDir, 'home'),
-      DT_PROJECT: join(serveDir, 'proj'),
       // PORT=0 serve трактует как «не задан» — берём случайный свободный
       PORT: String(20000 + Math.floor(Math.random() * 20000)),
     },

@@ -245,6 +245,17 @@ export class Screen {
     this.placeCursor();
   }
 
+  /**
+   * Заменить историю в панели: открыли другой разговор — старые строки,
+   * прокрутка и выделение к нему больше не относятся.
+   */
+  reseed(lines: string[]): void {
+    this.chat = [];
+    this.viewOffset = 0;
+    this.clearSelection();
+    this.seed(lines);
+  }
+
   /** Полная перерисовка всех зон из состояния — страховка от потерянных кадров */
   repaint(): void {
     this.repaintPane();

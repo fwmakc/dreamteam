@@ -4,7 +4,7 @@
  * Провал = модель пишет тул-блоки вхолостую (был именно такой баг: в
  * parseActions уходили только имена пользовательских tools/*.ts).
  *
- * Герметично: временные DT_HOME/DT_PROJECT, вместо API — локальный
+ * Герметично: временный DT_HOME, вместо API — локальный
  * openai-compatible сервер с двумя заготовленными ответами (реплика с
  * тул-блоком, потом «готово»). Запуск: npm run probe:toolloop
  */
@@ -29,7 +29,6 @@ const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
 mkdirSync(proj, { recursive: true });
 process.env.DT_HOME = home;
-process.env.DT_PROJECT = join(proj, '.dreamteam');
 process.chdir(proj); // рабочая папка инструментов = cwd
 
 // ── фейковый провайдер: два ответа по числу запросов ─────────────────────────
@@ -89,19 +88,21 @@ import type { Presenter } from '../src/core/presenter.js';
 
 const { app } = await bootstrapApp();
 const engine = new Engine(app, stub as unknown as Presenter);
-app.session.title = 'Проба цикла тулов'; // без генерации имени — она тоже тратит вызов
-app.session.participants = ['kirk'];
-app.store.save(app.session);
+// старт без проекта — открываем свой: рабочая папка тулов и разговоры в доме
+engine.newProject('dev', proj);
+app.session!.title = 'Проба цикла тулов'; // без генерации имени — она тоже тратит вызов
+app.session!.participants = ['kirk'];
+app.store!.save(app.session!);
 
 await engine.handleMessage('Кир, создай pdf: @kirk', AbortSignal.timeout(30_000));
 
 const pdf = join(proj, 'proba.pdf');
 check('тул-блок ```docs исполнен: proba.pdf на диске', existsSync(pdf) && readFileSync(pdf).subarray(0, 5).toString() === '%PDF-',
   existsSync(pdf) ? `${readFileSync(pdf).length} байт` : 'файла нет');
-check('в истории есть ответ инструментов', app.session.messages.some((m) => m.authorId === 'tool' && m.text.includes('✅')),
-  JSON.stringify(app.session.messages.map((m) => m.authorId)));
+check('в истории есть ответ инструментов', app.session!.messages.some((m) => m.authorId === 'tool' && m.text.includes('✅')),
+  JSON.stringify(app.session!.messages.map((m) => m.authorId)));
 // договорачка идёт мимо turnEnd — итог читаем из истории сессии
-const lastAgent = [...app.session.messages].reverse().find((m) => m.authorId === 'kirk');
+const lastAgent = [...app.session!.messages].reverse().find((m) => m.authorId === 'kirk');
 check('агент договорился после результата тула', (lastAgent?.text ?? '').includes('Готово'), (lastAgent?.text ?? '').slice(0, 120));
 check('было два обращения к провайдеру (ход + договорачка)', calls === 2, `вызовов: ${calls}`);
 check('без ошибок провайдера', errors.length === 0, errors.join(' | ').slice(0, 200));

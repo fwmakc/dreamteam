@@ -9,23 +9,22 @@
  * Сценарии: 1 Елена docx→md→pdf · 2 Андрей ocr скана ДДУ · 3 Тимур web
  * consultant.ru · 4 Андрей письмо с вложением · 5 Ольга проверка почты.
  *
- * Требует: дом ~/.dreamteam (провайдер с ключом), mails.json в служебной
- * папке проекта (<проект>/.dreamteam/mails.json) с ящиками test1/test2
- * (tlsNoVerify при чужом сертификате хостера),
+ * Требует: дом ~/.dreamteam (провайдер с ключом), поле "mails" в project.json
+ * проекта рабочей папки — с ящиками test1/test2 (tlsNoVerify при чужом
+ * сертификате хостера),
  * у агентов — тула (elena: files+docs; andrey: files+ocr+mail;
  * olga: files+mail; timur: web с sites consultant.ru).
  *
- * Слои: DT_PROJECT — служебная папка <проект>/.dreamteam (hosts.json,
- * mails.json и переписка), рабочая папка инструментов — cwd процесса, поэтому
- * драйвер делает chdir в корень проекта. Дом не подменяем: реальный
- * провайдер. Каждый прогон создаёт свежий разговор — его можно открыть в
- * приложении и прочитать переписку целиком.
+ * Слои: проекты живут в доме, поэтому драйвер открывает проект рабочей папки
+ * (известен дому — откроется, нет — зарегистрируется), рабочая папка
+ * инструментов — cwd процесса, поэтому драйвер делает chdir в корень проекта.
+ * Дом не подменяем: реальный провайдер. Каждый прогон создаёт свежий
+ * разговор — его можно открыть в приложении и прочитать переписку целиком.
  */
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const proj = 'C:\\Users\\user\\project'; // рабочая папка агентов (cwd)
-process.env.DT_PROJECT = join(proj, '.dreamteam'); // служебная папка проекта
 process.chdir(proj);
 // DT_HOME не подменяем: реальный дом, реальные ящики, реальный провайдер.
 
@@ -68,15 +67,17 @@ import type { Presenter } from '../src/core/presenter.js';
 
 const { app } = await bootstrapApp();
 const engine = new Engine(app, stub as unknown as Presenter);
+// проект рабочей папки: известен дому — откроется, нет — зарегистрируется
+engine.switchProject(proj);
 // свежий разговор на прогон: сценарии не подмешиваются в переписку хозяина
-app.session = app.store.create();
-app.store.save(app.session);
+app.session = app.store!.create();
+app.store!.save(app.session!);
 console.log(`Разговор сценария: ${app.session.id} (${app.session.title})`);
 
 const round = async (agent: string, text: string, ms = 300_000): Promise<void> => {
   notices.length = 0; errors.length = 0; tools.length = 0; reply.text = '';
-  app.session.participants = [agent];
-  app.store.save(app.session);
+  app.session!.participants = [agent];
+  app.store!.save(app.session!);
   const started = Date.now();
   process.stdout.write(`\n[${agent}] ${text.slice(0, 90)}…\n`);
   try {
@@ -159,7 +160,7 @@ for (const f of readdirSync(proj)) {
   if (statSync(p).isFile()) console.log(`  ${f} — ${statSync(p).size} байт`);
 }
 
-writeFileSync(join(proj, '.dreamteam', 'scenarios-live-evidence.json'), JSON.stringify({ заметки: notices, ошибки: errors, тула: tools }, null, 2));
+writeFileSync(join(proj, 'scenarios-live-evidence.json'), JSON.stringify({ заметки: notices, ошибки: errors, тула: tools }, null, 2));
 
 console.log(fails === 0 ? '\nВсе сценарии прошли' : `\nПровалено проверок: ${fails}`);
 process.exitCode = fails === 0 ? 0 : 1;

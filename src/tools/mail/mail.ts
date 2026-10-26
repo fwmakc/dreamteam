@@ -89,7 +89,7 @@ export default (config: ToolConfig): Tool => {
               const ep = resolveEndpoints(acc);
               return `${name} — ${acc.user} (imap: ${ep.imap.host}, smtp: ${ep.smtp.host})`;
             })
-            .join('\n') || `ящиков нет — заполните mails.json в папке .dreamteam проекта, например:\n${mailConfigHint()}`;
+            .join('\n') || `ящиков нет — заполните поле "mails" в project.json проекта (в доме), например:\n${mailConfigHint()}`;
         }
         case 'list': {
           const n = Math.min(Math.max(Number(rest[1] ?? 10) || 10, 1), 50);

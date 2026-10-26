@@ -38,16 +38,14 @@ import {
 } from '../tools-api.js';
 import { buildToolset, loadUserTools } from '../tools-registry.js';
 import { operationHints, runOperationText } from './operations.js';
-import { join, resolve } from 'node:path';
-// пути всех трёх слоёв (пакет / дом / проект) — только в paths.ts
+import { basename, join, resolve } from 'node:path';
+// все пути приложения — только в paths.ts (PROJECT_DIR и др. — живые привязки)
 import {
   AGENTS_DIR,
-  HOSTS_FILE,
-  MAIL_FILE,
   MEMORY_FILE,
-  MESSENGERS_FILE,
-  PROJECTS_FILE,
-    PROVIDERS_DIR,
+  PROJECTS_DIR,
+  PROJECT_DIR,
+  PROJECT_FILE,
   SESSIONS_DIR,
   SETTINGS_FILE,
   TOOLS_DIR,
@@ -55,8 +53,7 @@ import {
   WORKSPACE,
   setProjectRoot,
 } from '../paths.js';
-import { ensureProject } from '../wizard.js';
-import { forgetProject, loadProjectRegistry, projectLabel, rememberProject, resolveProjectDir } from './projects.js';
+import * as projects from './projects.js';
 import { planTurns, type PlanResult } from '../orchestrator.js';
 import { compressIfNeeded, contextSlice } from '../compress.js';
 import {
@@ -134,8 +131,10 @@ class ChatEvent {
 }
 
 export interface App {
-  store: SessionStore;
-  session: Session;
+  /** Магазин разговоров активного проекта; null — проект не выбран */
+  store: SessionStore | null;
+  /** Активный разговор; null — проект не выбран (старт приложения) */
+  session: Session | null;
   /** Карточки моделей из models/ дома */
   models: Map<string, ProviderStatus>;
   /** image-модели (генерация картинок) из той же полки */
@@ -146,6 +145,17 @@ export interface App {
   settings: SettingsConfig;
   profile: UserProfile;
   memory: TeamMemory;
+}
+
+/**
+ * Проект обязателен: чат, разговоры и секреты (hosts/mails/messengers) живут
+ * в projects/<id>/ дома. Нет проекта — внятная ошибка с подсказкой, не падение.
+ */
+export function requireProject(app: App): { store: SessionStore; session: Session } {
+  if (!app.store || !app.session) {
+    throw new Error(t('нет открытого проекта — сначала /project new <имя> [папка] или /project open <имя|путь>'));
+  }
+  return { store: app.store, session: app.session };
 }
 
 /** Состав чата: явно выбранные участники или вся команда (старые разговоры). */
@@ -199,6 +209,16 @@ export class Engine {
     public app: App,
     private presenter: Presenter,
   ) {}
+
+  /** Активный разговор; нет проекта — подсказка «/project new | open». */
+  private get session(): Session {
+    return requireProject(this.app).session;
+  }
+
+  /** Магазин разговоров активного проекта; нет проекта — та же подсказка. */
+  private get store(): SessionStore {
+    return requireProject(this.app).store;
+  }
 
   // ── модели ───────────────────────────────────────────────────────────────
 
@@ -388,7 +408,8 @@ export class Engine {
   }
 
   private toolsConfig(): ToolsConfig {
-    return loadToolsConfig(SETTINGS_FILE, HOSTS_FILE, WORKSPACE);
+    // ssh-серверы — поле hosts в project.json; нет проекта — серверов нет
+    return loadToolsConfig(SETTINGS_FILE, PROJECT_FILE || null, WORKSPACE);
   }
 
   // ── конспекты и @session ────────────────────────────────────────────────
@@ -400,7 +421,7 @@ export class Engine {
   private async pickSession(numStr?: string): Promise<Session | null> {
     // автономный режим: никаких интерактивных вопросов
     if (this.autoMode) return null;
-    const list = this.app.store.list().filter((s) => s.id !== this.app.session.id);
+    const list = this.store.list().filter((s) => s.id !== this.session.id);
     if (list.length === 0) {
       this.presenter.notice(t('  ⚠ Других разговоров пока нет — нечего прикладывать.'));
       return null;
@@ -412,14 +433,14 @@ export class Engine {
         this.presenter.notice(tf('  ⚠ В списке других разговоров нет №{n} (см. /sessions).', { n: numStr }));
         return null;
       }
-      return this.app.store.load(meta.id);
+      return this.store.load(meta.id);
     }
     const idx = await this.presenter.chooseSession(list.map((s) => ({ title: s.title, count: s.count })));
     if (idx === null || idx < 0 || idx >= list.length) {
       this.presenter.notice(t('  … продолжаю без приложения.'));
       return null;
     }
-    return this.app.store.load(list[idx].id);
+    return this.store.load(list[idx].id);
   }
 
   /**
@@ -431,7 +452,7 @@ export class Engine {
     signal?: AbortSignal,
     userName = 'Пользователь',
     quiet = false,
-    store: SessionStore = this.app.store,
+    store: SessionStore = requireProject(this.app).store,
   ): Promise<string | null> {
     const provider = this.resolveProvider(undefined);
     if (session.digest && session.digestAtCount !== undefined        && session.messages.length - session.digestAtCount < 10) {
@@ -500,6 +521,11 @@ export class Engine {
       }
       return;
     }
+    // болтовня без проекта невозможна: разговоры живут в projects/<id>/
+    if (!this.app.store) {
+      this.presenter.notice(t('  Нет открытого проекта — выберите: /project new <имя> [папка] или /project open <имя|путь> (список — /project)'));
+      return;
+    }
     let team: Agent[];
     try {
       team = this.team();
@@ -527,7 +553,7 @@ export class Engine {
   }
 
   private async runRound(text: string, fullTeam: Agent[], signal: AbortSignal): Promise<void> {
-    const { session, store } = this.app;
+    const { session, store } = requireProject(this.app);
     // профиль читаем каждый раунд: правки config/user.json подхватываются на лету
     const profile = loadUserProfile(USER_FILE);
     this.app.profile = profile;
@@ -722,13 +748,12 @@ export class Engine {
     profile: UserProfile,
     signal: AbortSignal,
   ): Promise<void> {
-    const { session, store } = this.app;
+    const { session, store } = requireProject(this.app);
     const agent = managerAsAgent(this.app.mgr);
     const provider = this.managerProvider();
     this.presenter.turnHeader(agent);
     const busy = this.presenter.busy(tf('{emoji} {name} разбирается…', { emoji: agent.emoji, name: agent.name }));
-    // реестр серверов для блока состояния; не читается только если файл битый —
-    // но тогда приложение не стартовало бы, так что здесь он всегда валиден
+    // ssh-серверы для блока состояния — из project.json (toolsConfig перечитывает)
     const cfg = this.toolsConfig();
     let full = '';
     let streamError: unknown = null;
@@ -756,10 +781,10 @@ export class Engine {
                 hosts: [...p.hosts.keys()],
                 agents: fullTeam.filter((a) => a.projects?.includes(id)).map((a) => a.id),
               })),
-              knownProjects: loadProjectRegistry(PROJECTS_FILE).projects.map((p) => ({
-                name: p.name,
-                path: p.path,
-                current: p.path === WORKSPACE,
+              knownProjects: projects.listProjects().map((p) => ({
+                name: p.id,
+                path: p.path ?? '',
+                current: Boolean(PROJECT_DIR) && basename(PROJECT_DIR) === p.id,
               })),
               operations: operationHints(),
             }),
@@ -853,37 +878,39 @@ export class Engine {
       case 'tool.grant':
         return grantTool(AGENTS_DIR, action.agent, action.tool, action.card, TOOLS_DIR);
       case 'project.host.add':
-        return addProjectHosts(HOSTS_FILE, { [String(action.name ?? 'main')]: action });
+        return addProjectHosts(PROJECT_FILE, { [String(action.name ?? 'main')]: action });
       case 'project.open': {
         // смена проекта — после сохранения реплики менеджера в СТАРУЮ сессию:
         // разговор принадлежит своему проекту
-        const target = this.resolveProjectDir(String(action.path ?? ''));
-        if (resolve(target) === WORKSPACE) return t('Этот проект и так открыт.');
+        const target = projects.resolveProjectTarget(String(action.path ?? ''), WORKSPACE || process.cwd());
+        if (!target.created && target.config.path && WORKSPACE && resolve(target.config.path) === resolve(WORKSPACE)) {
+          return t('Этот проект и так открыт.');
+        }
         pendingSwitches.push(() => {
-          this.applyProjectSwitch(target);
+          this.applyProjectSwitch(target.config.id);
         });
-        return tf('✓ Переключаюсь на проект «{label}» ({path})', { label: projectLabel(target), path: target });
+        return tf('✓ Переключаюсь на проект «{label}» ({path})', { label: target.config.id, path: target.config.path ?? '(папка ещё не задана)' });
       }
       case 'mail.add': {
         // op и name — поля действия, не ящика: в spec не идут (валидация строга к лишним полям)
         const { op, name, ...spec } = action;
-        return addMailAccount(MAIL_FILE, String(name), spec);
+        return addMailAccount(PROJECT_FILE, String(name), spec);
       }
       case 'mail.remove':
-        return removeMailAccount(MAIL_FILE, String(action.name));
+        return removeMailAccount(PROJECT_FILE, String(action.name));
       case 'messenger.add':
-        return addMessengerBot(MESSENGERS_FILE, action.key, action.token);
+        return addMessengerBot(PROJECT_FILE, action.key, action.token);
       case 'messenger.remove':
-        return removeMessengerBot(MESSENGERS_FILE, action.key);
+        return removeMessengerBot(PROJECT_FILE, action.key);
       default:
         throw new Error(`неизвестное действие менеджера «${(action as { op: string }).op}»`);
       case 'session.list':
         return this.sessionsListText();
       case 'session.open': {
-        const meta = Number.isInteger(action.n) && action.n > 0 ? this.app.store.list()[action.n - 1] : undefined;
+        const meta = Number.isInteger(action.n) && action.n > 0 ? this.store.list()[action.n - 1] : undefined;
         if (!meta) return tf('Не нашёл разговор №{n} — см. /sessions', { n: action.n });
-        if (meta.id === this.app.session.id) return tf('Разговор «{title}» и так открыт.', { title: meta.title });
-        const loaded = this.app.store.load(meta.id);
+        if (meta.id === this.session.id) return tf('Разговор «{title}» и так открыт.', { title: meta.title });
+        const loaded = this.store.load(meta.id);
         if (!loaded) return tf('Не удалось прочитать разговор «{title}».', { title: meta.title });
         pendingSwitches.push(() => {
           this.openSession(loaded);
@@ -897,14 +924,16 @@ export class Engine {
           .filter((id) => known.has(id));
         pendingSwitches.push(() => {
           const old = this.app.session;
-          this.app.session = this.app.store.create();
-          this.app.session.title = title;
+          const store = requireProject(this.app).store;
+          const created = store.create();
+          created.title = title;
           // новый разговор без явных участников — один на один с менеджером
-          this.app.session.participants = ids.length > 0 ? ids : [MANAGER_ID];
-          this.app.store.save(this.app.session);
-          this.queueFlush(old);
-          this.presenter.notice(tf('  Новый разговор «{title}» ({id})', { title: this.app.session.title, id: this.app.session.id }));
-          const line = this.participantsLine(this.app.session);
+          created.participants = ids.length > 0 ? ids : [MANAGER_ID];
+          store.save(created);
+          this.app.session = created;
+          this.queueFlush(old!);
+          this.presenter.notice(tf('  Новый разговор «{title}» ({id})', { title: created.title, id: created.id }));
+          const line = this.participantsLine(created);
           if (line) this.presenter.notice(`  ${t('Участники:')} ${line}`);
         });
         return tf('✓ Создаю разговор «{title}»{chat}', { title, chat: ids.length ? tf(', в чате: {ids}', { ids: ids.join(', ') }) : '' });
@@ -918,10 +947,10 @@ export class Engine {
 
   /** Список разговоров текстом — для действия session.list. */
   sessionsListText(): string {
-    const list = this.app.store.list();
+    const list = this.store.list();
     if (list.length === 0) return t('Разговоров пока нет.');
     return list
-      .map((s, i) => `${i + 1}. ${s.title} — ${tf('{n} сообщ.', { n: s.count })}${s.id === this.app.session.id ? ` (${t('текущий')})` : ''}`)
+      .map((s, i) => `${i + 1}. ${s.title} — ${tf('{n} сообщ.', { n: s.count })}${s.id === this.session.id ? ` (${t('текущий')})` : ''}`)
       .join('\n');
   }
 
@@ -933,62 +962,101 @@ export class Engine {
 
   /** Удаление разговора по номеру списка; текущий не удаляется. */
   deleteSession(n: number): string {
-    const meta = Number.isInteger(n) && n > 0 ? this.app.store.list()[n - 1] : undefined;
+    const meta = Number.isInteger(n) && n > 0 ? this.store.list()[n - 1] : undefined;
     if (!meta) return tf('Не нашёл разговор №{n} — см. /sessions', { n });
-    if (meta.id === this.app.session.id) return t('Текущий разговор удалить нельзя — сначала откройте другой.');
-    this.app.store.delete(meta.id);
+    if (meta.id === this.session.id) return t('Текущий разговор удалить нельзя — сначала откройте другой.');
+    this.store.delete(meta.id);
     return tf('Разговор «{title}» удалён.', { title: meta.title });
   }
 
-  // ── проекты: переключение и реестр ─────────────────────────────────────
+  // ── проекты: реестр — папки в доме (projects/<id>/) ─────────────────────
 
-  /** Аргумент /project open и действия менеджера: путь или имя из реестра. */
-  resolveProjectDir(arg: string): string {
-    return resolveProjectDir(arg, WORKSPACE, loadProjectRegistry(PROJECTS_FILE));
-  }
-
-  /** Сменить проект: /project open, project.open через WS и от менеджера. */
+  /** project.open: имя проекта или путь к папке (незарегистрированная — регистрируем). */
   switchProject(arg: string): string {
-    return this.applyProjectSwitch(this.resolveProjectDir(arg));
+    const { config, created } = projects.resolveProjectTarget(arg, WORKSPACE || process.cwd());
+    const registered = created
+      ? tf('Проект «{id}» зарегистрировал в доме (папка была открыта впервые).\n', { id: config.id })
+      : '';
+    return registered + this.applyProjectSwitch(config.id);
   }
 
-  /** Применить смену проекта: скаффолд .dreamteam, слой путей, реестр, магазин
-   *  разговоров. Итоги старого разговора вливаются в общую память ДО подмены
-   *  хранилища: фоновое вливание должно писать в проект, где разговор жил. */
-  applyProjectSwitch(dir: string): string {
-    const target = resolve(dir);
-    if (target === WORKSPACE) return tf('Этот проект уже открыт: {path}', { path: WORKSPACE });
-    // папка может быть новой — скаффолдим .dreamteam, как при первом запуске
-    const notes = ensureProject(this.app.settings.model?.id ?? '', join(target, '.dreamteam'));
-    this.queueFlush(this.app.session, this.app.store);
-    setProjectRoot(target);
+  /** project.new: создать проект (+ рабочую папку, если задана) и открыть его. */
+  newProject(name: string, pathRaw: string | null): string {
+    const cfg = projects.createProject(name, pathRaw);
+    return tf('✓ Проект «{id}» создал (данные — в доме, projects/{id}/)\n', { id: cfg.id }) + this.applyProjectSwitch(cfg.id);
+  }
+
+  /** project.remove: удалить проект ИЗ ДОМА (projects/<id>/); рабочая папка не трогается. */
+  deleteProject(arg: string): string {
+    const id = this.projectIdByArg(arg);
+    projects.removeProject(id, PROJECT_DIR);
+    return tf('✓ Проект «{id}» удалён из дома — файлы рабочей папки не тронуты.', { id });
+  }
+
+  /** project.rename: переименовать ТЕКУЩИЙ проект (папка в доме + id в project.json). */
+  renameCurrentProject(newIdRaw: string): string {
+    if (!PROJECT_DIR) throw new Error(t('нет открытого проекта — сначала /project new <имя> [папка] или /project open <имя|путь>'));
+    const oldId = basename(PROJECT_DIR);
+    const cfg = projects.renameProject(oldId, newIdRaw);
+    // слой путей указывал в старую папку — перепривязываем к новой; магазин
+    // держит путь к sessions/ с момента создания — пересобираем и перечитываем
+    // открытый разговор, чтобы запись пошла в переименованную папку
+    setProjectRoot(join(PROJECTS_DIR, cfg.id), cfg.path ?? '');
+    if (this.app.store) {
+      this.app.store = new SessionStore(SESSIONS_DIR);
+      const reread = this.app.session ? this.app.store.load(this.app.session.id) : null;
+      if (reread) this.app.session = reread;
+    }
+    return tf('✓ Проект переименован: «{old}» → «{new}»', { old: oldId, new: cfg.id });
+  }
+
+  /** project.path: сменить рабочую папку текущего проекта (папка создаётся). */
+  repointProject(pathRaw: string): string {
+    if (!PROJECT_DIR) throw new Error(t('нет открытого проекта — сначала /project new <имя> [папка] или /project open <имя|путь>'));
+    const cfg = projects.loadProjectConfig(basename(PROJECT_DIR));
+    if (!cfg) throw new Error(t('project.json текущего проекта не читается — см. /project'));
+    projects.setProjectPath(cfg, pathRaw);
+    setProjectRoot(PROJECT_DIR, cfg.path ?? '');
+    return tf('✓ Рабочая папка проекта «{id}»: {path}', { id: cfg.id, path: WORKSPACE });
+  }
+
+  /** Имя проекта по аргументу remove: id или путь из реестра; НЕ регистрирует новые. */
+  private projectIdByArg(arg: string): string {
+    const raw = arg.trim().replace(/^["']|["']$/g, '');
+    if (!raw) throw new Error(t('укажите проект: /project remove <имя> (список — /project)'));
+    const found = projects.listProjects().find(
+      (p) => p.id.toLowerCase() === raw.toLowerCase() || (p.path && resolve(p.path) === resolve(raw)),
+    );
+    if (!found) throw new Error(tf('проекта «{raw}» нет — см. /project', { raw }));
+    return found.id;
+  }
+
+  /**
+   * Применить смену проекта: отметить lastOpened, слой путей (PROJECT_DIR,
+   * WORKSPACE, SESSIONS_DIR), магазин разговоров; открыть последний разговор
+   * или создать новый. Итоги старого разговора вливаются в общую память ДО
+   * подмены хранилища: фоновое вливание должно писать в проект, где разговор жил.
+   */
+  applyProjectSwitch(id: string): string {
+    const dir = join(PROJECTS_DIR, id);
+    const cfg = projects.loadProjectConfig(id);
+    if (!cfg) throw new Error(tf('проект «{id}» не читается (нет project.json) — /project new {id} создаст заново', { id }));
+    // «уже открыт» — про состояние ЭТОГО движка, а не глобального слоя путей:
+    // paths общие на процесс, а магазинов может быть несколько (второй serve
+    // в том же процессе стартует без проекта при уже выставленном PROJECT_DIR)
+    if (this.app.store && this.app.session && PROJECT_DIR && resolve(PROJECT_DIR) === resolve(dir)) {
+      return tf('Этот проект уже открыт: {id}', { id: cfg.id });
+    }
+    if (this.app.store && this.app.session) this.queueFlush(this.app.session, this.app.store);
+    projects.touchProject(id);
+    setProjectRoot(dir, cfg.path ?? '');
     this.app.store = new SessionStore(SESSIONS_DIR);
     const list = this.app.store.list();
     this.app.session = list.length > 0 ? this.app.store.load(list[0].id) ?? this.app.store.create() : this.app.store.create();
-    rememberProject(PROJECTS_FILE, target, true);
-    for (const note of notes) this.presenter.notice('  ' + note);
-    this.presenter.notice(`  ${t('Проект:')} ${WORKSPACE}`);
+    this.presenter.notice(`  ${t('Проект:')} ${cfg.id}${WORKSPACE ? ` · ${WORKSPACE}` : ''}`);
     this.presenter.notice(tf('  Открыт разговор «{title}» ({n} сообщ.)', { title: this.app.session.title, n: this.app.session.messages.length }));
     this.presenter.sessionOpened(this.app.session);
-    return tf('✓ Проект: {path}', { path: WORKSPACE });
-  }
-
-  /** Запомнить папку проекта в реестре без переключения (/project add). */
-  addProject(arg: string): string {
-    const dir = this.resolveProjectDir(arg);
-    const known = loadProjectRegistry(PROJECTS_FILE).projects.some((p) => p.path === resolve(dir));
-    rememberProject(PROJECTS_FILE, dir, false);
-    const label = projectLabel(dir);
-    return known
-      ? tf('Проект «{label}» уже в реестре ({path}).', { label, path: dir })
-      : tf('✓ Проект «{label}» запомнил: {path}. Открыть: /project open {label}', { label, path: dir });
-  }
-
-  /** Забыть проект в реестре (/project remove); текущий не забывается. */
-  removeProject(arg: string): string {
-    const dir = this.resolveProjectDir(arg);
-    forgetProject(PROJECTS_FILE, dir, WORKSPACE);
-    return tf('✓ Проект «{label}» забыт — файлы в {path} не тронуты.', { label: projectLabel(dir), path: dir });
+    return tf('✓ Проект: {id}{ws}', { id: cfg.id, ws: WORKSPACE ? ` (${WORKSPACE})` : '' });
   }
 
   /**
@@ -999,8 +1067,8 @@ export class Engine {
   async renameSession(name?: string): Promise<string> {
     const clean = (name ?? '').replace(/\s+/g, ' ').trim();
     if (!clean) {
-      const context = this.app.session.digest
-        ? `Вот краткое содержание разговора:\n${this.app.session.digest}`
+      const context = this.session.digest
+        ? `Вот краткое содержание разговора:\n${this.session.digest}`
         : this.namingContextFromMessages();
       const invented = await this.generateSessionName(`Нужно дать имя сессии.\n${context}`);
       if (!invented) return t('Не придумал имя — назовите сами: /session rename <имя>');
@@ -1010,14 +1078,14 @@ export class Engine {
   }
 
   private applySessionName(title: string): string {
-    this.app.session.title = title;
-    this.app.store.save(this.app.session);
+    this.session.title = title;
+    this.store.save(this.session);
     return tf('Разговор переименован: «{title}»', { title });
   }
 
   /** Первое и последние сообщения — запасной контекст, когда дайджеста ещё нет. */
   private namingContextFromMessages(): string {
-    const msgs = this.app.session.messages.filter((m) => m.authorId !== 'tool');
+    const msgs = this.session.messages.filter((m) => m.authorId !== 'tool');
     const first = msgs[0]?.text ?? '(пусто)';
     const last = msgs.slice(-3).map((m) => `${m.authorName}: ${m.text}`).join('\n');
     return `Вот первое сообщение разговора:\n${first.slice(0, 600)}\n\nИ последние сообщения:\n${last.slice(0, 600)}`;
@@ -1049,8 +1117,8 @@ export class Engine {
   /** /session <№>: открыть разговор из списка; нет такого — заметка. */
   openSessionByArg(arg: string): void {
     const n = Number.parseInt(arg, 10);
-    const target = Number.isInteger(n) ? this.app.store.list()[n - 1] : undefined;
-    const loaded = target ? this.app.store.load(target.id) : null;
+    const target = Number.isInteger(n) ? this.store.list()[n - 1] : undefined;
+    const loaded = target ? this.store.load(target.id) : null;
     if (!loaded) {
       this.presenter.notice(tf('  Не нашёл разговор №{n}. Посмотрите список: /sessions', { n: arg }));
       return;
@@ -1060,10 +1128,10 @@ export class Engine {
 
   /** Переключение на другой разговор: общее для /session и действия менеджера session.open. */
   openSession(loaded: Session): void {
-    if (loaded.id !== this.app.session.id) {
-      const old = this.app.session;
+    const current = this.session;
+    if (loaded.id !== current.id) {
       this.app.session = loaded;
-      this.queueFlush(old);
+      this.queueFlush(current);
     }
     this.presenter.notice(tf('  Открыт разговор «{title}» ({n} сообщ.)', { title: loaded.title, n: loaded.messages.length }));
     const line = this.participantsLine(loaded);
@@ -1077,14 +1145,14 @@ export class Engine {
    *  показывается живьём через presenter.service. */
   serviceLine(text: string): void {
     const mgr = managerAsAgent(this.app.mgr);
-    this.app.session.messages.push({
+    this.session.messages.push({
       authorId: mgr.id,
       authorName: mgr.name,
       authorRole: mgr.role,
       text,
       ts: Date.now(),
     });
-    this.app.store.save(this.app.session);
+    this.store.save(this.session);
     this.presenter.service?.(text);
   }
 
@@ -1093,12 +1161,13 @@ export class Engine {
   addToChat(arg: string, fullTeam: Agent[]): { text: string; changed: boolean } {
     const agent = findAgentByArg(fullTeam, arg);
     if (!agent) return { text: tf('Нет участника «{name}» — см. /team', { name: arg }), changed: false };
-    if (chatTeam(this.app.session, fullTeam).some((a) => a.id === agent.id)) {
+    if (chatTeam(this.session, fullTeam).some((a) => a.id === agent.id)) {
       return { text: tf('{emoji} {name} уже в чате.', { emoji: agent.emoji, name: agent.name }), changed: false };
     }
-    this.app.session.participants ??= fullTeam.map((a) => a.id);
-    if (!this.app.session.participants.includes(agent.id)) this.app.session.participants.push(agent.id);
-    this.app.store.save(this.app.session);
+    const session = this.session;
+    session.participants ??= fullTeam.map((a) => a.id);
+    if (!session.participants.includes(agent.id)) session.participants.push(agent.id);
+    this.store.save(session);
     return { text: tf('{emoji} {name} присоединился к чату.', { emoji: agent.emoji, name: agent.name }), changed: true };
   }
 
@@ -1106,17 +1175,18 @@ export class Engine {
   removeFromChat(arg: string, fullTeam: Agent[]): { text: string; changed: boolean } {
     const kicked = findAgentByArg(fullTeam, arg);
     if (!kicked) return { text: tf('Нет участника «{name}» — см. /team', { name: arg }), changed: false };
-    if (!chatTeam(this.app.session, fullTeam).some((a) => a.id === kicked.id)) {
+    const session = this.session;
+    if (!chatTeam(session, fullTeam).some((a) => a.id === kicked.id)) {
       return { text: tf('{emoji} {name} и так не в этом чате.', { emoji: kicked.emoji, name: kicked.name }), changed: false };
     }
     // материализуем явный список, иначе выгон «вернул» бы всю команду
-    this.app.session.participants ??= fullTeam.map((a) => a.id);
-    const rest = this.app.session.participants.filter((id) => id !== kicked.id);
+    session.participants ??= fullTeam.map((a) => a.id);
+    const rest = session.participants.filter((id) => id !== kicked.id);
     // без агентов чат не бросаем: остаётся консьерж — он позовёт кого нужно
     const byId = new Set(fullTeam.map((a) => a.id));
-    this.app.session.participants = rest.some((id) => byId.has(id)) ? rest : [MANAGER_ID];
-    this.app.store.save(this.app.session);
-    const alone = this.app.session.participants.length === 1 && this.app.session.participants[0] === MANAGER_ID;
+    session.participants = rest.some((id) => byId.has(id)) ? rest : [MANAGER_ID];
+    this.store.save(session);
+    const alone = session.participants.length === 1 && session.participants[0] === MANAGER_ID;
     return {
       text:
         tf('{emoji} {name} покинул(а) чат. Реплики останутся в истории.', { emoji: kicked.emoji, name: kicked.name }) +
@@ -1183,11 +1253,12 @@ export class Engine {
 
   /** /session new: мгновенно новый разговор один на один с менеджером + приветствие. */
   async newSession(signal: AbortSignal): Promise<void> {
-    const old = this.app.session;
-    this.app.session = this.app.store.create();
-    this.app.session.participants = [MANAGER_ID];
-    this.app.store.save(this.app.session);
-    this.presenter.notice(tf('  Новый разговор {id}', { id: this.app.session.id }));
+    const { session: old, store } = requireProject(this.app);
+    const created = store.create();
+    created.participants = [MANAGER_ID];
+    store.save(created);
+    this.app.session = created;
+    this.presenter.notice(tf('  Новый разговор {id}', { id: created.id }));
     this.presenter.notice(tf('  В чате: {emoji} {name} — попросите позвать кого-нибудь из команды (/team)', { emoji: this.app.mgr.emoji, name: this.app.mgr.name }));
     this.queueFlush(old);
     await this.welcomeManager(signal);
@@ -1195,9 +1266,9 @@ export class Engine {
 
   /** Старт приложения на пустом разговоре: менеджер здоровается сам, как по /new. */
   async startupWelcome(signal: AbortSignal): Promise<void> {
-    const session = this.app.session;
+    const { session, store } = requireProject(this.app);
     session.participants = [MANAGER_ID];
-    this.app.store.save(session);
+    store.save(session);
     this.presenter.notice(tf('  В чате: {emoji} {name} — попросите позвать кого-нибудь из команды (/team)', { emoji: this.app.mgr.emoji, name: this.app.mgr.name }));
     await this.welcomeManager(signal);
   }
@@ -1308,7 +1379,7 @@ export class Engine {
     provider: LLMProvider,
     signal: AbortSignal,
   ): Promise<void> {
-    const { session, store } = this.app;
+    const { session, store } = requireProject(this.app);
     const cfg = this.toolsConfig();
     let toolset: Map<string, Tool>;
     try {
@@ -1404,7 +1475,7 @@ export class Engine {
     provider: LLMProvider,
     signal: AbortSignal,
   ): Promise<string> {
-    const personal = memoryBlock(agent, this.app.session, fullTeam, this.app.memory, profile.name);
+    const personal = memoryBlock(agent, this.session, fullTeam, this.app.memory, profile.name);
     const sink = this.presenter.stream(`${agent.emoji} ${agent.name} продолжает…`);
     let full = '';
     try {
@@ -1412,9 +1483,9 @@ export class Engine {
         ...this.buildRequest(
           agent,
           TOOL_FOLLOW_FOCUS,
-          contextSlice(this.app.session),
+          contextSlice(this.session),
           profile,
-          this.app.session.summary,
+          this.session.summary,
           personal,
         ),
         signal,
@@ -1445,7 +1516,7 @@ export class Engine {
     plan: PlanResult,
     signal: AbortSignal,
   ): Promise<void> {
-    const { session } = this.app;
+    const { session } = requireProject(this.app);
 
     // 1) память разговора
     const speakers = plan.turns
@@ -1471,7 +1542,7 @@ export class Engine {
           signal,
         );
         session.memories = { ...session.memories, [agent.id]: { ...memory, updatedAtMsg: session.messages.length } };
-        this.app.store.save(session);
+        this.store.save(session);
         this.presenter.notice(tf('  … {name} осмыслил(а) разговор — память обновлена', { name: agent.name }));
       } catch (err) {
         if (!signal.aborted) {
@@ -1513,9 +1584,9 @@ export class Engine {
    * конспекта (при /exit: нет свежего конспекта — отложим на следующий /new).
    */
   async flushChatMemory(
-    target: Session = this.app.session,
+    target: Session = requireProject(this.app).session,
     opts: { quiet?: boolean; onlyIfFreshDigest?: boolean } = {},
-    store: SessionStore = this.app.store,
+    store: SessionStore = requireProject(this.app).store,
   ): Promise<void> {
     const session = target;
     const quiet = opts.quiet ?? false;
@@ -1548,7 +1619,7 @@ export class Engine {
 
   /** Вливание — в хранилище, где живёт разговор: при смене проекта магазин
    *  подменяется, и фоновая задача не должна писать в чужой проект. */
-  private queueFlush(session: Session, store: SessionStore = this.app.store): void {
+  private queueFlush(session: Session, store: SessionStore = requireProject(this.app).store): void {
     this.flushChain = this.flushChain
       .then(() => this.flushChatMemory(session, { quiet: true }, store))
       .catch(() => {

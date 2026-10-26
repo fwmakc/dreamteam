@@ -10,7 +10,7 @@
  *  - через ядро: /settings set ui=en — интерфейс переключается на лету,
  *    отчёты операций (/help, /schedule add) сразу на английском; назад — на русском.
  *
- * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер.
+ * Герметично: временный DT_HOME, mock-провайдер.
  * Запуск: npm run probe:i18n
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -26,10 +26,8 @@ function check(name: string, cond: boolean, detail?: string): void {
 
 const base = mkdtempSync(join(tmpdir(), 'dt-i18n-'));
 const home = join(base, 'home');
-const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
-process.env.DT_PROJECT = proj;
 process.chdir(base);
 process.on('exit', () => { try { rmSync(base, { recursive: true, force: true }); } catch { /* Windows держит файлы */ } });
 

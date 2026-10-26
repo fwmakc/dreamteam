@@ -6,10 +6,11 @@
  *   npm run smoke:live
  *
  * Требования:
- *  - в ~/.dreamteam/providers.json основной провайдер — настоящий
- *    (не «mock») и с ключом в карточке, например GLM (Z.ai, Coding Plan):
+ *  - в доме ~/.dreamteam/models/ есть боевая карточка модели — настоящий
+ *    адаптер (не «mock») с ключом прямо в карточке, например GLM
+ *    (Z.ai, Coding Plan), файл models/glm.json:
  *
- *      "glm": {
+ *      {
  *        "adapter": "openai-compatible",
  *        "baseUrl": "https://api.z.ai/api/coding/paas/v4",
  *        "model": "glm-4.6",
@@ -18,13 +19,14 @@
  *
  *    (обычный ключ z.ai без Coding Plan — baseUrl "https://api.z.ai/api/paas/v4")
  *
- * Дом берётся настоящий (ключи и провайдеры), проект — временная песочница:
- * ничего в реальном проекте не изменяется. Три проверки: живой ответ менеджера,
- * менеджер реально создаёт агента, агент с files реально пишет файл.
+ * Дом настоящий (ключи и провайдеры), рабочая папка и проект — песочница:
+ * для рабочей папки в доме заводится свой проект (projects/<id>/), после
+ * прогона он удаляется вместе с песочницей. Три проверки: живой ответ
+ * менеджера, менеджер реально создаёт агента, агент с files пишет файл.
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readFileSync as rf, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, writeFileSync, readFileSync, readFileSync as rf, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 let fails = 0;
 const check = (name: string, cond: boolean, detail?: unknown): void => {
@@ -39,20 +41,19 @@ const check = (name: string, cond: boolean, detail?: unknown): void => {
 const userHome = resolve(process.env.DT_HOME ?? join(process.env.USERPROFILE ?? process.env.HOME ?? '.', '.dreamteam'));
 process.env.DT_HOME = userHome;
 const proj = mkdtempSync(join(tmpdir(), 'dt-live-'));
-process.env.DT_PROJECT = proj;
 process.chdir(proj);
 
-const providersPath = join(userHome, 'providers.json');
-if (!existsSync(providersPath)) {
-  console.log('Нет ~/.dreamteam/providers.json — боевой провайдер не настроен. См. шапку файла.');
-  process.exit(2);
-}
-const providersFile = JSON.parse(readFileSync(providersPath, 'utf8')) as { default: string; providers: Record<string, { adapter: string; model?: string }> };
-const def = providersFile.default;
-const conf = providersFile.providers[def];
-console.log(`Боевой провайдер: «${def}» (${conf?.adapter ?? '?'}, модель ${conf?.model ?? '?'}), дом ${userHome}`);
-if (def === 'mock' || conf?.adapter === 'mock') {
-  console.log('Основной провайдер — mock. Настройте настоящий (например GLM, см. шапку файла) и повторите.');
+// боевая карточка: любой models/*.json с настоящим адаптером и ключом
+const modelsDir = join(userHome, 'models');
+const cards = (existsSync(modelsDir) ? readdirSync(modelsDir).filter((f) => f.endsWith('.json')) : [])
+  .map((f) => {
+    try { return JSON.parse(rf(join(modelsDir, f), 'utf8')) as { adapter?: string; model?: string; apiKey?: string }; } catch { return null; }
+  })
+  .filter((c): c is { adapter?: string; model?: string; apiKey?: string } => c !== null);
+const conf = cards.find((c) => c.adapter && c.adapter !== 'mock' && c.apiKey);
+console.log(`Боевая модель: ${conf ? `${conf.model ?? '?'} (${conf.adapter})` : 'не найдена'}, дом ${userHome}`);
+if (!conf) {
+  console.log('В ~/.dreamteam/models/ нет карточки настоящего провайдера с ключом. См. шапку файла.');
   process.exit(2);
 }
 
@@ -75,7 +76,10 @@ const stub = {
   sessionOpened() {},
 };
 
-process.on('exit', () => { try { rmSync(proj, { recursive: true, force: true }); } catch { /* Windows держит файлы */ } });
+process.on('exit', () => {
+  try { rmSync(proj, { recursive: true, force: true }); } catch { /* Windows держит файлы */ }
+  try { rmSync(join(userHome, 'projects', basename(proj)), { recursive: true, force: true }); } catch { /* уже чисто */ }
+});
 process.on('SIGINT', () => process.exit(130));
 process.on('SIGTERM', () => process.exit(143));
 
@@ -86,8 +90,11 @@ import type { Presenter } from '../src/core/presenter.js';
 
 const { app } = await bootstrapApp();
 const engine = new Engine(app, stub as unknown as Presenter);
-app.session.participants = [MANAGER_ID];
-app.store.save(app.session);
+// песочница как проект: путь не зарегистрирован — switchProject сам заведёт
+// проект в доме (projects/<id>/, id = имя песочницы) и откроет его
+engine.switchProject(proj);
+app.session!.participants = [MANAGER_ID];
+app.store!.save(app.session!);
 
 const round = async (text: string, ms = 180_000): Promise<void> => {
   reply.text = '';
@@ -100,20 +107,21 @@ const stubReply = /заготовленный ответ mock-режима/i.tes
 check('1: менеджер ответил живьём (не заглушка, не пусто)', reply.text.trim().length > 10 && !stubReply, reply.text.slice(0, 160) || '(пусто)');
 
 // ── 2. менеджер реально создаёт агента ─────────────────────────────────────
-const agentsFile = join(proj, 'agents.json');
+// команда живёт в доме: agents/<id>.json, по файлу на участника
+const agentsDir = join(userHome, 'agents');
+const yuristFile = join(agentsDir, 'smok_yurist.json');
 await round('Добавь в команду нового участника: id «smok_yurist», имя «Юрист», роль «право и договоры». Никого не звать в чат.');
-const team: Array<{ id: string }> = existsSync(agentsFile) ? JSON.parse(rf(agentsFile, 'utf8')) : [];
-check('2: менеджер создал агента smok_yurist (agents.json на диске)', team.some((a) => a.id === 'smok_yurist'), team.map((a) => a.id).join(', ') || 'файла нет');
+check('2: менеджер создал агента smok_yurist (карточка в доме)', existsSync(yuristFile),
+  existsSync(agentsDir) ? readdirSync(agentsDir).join(', ') : 'папки agents нет');
 
 // ── 3. агент с files реально пишет файл ────────────────────────────────────
-if (team.some((a) => a.id === 'smok_yurist')) {
-  // тула files нет по умолчанию — включаем конфигом (то же, что делает /grant)
-  const cfg = JSON.parse(rf(agentsFile, 'utf8'));
-  cfg.find((a: { id: string }) => a.id === 'smok_yurist').tools = { files: {} };
-  writeFileSync(agentsFile, JSON.stringify(cfg, null, 2) + '\n');
-  mkdirSync(join(proj, 'tools'), { recursive: true });
-  app.session.participants = [MANAGER_ID, 'smok_yurist'];
-  app.store.save(app.session);
+if (existsSync(yuristFile)) {
+  // тула files нет по умолчанию — включаем в карточке (то же, что делает /grant)
+  const card = JSON.parse(rf(yuristFile, 'utf8')) as Record<string, unknown>;
+  card.tools = { files: {} };
+  writeFileSync(yuristFile, JSON.stringify(card, null, 2) + '\n');
+  app.session!.participants = [MANAGER_ID, 'smok_yurist'];
+  app.store!.save(app.session!);
   await round('Юрист, создай файл otchet-smoke.txt с одной строкой «smoke ok» и подтверди.');
   const created = join(proj, 'otchet-smoke.txt');
   check('3: юрист создал файл на диске через тул files', existsSync(created) && rf(created, 'utf8').includes('smoke ok'),

@@ -1,11 +1,11 @@
 /**
- * Почта: несколько ящиков из mails.json в служебной папке проекта (.dreamteam)
- * — приём (IMAP) и отправка (SMTP). Секреты живут в проекте, не в карточках
- * агентов: карточка тула ничего не знает о паролях.
+ * Почта: несколько ящиков из поля "mails" в project.json проекта — приём
+ * (IMAP) и отправка (SMTP). Секреты живут в проекте (в доме, projects/<id>/),
+ * не в карточках агентов: карточка тула ничего не знает о паролях.
  *
- *   { "личное": { "user": "я@yandex.ru", "password": "пароль приложения",
- *                 "imap": "imap.yandex.ru", "smtp": "smtp.yandex.ru" },
- *     "работа": { "user": "…", "password": "…", "imap": "imap.corp.ru", "smtp": "smtp.corp.ru" } }
+ *   { "mails": { "личное": { "user": "я@yandex.ru", "password": "пароль приложения",
+ *                             "imap": "imap.yandex.ru", "smtp": "smtp.yandex.ru" },
+ *                "работа": { "user": "…", "password": "…", "imap": "imap.corp.ru", "smtp": "smtp.corp.ru" } } }
  *
  * Всё явно: imap (сервер входящей почты) и smtp (исходящей) обязательны;
  * порты 993/465 — дефолт, переопределяются полями port/smtpPort.
@@ -21,11 +21,11 @@
  * Чтение: последние N писем (конверты), поиск подстрокой по теме/отправителю
  * в последних 200, письмо целиком с сохранением вложений в рабочую папку.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import dns from 'node:dns';
 import { promisify } from 'node:util';
-import { MAIL_FILE } from './paths.js';
+import { PROJECT_FILE } from './paths.js';
 
 const ACCOUNT_FIELDS = ['user', 'password', 'imap', 'smtp', 'port', 'smtpPort', 'tlsNoVerify'];
 
@@ -48,23 +48,27 @@ export interface MailEndpoints {
   smtp: { host: string; port: number; secure: boolean };
 }
 
-/** Читает и валидирует mails.json проекта (.dreamteam); нет файла — отказ с примером. */
-export function loadAccounts(file = MAIL_FILE): Record<string, MailAccount> {
-  if (!existsSync(file)) {
-    throw new Error(
-      `нет файла ${file} — опишите ящики, например:\n` +
-      '{ "личное": { "user": "я@yandex.ru", "password": "пароль приложения", "imap": "imap.yandex.ru", "smtp": "smtp.yandex.ru" } }\n' +
-      'imap — сервер входящей почты, smtp — исходящей',
-    );
-  }
+/** Подсказка: где описывают ящики и как это выглядит. */
+function mailsHint(file: string): string {
+  return (
+    `нет поля "mails" в ${file} (project.json проекта) — опишите ящики, например:\n` +
+    '{ "mails": { "личное": { "user": "я@yandex.ru", "password": "пароль приложения", "imap": "imap.yandex.ru", "smtp": "smtp.yandex.ru" } } }\n' +
+    'imap — сервер входящей почты, smtp — исходящей'
+  );
+}
+
+/** Читает и валидирует ящики проекта — поле "mails" в project.json; поля нет — отказ с примером. */
+export function loadAccounts(file = PROJECT_FILE): Record<string, MailAccount> {
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8'));
+    const cfg = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    raw = cfg?.mails;
   } catch (e) {
     throw new Error(`${file} — кривой JSON: ${e instanceof Error ? e.message : e}`);
   }
+  if (raw === undefined) throw new Error(mailsHint(file));
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(`${file} — ожидается объект {"имя ящика": {...}}`);
+    throw new Error(`${file} — поле "mails" ожидается объектом {"имя ящика": {...}}`);
   }
   const accounts: Record<string, MailAccount> = {};
   for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
@@ -139,7 +143,7 @@ async function withImap<T>(acc: MailAccount, mailBox: string, fn: (client: impor
   try {
     await client.connect();
   } catch (err) {
-    throw new Error(`ящик ${acc.user} (${ep.imap.host}) недоступен: ${err instanceof Error ? err.message : err} — проверьте mails.json (нужен пароль приложения)`);
+    throw new Error(`ящик ${acc.user} (${ep.imap.host}) недоступен: ${err instanceof Error ? err.message : err} — проверьте поле "mails" (нужен пароль приложения)`);
   }
   try {
     const box = await client.mailboxOpen(mailBox);
@@ -276,7 +280,7 @@ export async function sendMail(acc: MailAccount, args: SendArgs): Promise<string
   }
 }
 
-/** Пример mails.json — для отказа без файла и документации. */
+/** Пример поля "mails" — для отказа без ящиков и документации. */
 export function mailConfigHint(): string {
   return JSON.stringify(
     {

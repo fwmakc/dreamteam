@@ -14,7 +14,7 @@ import { t, tf } from './i18n.js';
  * у тула ('allow' — молча, 'deny' — отказ, 'ask' — вопрос y/n), выполняет и
  * возвращает результаты следующим сообщением в истории.
  *
- * Серверы: реестр в hosts.json (в .dreamteam проекта) — { "prod": { "host": … } };
+ * Серверы: поле "hosts" в project.json проекта — { "prod": { "host": … } };
  * в блоках адресуются именем — ```ssh prod systemctl status nginx (префикс
  * «project:» тоже понимается, проект один — текущая папка). Доступ агенту
  * выдаётся полем projects в agents.json. Локально инструменты
@@ -34,7 +34,7 @@ export interface HostConfig {
   dir?: string;
 }
 
-/** Серверы проекта из hosts.json: имя → параметры подключения. */
+/** Серверы проекта (поле "hosts" в project.json): имя → параметры подключения. */
 export interface ProjectEntry {
   hosts: Map<string, HostConfig>;
 }
@@ -90,50 +90,58 @@ export interface ToolContext {
   model(id?: string): { provider: LLMProvider } | { error: string };
 }
 
-/** Читает settings.json (лимиты) + hosts.json (серверы); settings обязателен, hosts.json нет — серверов нет. */
-export function loadToolsConfig(settingsFile: string, hostsFile: string, workspaceAbs: string): ToolsConfig {
+/** Читает settings.json (лимиты) и поле "hosts" в project.json (серверы);
+ *  settings обязателен, projectFile null (нет проекта) — серверов нет. */
+export function loadToolsConfig(settingsFile: string, projectFile: string | null, workspaceAbs: string): ToolsConfig {
   const settings = loadSettings(settingsFile, 0);
+  const hosts = projectFile ? loadHostsRecord(readHostsField(projectFile)) : new Map<string, HostConfig>();
   return {
     workspaceAbs,
     runTimeoutMs: settings.runTimeoutMs,
     maxOutputChars: settings.maxOutputChars,
-    projects: new Map([['project', { hosts: loadHosts(hostsFile) }]]),
+    projects: new Map([['project', { hosts }]]),
   };
 }
 
-/** Читает hosts.json ({ "prod": { "host": … } }); файла нет — серверов нет, битые поля — внятная ошибка. */
-export function loadHosts(file: string): Map<string, HostConfig> {
-  let raw: unknown;
+/** Поле "hosts" из project.json; нет файла или поля — серверов нет (просмотр не падает). */
+function readHostsField(projectFile: string): unknown {
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8'));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return new Map();
-    throw new Error(`не удалось прочитать ${file}: ${err instanceof Error ? err.message : err}`);
+    const cfg = JSON.parse(readFileSync(projectFile, 'utf8')) as Record<string, unknown>;
+    return cfg?.hosts ?? {};
+  } catch {
+    return {};
   }
+}
+
+/**
+ * Поле "hosts" из project.json ({ "prod": { "host": … } }) → карта; пусто/нет
+ * поля — серверов нет, битые поля — внятная ошибка.
+ */
+export function loadHostsRecord(raw: unknown): Map<string, HostConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(`${file}: ожидается объект { "сервер": { "host": "…", … } }`);
+    throw new Error('project.json — поле "hosts" ожидается объектом { "сервер": { "host": "…", … } }');
   }
   const hosts = new Map<string, HostConfig>();
   for (const [hid, h] of Object.entries(raw as Record<string, unknown>)) {
     if (!h || typeof h !== 'object' || Array.isArray(h)) {
-      throw new Error(`${file}: сервер «${hid}» — ожидается объект { "host": "…", "dir": "…" }`);
+      throw new Error(`project.json (hosts): сервер «${hid}» — ожидается объект { "host": "…", "dir": "…" }`);
     }
     const o = h as Record<string, unknown>;
     if (typeof o.host !== 'string' || !o.host) {
-      throw new Error(`${file}: сервер «${hid}» — обязательное поле "host"`);
+      throw new Error(`project.json (hosts): сервер «${hid}» — обязательное поле "host"`);
     }
     const host: HostConfig = { host: o.host };
     for (const key of ['user', 'password', 'dir'] as const) {
       const v = o[key];
       if (v === undefined) continue;
       if (typeof v !== 'string' || (key === 'dir' && !v.trim())) {
-        throw new Error(`${file}: сервер «${hid}» — "${key}" жду непустой строкой`);
+        throw new Error(`project.json (hosts): сервер «${hid}» — "${key}" жду непустой строкой`);
       }
       host[key] = v;
     }
     if (o.port !== undefined) {
       if (typeof o.port !== 'number' || !Number.isInteger(o.port) || o.port <= 0) {
-        throw new Error(`${file}: сервер «${hid}» — "port" жду целым числом больше нуля`);
+        throw new Error(`project.json (hosts): сервер «${hid}» — "port" жду целым числом больше нуля`);
       }
       host.port = o.port;
     }
@@ -159,7 +167,7 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
     const pid = ref.slice(0, qi);
     const hid = ref.slice(qi + 1);
     const h = cfg.projects.get(pid)?.hosts.get(hid);
-    if (!h) return { error: `хост «${ref}» не настроен в hosts.json` };
+    if (!h) return { error: `хост «${ref}» не настроен (поле "hosts" в project.json)` };
     return { project: pid, id: hid, host: h };
   }
   const hits: HostTarget[] = [];
@@ -167,7 +175,7 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
     const h = entry.hosts.get(ref);
     if (h) hits.push({ project: pid, id: ref, host: h });
   }
-  if (hits.length === 0) return { error: `хост «${ref}» не настроен в hosts.json` };
+  if (hits.length === 0) return { error: `хост «${ref}» не настроен (поле "hosts" в project.json)` };
   if (hits.length > 1) {
     const fulls = hits.map((h) => `${h.project}:${ref}`).join(' или ');
     return {
@@ -320,7 +328,7 @@ export function checkPermission(agent: Agent, action: Action, cfg: ToolsConfig):
   }
   if (action.project) {
     if (!agent.projects?.includes(action.project)) return `проект «${action.project}» этому агенту не назначен`;
-    if (!cfg.projects.has(action.project)) return `проект «${action.project}» не известен — серверы в hosts.json, префикс «project:»`;
+    if (!cfg.projects.has(action.project)) return `проект «${action.project}» не известен — серверы в поле "hosts" (project.json), префикс «project:»`;
   }
   return null;
 }
@@ -846,7 +854,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '',
       '<текст письма>',
       '```',
-      'mail работает с ящиками из mails.json в служебной папке проекта .dreamteam (настроил хозяин): list/find — проверка почты, ' +
+      'mail работает с ящиками из поля "mails" в project.json проекта (данные проекта живут в доме приложения; настроил хозяин): list/find — проверка почты, ' +
         'read — письмо целиком (вложения сохраняются в mail/), send — отправка с вложениями.',
     );
   }
@@ -858,7 +866,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '',
       '<текст сообщения>',
       '```',
-      'telegram — бот из messengers.json в служебной папке проекта .dreamteam (токен задал хозяин): list — чаты и chat_id, ' +
+      'telegram — бот из поля "messengers" в project.json проекта (токен задал хозяин): list — чаты и chat_id, ' +
         'in — входящие, send — сообщение в чат (файлы — вложением).',
     );
   }
@@ -870,7 +878,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '',
       '<текст сообщения>',
       '```',
-      'max — бот мессенджера MAX (токен в messengers.json проекта, папка .dreamteam): chats — чаты и chat_id, ' +
+      'max — бот мессенджера MAX (токен в поле "messengers" project.json проекта): chats — чаты и chat_id, ' +
         'in — входящие, send — сообщение в чат или user:<user_id> (файлы — вложением).',
     );
   }

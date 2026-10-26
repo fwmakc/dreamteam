@@ -5,12 +5,13 @@
  *  - «взгляд GUI» — state-снапшот через WS у работающего serve;
  *  - «взгляд TUI» — те же файлы через свежий SessionStore (как у терминала).
  *
- * Сценарий: seeded-сессии → снапшот ≡ диск → раунд через GUI → диск обновился
+ * Сценарий: seeded-сессии → проект открыт rpc-ом (старт без проекта, как
+ * требует модель) → снапшот ≡ диск → раунд через GUI → диск обновился
  * (TUI увидит) → «TUI» пишет в файлы → serve перезапущен → GUI видит его данные
  * (одновременная работа двух процессов на одном проекте не поддерживается —
  * перезапуск подхватывает изменения, это и проверяем).
  *
- * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер.
+ * Герметично: временный DT_HOME, mock-провайдер.
  * Запуск: npm run probe:consistency
  */
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -34,9 +35,10 @@ const home = join(base, 'home');
 const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
-process.env.DT_PROJECT = proj;
 process.chdir(base);
-const { SESSIONS_DIR } = await import('../src/paths.js');
+// неймспейс, не деструктуризация: SESSIONS_DIR — летучая привязка (пустая до
+// открытия проекта), живое значение читаем в момент вызова
+const pathsMod = await import('../src/paths.js');
 writeModels(home, { mock: { adapter: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
@@ -46,8 +48,10 @@ const { SessionStore } = await import('../src/sessions.js');
 import type { Session } from '../src/types.js';
 import { rmTemp } from './rm-tmp.js';
 
-// ── сеем два разговора так, как их сохранила бы любая из оболочек ───────────
-const storeTUI = new SessionStore(join(home, 'sessions'));
+// ── сеем два разговора в проект дома, как сохранила бы любая оболочка ───────
+const { createProject } = await import('../src/core/projects.js');
+createProject('dev', proj); // projects/dev/ + рабочая папка proj
+const storeTUI = new SessionStore(join(home, 'projects', 'dev', 'sessions'));
 const s1: Session = storeTUI.create();
 s1.title = 'Проект Альфа — обсуждение';
 s1.messages.push(
@@ -117,7 +121,7 @@ async function guiView(port: number): Promise<GuiView> {
 
 /** Взгляд TUI: свежий SessionStore поверх тех же файлов. */
 function tuiView(): GuiView {
-  const fresh = new SessionStore(SESSIONS_DIR); // сессии — проектные: тот же DT_PROJECT
+  const fresh = new SessionStore(pathsMod.SESSIONS_DIR); // проект уже открыт rpc-ом
   const list = fresh.list();
   return {
     sessions: list,
@@ -128,6 +132,14 @@ function tuiView(): GuiView {
 }
 
 let handle = await startServe({ port: 0 });
+
+// старт без проекта: открываем проект rpc-ом — тем же ходом, что и GUI
+{
+  const c = await makeClient(handle.port);
+  c.send({ type: 'rpc', id: 'open1', method: 'project.open', args: { path: proj } });
+  await c.next((m) => (m.type === 'rpc_result' || m.type === 'rpc_error') && m.id === 'open1');
+  c.close();
+}
 
 // ── 1. одинаковые разговоры: список сессий GUI ≡ TUI ─────────────────────────
 {
@@ -176,12 +188,19 @@ let handle = await startServe({ port: 0 });
 // ── 4. «TUI» пишет в файлы → перезапущенный serve показывает его данные ──────
 {
   await handle.close();
-  const fresh = new SessionStore(SESSIONS_DIR); // сессии — проектные: тот же DT_PROJECT
+  const fresh = new SessionStore(pathsMod.SESSIONS_DIR); // проект уже открыт rpc-ом
   const current = fresh.load(fresh.list()[0].id)!;
   current.messages.push({ authorId: 'user', authorName: 'Вы', text: 'сообщение из TUI (после перезапуска сервера)', ts: Date.now() });
   fresh.save(current);
 
   handle = await startServe({ port: 0 });
+  // новый serve стартует без проекта — открываем заново тем же rpc-ходом
+  {
+    const c = await makeClient(handle.port);
+    c.send({ type: 'rpc', id: 'open2', method: 'project.open', args: { path: proj } });
+    await c.next((m) => (m.type === 'rpc_result' || m.type === 'rpc_error') && m.id === 'open2');
+    c.close();
+  }
   const gui = await guiView(handle.port);
   check(
     'перезапуск serve: сообщение TUI на месте у GUI',

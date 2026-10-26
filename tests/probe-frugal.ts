@@ -6,7 +6,7 @@
  *  - focused-контекст: агент с focused mode видит чужие реплики как однострочники;
  *  - /usage: статистика сессии накапливается при раундах.
  *
- * Герметично: временные DT_HOME/DT_PROJECT.
+ * Герметично: временный DT_HOME.
  * Запуск: npm run probe:frugal
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -25,7 +25,6 @@ const home = join(root, 'home');
 mkdirSync(join(home, 'agents'), { recursive: true });
 mkdirSync(join(home, 'models'), { recursive: true });
 process.env.DT_HOME = home;
-process.env.DT_PROJECT = join(root, 'proj', '.dreamteam');
 writeFileSync(join(home, 'models', 'flagship.json'),
   JSON.stringify({ adapter: 'mock' }, null, 2));
 writeFileSync(join(home, 'models', 'service.json'),
@@ -151,15 +150,17 @@ writeFileSync(join(home, 'settings.json'),
   };
   const { app } = await bootstrapApp();
   const engine = new Engine(app, stub);
+  // старт без проекта — открываем свой: разговоры живут в доме
+  engine.newProject('dev', join(root, 'ws'));
   // /usage: проверяем операцию с заведомо заданной статистикой
-  app.session.usage = { promptTokens: 1500, cachedTokens: 1240, outputTokens: 200, rounds: 3 };
-  const usage = app.session.usage;
+  app.session!.usage = { promptTokens: 1500, cachedTokens: 1240, outputTokens: 200, rounds: 3 };
+  const usage = app.session!.usage;
   check('/usage: статистика задана', Boolean(usage) && (usage?.rounds ?? 0) > 0, JSON.stringify(usage));
   const lines = await runOperationText(engine, '/usage');
   check('/usage: отчёт содержит раунды', lines.some((l) => l.includes('Раундов')), lines.join(' | '));
   check('/usage: отчёт содержит кэш', lines.some((l) => l.includes('кэша') || l.includes('1 240')), lines.join(' | '));
   // пустая статистика — честное сообщение
-  app.session.usage = undefined;
+  app.session!.usage = undefined;
   const empty = await runOperationText(engine, '/usage');
   check('/usage: пустая — честное сообщение', empty.some((l) => l.includes('Статистики')), empty.join(' | '));
 }

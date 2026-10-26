@@ -1,18 +1,18 @@
 /**
- * Сценарий «жизненный цикл» для GUI (WS) и TUI (пайп): 9 шагов с реальными
- * проверками после каждого. Тот же дом и проект для обеих оболочек.
+ * Сценарий «жизненный цикл» через GUI-протокол (WS): 9 шагов с реальными
+ * проверками после каждого.
  *
- * Шаги: 1.создать сессию 2.создать агента-юриста 3.позвать его в сессию
- * 4.переименовать 5.несколько сообщений 6.экспорт 7.удалить агента и сессию
- * 8.импорт 9.снова удалить агента и сессию.
+ * Шаги: 0.открыть проект 1.создать сессию 2.создать агента-юриста 3.позвать
+ * его в сессию 4.переименовать 5.несколько сообщений 6.экспорт 7.удалить
+ * агента и сессию 8.импорт 9.снова удалить агента и сессию.
  *
- * Герметично: временные DT_HOME/DT_PROJECT, mock-провайдер.
+ * Герметично: временный DT_HOME, mock-провайдер; проект открывается rpc-ом,
+ * как это делает GUI.
  * Запуск: npm run probe:scenario
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { writeModels } from './models.js';
 import { tmpdir } from 'node:os';
-import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
 
@@ -30,8 +30,8 @@ const base = mkdtempSync(join(tmpdir(), 'dt-scen-'));
 const home = join(base, 'home');
 const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
+mkdirSync(proj, { recursive: true }); // project.open открывает существующую папку
 process.env.DT_HOME = home;
-process.env.DT_PROJECT = proj;
 process.chdir(base);
 writeModels(home, { mock: { adapter: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
@@ -81,27 +81,18 @@ function makeClient(port: number): Promise<{
   });
 }
 
-/** TUI в пайп-режиме: команды через stdin, вывод в stdout. */
-function runTuiPipe(commands: string[]): Promise<string> {
-  return new Promise((resolve) => {
-    const child = spawn(
-      process.execPath,
-      ['--import', 'tsx', join('C:/dev/fwmakc/dreamteam', 'src', 'index.ts')],
-      { cwd: base, env: { ...process.env }, stdio: ['pipe', 'pipe', 'pipe'] },
-    );
-    let out = '';
-    child.stdout.on('data', (d: Buffer) => (out += d.toString()));
-    child.stderr.on('data', (d: Buffer) => (out += d.toString()));
-    child.stdin.write(commands.join('\n') + '\n');
-    child.stdin.end();
-    child.on('close', () => resolve(out));
-    setTimeout(() => { child.kill(); resolve(out); }, 60_000);
-  });
-}
-
 let handle = await startServe({ port: 0 });
 const gui = await makeClient(handle.port);
-await gui.next((m) => m.type === 'state');
+await gui.next((m) => m.type === 'state'); // первый state — без проекта
+
+// ── Шаг 0: открыть проект rpc-ом (старт приложения — без проекта) ───────────
+{
+  gui.send({ type: 'rpc', id: 'r0', method: 'project.open', args: { path: proj } });
+  await gui.next((m) => (m.type === 'rpc_result' || m.type === 'rpc_error') && m.id === 'r0');
+  const st = await gui.next((m) => m.type === 'state' && Boolean((m.state as { session?: unknown }).session));
+  const pr = (st.state as { project: { id: string } | null }).project;
+  check('GUI/TUI 0: проект открыт, разговор создан', pr?.id === 'proj', JSON.stringify(pr));
+}
 
 // ── Шаг 1: создать новую сессию ──────────────────────────────────────────────
 {
@@ -150,7 +141,7 @@ await gui.next((m) => m.type === 'state');
   await gui.next(
     (m) => m.type === 'state' && (m.state as { session: { messages: { text: string }[] } }).session.messages.some((x) => x.text.includes('риски')),
   );
-  const store = new SessionStore(join(proj, 'sessions'));
+  const store = new SessionStore(join(home, 'projects', 'proj', 'sessions')); // переписка — в доме
   const list = store.list();
   check('GUI/TUI 5: сообщения записаны на диск', list.length === 2, JSON.stringify(list.map((s) => s.title)));
 }
@@ -160,7 +151,7 @@ await gui.next((m) => m.type === 'state');
   gui.send({ type: 'command', text: '/session export 1' });
   await gui.next((m) => m.type === 'notice' && String(m.text).includes('Экспорт'));
   await wait(500);
-  const list = (await import('node:fs')).readdirSync(base).filter((f: string) => f.startsWith('dt-'));
+  const list = (await import('node:fs')).readdirSync(proj).filter((f: string) => f.startsWith('dt-')); // архив — в рабочую папку проекта
   check('GUI/TUI 6: экспорт — файл на диске', list.length > 0, JSON.stringify(list));
 }
 
@@ -182,11 +173,11 @@ await gui.next((m) => m.type === 'state');
 // ── Шаг 8: импорт сессии ─────────────────────────────────────────────────────
 {
   // найти zip-файл экспорта
-  const files = (await import('node:fs')).readdirSync(base).filter((f: string) => f.endsWith('.zip'));
+  const files = (await import('node:fs')).readdirSync(proj).filter((f: string) => f.endsWith('.zip'));
   if (files.length === 0) {
     check('GUI/TUI 8: импорт — файл найден', false, 'нет zip в песочнице');
   } else {
-    const zipData = readFileSync(join(base, files[0]));
+    const zipData = readFileSync(join(proj, files[0]));
     gui.send({ type: 'import_session', dataB64: zipData.toString('base64') });
     const rep = await gui.next((m) => m.type === 'notice' && String(m.text).includes('Импорт сессии'));
     check('GUI/TUI 8: сессия импортирована', Boolean(rep));

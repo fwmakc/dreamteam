@@ -12,8 +12,8 @@
  * своими JSON-действиями: валидация и tmp+rename-откат общие. Ошибки летят
  * вызывающему (терминал покажет, сервер ушлёт error/rpc_error).
  */
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { loadTeam } from '../agents.js';
 import {
   addMailAccount,
@@ -36,18 +36,22 @@ import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from
 import { resolveEndpoints } from '../mail.js';
 import { agentToolIds } from '../tools-api.js';
 import { t, tf, applyLocale } from '../i18n.js';
-import { AGENTS_DIR, DT_HOME, HOSTS_FILE, MAIL_FILE, MANAGER_FILE, MESSENGERS_FILE, MODELS_DIR, PROJECTS_FILE, SCHEDULE_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
-import { loadProjectRegistry, projectLabel } from './projects.js';
+import { AGENTS_DIR, DT_HOME, MANAGER_FILE, MODELS_DIR, PROJECTS_DIR, PROJECT_DIR, PROJECT_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
+import { listProjects } from './projects.js';
 import { loadSettings } from '../settings.js';
-import { chatTeam, isSessionRef, type App, type Engine } from './engine.js';
+import { chatTeam, isSessionRef, requireProject, type App, type Engine } from './engine.js';
 import { loadSchedule, saveSchedule } from './schedule.js';
 import {
   applyHomeImport,
+  applyProjectImport,
   applySessionImport,
+  applySettingsImport,
   homeEntries,
   packEntriesZip,
+  projectEntries,
   readZipEntries,
   sessionEntriesById,
+  settingsEntries,
 } from './transfer.js';
 import type { Agent, ManagerHostSpec, ModelRef } from '../types.js';
 
@@ -68,18 +72,21 @@ export interface OpSpec {
   help: string;
   /** Обзор группы: разрешает вызов без глагола (`/team` = team.list) */
   implicit?: boolean;
+  /** Операция требует открытого проекта (разговоры, чат, секреты проекта) */
+  needsProject?: boolean;
   run: (engine: Engine, rest: string[], signal?: AbortSignal) => Promise<string[]>;
 }
 
 // ── просмотры (бесцветные: терминал рисует свои цветные версии сам) ─────────
 
 function sessionsText(app: App): string[] {
-  const list = app.store.list();
+  const { session, store } = requireProject(app);
+  const list = store.list();
   if (list.length === 0) return [t('Разговоров пока нет.')];
   const fmt = (ts: number) => new Date(ts).toLocaleString('ru-RU');
   const lines = ['', t('Разговоры (свежие сверху):')];
   list.forEach((s, i) => {
-    const cur = s.id === app.session.id ? t(' ← текущий') : '';
+    const cur = s.id === session.id ? t(' ← текущий') : '';
     lines.push(`${i + 1}. ${s.title} — ${t(`сообщ.:`)} ${s.count}${cur}`);
     lines.push(`   ${t('создан')} ${fmt(s.createdAt)} · ${t('последнее сообщение')} ${fmt(s.updatedAt)} · id ${s.id}`);
   });
@@ -101,7 +108,8 @@ function teamText(app: App): string[] {
   } catch {
     return [t('agents.json недоступен.')];
   }
-  const inChat = new Set(chatTeam(app.session, fullTeam).map((a) => a.id));
+  const { session } = requireProject(app);
+  const inChat = new Set(chatTeam(session, fullTeam).map((a) => a.id));
   const lines = [
     tf('{emoji} {name} — менеджер переговорки: консьерж и шлюз настроек [модель: {model}]', {
       emoji: app.mgr.emoji, name: app.mgr.name, model: app.mgr.model.id ?? '',
@@ -141,10 +149,11 @@ function modelsText(app: App): string[] {
 
 function historyText(app: App, nStr?: string): string[] {
   const n = Number.parseInt(nStr ?? '', 10);
-  const all = app.session.messages;
+  const { session } = requireProject(app);
+  const all = session.messages;
   const shown = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
   if (shown.length === 0) return [t('Разговор пуст.')];
-  const lines = [tf('Разговор «{title}» — показано {shown} из {all} сообщений:', { title: app.session.title, shown: shown.length, all: all.length }), ''];
+  const lines = [tf('Разговор «{title}» — показано {shown} из {all} сообщений:', { title: session.title, shown: shown.length, all: all.length }), ''];
   for (const m of shown) {
     const who = m.authorId === 'user'
       ? t('Вы')
@@ -166,6 +175,7 @@ function memoryText(app: App, arg: string): string[] {
   } catch {
     // без agents.json показываем только общую память
   }
+  const { session } = requireProject(app);
   if (arg === 'shared') {
     if (!app.memory.shared) {
       return [t('Общая память пока пуста — заполняется при закрытии разговоров (/session new, /exit).')];
@@ -173,7 +183,7 @@ function memoryText(app: App, arg: string): string[] {
     return ['', t('Общая память команды:'), ...app.memory.shared.split('\n'), ''];
   }
   if (!arg) {
-    const withMem = memTeam.filter((a) => app.session.memories?.[a.id]);
+    const withMem = memTeam.filter((a) => session.memories?.[a.id]);
     return [
       t('Чья память: /memory show <имя> (например, /memory show Глеб), /memory show shared — общая.'),
       withMem.length > 0
@@ -184,11 +194,11 @@ function memoryText(app: App, arg: string): string[] {
   const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
   const who = memTeam.find((a) => norm(a.name) === norm(arg) || a.id === norm(arg));
   if (!who) return [tf('Нет участника «{name}» — см. /team', { name: arg })];
-  const mine = app.session.memories?.[who.id];
+  const mine = session.memories?.[who.id];
   const glob = app.memory.agents[who.id];
   const lines = [
     '',
-    tf('Что {name} помнит в разговоре «{title}»:', { name: who.name, title: app.session.title }),
+    tf('Что {name} помнит в разговоре «{title}»:', { name: who.name, title: session.title }),
     `${t('Задача:')} ${mine?.task ?? '—'}`,
     `${t('Отношение к вам:')} ${mine?.towardUser ?? '—'}`,
   ];
@@ -203,23 +213,30 @@ function memoryText(app: App, arg: string): string[] {
 }
 
 function projectListText(app: App): string[] {
-  void app;
-  // реестр проектов машины: текущий — всегда первым, даже если его ещё не записали
-  const known = loadProjectRegistry(PROJECTS_FILE).projects.filter((p) => p.path !== WORKSPACE);
-  const lines = [
-    '',
-    t('Проекты (смена: /project open <имя|путь>):'),
-    tf('• {name} — {path} ← текущий', { name: projectLabel(WORKSPACE), path: WORKSPACE }),
-    ...known.map((p) => tf('• {name} — {path}', { name: p.name, path: p.path })),
-  ];
-  // серверы текущего проекта (hosts.json)
-  const hosts = Object.entries(loadHostsFile(HOSTS_FILE)) as [string, { host: string; user?: string; port?: number }][];
-  lines.push(t('Серверы проекта (hosts.json):'));
-  if (hosts.length === 0) {
-    lines.push(t('  пусто — /project host add <имя>=[пользователь@]хост[:порт]'));
-  } else {
-    for (const [name, h] of hosts) {
-      lines.push(`  • ${name}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`);
+  const lines = ['', t('Проекты (смена: /project open <имя|путь>):')];
+  const all = listProjects();
+  if (all.length === 0 && !PROJECT_DIR) {
+    lines.push(t('  пока ни одного — /project new <имя> [папка] создаст первый'));
+  }
+  const noPath = t('(папка не задана)');
+  for (const p of all) {
+    const cur = Boolean(PROJECT_DIR) && basename(PROJECT_DIR) === p.id;
+    lines.push(
+      cur
+        ? tf('• {id} — {path} ← текущий', { id: p.id, path: p.path ?? noPath })
+        : tf('• {id} — {path}', { id: p.id, path: p.path ?? noPath }),
+    );
+  }
+  // серверы текущего проекта (поле "hosts" в project.json)
+  if (app.store) {
+    const hosts = Object.entries(loadHostsFile(PROJECT_FILE)) as [string, { host: string; user?: string; port?: number }][];
+    lines.push(t('Серверы проекта (поле "hosts" в project.json):'));
+    if (hosts.length === 0) {
+      lines.push(t('  пусто — /project host add <имя>=[пользователь@]хост[:порт]'));
+    } else {
+      for (const [name, h] of hosts) {
+        lines.push(`  • ${name}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`);
+      }
     }
   }
   lines.push('');
@@ -316,24 +333,56 @@ function parseHostSpec(spec: string): ManagerHostSpec {
   return out;
 }
 
-/** Экспорт дома: zip в рабочей папке. */
+/** Куда класть архивы: рабочая папка проекта, а без проекта — дом. */
+function exportTargetDir(): string {
+  const dir = WORKSPACE || DT_HOME;
+  // путь проекта мог быть зарегистрирован, а папка — ещё не создана
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** Экспорт всего приложения (дом целиком: настройки, команда, модели с ключами, все проекты и разговоры). */
 function exportHomeZip(engine: Engine): string[] {
-  const app = engine.app;
   const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-  const entries = homeEntries(app);
-  const file = join(WORKSPACE, `dt-home-${ts}.zip`);
+  const entries = homeEntries();
+  const file = join(exportTargetDir(), `dt-home-${ts}.zip`);
   writeFileSync(file, packEntriesZip(entries));
   return [tf('Экспорт: {file} ({n} записей, включая ключи моделей — хранить как пароль)', { file, n: entries.length })];
+}
+
+/** Экспорт настроек приложения (без проектов): settings, профиль, менеджер, модели с ключами. */
+function exportSettingsZip(engine: Engine): string[] {
+  const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const entries = settingsEntries();
+  const file = join(exportTargetDir(), `dt-settings-${ts}.zip`);
+  writeFileSync(file, packEntriesZip(entries));
+  return [tf('Экспорт: {file} ({n} записей, включая ключи моделей — хранить как пароль)', { file, n: entries.length })];
+}
+
+/** Экспорт одного проекта (project.json + все его разговоры); без аргумента — текущий. */
+function exportProjectZip(engine: Engine, idArg?: string): string[] {
+  const id = (idArg ?? '').trim() || (PROJECT_DIR ? basename(PROJECT_DIR) : '');
+  if (!id) return [t('Укажите имя проекта: /project export <имя> (список — /project)')];
+  let entries: ReturnType<typeof projectEntries>;
+  try {
+    entries = projectEntries(id);
+  } catch (err) {
+    return [tf('Не удалось собрать архив проекта «{id}»: {err}', { id, err: err instanceof Error ? err.message : String(err) })];
+  }
+  const file = join(exportTargetDir(), `dt-project-${id}.zip`);
+  writeFileSync(file, packEntriesZip(entries));
+  return [tf('Экспорт: {file} ({n} записей — project.json и разговоры)', { file, n: entries.length })];
 }
 
 /** Экспорт разговора: номер резолвится в id один раз — архив и его имя
  *  всегда про один и тот же разговор, даже если список живёт своей жизнью. */
 function exportSessionZip(engine: Engine, n: number | undefined): string[] {
   const app = engine.app;
-  const id = n === undefined ? app.session.id : app.store.list()[n - 1]?.id;
+  const { session, store } = requireProject(app);
+  const id = n === undefined ? session.id : store.list()[n - 1]?.id;
   if (!id) return [n === undefined ? t('Разговоров нет — экспортировать нечего.') : tf('Не нашёл разговор №{n} — см. /sessions', { n })];
   const entries = sessionEntriesById(app, id);
-  const file = join(WORKSPACE, `dt-session-${id}.zip`);
+  const file = join(exportTargetDir(), `dt-session-${id}.zip`);
   writeFileSync(file, packEntriesZip(entries));
   return [tf('Экспорт: {file} ({n} записей)', { file, n: entries.length })];
 }
@@ -343,12 +392,12 @@ function exportSessionZip(engine: Engine, n: number | undefined): string[] {
 export const OPERATIONS: OpSpec[] = [
   // разговоры
   {
-    name: 'sessions.list', implicit: true, title: 'список разговоров',
+    name: 'sessions.list', implicit: true, needsProject: true, title: 'список разговоров',
     help: 'разговоры: свежие сверху, текущий отмечен',
     run: async (engine) => sessionsText(engine.app),
   },
   {
-    name: 'session.new', title: 'новый разговор',
+    name: 'session.new', needsProject: true, title: 'новый разговор',
     help: 'один на один с менеджером, он позовёт остальных',
     run: async (engine, _rest, signal) => {
       await engine.newSession(signal ?? new AbortController().signal);
@@ -358,6 +407,7 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'session.open',
     args: [{ name: 'номер', required: true, hint: 'sessions' }],
+    needsProject: true,
     title: 'открыть разговор',
     help: 'переключиться на разговор из списка',
     run: async (engine, rest) => {
@@ -368,6 +418,7 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'session.delete',
     args: [{ name: 'номер', required: true, hint: 'sessions' }],
+    needsProject: true,
     title: 'удалить разговор',
     help: 'текущий удалить нельзя — сначала откройте другой',
     run: async (engine, rest) => {
@@ -379,6 +430,7 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'session.rename',
     args: [{ name: 'имя', required: false }],
+    needsProject: true,
     title: 'переименовать разговор',
     help: 'текущий разговор; без имени менеджер придумает сам',
     run: async (engine, rest) => [await engine.renameSession(rest.join(' '))],
@@ -386,6 +438,7 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'session.history',
     args: [{ name: 'N', required: false }],
+    needsProject: true,
     title: 'история разговора',
     help: 'текущий разговор целиком или последние N сообщений',
     run: async (engine, rest) => historyText(engine.app, rest[0]),
@@ -393,6 +446,7 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'session.export',
     args: [{ name: 'номер', required: false, hint: 'sessions' }],
+    needsProject: true,
     title: 'экспорт разговора',
     help: 'архив разговора в zip; без номера — текущий',
     run: async (engine, rest) => {
@@ -404,40 +458,64 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'session.import',
     args: [{ name: 'файл.zip', required: true }],
+    needsProject: true,
     title: 'импорт разговора',
-    help: 'вернуть разговор из архива (вливается как новый)',
+    help: 'вернуть разговор из архива (вливается в открытый проект как новый)',
     run: async (engine, rest) => {
       const file = rest.join(' ');
       if (!file) return [t('Синтаксис: /session import <файл.zip>')];
       if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
       const entries = readZipEntries(readFileSync(file));
       if (!entries.some((e) => e.rel === 'session.json')) {
-        return [t('В архиве нет session.json — это архив дома? Тогда: /home import <файл>')];
+        return [t('В архиве нет session.json — это архив всего приложения? Тогда: /home import <файл>')];
       }
       return [await applySessionImport(engine.app, entries)];
     },
   },
   {
-    name: 'home.export', title: 'экспорт дома',
-    help: 'снимок дома для переезда: настройки, провайдеры с ключами, память, расписание и все разговоры; .env (TOKEN/PORT) — вещь машины',
+    name: 'home.export', title: 'экспорт всего приложения',
+    help: 'дом целиком: настройки, команда, модели с ключами, память, расписание и ВСЕ проекты с разговорами; .env (TOKEN/PORT) — вещь машины',
     run: async (engine) => exportHomeZip(engine),
   },
   {
     name: 'home.import',
     args: [{ name: 'файл.zip', required: true }],
-    title: 'импорт дома',
-    help: 'настройки/профиль/память/расписание заменяются, разговоры вливаются по id; с подтверждением',
+    title: 'импорт всего приложения',
+    help: 'настройки/профиль/память/расписание заменяются, проекты и разговоры вливаются; с подтверждением',
     run: async (engine, rest) => {
       const file = rest.join(' ');
       if (!file) return [t('Синтаксис: /home import <файл.zip>')];
       if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
       const entries = readZipEntries(readFileSync(file));
       const ok = await engine.confirmAction(
-        t('Импортировать домашние настройки из этого архива?'),
-        t('Настройки/профиль/модели, память команды и расписание заменяются; разговоры вливаются по id. Ключи (.env) не переносятся.'),
+        t('Импортировать всё приложение из этого архива?'),
+        t('Настройки/профиль/модели, память команды и расписание заменяются; проекты и их разговоры вливаются по id; открытый проект перечитывается. Ключи (.env) не переносятся.'),
       );
-      if (!ok) return [t('Импорт дома отменён.')];
+      if (!ok) return [t('Импорт отменён.')];
       return [applyHomeImport(engine.app, entries)];
+    },
+  },
+  {
+    name: 'settings.export', title: 'экспорт настроек',
+    help: 'настройки приложения без проектов: settings, профиль, менеджер, модели с ключами',
+    run: async (engine) => exportSettingsZip(engine),
+  },
+  {
+    name: 'settings.import',
+    args: [{ name: 'файл.zip', required: true }],
+    title: 'импорт настроек',
+    help: 'settings/профиль/менеджер/модели заменяются, проекты не трогаются; с подтверждением',
+    run: async (engine, rest) => {
+      const file = rest.join(' ');
+      if (!file) return [t('Синтаксис: /settings import <файл.zip>')];
+      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
+      const entries = readZipEntries(readFileSync(file));
+      const ok = await engine.confirmAction(
+        t('Импортировать настройки приложения из этого архива?'),
+        t('settings.json, профиль, менеджер и карточки моделей (с ключами) заменяются; проекты и разговоры не трогаются.'),
+      );
+      if (!ok) return [t('Импорт отменён.')];
+      return [applySettingsImport(engine.app, entries)];
     },
   },
 
@@ -445,6 +523,7 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'chat.add',
     args: [{ name: 'имя|номер', required: true, hint: 'team' }],
+    needsProject: true,
     title: 'позвать участника',
     help: 'в текущий чат',
     run: async (engine, rest) => chatChangeText(engine, rest.join(' '), 'позвать'),
@@ -452,6 +531,7 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'chat.remove',
     args: [{ name: 'имя|номер', required: true, hint: 'team' }],
+    needsProject: true,
     title: 'вывести участника',
     help: 'из текущего чата',
     run: async (engine, rest) => chatChangeText(engine, rest.join(' '), 'вывести'),
@@ -459,7 +539,7 @@ export const OPERATIONS: OpSpec[] = [
 
   // команда
   {
-    name: 'team.list', implicit: true, title: 'состав команды',
+    name: 'team.list', implicit: true, needsProject: true, title: 'состав команды',
     help: 'кто в команде, у кого какие тула, кто в чате',
     run: async (engine) => teamText(engine.app),
   },
@@ -643,7 +723,7 @@ export const OPERATIONS: OpSpec[] = [
     },
   },
   {
-    name: 'memory.show', implicit: true,
+    name: 'memory.show', implicit: true, needsProject: true,
     args: [{ name: 'кого|shared', required: false, hint: 'team' }],
     title: 'память',
     help: 'без аргумента — обзор; «shared» — общая память команды',
@@ -653,14 +733,29 @@ export const OPERATIONS: OpSpec[] = [
   // проекты
   {
     name: 'project.list', implicit: true, title: 'проекты',
-    help: 'известные проекты и серверы текущего; смена — /project open',
+    help: 'проекты дома и серверы текущего; смена — /project open, создание — /project new',
     run: async (engine) => projectListText(engine.app),
+  },
+  {
+    name: 'project.new',
+    args: [
+      { name: 'имя', required: true },
+      { name: 'папка', required: false },
+    ],
+    title: 'новый проект',
+    help: 'создаст проект в доме и откроет его; папка создаётся, если её нет',
+    run: async (engine, rest) => {
+      const name = rest[0];
+      if (!name) return [t('Синтаксис: /project new <имя> [папка] — имя без пробелов; рабочая папка создаётся, если её нет')];
+      const dir = rest.length > 1 ? rest.slice(1).join(' ') : null;
+      return [engine.newProject(name, dir)];
+    },
   },
   {
     name: 'project.open',
     args: [{ name: 'имя|путь', required: true, hint: 'projects' }],
     title: 'открыть проект',
-    help: 'сменить рабочую папку и разговоры, не выходя из приложения',
+    help: 'сменить проект не выходя из приложения; незнакомая папка — регистрируется',
     run: async (engine, rest) => {
       const arg = rest.join(' ').trim();
       if (!arg) return [t('Синтаксис: /project open <имя|путь> (список — /project)')];
@@ -668,25 +763,69 @@ export const OPERATIONS: OpSpec[] = [
     },
   },
   {
-    name: 'project.add',
-    args: [{ name: 'путь', required: true }],
-    title: 'запомнить проект',
-    help: 'добавить папку в реестр проектов, не переключаясь',
-    run: async (engine, rest) => {
-      const arg = rest.join(' ').trim();
-      if (!arg) return [t('Синтаксис: /project add <путь>')];
-      return [engine.addProject(arg)];
-    },
-  },
-  {
     name: 'project.remove',
     args: [{ name: 'имя|путь', required: true, hint: 'projects' }],
-    title: 'забыть проект',
-    help: 'убрать из реестра (файлы не трогаются); текущий не забыть',
+    title: 'удалить проект',
+    help: 'из дома (projects/<id>/ вместе с разговорами); рабочая папка не трогается; текущий не удалить',
     run: async (engine, rest) => {
       const arg = rest.join(' ').trim();
       if (!arg) return [t('Синтаксис: /project remove <имя|путь>')];
-      return [engine.removeProject(arg)];
+      return [engine.deleteProject(arg)];
+    },
+  },
+  {
+    name: 'project.rename',
+    args: [{ name: 'новое имя', required: true }],
+    needsProject: true,
+    title: 'переименовать проект',
+    help: 'текущий проект: папка в доме и id в project.json',
+    run: async (engine, rest) => {
+      const name = rest.join(' ').trim();
+      if (!name) return [t('Синтаксис: /project rename <новое имя> (текущий проект; имя без пробелов)')];
+      return [engine.renameCurrentProject(name)];
+    },
+  },
+  {
+    name: 'project.path',
+    args: [{ name: 'папка', required: true }],
+    needsProject: true,
+    title: 'сменить рабочую папку',
+    help: 'текущего проекта; папка создаётся, если её нет',
+    run: async (engine, rest) => {
+      const dir = rest.join(' ').trim();
+      if (!dir) return [t('Синтаксис: /project path <папка> (текущий проект; папка создаётся, если её нет)')];
+      return [engine.repointProject(dir)];
+    },
+  },
+  {
+    name: 'project.export',
+    args: [{ name: 'имя', required: false, hint: 'projects' }],
+    title: 'экспорт проекта',
+    help: 'архив проекта: project.json (с секретами) и все разговоры; без имени — текущий',
+    run: async (engine, rest) => exportProjectZip(engine, rest.join(' ')),
+  },
+  {
+    name: 'project.import',
+    args: [
+      { name: 'файл.zip', required: true },
+      { name: 'имя', required: false },
+    ],
+    title: 'импорт проекта',
+    help: 'имя занято — разговоры вольются в него по id, свободно — новый проект; с подтверждением',
+    run: async (engine, rest) => {
+      const file = rest[0] ?? '';
+      if (!file) return [t('Синтаксис: /project import <файл.zip> [имя]')];
+      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
+      const entries = readZipEntries(readFileSync(file));
+      if (!entries.some((e) => e.rel === 'project.json')) {
+        return [t('В архиве нет project.json — это архив всего приложения? Тогда: /home import <файл>')];
+      }
+      const ok = await engine.confirmAction(
+        t('Импортировать проект из этого архива?'),
+        t('Имя проекта занято — разговоры вливаются в него по id (совпавшие заменяются); свободно — создастся новый проект. Секреты (серверы, почта, боты) не заменяются.'),
+      );
+      if (!ok) return [t('Импорт отменён.')];
+      return [applyProjectImport(engine.app, entries, rest.slice(1).join(' ').trim() || undefined)];
     },
   },
   {
@@ -694,8 +833,9 @@ export const OPERATIONS: OpSpec[] = [
     args: [
       { name: 'имя=хост', required: true },
     ],
+    needsProject: true,
     title: 'добавить сервер',
-    help: 'в текущий проект; формат хоста [пользователь@]хост[:порт]',
+    help: 'в текущий проект (поле "hosts" в project.json); формат [пользователь@]хост[:порт]',
     run: async (_engine, rest) => {
       const body = rest.join(' ');
       const eq = body.indexOf('=');
@@ -705,27 +845,28 @@ export const OPERATIONS: OpSpec[] = [
       const name = body.slice(0, eq).trim();
       const spec = body.slice(eq + 1).trim();
       if (!name || !spec) return [t('Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]')];
-      return [addProjectHosts(HOSTS_FILE, { [name]: parseHostSpec(spec) })];
+      return [addProjectHosts(PROJECT_FILE, { [name]: parseHostSpec(spec) })];
     },
   },
   {
     name: 'project.host.delete',
     args: [{ name: 'имя', required: true }],
+    needsProject: true,
     title: 'убрать сервер',
-    help: 'из текущего проекта',
+    help: 'из текущего проекта (поле "hosts" в project.json)',
     run: async (_engine, rest) => {
       const [name] = rest;
       if (!name) return [t('Синтаксис: /project host delete <имя>')];
-      return [removeProjectHost(HOSTS_FILE, name)];
+      return [removeProjectHost(PROJECT_FILE, name)];
     },
   },
 
   // почта и боты проекта
   {
-    name: 'mail.list', implicit: true, title: 'ящики',
-    help: 'реестр ящиков (mails.json)',
+    name: 'mail.list', implicit: true, needsProject: true, title: 'ящики',
+    help: 'реестр ящиков (поле "mails" в project.json проекта)',
     run: async () => {
-      const mails = loadMailsFile(MAIL_FILE);
+      const mails = loadMailsFile(PROJECT_FILE);
       const names = Object.keys(mails);
       if (names.length === 0) {
         return [t('Ящиков нет — /mail add <имя> user=… password=… imap=… smtp=… или попросите менеджера')];
@@ -747,8 +888,9 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'имя', required: true },
       { name: 'user=… password=… imap=… smtp=…', required: true },
     ],
+    needsProject: true,
     title: 'добавить ящик',
-    help: 'пароль приложения; в mails.json проекта — руками, командой или через менеджера',
+    help: 'пароль приложения; в поле "mails" project.json — руками, командой или через менеджера',
     run: async (_engine, rest) => {
       const [name, ...pairs] = rest;
       if (!name || pairs.length === 0) {
@@ -756,25 +898,26 @@ export const OPERATIONS: OpSpec[] = [
       }
       const spec = parseMailSpec(pairs);
       if (typeof spec === 'string') return [spec];
-      return [addMailAccount(MAIL_FILE, name, spec)];
+      return [addMailAccount(PROJECT_FILE, name, spec)];
     },
   },
   {
     name: 'mail.remove',
     args: [{ name: 'имя', required: true }],
+    needsProject: true,
     title: 'убрать ящик',
-    help: 'из mails.json проекта',
+    help: 'из поля "mails" project.json проекта',
     run: async (_engine, rest) => {
       const [name] = rest;
       if (!name) return [t('Синтаксис: /mail remove <имя>')];
-      return [removeMailAccount(MAIL_FILE, name)];
+      return [removeMailAccount(PROJECT_FILE, name)];
     },
   },
   {
-    name: 'messenger.list', implicit: true, title: 'боты',
-    help: 'токены ботов (messengers.json)',
+    name: 'messenger.list', implicit: true, needsProject: true, title: 'боты',
+    help: 'токены ботов (поле "messengers" в project.json проекта)',
     run: async () => {
-      const cfg = loadMessengersFile(MESSENGERS_FILE);
+      const cfg = loadMessengersFile(PROJECT_FILE);
       const rows = (['telegram', 'max'] as const).filter((k) => cfg[k] !== undefined).map((k) => `• ${k}: ${t('токен сохранён')}`);
       if (rows.length === 0) return [t('Ботов нет — /messenger add <telegram|max> <токен> или попросите менеджера')];
       return ['', t('Боты:'), ...rows, ''];
@@ -786,23 +929,25 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'telegram|max', required: true },
       { name: 'токен', required: true },
     ],
+    needsProject: true,
     title: 'токен бота',
-    help: 'в messengers.json проекта; Telegram — @BotFather, MAX — dev.max.ru',
+    help: 'в поле "messengers" project.json проекта; Telegram — @BotFather, MAX — dev.max.ru',
     run: async (_engine, rest) => {
       const [key, token] = rest;
       if (!key || !token) return [t('Синтаксис: /messenger add <telegram|max> <токен>')];
-      return [addMessengerBot(MESSENGERS_FILE, key, token)];
+      return [addMessengerBot(PROJECT_FILE, key, token)];
     },
   },
   {
     name: 'messenger.remove',
     args: [{ name: 'telegram|max', required: true }],
+    needsProject: true,
     title: 'убрать бота',
-    help: 'из messengers.json проекта',
+    help: 'из поля "messengers" project.json проекта',
     run: async (_engine, rest) => {
       const [key] = rest;
       if (!key) return [t('Синтаксис: /messenger remove <telegram|max>')];
-      return [removeMessengerBot(MESSENGERS_FILE, key)];
+      return [removeMessengerBot(PROJECT_FILE, key)];
     },
   },
   {
@@ -951,10 +1096,10 @@ export const OPERATIONS: OpSpec[] = [
     },
   },
   {
-    name: 'usage.show', implicit: true, title: 'статистика токенов',
+    name: 'usage.show', implicit: true, needsProject: true, title: 'статистика токенов',
     help: 'вход/выход/кэш — накопительно за текущий разговор',
     run: async (engine) => {
-      const u = engine.app.session.usage;
+      const u = requireProject(engine.app).session.usage;
       if (!u || u.rounds === 0) return [t('Статистики пока нет — сделайте раунд с API (не mock).')];
       const pct = u.promptTokens > 0 ? Math.round((u.cachedTokens / u.promptTokens) * 100) : 0;
       return [
@@ -997,7 +1142,7 @@ export const OPERATIONS: OpSpec[] = [
   },
 ];
 
-// ── расписание: schedule.json лежит в проектном слое рядом с projects.json ──
+// ── расписание: schedule.json лежит в доме, общее для всех проектов ──
 
 const scheduleDir = (): string => DT_HOME;
 
@@ -1007,6 +1152,14 @@ const byName = new Map(OPERATIONS.map((o) => [o.name, o]));
 
 export function findOperation(name: string): OpSpec | undefined {
   return byName.get(name);
+}
+
+/** Гейт «без проекта»: операции с needsProject отвечают подсказкой вместо падения. */
+async function runOp(engine: Engine, op: OpSpec, args: string[], signal?: AbortSignal): Promise<string[]> {
+  if (op.needsProject && !engine.app.store) {
+    return [t('нет открытого проекта — сначала /project new <имя> [папка] или /project open <имя|путь>')];
+  }
+  return op.run(engine, args, signal);
 }
 
 /** Канонический текст команды операции: обзор группы — без глагола. */
@@ -1054,15 +1207,15 @@ export async function runOperationText(
   }
   // трёхсловные имена (project host add) важнее двухсловных: ищем с хвоста
   const explicit3 = second && rest.length > 0 ? byName.get(`${group}.${second}.${rest[0].toLowerCase()}`) : undefined;
-  if (explicit3) return explicit3.run(engine, rest.slice(1), signal);
+  if (explicit3) return runOp(engine, explicit3, rest.slice(1), signal);
   const explicit = second ? byName.get(`${group}.${second.toLowerCase()}`) : undefined;
-  if (explicit) return explicit.run(engine, rest, signal);
+  if (explicit) return runOp(engine, explicit, rest, signal);
   // обзор группы: verb-less (`/team`) или имплицитная операция с аргументом
   // (`/memory Глеб`, `/memory shared`) — глагол не нужен
   const implicit = OPERATIONS.find((o) => o.name.startsWith(`${group}.`) && o.implicit);
   if (implicit) {
     const args = second ? [second, ...rest] : rest;
-    return implicit.run(engine, args, signal);
+    return runOp(engine, implicit, args, signal);
   }
   // не похоже ни на что: подсказываем ближайшую группу
   const groups = [...new Set(OPERATIONS.map((o) => o.name.split('.')[0]))];
