@@ -1,4 +1,4 @@
-import { findMentions, loadTeam, loadUserProfile } from '../agents.js';
+import { findMentions, loadTeam, loadUserProfile, MENTION_TRIGGERS } from '../agents.js';
 import {
   MANAGER_ID,
   MANAGER_PROMPT,
@@ -300,11 +300,30 @@ export class Engine {
   private buildRequest(
     agent: Agent,
     focus: string | undefined,
-    history: ChatMessage[],
+    fullHistory: ChatMessage[],
     user: UserProfile,
     summary?: string,
     personal?: string,
   ): StreamRequest {
+    // focused-контекст: чужие реплики вне хвоста — однострочники
+    let history = fullHistory;
+    const focused = agent.context?.mode === 'focused';
+    if (focused) {
+      const tail = agent.context?.tail ?? 8;
+      const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
+      history = fullHistory.map((m, i) => {
+        const isTail = i >= fullHistory.length - tail;
+        const isMine = m.authorId === agent.id;
+        const isUser = m.authorId === 'user';
+        const isTool = m.authorId === 'tool';
+        const addressed = MENTION_TRIGGERS.some((p) =>
+          norm(m.text).includes(p + norm(agent.name)) || norm(m.text).includes(p + agent.id),
+        );
+        if (isTail || isMine || isUser || isTool || addressed || isSessionRef(m)) return m;
+        const preview = m.text.slice(0, 80).replace(/\n/g, ' ');
+        return { ...m, text: `(${preview}${m.text.length > 80 ? '…' : ''})` };
+      });
+    }
     const messages: LLMMessage[] = [];
     if (summary) {
       messages.push({
