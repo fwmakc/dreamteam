@@ -4,6 +4,7 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const files = [];
@@ -35,8 +36,8 @@ for (const f of files) {
 }
 const decode = (r) => JSON.parse('"' + r.replace(/(?<!\\)"/g, String.fromCharCode(92) + '"') + '"');
 
-const { en } = await import('file:///' + root + '/src/locales/en.ts');
-const { zh } = await import('file:///C:/dev/fwmakc/dreamteam/src/locales/zh.ts');
+const { en } = await import(pathToFileURL(join(root, 'src', 'locales', 'en.ts')).href);
+const { zh } = await import(pathToFileURL(join(root, 'src', 'locales', 'zh.ts')).href);
 let bad = 0;
 for (const [name, dict] of [['en', en], ['zh', zh]]) {
   const miss = [...raws].filter((r) => !(decode(r) in dict));
