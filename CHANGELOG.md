@@ -3,6 +3,41 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow
 semver while pre-1.0 (breaking changes may land in minors).
 
+## [0.0.7] — 2026-10-26
+
+### Breaking
+
+- **`providers.json` → `models/` folder** — each model is a card file
+  `models/<id>.json` with `{adapter, model, baseUrl, apiKey, maxTokens,
+  temperature, thinking, reasoning}`. `settings.json` gains `"model"` (default
+  model reference). `manager.json` field `"provider"` → `"model"`.
+- **`agents.json` → `agents/` folder** — each agent is a card file
+  `agents/<id>.json`. Agent `role` removed (use `description`). Roster is
+  alphabetical by id.
+- **`/provider` → `/model`** — operations, rpc names, state field, completion
+  hints, GUI panel. Agent field `"provider"` → `"model"`.
+- Per-adapter **contracts**: required keys → loud error with parameter name and
+  file path at startup. Unknown keys → rejected with allowed list.
+
+### Added
+
+- **`ModelRef` overrides** — agent/tool cards can override generation params:
+  `"model": {"id": "glm-5-turbo", "temperature": 0.4}`. Card connection fields
+  (`baseUrl`, `apiKey`) are NOT overridable — create another model card.
+- **Custom adapters** — `~/.dreamteam/providers/<id>.ts` with
+  `export default` factory, same as custom tools.
+- **serviceModel** — `settings.serviceModel` routes moderator, naming,
+  compression and memory to a cheaper model.
+- **Solo moderator skip** — with one agent in chat, the moderator LLM call is
+  skipped (saves a call per round).
+- **`scripts/check-i18n.mjs`** — dictionary completeness check.
+
+### Changed
+
+- Image adapters split file-per-adapter (`openai-images.ts`, `mock-images.ts`).
+- First-run wizard asks interface language → adapter → creates `models/<id>.json`.
+- Scaffold ships 18 model cards and 5 agent cards in folders.
+
 ## [0.0.6] — 2026-10-25
 
 ### Added
