@@ -330,13 +330,12 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   const presenter = new ServerPresenter();
   const engine = new Engine(app, presenter);
 
-  // Проект из аргументов запуска (`dreamteam serve .` / open / new): открываем
-  // до поднятия сервера — панели и снимок состояния сразу с проектом. Ошибка
-  // формы или папки — вверх, в фатальный catch точки входа (exit 1).
+  // Проект из аргументов запуска (`dreamteam serve .`): открываем до поднятия
+  // сервера — панели и снимок состояния сразу с проектом. Ошибка формы или
+  // папки — вверх, в фатальный catch точки входа (exit 1).
   const cliForm = parseCliProject(cliProjectArgs());
   if (cliForm.kind === 'error') throw new Error(cliForm.message);
   if (cliForm.kind === 'open') engine.switchProject(cliForm.target);
-  else if (cliForm.kind === 'new') engine.newProject(cliForm.name, cliForm.path);
   // заметки движка уходят клиентам WS (на старте их ещё нет) — строку проекта
   // показываем и в консоль, рядом с адресом API
   if (PROJECT_DIR) console.log(pc.dim(`  Проект: ${basename(PROJECT_DIR)}${WORKSPACE ? ` · ${WORKSPACE}` : ''}`));

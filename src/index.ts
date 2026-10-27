@@ -726,10 +726,10 @@ async function main(): Promise<void> {
   appRef = app;
   const engine = new Engine(app, new CliPresenter());
 
-  // Проект из аргументов запуска (`dreamteam .` / open / new): применяем до
-  // входа в управляемый экран — ошибка формы или папки уходит в обычный
-  // stdout с кодом 1, а заметки ядра в экранном режиме всё равно сотрутся
-  // при смене буфера, поэтому строку проекта после баннера печатаем отдельно.
+  // Проект из аргументов запуска (`dreamteam .`): применяем до входа в
+  // управляемый экран — ошибка формы или папки уходит в обычный stdout с кодом
+  // 1, а заметки ядра в экранном режиме всё равно сотрутся при смене буфера,
+  // поэтому строку проекта после баннера печатаем отдельно.
   const cliForm = parseCliProject(cliProjectArgs());
   if (cliForm.kind === 'error') {
     console.error(`  ${cliForm.message}`);
@@ -737,7 +737,6 @@ async function main(): Promise<void> {
   }
   try {
     if (cliForm.kind === 'open') engine.switchProject(cliForm.target);
-    else if (cliForm.kind === 'new') engine.newProject(cliForm.name, cliForm.path);
   } catch (err) {
     console.error(`  ${err instanceof Error ? err.message : err}`);
     process.exit(1);

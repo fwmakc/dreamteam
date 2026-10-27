@@ -1,10 +1,8 @@
 /**
  * Формы запуска с проектом — общий разбор для терминала и serve:
  *
- *   dreamteam                   — без проекта (человек откроет сам, /project)
- *   dreamteam <путь>            — сахар к open: путь к рабочей папке
- *   dreamteam open <имя|путь>   — открыть по имени из реестра или по пути
- *   dreamteam new <имя> [папка] — создать проект (и папку) и открыть
+ *   dreamteam        — без проекта (человек откроет сам, /project)
+ *   dreamteam <путь> — сахар к open: путь к рабочей папке
  *
  * bin/dreamteam.js валидирует форму мгновенно (до загрузки tsx и мастера
  * первого запуска) и кладёт хвост argv в DT_PROJECT_ARGS (JSON-массив);
@@ -15,7 +13,6 @@ import { t, tf } from './i18n.js';
 export type CliProjectForm =
   | { kind: 'none' }
   | { kind: 'open'; target: string }
-  | { kind: 'new'; name: string; path: string | null }
   | { kind: 'error'; message: string };
 
 /** Похоже ли на путь к папке: «.», «..», с разделителем или абсолютный. */
@@ -41,18 +38,10 @@ export function cliProjectArgs(): string[] {
 export function parseCliProject(args: string[]): CliProjectForm {
   const rest = args.filter((a) => a !== '--open'); // флаг serve — к проекту не относится
   if (rest.length === 0) return { kind: 'none' };
-  const [head, second, third] = rest;
-  if (head === 'open') {
-    if (!second || third) return { kind: 'error', message: t('Форма: dreamteam open <имя|путь> — имя из /projects или путь к папке.') };
-    return { kind: 'open', target: second };
-  }
-  if (head === 'new') {
-    if (!second || rest.length > 3) return { kind: 'error', message: t('Форма: dreamteam new <имя> [папка] — папка создаётся, если её нет.') };
-    return { kind: 'new', name: second, path: third ?? null };
-  }
+  const [head, second] = rest;
   if (second) return { kind: 'error', message: tf('Лишний аргумент «{a}» — укажите один путь: dreamteam <путь>.', { a: second }) };
   if (!looksLikePath(head)) {
-    return { kind: 'error', message: tf('«{a}» не похоже на путь — папку пишите как ./имя или полным путём; для имени проекта: dreamteam open {a}.', { a: head }) };
+    return { kind: 'error', message: tf('«{a}» не похоже на путь — папку пишите как ./имя или полным путём; открыть проект по имени можно командой /project open {a} внутри приложения.', { a: head }) };
   }
   return { kind: 'open', target: head };
 }

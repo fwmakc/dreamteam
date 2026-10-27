@@ -13,10 +13,8 @@ const usage = (toStderr) => {
     '',
     '  dreamteam                   терминальная оболочка (TUI); проект открывается командами /project',
     '  dreamteam <путь>            то же + открыть проект этой рабочей папки (незнакомую зарегистрирует)',
-    '  dreamteam open <имя|путь>   открыть проект по имени (список — /project) или по пути к папке',
-    '  dreamteam new <имя> [папка] создать проект (и рабочую папку, если задана) и открыть',
     '  dreamteam serve             веб-оболочка: API+GUI (адрес — HOST/PORT, по умолчанию 127.0.0.1:8080)',
-    '  dreamteam serve <форма проекта>  веб-оболочка сразу с проектом (те же <путь> / open / new)',
+    '  dreamteam serve <путь>      веб-оболочка сразу с проектом этой рабочей папки',
     '  dreamteam serve --open      то же + открыть http://адрес в браузере (так работает ярлык быстрого запуска)',
     '  dreamteam -v                версия пакета',
     '  dreamteam -h                эта справка',
@@ -53,16 +51,12 @@ if (argv[0] === 'serve') {
 // проекта для приложения не входит
 const rest = serve ? argv.filter((a) => a !== '--open') : argv;
 if (rest.length > 0) {
-  const [head, second, third] = rest;
+  const [head, second] = rest;
   if (head.startsWith('-')) fail(`Не знаю, что делать с флагом «${head}»${serve ? '' : ' — --open есть только у serve'}.`);
-  if (head === 'open') {
-    if (!second || third) fail('Форма: dreamteam open <имя|путь> — имя из /project или путь к папке.');
-  } else if (head === 'new') {
-    if (!second || rest.length > 3) fail('Форма: dreamteam new <имя> [папка] — папка создаётся, если её нет.');
-  } else if (second) {
+  if (second) {
     fail(`Лишний аргумент «${second}» — укажите один путь: dreamteam <путь>.`);
   } else if (head !== '.' && head !== '..' && !head.includes('/') && !head.includes('\\')) {
-    fail(`«${head}» не похоже на путь — папку пишите как ./имя или полным путём; для имени проекта: dreamteam open ${head}.`);
+    fail(`«${head}» не похоже на путь — папку пишите как ./имя или полным путём; открыть проект по имени можно командой /project open ${head} внутри приложения.`);
   }
 }
 process.env.DT_PROJECT_ARGS = JSON.stringify(rest);

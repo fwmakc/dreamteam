@@ -36,20 +36,20 @@ const v2 = run(['--version']);
 check('--version — синоним -v', v2.status === 0 && v2.stdout.includes(version));
 
 const h1 = run(['-h']);
-check('-h показывает справку (TUI, open, new, serve, -v)', h1.status === 0 && h1.stdout.includes('serve') && h1.stdout.includes('open <имя|путь>') && h1.stdout.includes('-v'), `stdout=${JSON.stringify(h1.stdout)}`);
+check('-h показывает справку (TUI, путь, serve, -v)', h1.status === 0 && h1.stdout.includes('serve') && h1.stdout.includes('<путь>') && h1.stdout.includes('-v'), `stdout=${JSON.stringify(h1.stdout)}`);
 
 const h2 = run(['--help']);
 check('--help — синоним -h', h2.status === 0 && h2.stdout.includes('serve'));
 
 // fail-fast до загрузки приложения: опечатка не должна запускать TUI и мастер
 const bad = run(['serv']);
-check('голое имя вместо пути — отказ с подсказкой open (TUI не стартует)', bad.status === 1 && bad.stderr.includes('serv') && bad.stderr.includes('dreamteam open serv'), `status=${bad.status} stderr=${JSON.stringify(bad.stderr)}`);
+check('голое имя вместо пути — отказ с подсказкой /project open (TUI не стартует)', bad.status === 1 && bad.stderr.includes('serv') && bad.stderr.includes('/project open serv'), `status=${bad.status} stderr=${JSON.stringify(bad.stderr)}`);
 const flag = run(['--open']);
 check('--open без serve — отказ', flag.status === 1 && flag.stderr.includes('--open есть только у serve'), `status=${flag.status} stderr=${JSON.stringify(flag.stderr)}`);
-const openNoArg = run(['open']);
-check('open без аргумента — отказ с формой', openNoArg.status === 1 && openNoArg.stderr.includes('dreamteam open <имя|путь>'), `status=${openNoArg.status} stderr=${JSON.stringify(openNoArg.stderr)}`);
-const newNoArg = run(['new']);
-check('new без имени — отказ с формой', newNoArg.status === 1 && newNoArg.stderr.includes('dreamteam new <имя> [папка]'), `status=${newNoArg.status} stderr=${JSON.stringify(newNoArg.stderr)}`);
+const openSub = run(['open', 'myproj']);
+check('подкоманда open убрана — отказ «лишний аргумент»', openSub.status === 1 && openSub.stderr.includes('Лишний аргумент'), `status=${openSub.status} stderr=${JSON.stringify(openSub.stderr)}`);
+const newSub = run(['new']);
+check('подкоманда new убрана — отказ как не-путь', newSub.status === 1 && newSub.stderr.includes('не похоже на путь') && newSub.stderr.includes('/project open new'), `status=${newSub.status} stderr=${JSON.stringify(newSub.stderr)}`);
 const twoPaths = run(['.', 'лишний']);
 check('два пути — отказ «лишний аргумент»', twoPaths.status === 1 && twoPaths.stderr.includes('Лишний аргумент'), `status=${twoPaths.status} stderr=${JSON.stringify(twoPaths.stderr)}`);
 
