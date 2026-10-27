@@ -1,5 +1,6 @@
 {
-  "adapter": "openai-compatible",
+  "provider": "openai-compatible",
   "baseUrl": "https://api.z.ai/api/coding/paas/v4",
-  "model": "glm-5-turbo"
+  "model": "glm-5-turbo",
+  "apiKey": ""
 }

@@ -71,6 +71,8 @@ export interface OpHint {
   /** Каноническая команда: '/session open' или обзорная '/sessions' */
   cmd: string;
   args?: string;
+  /** Машиночитаемые подсказки аргументов (sessions/agents/chat/models/…), по одной на аргумент */
+  hints?: string[];
   help: string;
 }
 
@@ -141,11 +143,11 @@ export type WsMessage =
   | { type: 'choose_response'; id: string; index: number | null }
   | { type: 'export_home' }
   | { type: 'export_settings' }
-  | { type: 'export_project'; name?: string }
-  | { type: 'export_session'; n: number }
+  | { type: 'export_project'; id?: string }
+  | { type: 'export_session'; id: string }
   | { type: 'import_home'; dataB64: string }
   | { type: 'import_settings'; dataB64: string }
-  | { type: 'import_project'; dataB64: string; name?: string }
+  | { type: 'import_project'; dataB64: string; id?: string }
   | { type: 'import_session'; dataB64: string }
   | { type: 'file'; name: string; dataB64: string; text?: string }
   | { type: 'rpc'; id: string; method: string; args?: Record<string, unknown> };

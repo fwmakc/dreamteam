@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http from 'node:http';
+import { makeCtx } from './tool-ctx.js';
 
 // DT_HOME читается при импорте paths — подменяем до загрузки модулей
 const home = mkdtempSync(join(tmpdir(), 'dt-msg-home-'));
@@ -117,7 +118,7 @@ const { TELEGRAM_API, MAX_API, parseSendText } = await import('../src/messengers
 
 const tg = makeTg({});
 const mx = makeMax({});
-const ctx = { cwd, run: async () => ({ ok: true, output: '' }), http: async () => ({ ok: true, output: '' }), confirm: async () => false };
+const ctx = makeCtx(cwd);
 const run = (tool: typeof tg, body: string): Promise<string> => tool.run(body, ctx);
 const errOf = async (tool: typeof tg, body: string): Promise<string> => {
   try {

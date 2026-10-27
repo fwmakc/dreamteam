@@ -3,7 +3,7 @@
  *  - HTTP: /health, статика 404 до появления gui-dist/;
  *  - WS: первичный state, раунд через mock-провайдера (менеджер: team.add,
  *    chat.add, статус), rpc (sessions.list, session.new с приветствием,
- *    chat.add/remove, provider.set, session.delete, неизвестный метод);
+ *    session.agent.add/delete, settings.update, session.delete, неизвестный метод);
  *  - ServerPresenter: вопрос без клиентов — сразу отказ, ответ клиента —
  *    подтверждение, выбор разговора, таймаут-отказ.
  *
@@ -40,7 +40,7 @@ process.env.DT_HOME = home;
 // рабочая папка инструментов = cwd на момент импорта: уводим процесс в tmp,
 // чтобы mock-демонстрация писала файлы в песочницу, а не в репозиторий
 process.chdir(base);
-writeModels(home, { mock: { adapter: 'mock' } }, 'mock');
+writeModels(home, { mock: { provider: 'mock' } }, 'mock');
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 
@@ -262,9 +262,9 @@ const client = await makeClient(handle.port);
       (stHelp.state as { session: { messages: unknown[] } }).session.messages.length === beforeCmd,
     );
 
-    client.send({ type: 'command', text: '/chat add Тест' });
+    client.send({ type: 'command', text: '/session agent add test_probe' });
     const again = await client.next((m) => m.type === 'notice' && String(m.text).includes('уже в чате'));
-    check('ws: /add — отчёт о составе чата', Boolean(again));
+    check('ws: /session agent add — отчёт о составе чата', Boolean(again));
     const sAdd = client.stateCount();
     client.send({ type: 'command', text: '/foobar' });
     const unknown = await client.next((m) => m.type === 'notice' && String(m.text).includes('Неизвестная команда'));
@@ -276,14 +276,14 @@ const client = await makeClient(handle.port);
     check('ws: /exit — только терминал', Boolean(tui));
     await client.waitState(sExit + 1);
 
-    client.send({ type: 'command', text: '/profile set Иванов; инженер' });
+    client.send({ type: 'command', text: '/profile update name=Иванов role=инженер' });
     const stMe = await client.next(
       (m) => m.type === 'state' && (m.state as { profile: { name: string } }).profile.name === 'Иванов',
     );
-    check('ws: /me меняет профиль в state', ((stMe.state as { profile: { role?: string } }).profile.role) === 'инженер');
+    check('ws: /profile update меняет профиль в state', ((stMe.state as { profile: { role?: string } }).profile.role) === 'инженер');
 
     // user_message с `/…` исполняется так же (перехват в ядре)
-    client.send({ type: 'user_message', text: '/model' });
+    client.send({ type: 'user_message', text: '/models' });
     const prov = await client.next((m) => m.type === 'notice' && String(m.text).includes('• mock'));
     check('ws: /… в user_message тоже команда', Boolean(prov));
     await client.next((m) => m.type === 'state');
@@ -293,6 +293,7 @@ const client = await makeClient(handle.port);
   client.send({ type: 'rpc', id: 'r1', method: 'sessions.list' });
   const list = await client.next((m) => m.type === 'rpc_result' && m.id === 'r1');
   check('rpc: список разговоров', ((list.result as { sessions: unknown[] }).sessions.length === 1));
+  const firstId = (list.result as { sessions: { id: string }[] }).sessions[0].id;
 
   // rpc: новый разговор — приветствие консьержа
   client.send({ type: 'rpc', id: 'r2', method: 'session.new' });
@@ -307,9 +308,9 @@ const client = await makeClient(handle.port);
 
   // rpc: состав чата туда-обратно; state берём свежим rpc-снимком —
   // в очереди могут висеть state-события прошлых раундов
-  client.send({ type: 'rpc', id: 'r3', method: 'chat.add', args: { name: 'Тест' } });
+  client.send({ type: 'rpc', id: 'r3', method: 'session.agent.add', args: { id: 'test_probe' } });
   const add = await client.next((m) => m.type === 'rpc_result' && m.id === 'r3');
-  check('rpc: chat.add — текст отчёта', String((add.result as { text: string }).text).includes('присоединился'));
+  check('rpc: session.agent.add — текст отчёта', String((add.result as { text: string }).text).includes('присоединился'));
   client.send({ type: 'rpc', id: 'snap1', method: 'state' });
   const snap1 = await client.next((m) => m.type === 'rpc_result' && m.id === 'snap1');
   const after3 = snap1.result as { team: { id: string; inChat: boolean }[]; session: { messages: { authorId: string; text: string }[] } };
@@ -320,9 +321,9 @@ const client = await makeClient(handle.port);
     JSON.stringify(after3.session.messages.at(-1)),
   );
 
-  client.send({ type: 'rpc', id: 'r4', method: 'chat.remove', args: { name: 'Тест' } });
+  client.send({ type: 'rpc', id: 'r4', method: 'session.agent.delete', args: { id: 'test_probe' } });
   const rem = await client.next((m) => m.type === 'rpc_result' && m.id === 'r4');
-  check('rpc: chat.remove — текст отчёта', String((rem.result as { text: string }).text).includes('покинул'));
+  check('rpc: session.agent.delete — текст отчёта', String((rem.result as { text: string }).text).includes('покинул'));
   client.send({ type: 'rpc', id: 'snap2', method: 'state' });
   const snap2 = await client.next((m) => m.type === 'rpc_result' && m.id === 'snap2');
   const after4 = snap2.result as { session: { messages: { authorId: string; text: string }[] } };
@@ -333,11 +334,11 @@ const client = await makeClient(handle.port);
   );
 
   // rpc: user_set — профиль через форму настроек (обе оболочки ходят rpc-методом)
-  client.send({ type: 'rpc', id: 'r9', method: 'profile.set', args: { name: 'Профиль', role: 'тест' } });
+  client.send({ type: 'rpc', id: 'r9', method: 'profile.update', args: { name: 'Профиль', role: 'тест' } });
   const us = await client.next((m) => m.type === 'rpc_result' && m.id === 'r9');
-  check('rpc: profile.set — профиль обновлён', String((us.result as { text: string }).text).includes('Профиль'));
+  check('rpc: profile.update — профиль обновлён', String((us.result as { text: string }).text).includes('Профиль'));
   // то же клиентским сообщением (канал без rpc) — и вернуть профиль как был
-  client.send({ type: 'rpc', id: 'r9b', method: 'profile.set', args: { name: 'Пользователь' } });
+  client.send({ type: 'rpc', id: 'r9b', method: 'profile.update', args: { name: 'Пользователь' } });
   await client.next((m) => m.type === 'rpc_result' && m.id === 'r9b');
 
   // rpc: schedule.list — задачи расписания (секция «Расписание» в GUI)
@@ -349,7 +350,7 @@ const client = await makeClient(handle.port);
   client.send({ type: 'rpc', id: 'r14', method: 'model.update', args: { id: 'mock', fields: { model: 'mock-2' } } });
   const pu = await client.next((m) => m.type === 'rpc_result' && m.id === 'r14');
   check('rpc: model.update — карточка правится', String((pu.result as { text: string }).text).includes('mock-2'));
-  client.send({ type: 'rpc', id: 'r15', method: 'model.update', args: { id: 'mock', fields: { adapter: 'неттакого' } } });
+  client.send({ type: 'rpc', id: 'r15', method: 'model.update', args: { id: 'mock', fields: { provider: 'неттакого' } } });
   const puErr = await client.next((m) => m.type === 'rpc_error' && m.id === 'r15');
   check('rpc: model.update — неизвестный адаптер — rpc_error', String(puErr.error).includes('неттакого'));
   client.send({ type: 'rpc', id: 'r16', method: 'model.update', args: { id: 'mock', fields: { model: 'mock' } } });
@@ -369,7 +370,7 @@ const client = await makeClient(handle.port);
   check('rpc: schedule_delete — задача удалена', (sd.result as { tasks: unknown[] }).tasks.length === 0);
 
   // rpc: ошибки — честные сообщения
-  client.send({ type: 'rpc', id: 'r5', method: 'model.set', args: { id: 'nope' } });
+  client.send({ type: 'rpc', id: 'r5', method: 'settings.update', args: { patch: { model: { id: 'nope' } } } });
   const err1 = await client.next((m) => m.type === 'rpc_error' && m.id === 'r5');
   check('rpc: неизвестная модель — rpc_error', String(err1.error).includes('nope'));
   client.send({ type: 'rpc', id: 'r6', method: 'совсем-неизвестное' });
@@ -377,12 +378,12 @@ const client = await makeClient(handle.port);
   check('rpc: неизвестный метод — rpc_error', String(err2.error).includes('совсем-неизвестное'));
 
   // rpc: текущий разговор удалить нельзя (но state после попытки всё равно уходит)
-  client.send({ type: 'rpc', id: 'r7', method: 'session.delete', args: { n: 1 } });
+  client.send({ type: 'rpc', id: 'r7', method: 'session.delete', args: { id: sess2.id } });
   const del = await client.next((m) => m.type === 'rpc_result' && m.id === 'r7');
   check('rpc: текущий разговор не удаляется', String((del.result as { text: string }).text).includes('нельзя'));
 
   // rpc: другой разговор удаляется — отчёт и свежий state (список короче)
-  client.send({ type: 'rpc', id: 'r8', method: 'session.delete', args: { n: 2 } });
+  client.send({ type: 'rpc', id: 'r8', method: 'session.delete', args: { id: firstId } });
   const del2 = await client.next((m) => m.type === 'rpc_result' && m.id === 'r8');
   check('rpc: другой разговор удаляется', !String((del2.result as { text: string }).text).includes('нельзя'));
   const st4 = await client.next(
@@ -490,7 +491,7 @@ const client = await makeClient(handle.port);
 
     b.close();
     await wait(100);
-    client.send({ type: 'command', text: '/model' });
+    client.send({ type: 'command', text: '/models' });
     const provN = await client.next((m) => m.type === 'notice' && String(m.text).includes('★ основной'));
     check('multi: после отключения B сервер работает с A', Boolean(provN));
     await client.next((m) => m.type === 'state');
@@ -504,7 +505,7 @@ const client = await makeClient(handle.port);
     card.tools = { files: {}, shell: { allow: ['git *'] } };
     writeFileSync(cardFile, JSON.stringify(card, null, 2));
 
-    client.send({ type: 'rpc', id: 'c9', method: 'chat.add', args: { name: 'Тест' } });
+    client.send({ type: 'rpc', id: 'c9', method: 'session.agent.add', args: { id: 'test_probe' } });
     await client.next((m) => m.type === 'rpc_result' && m.id === 'c9');
 
     const sRound = client.stateCount();
@@ -534,7 +535,7 @@ const client = await makeClient(handle.port);
     );
     check('confirm: session.new — менеджер приветствует', greeted.type === 'say');
     await client.waitState(sNew + 1);
-    client.send({ type: 'rpc', id: 'c11', method: 'chat.add', args: { name: 'Тест' } });
+    client.send({ type: 'rpc', id: 'c11', method: 'session.agent.add', args: { id: 'test_probe' } });
     await client.next((m) => m.type === 'rpc_result' && m.id === 'c11');
     const sDeny = client.stateCount();
     client.send({ type: 'user_message', text: 'покажи, что умеешь' });
@@ -569,39 +570,41 @@ const client = await makeClient(handle.port);
     await client.waitState(sCh2 + 1);
   }
 
-  // --- УПРАВЛЕНИЕ ЧЕРЕЗ КОМАНДЫ WS: /agent, /grant, /project ---
+  // --- УПРАВЛЕНИЕ ЧЕРЕЗ КОМАНДЫ WS: /agent, /project ---
   {
     const sAg = client.stateCount();
-    client.send({ type: 'command', text: '/team add api_guy Аписька тестировщик' });
+    client.send({ type: 'command', text: '/agent new api_guy name=Аписька role=тестировщик' });
     const addA = await client.next((m) => m.type === 'notice' && String(m.text).includes('api_guy'));
-    check('ws: /agent add — отчёт', Boolean(addA));
+    check('ws: /agent new — отчёт', Boolean(addA));
     await client.waitState(sAg + 1);
     client.send({ type: 'rpc', id: 'dTeam', method: 'state' });
     const stA = await client.next((m) => m.type === 'rpc_result' && m.id === 'dTeam');
     check('ws: /agent add — появился в state.team', ((stA.result as { team: { id: string }[] }).team).some((a) => a.id === 'api_guy'));
 
     const sGrant = client.stateCount();
-    client.send({ type: 'command', text: '/team grant api_guy files' });
+    client.send({ type: 'command', text: '/agent tool add api_guy files' });
     const g = await client.next((m) => m.type === 'notice' && String(m.text).includes('files'));
-    check('ws: /grant — отчёт', Boolean(g));
+    check('ws: /agent tool add — отчёт', Boolean(g));
     await client.waitState(sGrant + 1);
 
     const sProj = client.stateCount();
-    client.send({ type: 'command', text: '/project host add main=root@127.0.0.1:2223' });
-    const p = await client.next((m) => m.type === 'notice' && String(m.text).includes('main'));
-    check('ws: /project host add — отчёт', Boolean(p));
+    client.send({ type: 'command', text: '/project host add main' });
+    await client.next((m) => m.type === 'notice' && String(m.text).includes('main'));
+    client.send({ type: 'command', text: '/project host update main host=127.0.0.1 user=root port=2223' });
+    const p = await client.next((m) => m.type === 'notice' && String(m.text).includes('port=2223'));
+    check('ws: /project host update — отчёт', Boolean(p));
     const pcfg = JSON.parse(readFileSync(join(home, 'projects', 'proj', 'project.json'), 'utf8')) as { hosts?: Record<string, { host?: string; user?: string; port?: number }> };
-    check('ws: /project host add — hosts в project.json', pcfg.hosts?.main?.host === '127.0.0.1' && pcfg.hosts?.main?.user === 'root' && pcfg.hosts?.main?.port === 2223, JSON.stringify(pcfg.hosts));
-    await client.waitState(sProj + 1);
+    check('ws: /project host — hosts в project.json', pcfg.hosts?.main?.host === '127.0.0.1' && pcfg.hosts?.main?.user === 'root' && pcfg.hosts?.main?.port === 2223, JSON.stringify(pcfg.hosts));
+    await client.waitState(sProj + 2);
 
     const sHost = client.stateCount();
-    client.send({ type: 'command', text: '/project host add reserve=127.0.0.2' });
+    client.send({ type: 'command', text: '/project host add reserve' });
     const ph = await client.next((m) => m.type === 'notice' && String(m.text).includes('reserve'));
-    check('ws: /project host — отчёт', Boolean(ph));
+    check('ws: /project host add — отчёт', Boolean(ph));
     await client.waitState(sHost + 1);
 
     const sBad = client.stateCount();
-    client.send({ type: 'command', text: '/team update api_guy foo=bar' });
+    client.send({ type: 'command', text: '/agent update api_guy foo=bar' });
     const badSet = await client.next((m) => m.type === 'error' && String(m.text).includes('не понятно, что менять'));
     check('ws: /agent set с мусорным полем — честная ошибка', Boolean(badSet));
     await client.waitState(sBad + 1);

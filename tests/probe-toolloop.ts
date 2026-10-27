@@ -52,7 +52,7 @@ server.unref(); // не держим процесс: завершаемся по
 mkdirSync(join(home, 'models'), { recursive: true });
 writeFileSync(
   join(home, 'models', 'fake.json'),
-  JSON.stringify({ adapter: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake-1' }, null, 2) + '\n',
+  JSON.stringify({ provider: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake-1' }, null, 2) + '\n',
 );
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'fake' } }, null, 2) + '\n');

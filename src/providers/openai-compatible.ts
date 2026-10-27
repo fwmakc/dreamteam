@@ -19,6 +19,7 @@ export const contract: AdapterContract = {
     temperature: { type: 'number', desc: '0 — строже, 1 — креативнее' },
     thinking: { type: 'string', enum: ['enabled', 'disabled'], desc: 'размышления GLM (биллятся)' },
     reasoning: { type: 'string', enum: ['minimal', 'low', 'medium', 'high', 'max'], desc: 'глубина размышлений' },
+    vision: { type: 'boolean', desc: 'модель видит картинки — тулу look (glm-4.6v, Qwen-VL…)' },
     extra: { type: 'object', desc: 'словарь дополнительных полей тела запроса' },
   },
   ref: ['temperature', 'maxTokens', 'thinking', 'reasoning'],

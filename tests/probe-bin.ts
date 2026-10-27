@@ -1,12 +1,13 @@
 /**
  * Проба бинаря: -v/--version и -h/--help отвечают без загрузки приложения
- * (дом не создаётся и не трогается), незнакомый аргумент — fail-fast с кодом 1.
- * Запуск: npm run probe:bin
+ * (дом не создаётся и не трогается), кривая форма проекта — fail-fast с кодом 1.
+ * e2e: `dreamteam <путь>` (TUI) и `dreamteam serve <путь>` открывают проект
+ * незнакомой папки — регистрируют его в доме. Запуск: npm run probe:bin
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rmTemp } from './rm-tmp.js';
 
@@ -35,49 +36,96 @@ const v2 = run(['--version']);
 check('--version — синоним -v', v2.status === 0 && v2.stdout.includes(version));
 
 const h1 = run(['-h']);
-check('-h показывает справку (TUI, serve, -v)', h1.status === 0 && h1.stdout.includes('serve') && h1.stdout.includes('-v'), `stdout=${JSON.stringify(h1.stdout)}`);
+check('-h показывает справку (TUI, open, new, serve, -v)', h1.status === 0 && h1.stdout.includes('serve') && h1.stdout.includes('open <имя|путь>') && h1.stdout.includes('-v'), `stdout=${JSON.stringify(h1.stdout)}`);
 
 const h2 = run(['--help']);
 check('--help — синоним -h', h2.status === 0 && h2.stdout.includes('serve'));
 
+// fail-fast до загрузки приложения: опечатка не должна запускать TUI и мастер
 const bad = run(['serv']);
-check('незнакомый аргумент — отказ с кодом 1 (TUI не стартует)', bad.status === 1 && bad.stderr.includes('serv') && bad.stderr.includes('serve'), `status=${bad.status} stderr=${JSON.stringify(bad.stderr)}`);
+check('голое имя вместо пути — отказ с подсказкой open (TUI не стартует)', bad.status === 1 && bad.stderr.includes('serv') && bad.stderr.includes('dreamteam open serv'), `status=${bad.status} stderr=${JSON.stringify(bad.stderr)}`);
+const flag = run(['--open']);
+check('--open без serve — отказ', flag.status === 1 && flag.stderr.includes('--open есть только у serve'), `status=${flag.status} stderr=${JSON.stringify(flag.stderr)}`);
+const openNoArg = run(['open']);
+check('open без аргумента — отказ с формой', openNoArg.status === 1 && openNoArg.stderr.includes('dreamteam open <имя|путь>'), `status=${openNoArg.status} stderr=${JSON.stringify(openNoArg.stderr)}`);
+const newNoArg = run(['new']);
+check('new без имени — отказ с формой', newNoArg.status === 1 && newNoArg.stderr.includes('dreamteam new <имя> [папка]'), `status=${newNoArg.status} stderr=${JSON.stringify(newNoArg.stderr)}`);
+const twoPaths = run(['.', 'лишний']);
+check('два пути — отказ «лишний аргумент»', twoPaths.status === 1 && twoPaths.stderr.includes('Лишний аргумент'), `status=${twoPaths.status} stderr=${JSON.stringify(twoPaths.stderr)}`);
 
-check('флаги не создали дом', existsSync(home) && readdirSync(home).length === 0, readdirSync(home).join(', '));
+check('отказы и флаги не создали дом', existsSync(home) && readdirSync(home).length === 0, readdirSync(home).join(', '));
 
-// serve-ветка бинаря: на преднастроенном доме (mock) сервер поднимается и печатает адрес
+/** Преднастроенный дом: mock-модель + русский интерфейс (мастер не стартует). */
+const makeMockHome = (base: string): string => {
+  const h = join(base, 'home');
+  mkdirSync(join(h, 'models'), { recursive: true });
+  writeFileSync(join(h, 'models', 'mock.json'), JSON.stringify({ provider: 'mock' }, null, 2) + '\n');
+  writeFileSync(join(h, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
+  return h;
+};
+
+// e2e: `dreamteam .` (TUI) — проект текущей папки регистрируется и открывается
 {
-  const serveDir = mkdtempSync(join(tmpdir(), 'dt-serve-'));
-  mkdirSync(join(serveDir, 'home'), { recursive: true });
-  mkdirSync(join(serveDir, 'home', 'models'), { recursive: true });
-  writeFileSync(
-    join(serveDir, 'home', 'models', 'mock.json'),
-    JSON.stringify({ adapter: 'mock' }, null, 2) + '\n',
-  );
-  // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
-  writeFileSync(join(serveDir, 'home', 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
-  const child = spawn(process.execPath, [BIN, 'serve'], {
+  const dir = mkdtempSync(join(tmpdir(), 'dt-open-'));
+  const work = join(dir, 'work');
+  mkdirSync(work, { recursive: true });
+  const mockHome = makeMockHome(dir);
+  const child = spawn(process.execPath, [BIN, '.'], { cwd: work, env: { ...process.env, DT_HOME: mockHome } });
+  let out = '';
+  const opened = await Promise.race([
+    new Promise<boolean>((res) => {
+      child.stdout?.on('data', (d: Buffer) => {
+        out += d.toString();
+        if (out.includes('Проект:')) res(true);
+      });
+      child.on('exit', () => res(false));
+    }),
+    new Promise<boolean>((res) => setTimeout(() => res(false), 60_000)),
+  ]);
+  child.kill();
+  check('`dreamteam .`: проект открыт — строка в шапке', opened, `stdout=${JSON.stringify(out.slice(0, 300))}`);
+  const pj = join(mockHome, 'projects', 'work', 'project.json');
+  check('`dreamteam .`: папка незнакомая — зарегистрирована в доме', existsSync(pj), pj);
+  if (existsSync(pj)) {
+    const cfg = JSON.parse(readFileSync(pj, 'utf8')) as { id?: string; path?: string };
+    check(
+      '`dreamteam .`: project.json указывает на рабочую папку',
+      cfg.id === 'work' && cfg.path !== undefined && resolve(cfg.path) === resolve(work),
+      JSON.stringify(cfg),
+    );
+  }
+  rmTemp(dir);
+}
+
+// e2e: `dreamteam serve <путь>` — веб-оболочка сразу с проектом
+{
+  const dir = mkdtempSync(join(tmpdir(), 'dt-serve-open-'));
+  const work = join(dir, 'work');
+  mkdirSync(work, { recursive: true });
+  const mockHome = makeMockHome(dir);
+  const child = spawn(process.execPath, [BIN, 'serve', work], {
     env: {
       ...process.env,
-      DT_HOME: join(serveDir, 'home'),
+      DT_HOME: mockHome,
       // PORT=0 serve трактует как «не задан» — берём случайный свободный
       PORT: String(20000 + Math.floor(Math.random() * 20000)),
     },
   });
   let out = '';
   const lifted = await Promise.race([
-    new Promise<boolean>((resolve) => {
+    new Promise<boolean>((res) => {
       child.stdout?.on('data', (d: Buffer) => {
         out += d.toString();
-        if (out.includes('API поднято')) resolve(true);
+        if (out.includes('API поднято') && out.includes('Проект:')) res(true);
       });
-      child.on('exit', () => resolve(false));
+      child.on('exit', () => res(false));
     }),
-    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 30_000)),
+    new Promise<boolean>((res) => setTimeout(() => res(false), 30_000)),
   ]);
   child.kill();
-  check('serve: бинарь поднимает API и печатает адрес', lifted, `stdout=${JSON.stringify(out.slice(0, 200))}`);
-  rmTemp(serveDir);
+  check('`serve <путь>`: API поднято и проект открыт', lifted, `stdout=${JSON.stringify(out.slice(0, 300))}`);
+  check('`serve <путь>`: проект зарегистрирован в доме', existsSync(join(mockHome, 'projects', 'work', 'project.json')));
+  rmTemp(dir);
 }
 
 console.log(fails === 0 ? '\nВсе проверки прошли.' : `\nПровалено проверок: ${fails}`);

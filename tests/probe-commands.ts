@@ -11,13 +11,12 @@ import { writeModels } from './models.js';
 
 const base = mkdtempSync(join(tmpdir(), 'dt-cmds-'));
 const home = join(base, 'home');
-const proj = join(base, 'proj');
 mkdirSync(home, { recursive: true });
 process.env.DT_HOME = home;
 // рабочая папка инструментов = cwd на момент импорта: уводим процесс в tmp
 process.chdir(base);
 
-writeModels(home, { mock: { adapter: 'mock' } });
+writeModels(home, { mock: { provider: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 
@@ -30,7 +29,6 @@ import type { Presenter, SpeakerRef, TurnSink } from '../src/core/presenter.js';
 // ── заглушка Presenter: собирает всё, что ядро говорит оболочке ─────────────
 const notices: string[] = [];
 const errors: string[] = [];
-let opened = 0;
 const sink: TurnSink = { delta() {}, done() {} };
 const stub: Presenter = {
   notice(text) { notices.push(text); },
@@ -46,7 +44,7 @@ const stub: Presenter = {
   attachment(_title: string, _digest: string) {},
   async confirm() { return false; },
   async chooseSession() { return null; },
-  sessionOpened(_session) { opened++; },
+  sessionOpened(_session) {},
 };
 
 const { app } = await bootstrapApp();
@@ -62,7 +60,7 @@ mkdirSync(join(home, 'agents'), { recursive: true });
 writeFileSync(join(home, 'agents', 'test_probe.json'), JSON.stringify({ name: 'Тест', prompt: 'Ты Тест.', emoji: '🧪', color: 'cyan' }, null, 2));
 writeFileSync(join(home, 'agents', 'gleb.json'), JSON.stringify({ name: 'Глеб', prompt: 'Ты Глеб.', emoji: '💾', color: 'yellow' }, null, 2));
 
-// консьерж-старт: в чате один менеджер — как после /new или первого запуска
+// консьерж-старт: в чате один менеджер — как после первого запуска
 app.session!.participants = [MANAGER_ID];
 app.store!.save(app.session!);
 
@@ -72,6 +70,14 @@ function check(name: string, cond: boolean, detail?: string): void {
   console.log((cond ? '  ok  ' : '  FAIL ') + name + (cond || !detail ? '' : ` — ${detail.slice(0, 300)}`));
   if (!cond) failed++;
 }
+const threw = async (line: string): Promise<string> => {
+  try {
+    await run(engine, line);
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  return '';
+};
 
 // ── /help: манифест как источник справки ────────────────────────────────────
 {
@@ -83,246 +89,264 @@ function check(name: string, cond: boolean, detail?: string): void {
   check('подсказки: по одной на операцию', operationHints().length === OPERATIONS.length);
 }
 
-// ── разговоры: new/open/delete/rename/history/export ────────────────────────
+// ── разговоры: new/update/history/open/close/delete/export ──────────────────
 {
   let lines = await run(engine, '/sessions');
   check('sessions: текущий помечен', lines.some((l) => l.includes('← текущий')));
-  check('sessions: id показан', lines.some((l) => l.includes(' · id ')) ?? false);
+  check('sessions: id в строке списка', lines.some((l) => l.includes(`• ${app.session!.id} —`)));
 
   lines = await run(engine, '/session new');
-  check('session new: новый разговор (сессий 2)', app.store!.list().length === 2);
-  lines = await run(engine, '/session rename Пристрелочный разговор');
-  check('session rename: отчёт', lines[0]?.includes('Пристрелочный разговор') ?? false);
-  check('session rename: заголовок изменился', (await run(engine, '/sessions')).some((l) => l.includes('Пристрелочный разговор')));
+  check('session new: новый разговор создан и открыт (сессий 2)', app.store!.list().length === 2);
+  const fresh = app.session!.id;
+  const older = app.store!.list().map((s) => s.id).find((id) => id !== fresh)!;
+
+  lines = await run(engine, '/session update title=Пристрелочный разговор');
+  check('session update: отчёт', lines[0]?.includes('Пристрелочный разговор') ?? false);
+  check(
+    'session update: заголовок изменился (пробел в значении склеен)',
+    (await run(engine, '/sessions')).some((l) => l.includes('Пристрелочный разговор')),
+  );
+
   lines = await run(engine, '/session history');
   check('session history: приветствие менеджера на месте', lines.some((l) => l.includes('менеджер переговорки')) ?? false);
+  lines = await run(engine, '/session history 1 1');
+  check('session history: срез включительно — одно сообщение', lines.some((l) => l.includes('показано 1 из')) ?? false);
+  lines = await run(engine, '/session history abc');
+  check('session history: from не число — отказ', lines[0]?.includes('from — номер сообщения') ?? false);
+  lines = await run(engine, '/session history 5 2');
+  check('session history: to меньше from — отказ', lines[0]?.includes('to — номер сообщения') ?? false);
 
-  lines = await run(engine, '/session open 1');
-  check('session open: переключение на первый', Boolean(app.session));
-  lines = await run(engine, '/session open 2');
-  check('session open: вернулись на второй', Boolean(app.session));
+  lines = await run(engine, `/session open ${older}`);
+  check('session open: переключение на первый', app.session?.id === older);
+  lines = await run(engine, `/session open ${fresh}`);
+  check('session open: вернулись на свежий', app.session?.id === fresh);
 
   lines = await run(engine, '/session delete 99');
-  check('session delete: нет номера — отказ', lines[0]?.includes('Не нашёл') ?? false);
-  lines = await run(engine, '/session delete 2');
-  check('session delete: текущий не удаляется', lines[0]?.includes('нельзя') ?? false);
+  check('session delete: нет такого id — отказ', lines[0]?.includes('Разговора с id «99» нет') ?? false);
+  lines = await run(engine, `/session delete ${fresh}`);
+  check('session delete: текущий — отказ «сначала close»', lines[0]?.includes('нельзя') ?? false);
+  lines = await run(engine, `/session delete ${older}`);
+  check('session delete: не-текущий удалён', !app.store!.list().some((s) => s.id === older));
+
   await run(engine, '/session open abc');
-  check('session open: не-номер — заметка через presenter', notices.some((t) => t.includes('Не нашёл разговор №abc')));
+  check('session open: нет такого id — заметка через presenter', notices.some((t) => t.includes('Разговора с id «abc» нет')));
+
+  lines = await run(engine, '/session close');
+  check('session close: разговор закрыт, проект открыт', lines[0]?.includes('Проект открыт') ?? false);
+  lines = await run(engine, '/session history');
+  check('history без разговора — отказ с подсказкой', lines[0]?.includes('нет открытого разговора') ?? false);
+  lines = await run(engine, '/sessions');
+  check('sessions: список живёт и без разговора', lines.some((l) => l.includes('Пристрелочный разговор')) ?? false);
+  lines = await run(engine, `/session open ${fresh}`);
+  check('session open: вернулись после close', app.session?.id === fresh);
 
   lines = await run(engine, '/session export');
   check('session export: архив текущего в рабочей папке', lines[0]?.includes('Экспорт:') ?? false);
-  lines = await run(engine, '/home export');
-  check('home export: архив дома', (lines[0]?.includes('Экспорт:') && lines[0]?.includes('dt-home-')) ?? false);
+  lines = await run(engine, '/export');
+  check('export: архив дома', (lines[0]?.includes('Экспорт:') && lines[0]?.includes('home-')) ?? false);
 }
 
-// ── чат: add/remove ──────────────────────────────────────────────────────────
+// ── чат: /session agent add|delete ───────────────────────────────────────────
 {
   // событие чата — реплика менеджера в хронике разговора, а не заметка
   const chronicle = () => app.session!.messages.at(-1)?.text ?? '';
-  let lines = await run(engine, '/chat add');
-  check('chat add: без аргумента — подсказка', lines[0]?.includes('Кого позвать?') ?? false);
-  lines = await run(engine, '/chat add Тест');
+  let lines = await run(engine, '/session agent add');
+  check('session agent add: без аргумента — подсказка', lines[0]?.includes('Кого позвать?') ?? false);
+  lines = await run(engine, '/session agent add test_probe');
   check(
-    'chat add: событие — реплика менеджера в хронике',
+    'session agent add: событие — реплика менеджера в хронике',
     lines.length === 0 && chronicle().includes('присоединился'),
     `lines=${JSON.stringify(lines)} last=${JSON.stringify(chronicle())}`,
   );
   check(
-    'chat add: автор события — менеджер-модератор',
+    'session agent add: автор события — менеджер-модератор',
     app.session!.messages.at(-1)?.authorId === MANAGER_ID && app.session!.messages.at(-1)?.authorRole === 'менеджер переговорки',
   );
-  lines = await run(engine, '/chat add Тест');
-  check('chat add: повтор — уже в чате (без события)', lines[0]?.includes('уже в чате') ?? false);
-  lines = await run(engine, '/chat add 2');
-  check('chat add: по номеру из /team', lines.length === 0);
-  lines = await run(engine, '/chat remove Тест');
-  check('chat remove: событие — реплика в хронике', lines.length === 0 && chronicle().includes('покинул'));
-  lines = await run(engine, '/chat add Никто');
-  check('chat add: неизвестный — внятный отказ', lines[0]?.includes('Нет участника «Никто»') ?? false);
+  lines = await run(engine, '/session agent add test_probe');
+  check('session agent add: повтор — уже в чате (без события)', lines[0]?.includes('уже в чате') ?? false);
+  lines = await run(engine, '/session agent delete test_probe');
+  check('session agent delete: событие — реплика в хронике', lines.length === 0 && chronicle().includes('покинул'));
+  lines = await run(engine, '/session agent add ghost');
+  check('session agent add: неизвестный id — внятный отказ', lines[0]?.includes('Нет агента с id «ghost»') ?? false);
 }
 
 // ── профиль и память ─────────────────────────────────────────────────────────
 {
-  let lines = await run(engine, '/profile set Иванов; инженер; пишу код');
-  check('profile set: сохранение профиля', lines[0]?.includes('Иванов') ?? false);
-  check('profile set: профиль в app', app.profile.name === 'Иванов' && app.profile.role === 'инженер');
+  let lines = await run(engine, '/profile update name=Иванов role=инженер about=пишу код');
+  check('profile update: сохранение профиля', lines[0]?.includes('Иванов') ?? false);
+  check(
+    'profile update: поля в app (пробел в about склеен)',
+    app.profile.name === 'Иванов' && app.profile.role === 'инженер' && app.profile.about === 'пишу код',
+  );
   lines = await run(engine, '/profile');
   check('profile: показ профиля', lines[0]?.includes('Иванов — инженер') ?? false);
 
   lines = await run(engine, '/memory shared');
   check('memory shared: пустая общая — подсказка', lines[0]?.includes('пока пуста') ?? false);
-  lines = await run(engine, '/memory Тест');
-  check('memory Тест: без глагола — личная память', lines.some((l) => l.startsWith('Задача:')) ?? false);
+  lines = await run(engine, '/memory test_probe');
+  check('memory: по id — личная память', lines.some((l) => l.startsWith('Задача:')) ?? false);
   lines = await run(engine, '/memory');
   check('memory: обзор — чья память', lines[0]?.includes('Чья память') ?? false);
-  lines = await run(engine, '/memory show С drawback');
-  check('memory show: неизвестное имя — отказ', lines[0]?.includes('Нет участника') ?? false);
+  lines = await run(engine, '/memory призрак');
+  check('memory: неизвестный id — отказ', lines[0]?.includes('Нет агента с id «призрак»') ?? false);
 }
 
-// ── модели ───────────────────────────────────────────────────────────────────
+// ── модели: список, смена основной через settings.update ─────────────────────
 {
-  let lines = await run(engine, '/model');
-  check('model: обзор — готовые модели', lines.some((l) => l.includes('mock') && l.includes('готов')) ?? false);
-  lines = await run(engine, '/model set mock');
-  check('model set: смена на ту же', lines[0]?.includes('Основная модель: mock') ?? false);
-  lines = await run(engine, '/model set nope');
-  check('model set: неизвестный id — отказ', lines[0]?.includes('Нет модели «nope»') ?? false);
+  let lines = await run(engine, '/models');
+  check('models: обзор — готовые модели', lines.some((l) => l.includes('mock') && l.includes('готов')) ?? false);
+  lines = await run(engine, '/settings update model.id=mock');
+  check('settings update model.id: смена на ту же', lines[0]?.includes('обновлены') ?? false);
+  lines = await run(engine, '/settings update model.id=nope');
+  check('settings update model.id: неизвестный id — отказ', lines[0]?.includes('Нет модели «nope»') ?? false);
 
   lines = await run(engine, '/model update mock model=mock-9');
   check('model update: отчёт', lines[0]?.includes('mock-9') ?? false);
   const card = JSON.parse(readFileSync(join(home, 'models', 'mock.json'), 'utf8')) as { model?: string };
   check('model update: модель на диске', card.model === 'mock-9');
-  let threw = '';
-  try {
-    await run(engine, '/model update nope model=x');
-  } catch (err) {
-    threw = err instanceof Error ? err.message : String(err);
-  }
-  check('model update: нет модели — отказ', threw.includes('«nope» нет'));
+  const miss = await threw('/model update nope model=x');
+  check('model update: нет модели — отказ', miss.includes('«nope» нет'));
 }
 
-// ── команда: team add/update/delete/grant ────────────────────────────────────
+// ── команда: /agent new/update/tool/delete ───────────────────────────────────
 {
-  let lines = await run(engine, '/team');
-  check('team: менеджер первый', lines[0]?.includes('менеджер переговорки') ?? false);
-  check('team: не в чате — метка с новой подсказкой', lines.some((l) => l.includes('не в этом чате (/chat add Тест)')) ?? false);
+  let lines = await run(engine, '/agents');
+  check('agents: менеджер первый', lines[0]?.includes('менеджер переговорки') ?? false);
+  check('agents: не в чате — метка с подсказкой по id', lines.some((l) => l.includes('не в этом чате (/session agent add test_probe)')) ?? false);
 
-  lines = await run(engine, '/team add');
-  check('team add: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
-  lines = await run(engine, '/team add test2 Второй лаборант');
-  check('team add: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
-  let team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
+  lines = await run(engine, '/agent new');
+  check('agent new: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+  lines = await run(engine, '/agent new test2 name=Второй');
+  check('agent new: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
+  const load = async () => (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
+  let team = await load();
   const second = team.find((a) => a.id === 'test2');
-  check('team add: записан', second?.name === 'Второй');
-  check('team add: дефолты эмодзи/цвета', second?.emoji === '🤖' && second?.color === 'white');
-  let threw = '';
-  try {
-    await run(engine, '/team add test2 Дубль');
-  } catch (err) {
-    threw = err instanceof Error ? err.message : String(err);
-  }
-  check('team add: дубликат id — ошибка', threw.includes('уже есть'));
+  check('agent new: записан', second?.name === 'Второй');
+  check('agent new: дефолты эмодзи/цвета', second?.emoji === '🤖' && second?.color === 'white');
+  const dup = await threw('/agent new test2 name=Дубль');
+  check('agent new: дубликат id — ошибка', dup.includes('уже есть'));
 
-  lines = await run(engine, '/team update test2 role=сметана model=mock');
-  check('team update: отчёт с полями', lines[0]?.includes('role="сметана"') ?? false);
-  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
-  check('team update: роль и провайдер записаны', team.find((a) => a.id === 'test2')?.role === 'сметана');
-  const badTemp = await run(engine, '/team update test2 temperature=жарко');
-  check('team update: temperature не число — отказ', badTemp[0]?.includes('числом') ?? false);
+  lines = await run(engine, '/agent update test2 role=сметана model.id=mock');
+  check('agent update: отчёт с полями', lines[0]?.includes('role="сметана"') ?? false);
+  team = await load();
+  const t2 = team.find((a) => a.id === 'test2');
+  check('agent update: роль записана', t2?.role === 'сметана');
+  check('agent update: вложенная модель записана', t2?.model?.id === 'mock');
+  const badTemp = await run(engine, '/agent update test2 temperature=жарко');
+  check('agent update: temperature не число — отказ', badTemp[0]?.includes('числом') ?? false);
 
-  lines = await run(engine, '/team grant');
-  check('team grant: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
-  lines = await run(engine, '/team grant test2 files');
-  check('team grant: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
-  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
-  check('team grant: тул files у агента', Boolean((team.find((a) => a.id === 'test2')?.tools as { files?: unknown })?.files));
-  threw = '';
-  try {
-    await run(engine, '/team grant test2 nosuchtool');
-  } catch (err) {
-    threw = err instanceof Error ? err.message : String(err);
-  }
-  check('team grant: неизвестный тул — отказ', threw.includes('nosuchtool'));
+  lines = await run(engine, '/agent tool add');
+  check('agent tool add: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+  lines = await run(engine, '/agent tool add test2 files');
+  check('agent tool add: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
+  team = await load();
+  check('agent tool add: тул files у агента', Boolean((team.find((a) => a.id === 'test2')?.tools as { files?: unknown })?.files));
+  const noTool = await threw('/agent tool add test2 nosuchtool');
+  check('agent tool add: неизвестный тул — отказ', noTool.includes('nosuchtool'));
 
-  lines = await run(engine, '/team delete test2');
-  check('team delete: отчёт', (lines[0]?.includes('test2') || lines[0]?.includes('Второй')) ?? false);
-  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
-  check('team delete: агента нет на диске', !team.some((a) => a.id === 'test2'));
+  lines = await run(engine, '/agent delete test2');
+  check('agent delete: отчёт', (lines[0]?.includes('test2') || lines[0]?.includes('Второй')) ?? false);
+  team = await load();
+  check('agent delete: агента нет на диске', !team.some((a) => a.id === 'test2'));
 
   // список: и через запятую, и через пробел, вперемешку; чужой id не валит остальных
   for (const id of ['t3', 't4', 't5']) {
-    lines = await run(engine, `/team add ${id} Тест-${id}`);
+    lines = await run(engine, `/agent new ${id} name=Тест-${id}`);
   }
-  lines = await run(engine, '/team delete t3, t4 t5');
-  check('team delete: список — три отчёта ✓', lines.filter((l) => l.startsWith('✓')).length === 3);
-  team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
-  check('team delete: список — все удалены с диска', !team.some((a) => ['t3', 't4', 't5'].includes(a.id)));
-  lines = await run(engine, '/team delete t3, призрак');
+  lines = await run(engine, '/agent delete t3, t4 t5');
+  check('agent delete: список — три отчёта ✓', lines.filter((l) => l.startsWith('✓')).length === 3);
+  team = await load();
+  check('agent delete: список — все удалены с диска', !team.some((a) => ['t3', 't4', 't5'].includes(a.id)));
+  lines = await run(engine, '/agent delete t3, призрак');
   check(
-    'team delete: чужой id — ✗, без падения',
+    'agent delete: чужой id — ✗, без падения',
     lines.length === 2 && lines.every((l) => l.startsWith('✗')) && lines[1].includes('призрак'),
   );
-  lines = await run(engine, '/team delete');
-  check('team delete: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+  lines = await run(engine, '/agent delete');
+  check('agent delete: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
 }
 
-// ── проекты: обзор/list/host add/host delete/delete ──────────────────────────
+// ── проекты: реестр + секреты (серверы) ──────────────────────────────────────
 {
-  let lines = await run(engine, '/project');
-  check('project: обзор — текущий проект', lines.some((l) => l.includes('← текущий')) ?? false);
-  check('project: обзор пустого — подсказка про серверы', lines.some((l) => l.includes('host add')) ?? false);
+  let lines = await run(engine, '/projects');
+  check('projects: реестр — текущий помечен', lines.some((l) => l.includes('← текущий')) ?? false);
 
-  lines = await run(engine, '/project host add prod=deploy@10.0.0.1:2202');
+  lines = await run(engine, '/project hosts');
+  check('project hosts: пустой — подсказка', lines[0]?.includes('Серверов нет') ?? false);
+
+  lines = await run(engine, '/project host add prod');
   check('project host add: отчёт ✓', lines[0]?.includes('prod') ?? false);
-  lines = await run(engine, '/project host add backup=10.0.0.2');
-  check('project host add: второй сервер — отчёт ✓', lines[0]?.includes('backup') ?? false);
-  const hosts = readProj().hosts as Record<string, { host: string; user?: string; port?: number }>
+  lines = await run(engine, '/project host update prod host=10.0.0.1 user=deploy port=2202');
+  check('project host update: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
+  const hosts = readProj().hosts as Record<string, { host: string; user?: string; port?: number }>;
   check(
-    'project host add: user и порт разобраны',
-    hosts.prod?.user === 'deploy' && hosts.prod.port === 2202 && hosts.backup?.host === '10.0.0.2',
+    'project host update: поля разобраны (порт числом)',
+    hosts.prod?.user === 'deploy' && hosts.prod?.port === 2202 && hosts.prod?.host === '10.0.0.1',
   );
-  lines = await run(engine, '/project host add staging=10.0.0.3');
-  check('project host add: ещё сервер — отчёт ✓', lines[0]?.includes('staging') ?? false);
-  lines = await run(engine, '/project');
-  check('project: обзор — список серверов', lines.some((l) => l.includes('prod: deploy@10.0.0.1:2202')) ?? false);
-  lines = await run(engine, '/project host delete staging');
-  check('project host delete: сервер убран', !(readProj().hosts as typeof hosts).staging);
+  await run(engine, '/project host add backup');
+  await run(engine, '/project host update backup host=10.0.0.2');
+  lines = await run(engine, '/project hosts');
+  check('project hosts: список серверов', lines.some((l) => l.includes('prod: deploy@10.0.0.1:2202')) ?? false);
+  lines = await run(engine, '/project host delete backup');
+  check('project host delete: сервер убран', !(readProj().hosts as typeof hosts).backup);
+  const badId = await threw('/project host add Сервер');
+  check('project host add: кириллический id — маска отклоняет', badId.includes('маске'));
 }
 
-// ── почта: list/add/remove ───────────────────────────────────────────────────
+// ── почта: list/add/update/delete ────────────────────────────────────────────
 {
-  let lines = await run(engine, '/mail');
-  check('mail: обзор пустого — подсказка', lines[0]?.includes('Ящиков нет') ?? false);
+  let lines = await run(engine, '/project mails');
+  check('project mails: пустой — подсказка', lines[0]?.includes('Ящиков нет') ?? false);
 
-  lines = await run(engine, '/mail add работа user=робот@corp.ru password=пароль-приложения imap=imap.corp.ru smtp=smtp.corp.ru smtpPort=587 tlsNoVerify');
-  check('mail add: отчёт ✓', lines[0]?.includes('работа') ?? false);
-  const mails = readProj().mails as Record<string, { user?: string; smtpPort?: number; tlsNoVerify?: boolean }>
-  check(
-    'mail add: пары разобраны (порт числом, флаг булевым)',
-    mails['работа']?.user === 'робот@corp.ru' && mails['работа']?.smtpPort === 587 && mails['работа']?.tlsNoVerify === true,
+  lines = await run(engine, '/project mail add work');
+  check('project mail add: отчёт ✓', lines[0]?.includes('work') ?? false);
+  lines = await run(
+    engine,
+    '/project mail update work user=робот@corp.ru password=пароль-приложения imap=imap.corp.ru smtp=smtp.corp.ru smtpPort=587 tlsNoVerify=true',
   );
-  lines = await run(engine, '/mail');
-  check('mail: обзор — ящик виден', lines.some((l) => l.includes('работа') && l.includes('imap.corp.ru:993') && l.includes('smtp.corp.ru:587')) ?? false);
-  // ошибки записи летят вызывающему (как у team.add) — оболочка сама их форматирует
-  let threw = '';
-  try {
-    await run(engine, '/mail add работа user=x@ya.ru password=p imap=imap.yandex.ru smtp=smtp.yandex.ru');
-  } catch (err) { threw = err instanceof Error ? err.message : String(err); }
-  check('mail add: дубликат — ошибка', threw.includes('уже есть'));
-  lines = await run(engine, '/mail add кривая');
-  check('mail add: без пар — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
-  threw = '';
-  try {
-    await run(engine, '/mail add бред user=x password=p smtp=s');
-  } catch (err) { threw = err instanceof Error ? err.message : String(err); }
-  check('mail add: нет imap — отказ валидатора', threw.includes('imap'));
-  lines = await run(engine, '/mail remove работа');
-  check('mail remove: ящик убран', !(readProj().mails as typeof mails)['работа']);
+  check('project mail update: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
+  const mails = readProj().mails as Record<string, { user?: string; smtpPort?: number; tlsNoVerify?: boolean }>;
+  check(
+    'project mail update: пары разобраны (порт числом, флаг булевым)',
+    mails.work?.user === 'робот@corp.ru' && mails.work?.smtpPort === 587 && mails.work?.tlsNoVerify === true,
+  );
+  lines = await run(engine, '/project mails');
+  check(
+    'project mails: ящик виден',
+    lines.some((l) => l.includes('робот@corp.ru') && l.includes('imap.corp.ru:993') && l.includes('smtp.corp.ru:587')) ?? false,
+  );
+  const dup = await threw('/project mail add work');
+  check('project mail add: дубликат — ошибка', dup.includes('уже есть'));
+  lines = await run(engine, '/project mail update work');
+  check('project mail update: без полей — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+  const badPort = await threw('/project mail update work port=abc');
+  check('project mail update: порт не число — отказ валидатора', badPort.includes('целое число больше нуля'));
+  lines = await run(engine, '/project mail delete work');
+  check('project mail delete: ящик убран', !(readProj().mails as typeof mails).work);
 }
 
-// ── мессенджеры: list/add/remove ─────────────────────────────────────────────
+// ── мессенджеры: list/add/update/delete ──────────────────────────────────────
 {
-  let lines = await run(engine, '/messenger');
-  check('messenger: обзор пустого — подсказка', lines[0]?.includes('Ботов нет') ?? false);
+  let lines = await run(engine, '/project messengers');
+  check('project messengers: пустой — подсказка', lines[0]?.includes('Ботов нет') ?? false);
 
-  lines = await run(engine, '/messenger add telegram 123456:ABC-cmd');
-  check('messenger add: отчёт ✓', lines[0]?.includes('telegram') ?? false);
-  const mess = readProj().messengers as Record<string, { token?: string } | undefined>
-  check('messenger add: токен на диске', mess.telegram?.token === '123456:ABC-cmd');
-  lines = await run(engine, '/messenger');
-  check('messenger: обзор — бот виден', lines.some((l) => l.includes('telegram')) ?? false);
-  let threw = '';
-  try {
-    await run(engine, '/messenger add slack x');
-  } catch (err) { threw = err instanceof Error ? err.message : String(err); }
-  check('messenger add: чужой ключ — ошибка', threw.includes('telegram'));
-  threw = '';
-  try {
-    await run(engine, '/messenger add telegram другой');
-  } catch (err) { threw = err instanceof Error ? err.message : String(err); }
-  check('messenger add: дубликат — ошибка', threw.includes('уже есть'));
-  lines = await run(engine, '/messenger remove telegram');
-  check('messenger remove: бот убран', !(readProj().messengers as typeof mess).telegram);
+  lines = await run(engine, '/project messenger add telegram');
+  check('project messenger add: отчёт ✓', lines[0]?.includes('telegram') ?? false);
+  lines = await run(engine, '/project messenger update telegram token=123456:ABC-cmd');
+  check('project messenger update: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
+  const mess = readProj().messengers as Record<string, { token?: string } | undefined>;
+  check('project messenger update: токен на диске', mess.telegram?.token === '123456:ABC-cmd');
+  lines = await run(engine, '/project messengers');
+  check(
+    'project messengers: бот виден (токен не светится)',
+    lines.some((l) => l.includes('telegram') && l.includes('токен сохранён')) ?? false,
+  );
+  const alien = await threw('/project messenger add slack');
+  check('project messenger add: чужой ключ — ошибка', alien.includes('telegram'));
+  const dup = await threw('/project messenger add telegram');
+  check('project messenger add: дубликат — ошибка', dup.includes('уже есть'));
+  lines = await run(engine, '/project messenger delete telegram');
+  check('project messenger delete: бот убран', !(readProj().messengers as typeof mess).telegram);
 }
 
 // ── расписание: list/add/toggle/delete ───────────────────────────────────────
@@ -343,17 +367,17 @@ function check(name: string, cond: boolean, detail?: string): void {
 {
   let lines = await run(engine, '/settings');
   check('settings: обзор — язык и лимиты', lines.some((l) => l.includes('maxTurns')) ?? false);
-  lines = await run(engine, '/settings set maxTurns=2');
-  check('settings set: отчёт', lines[0]?.includes('обновлены') ?? false);
+  lines = await run(engine, '/settings update maxTurns=2');
+  check('settings update: отчёт', lines[0]?.includes('обновлены') ?? false);
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')) as { maxTurns: number };
-  check('settings set: значение на диске', settings.maxTurns === 2);
+  check('settings update: значение на диске', settings.maxTurns === 2);
 
   lines = await run(engine, '/manager');
   check('manager: обзор — модель', lines.some((l) => l.includes('модель: mock')) ?? false);
-  lines = await run(engine, '/manager set temperature=0.4');
-  check('manager set: отчёт', lines[0]?.includes('temperature="0.4"') ?? false);
+  lines = await run(engine, '/manager update temperature=0.4');
+  check('manager update: отчёт', lines[0]?.includes('temperature="0.4"') ?? false);
   const manager = JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')) as { temperature: number };
-  check('manager set: значение на диске', manager.temperature === 0.4);
+  check('manager update: значение на диске', manager.temperature === 0.4);
 
   lines = await run(engine, '/auto on 3');
   check('auto on: лимит ходов', lines[0]?.includes('до 3 ходов') ?? false);
@@ -363,27 +387,19 @@ function check(name: string, cond: boolean, detail?: string): void {
 
 // ── края: старые имена умерли, свой тул, неизвестная, терминальная ──────────
 {
-  await run(engine, '/session open abc');
-  check('session open: не-номер — заметка через presenter', notices.some((t) => t.includes('Не нашёл разговор №abc')));
-
   // свой тул: достаточно файла tools/<id>.ts — включается командой
   writeFileSync(
     join(home, 'tools', 'mytool.ts'),
     'export default () => ({ desc: "Мой тул", check: () => "allow" as const, async run() { return "ок"; } });\n',
   );
   writeFileSync(join(home, 'agents', 'test2.json'), JSON.stringify({ name: 'Второй', prompt: 'Ты Второй.', color: 'white' }, null, 2));
-  const g = await run(engine, '/team grant test2 mytool');
-  check('team grant: свой тул из tools/ — отчёт', g[0]?.startsWith('✓') ?? false);
+  const g = await run(engine, '/agent tool add test2 mytool');
+  check('agent tool add: свой тул из tools/ — отчёт', g[0]?.startsWith('✓') ?? false);
   const team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
-  check('team grant: свой тул записан агенту', Boolean((team.find((a) => a.id === 'test2')?.tools as { mytool?: unknown })?.mytool));
+  check('agent tool add: свой тул записан агенту', Boolean((team.find((a) => a.id === 'test2')?.tools as { mytool?: unknown })?.mytool));
 
-  let threw = '';
-  try {
-    await run(engine, '/team update test2 foo=bar');
-  } catch (err) {
-    threw = err instanceof Error ? err.message : String(err);
-  }
-  check('team update: только неизвестные поля — ошибка helper', threw.includes('не понятно, что менять'));
+  const mystery = await threw('/agent update test2 foo=bar');
+  check('agent update: только неизвестные поля — ошибка helper', mystery.includes('не понятно, что менять'));
 
   // старые короткие имена больше не существуют
   const legacy = await run(engine, '/new');
@@ -406,15 +422,18 @@ function check(name: string, cond: boolean, detail?: string): void {
   app.session!.participants = [MANAGER_ID];
   app.store!.save(app.session!);
   const before = app.session!.messages.length;
-  await engine.handleMessage('/chat add Тест', new AbortController().signal);
-  check('handleMessage: /chat add исполнен (строка через presenter.service)', notices.some((t) => t.includes('присоединился')) ?? false);
+  await engine.handleMessage('/session agent add test_probe', new AbortController().signal);
+  check(
+    'handleMessage: /session agent add исполнен (строка через presenter.service)',
+    notices.some((t) => t.includes('присоединился')) ?? false,
+  );
   const msgs = app.session!.messages;
   check(
     'handleMessage: событие чата — в хронике репликой менеджера',
     msgs.length === before + 1 && msgs.at(-1)?.authorId === MANAGER_ID && (msgs.at(-1)?.text.includes('присоединился') ?? false),
     `before=${before} after=${msgs.length} last=${JSON.stringify(msgs.at(-1))}`,
   );
-  check('handleMessage: текст команды в историю не попал', !msgs.some((m) => m.authorId === 'user' && m.text.startsWith('/chat')));
+  check('handleMessage: текст команды в историю не попал', !msgs.some((m) => m.authorId === 'user' && m.text.startsWith('/session')));
 }
 
 console.log(failed === 0 ? '\nВсе проверки прошли' : `\nFAIL: ${failed}`);

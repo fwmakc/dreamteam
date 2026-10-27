@@ -23,6 +23,7 @@ import {
   executeRunAction,
   loadToolsConfig,
   parseActions,
+  safePath,
   workspaceFor,
   type Action,
   type ToolsConfig,
@@ -51,6 +52,7 @@ import {
   TOOLS_DIR,
   USER_FILE,
   WORKSPACE,
+  clearProjectRoot,
   setProjectRoot,
 } from '../paths.js';
 import * as projects from './projects.js';
@@ -153,9 +155,18 @@ export interface App {
  */
 export function requireProject(app: App): { store: SessionStore; session: Session } {
   if (!app.store || !app.session) {
-    throw new Error(t('нет открытого проекта — сначала /project new <имя> [папка] или /project open <имя|путь>'));
+    throw new Error(t('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>'));
   }
   return { store: app.store, session: app.session };
+}
+
+/** Разговор обязателен: проект открыт, но разговор закрыт (/session close). */
+export function requireSession(app: App): { store: SessionStore; session: Session } {
+  const found = app.store ? (app.session ? { store: app.store, session: app.session } : null) : null;
+  if (!found) {
+    throw new Error(t('нет открытого разговора — /session new [id] или /session open <id>; список — /sessions'));
+  }
+  return found;
 }
 
 /** Состав чата: явно выбранные участники или вся команда (старые разговоры). */
@@ -169,12 +180,10 @@ export function chatTeam(session: Session, fullTeam: Agent[]): Agent[] {
   return picked.length > 0 ? picked : ids.includes(MANAGER_ID) ? [] : fullTeam;
 }
 
-/** Ищет агента по номеру из /team, имени или id (регистр и «ё» не важны). */
-function findAgentByArg(fullTeam: Agent[], arg: string): Agent | undefined {
-  const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
-  const n = Number.parseInt(arg, 10);
-  if (Number.isInteger(n) && n > 0) return fullTeam[n - 1];
-  return fullTeam.find((a) => norm(a.name) === norm(arg) || a.id === norm(arg));
+/** Агент по id — только id: имена и номера адресацией больше не являются. */
+function findAgentById(fullTeam: Agent[], id: string): Agent | undefined {
+  const norm = id.trim().toLowerCase();
+  return fullTeam.find((a) => a.id === norm);
 }
 
 /**
@@ -523,7 +532,11 @@ export class Engine {
     }
     // болтовня без проекта невозможна: разговоры живут в projects/<id>/
     if (!this.app.store) {
-      this.presenter.notice(t('  Нет открытого проекта — выберите: /project new <имя> [папка] или /project open <имя|путь> (список — /project)'));
+      this.presenter.notice(t('  Нет открытого проекта — выберите: /project new <id> [папка] или /project open <id|путь> (список — /projects)'));
+      return;
+    }
+    if (!this.app.session) {
+      this.presenter.notice(t('  Нет открытого разговора — /session new [id], /session open <id> или /sessions.'));
       return;
     }
     let team: Agent[];
@@ -701,13 +714,17 @@ export class Engine {
           }),
         );
       }
-      // накопительная статистика: раунд → session.usage
+      // накопительная статистика: раунд → session.usage (итого и срез по модели)
       if (usage) {
-        const u = session.usage ?? (session.usage = { promptTokens: 0, cachedTokens: 0, outputTokens: 0, rounds: 0 });
-        u.promptTokens += usage.promptTokens ?? 0;
-        u.cachedTokens += usage.cachedTokens ?? 0;
-        u.outputTokens += usage.outputTokens ?? 0;
-        u.rounds++;
+        const bump = (u: { promptTokens: number; cachedTokens: number; outputTokens: number; rounds: number }) => {
+          u.promptTokens += usage?.promptTokens ?? 0;
+          u.cachedTokens += usage?.cachedTokens ?? 0;
+          u.outputTokens += usage?.outputTokens ?? 0;
+          u.rounds++;
+        };
+        bump(session.usage ?? (session.usage = { promptTokens: 0, cachedTokens: 0, outputTokens: 0, rounds: 0 }));
+        const byModel = session.usageByModel ?? (session.usageByModel = {});
+        bump(byModel[provider.id] ?? (byModel[provider.id] = { promptTokens: 0, cachedTokens: 0, outputTokens: 0, rounds: 0 }));
       }
       if (full.trim()) {
         session.messages.push({
@@ -907,9 +924,10 @@ export class Engine {
       case 'session.list':
         return this.sessionsListText();
       case 'session.open': {
-        const meta = Number.isInteger(action.n) && action.n > 0 ? this.store.list()[action.n - 1] : undefined;
-        if (!meta) return tf('Не нашёл разговор №{n} — см. /sessions', { n: action.n });
-        if (meta.id === this.session.id) return tf('Разговор «{title}» и так открыт.', { title: meta.title });
+        const id = String(action.id ?? '').trim();
+        const meta = this.store.list().find((s) => s.id === id);
+        if (!meta) return tf('Не нашёл разговор с id «{id}» — см. /sessions', { id });
+        if (meta.id === this.app.session?.id) return tf('Разговор «{title}» и так открыт.', { title: meta.title });
         const loaded = this.store.load(meta.id);
         if (!loaded) return tf('Не удалось прочитать разговор «{title}».', { title: meta.title });
         pendingSwitches.push(() => {
@@ -939,7 +957,7 @@ export class Engine {
         return tf('✓ Создаю разговор «{title}»{chat}', { title, chat: ids.length ? tf(', в чате: {ids}', { ids: ids.join(', ') }) : '' });
       }
       case 'session.delete':
-        return this.deleteSession(action.n);
+        return this.deleteSessionById(String(action.id ?? ''));
     }
   }
 
@@ -950,7 +968,7 @@ export class Engine {
     const list = this.store.list();
     if (list.length === 0) return t('Разговоров пока нет.');
     return list
-      .map((s, i) => `${i + 1}. ${s.title} — ${tf('{n} сообщ.', { n: s.count })}${s.id === this.session.id ? ` (${t('текущий')})` : ''}`)
+      .map((s) => `${s.id} — ${s.title} — ${tf('{n} сообщ.', { n: s.count })}${s.id === this.session.id ? ` (${t('текущий')})` : ''}`)
       .join('\n');
   }
 
@@ -960,16 +978,37 @@ export class Engine {
     return this.presenter.confirm({ label, desc, who: { id: agent.id, name: agent.name, emoji: agent.emoji, color: agent.color, role: agent.role } });
   }
 
-  /** Удаление разговора по номеру списка; текущий не удаляется. */
-  deleteSession(n: number): string {
-    const meta = Number.isInteger(n) && n > 0 ? this.store.list()[n - 1] : undefined;
-    if (!meta) return tf('Не нашёл разговор №{n} — см. /sessions', { n });
-    if (meta.id === this.session.id) return t('Текущий разговор удалить нельзя — сначала откройте другой.');
+  /** Удаление разговора по id; текущий — отказ: сначала /session close. */
+  deleteSessionById(id: string): string {
+    const meta = this.store.list().find((s) => s.id === id);
+    if (!meta) return tf('Разговора с id «{id}» нет — см. /sessions', { id });
+    if (this.app.session && meta.id === this.app.session.id) {
+      return t('Текущий разговор удалить нельзя — сначала /session close.');
+    }
     this.store.delete(meta.id);
-    return tf('Разговор «{title}» удалён.', { title: meta.title });
+    return tf('Разговор «{title}» ({id}) удалён.', { title: meta.title, id: meta.id });
+  }
+
+  /** /session close: разговор закрыт, проект остаётся открытым. */
+  closeSession(): string {
+    if (!this.app.store) return t('Проект не открыт.');
+    if (!this.app.session) return t('Разговор и так не открыт — /sessions, /session new [id] или /session open <id>.');
+    this.queueFlush(this.app.session);
+    this.app.session = null;
+    return t('✓ Разговор закрыт. Проект открыт: /sessions, /session new [id] или /session open <id>.');
   }
 
   // ── проекты: реестр — папки в доме (projects/<id>/) ─────────────────────
+
+  /** project.close: остаёмся без проекта — состояние голого запуска. */
+  closeProject(): string {
+    if (!this.app.store) return t('Проект и так не открыт.');
+    if (this.app.session) this.queueFlush(this.app.session, this.app.store);
+    this.app.store = null;
+    this.app.session = null;
+    clearProjectRoot();
+    return t('✓ Проект закрыт: /projects, /project new <id> [папка] или /project open <id|путь>.');
+  }
 
   /** project.open: имя проекта или путь к папке (незарегистрированная — регистрируем). */
   switchProject(arg: string): string {
@@ -995,7 +1034,7 @@ export class Engine {
 
   /** project.rename: переименовать ТЕКУЩИЙ проект (папка в доме + id в project.json). */
   renameCurrentProject(newIdRaw: string): string {
-    if (!PROJECT_DIR) throw new Error(t('нет открытого проекта — сначала /project new <имя> [папка] или /project open <имя|путь>'));
+    if (!PROJECT_DIR) throw new Error(t('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>'));
     const oldId = basename(PROJECT_DIR);
     const cfg = projects.renameProject(oldId, newIdRaw);
     // слой путей указывал в старую папку — перепривязываем к новой; магазин
@@ -1012,9 +1051,9 @@ export class Engine {
 
   /** project.path: сменить рабочую папку текущего проекта (папка создаётся). */
   repointProject(pathRaw: string): string {
-    if (!PROJECT_DIR) throw new Error(t('нет открытого проекта — сначала /project new <имя> [папка] или /project open <имя|путь>'));
+    if (!PROJECT_DIR) throw new Error(t('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>'));
     const cfg = projects.loadProjectConfig(basename(PROJECT_DIR));
-    if (!cfg) throw new Error(t('project.json текущего проекта не читается — см. /project'));
+    if (!cfg) throw new Error(t('project.json текущего проекта не читается — см. /projects'));
     projects.setProjectPath(cfg, pathRaw);
     setProjectRoot(PROJECT_DIR, cfg.path ?? '');
     return tf('✓ Рабочая папка проекта «{id}»: {path}', { id: cfg.id, path: WORKSPACE });
@@ -1023,11 +1062,11 @@ export class Engine {
   /** Имя проекта по аргументу remove: id или путь из реестра; НЕ регистрирует новые. */
   private projectIdByArg(arg: string): string {
     const raw = arg.trim().replace(/^["']|["']$/g, '');
-    if (!raw) throw new Error(t('укажите проект: /project remove <имя> (список — /project)'));
+    if (!raw) throw new Error(t('укажите проект: /project delete <id|путь> (список — /projects)'));
     const found = projects.listProjects().find(
       (p) => p.id.toLowerCase() === raw.toLowerCase() || (p.path && resolve(p.path) === resolve(raw)),
     );
-    if (!found) throw new Error(tf('проекта «{raw}» нет — см. /project', { raw }));
+    if (!found) throw new Error(tf('проекта «{raw}» нет — см. /projects', { raw }));
     return found.id;
   }
 
@@ -1060,9 +1099,9 @@ export class Engine {
   }
 
   /**
-   * Переименовать текущий разговор (/rename и действие менеджера session.rename).
-   * С именем — напрямую; без — менеджер придумывает по дайджесту, а если его
-   * ещё нет — по первому и последним сообщениям.
+   * /session update: переименовать текущий разговор. С title=… — напрямую;
+   * без полей менеджер придумывает по дайджесту, а если его ещё нет —
+   * по первому и последним сообщениям.
    */
   async renameSession(name?: string): Promise<string> {
     const clean = (name ?? '').replace(/\s+/g, ' ').trim();
@@ -1071,7 +1110,7 @@ export class Engine {
         ? `Вот краткое содержание разговора:\n${this.session.digest}`
         : this.namingContextFromMessages();
       const invented = await this.generateSessionName(`Нужно дать имя сессии.\n${context}`);
-      if (!invented) return t('Не придумал имя — назовите сами: /session rename <имя>');
+      if (!invented) return t('Не придумал имя — назовите сами: /session update title=<имя>');
       return this.applySessionName(invented);
     }
     return this.applySessionName(clean.slice(0, 80) + (clean.length > 80 ? '…' : ''));
@@ -1114,13 +1153,14 @@ export class Engine {
     }
   }
 
-  /** /session <№>: открыть разговор из списка; нет такого — заметка. */
-  openSessionByArg(arg: string): void {
-    const n = Number.parseInt(arg, 10);
-    const target = Number.isInteger(n) ? this.store.list()[n - 1] : undefined;
-    const loaded = target ? this.store.load(target.id) : null;
+  /** /session open <id>: открыть разговор по id; нет такого — заметка. */
+  openSessionById(id: string): void {
+    if (!this.app.store) {
+      throw new Error(t('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>'));
+    }
+    const loaded = this.app.store.load(id.trim());
     if (!loaded) {
-      this.presenter.notice(tf('  Не нашёл разговор №{n}. Посмотрите список: /sessions', { n: arg }));
+      this.presenter.notice(tf('  Разговора с id «{id}» нет. Посмотрите список: /sessions', { id }));
       return;
     }
     this.openSession(loaded);
@@ -1128,10 +1168,10 @@ export class Engine {
 
   /** Переключение на другой разговор: общее для /session и действия менеджера session.open. */
   openSession(loaded: Session): void {
-    const current = this.session;
-    if (loaded.id !== current.id) {
+    const current = this.app.session;
+    if (loaded.id !== current?.id) {
       this.app.session = loaded;
-      this.queueFlush(current);
+      if (current) this.queueFlush(current);
     }
     this.presenter.notice(tf('  Открыт разговор «{title}» ({n} сообщ.)', { title: loaded.title, n: loaded.messages.length }));
     const line = this.participantsLine(loaded);
@@ -1156,11 +1196,11 @@ export class Engine {
     this.presenter.service?.(text);
   }
 
-  /** Позвать участника в текущий чат: общее для /add и действия менеджера chat.add.
+  /** Позвать участника в текущий чат: общее для /session agent add и действия менеджера chat.add.
    *  changed — состав чата реально поменялся (только тогда это событие хроники). */
-  addToChat(arg: string, fullTeam: Agent[]): { text: string; changed: boolean } {
-    const agent = findAgentByArg(fullTeam, arg);
-    if (!agent) return { text: tf('Нет участника «{name}» — см. /team', { name: arg }), changed: false };
+  addToChat(id: string, fullTeam: Agent[]): { text: string; changed: boolean } {
+    const agent = findAgentById(fullTeam, id);
+    if (!agent) return { text: tf('Нет агента с id «{id}» — см. /agents', { id }), changed: false };
     if (chatTeam(this.session, fullTeam).some((a) => a.id === agent.id)) {
       return { text: tf('{emoji} {name} уже в чате.', { emoji: agent.emoji, name: agent.name }), changed: false };
     }
@@ -1171,10 +1211,10 @@ export class Engine {
     return { text: tf('{emoji} {name} присоединился к чату.', { emoji: agent.emoji, name: agent.name }), changed: true };
   }
 
-  /** Вывести участника из чата: общее для /out и действия менеджера chat.remove. */
-  removeFromChat(arg: string, fullTeam: Agent[]): { text: string; changed: boolean } {
-    const kicked = findAgentByArg(fullTeam, arg);
-    if (!kicked) return { text: tf('Нет участника «{name}» — см. /team', { name: arg }), changed: false };
+  /** Вывести участника из чата: общее для /session agent delete и действия менеджера chat.remove. */
+  removeFromChat(id: string, fullTeam: Agent[]): { text: string; changed: boolean } {
+    const kicked = findAgentById(fullTeam, id);
+    if (!kicked) return { text: tf('Нет агента с id «{id}» — см. /agents', { id }), changed: false };
     const session = this.session;
     if (!chatTeam(session, fullTeam).some((a) => a.id === kicked.id)) {
       return { text: tf('{emoji} {name} и так не в этом чате.', { emoji: kicked.emoji, name: kicked.name }), changed: false };
@@ -1224,6 +1264,27 @@ export class Engine {
     );
   }
 
+  /** /profile update поле=значение: точечная правка профиля (name, role, about). */
+  updateProfile(fields: { name?: string; role?: string; about?: string }): string {
+    const next = { ...this.app.profile };
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === undefined) continue;
+      (next as Record<string, string | undefined>)[k] = v;
+    }
+    if (!next.name) return t('Без имени нельзя — укажите name=…');
+    this.app.profile = next as UserProfile;
+    try {
+      writeFileSync(USER_FILE, JSON.stringify(this.app.profile, null, 2) + '\n');
+    } catch (err) {
+      throw new Error(`не удалось сохранить ${USER_FILE}: ${err instanceof Error ? err.message : err}`);
+    }
+    return (
+      tf('Запомнил: вы — {name}', { name: this.app.profile.name }) +
+      (this.app.profile.role ? ` (${this.app.profile.role})` : '') +
+      `. ${t('Команда теперь знает, кто вы.')}`
+    );
+  }
+
   /** Имена участников чата для подписи (без чтения agents.json возвращает null). */
   participantsLine(session: Session): string | null {
     if (!session.participants || session.participants.length === 0) return null;
@@ -1251,16 +1312,20 @@ export class Engine {
     await this.managerTurn(WELCOME_REQUEST, team, this.app.profile, signal);
   }
 
-  /** /session new: мгновенно новый разговор один на один с менеджером + приветствие. */
-  async newSession(signal: AbortSignal): Promise<void> {
-    const { session: old, store } = requireProject(this.app);
-    const created = store.create();
+  /** /session new [id]: новый разговор один на один с менеджером + приветствие; id не задан — автоштамп. */
+  async newSession(signal: AbortSignal, id?: string): Promise<void> {
+    if (!this.app.store) {
+      throw new Error(t('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>'));
+    }
+    const store = this.app.store;
+    const old = this.app.session;
+    const created = store.create(id);
     created.participants = [MANAGER_ID];
     store.save(created);
     this.app.session = created;
     this.presenter.notice(tf('  Новый разговор {id}', { id: created.id }));
-    this.presenter.notice(tf('  В чате: {emoji} {name} — попросите позвать кого-нибудь из команды (/team)', { emoji: this.app.mgr.emoji, name: this.app.mgr.name }));
-    this.queueFlush(old);
+    this.presenter.notice(tf('  В чате: {emoji} {name} — попросите позвать кого-нибудь из команды (/agents)', { emoji: this.app.mgr.emoji, name: this.app.mgr.name }));
+    if (old) this.queueFlush(old);
     await this.welcomeManager(signal);
   }
 
@@ -1269,7 +1334,7 @@ export class Engine {
     const { session, store } = requireProject(this.app);
     session.participants = [MANAGER_ID];
     store.save(session);
-    this.presenter.notice(tf('  В чате: {emoji} {name} — попросите позвать кого-нибудь из команды (/team)', { emoji: this.app.mgr.emoji, name: this.app.mgr.name }));
+    this.presenter.notice(tf('  В чате: {emoji} {name} — попросите позвать кого-нибудь из команды (/agents)', { emoji: this.app.mgr.emoji, name: this.app.mgr.name }));
     await this.welcomeManager(signal);
   }
 
@@ -1318,6 +1383,7 @@ export class Engine {
     const who: SpeakerRef = agent;
     const base: ToolCheckContext = {
       cwd: workspaceFor(agent, action, cfg),
+      projectHome: PROJECT_DIR || null,
       project: action.project,
       arg:
         action.kind === 'file' || action.kind === 'look'
@@ -1328,6 +1394,17 @@ export class Engine {
     };
     return {
       ...base,
+      workspaceFile: (rel) => {
+        const abs = safePath(base.cwd, rel);
+        if (!abs) throw new Error(`путь «${rel}» вне рабочей папки — работа только внутри неё`);
+        return abs;
+      },
+      projectFile: (rel) => {
+        if (!PROJECT_DIR) throw new Error('нет открытого проекта — прикладных папок нет (inbox, mail, images)');
+        const abs = safePath(PROJECT_DIR, rel);
+        if (!abs) throw new Error(`путь «${rel}» вне папки проекта в доме (${PROJECT_DIR})`);
+        return abs;
+      },
       run: async (command) => {
         // полный конвейер shell-тула: check тула → живой вопрос → запуск
         const shell = toolset.get('shell');
@@ -1409,6 +1486,7 @@ export class Engine {
         const tool = toolset.get(action.kind === 'tool' ? action.tool : action.kind === 'file' ? 'files' : action.kind === 'run' ? 'shell' : action.kind)!;
         const verdict = tool.check(this.checkTargetOf(action), {
           cwd: workspaceFor(agent, action, cfg),
+          projectHome: PROJECT_DIR || null,
           project: action.project,
           arg:
             action.kind === 'file' || action.kind === 'look'

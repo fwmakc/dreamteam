@@ -1,7 +1,7 @@
 /**
  * Проба кастомных адаптеров провайдеров: файл providers/<id>.ts в доме —
  * export default фабрика (id, config) => LLMProvider, карточка в providers.json
- * ссылается полем "adapter".
+ * ссылается полем "provider".
  *  - happy path: адаптер «echo» отвечает на раунд, статус ok, провайдер виден
  *    rpc-слою (addProviderConfig принимает его адаптер, неизвестный — отказ
  *    со списком, где «echo» есть);
@@ -34,7 +34,7 @@ function makeHome(name: string, extra: void): string {
   process.env.DT_HOME = home;
   writeFileSync(
     join(home, 'models', 'echo.json'),
-    JSON.stringify({ adapter: 'echo', model: 'mirror' }, null, 2) + '\n',
+    JSON.stringify({ provider: 'echo', model: 'mirror' }, null, 2) + '\n',
   );
   writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'echo' } }, null, 2) + '\n');
   return home;
@@ -65,15 +65,15 @@ export default (id, config) => ({
   check('кастомный адаптер: раунд отвечает', chunks.join('').includes('ЭХО: привет'), chunks.join(''));
 
   const { addModelConfig, loadUserAdapters } = await import('../src/providers/registry.js');
-  const report = addModelConfig(join(home, 'models'), 'two', { adapter: 'echo', model: 'y' });
+  const report = addModelConfig(join(home, 'models'), 'two', { provider: 'echo', model: 'y' });
   check('rpc: карточка с кастомным адаптером добавляется', report.includes('добавлена'), report);
 
   let threw = '';
-  try { addModelConfig(join(home, 'models'), 'three', { adapter: 'nope' }); } catch (e) { threw = (e as Error).message; }
+  try { addModelConfig(join(home, 'models'), 'three', { provider: 'nope' }); } catch (e) { threw = (e as Error).message; }
   check('rpc: неизвестный адаптер — отказ, в списке есть кастомный', threw.includes('nope') && threw.includes('echo'), threw);
 
   const card = JSON.parse(readFileSync(join(home, 'models', 'two.json'), 'utf8'));
-  check('rpc: карточка реально записана', card.adapter === 'echo', JSON.stringify(card));
+  check('rpc: карточка реально записана', card.provider === 'echo', JSON.stringify(card));
 
   // --- 2. коллизия со встроенным адаптером — громкая ошибка --------------------
   const home2 = join(root, 'h2');

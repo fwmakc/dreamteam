@@ -16,6 +16,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 
 const { default: makeTool } = await import('../src/tools/web/web.js');
 import http from 'node:http';
+import { makeCtx } from './tool-ctx.js';
 
 /** Локальный сайт: страница с двумя ссылками и редирект — для links и редиректов. */
 const server = http.createServer((req, res) => {
@@ -93,7 +94,7 @@ const checkV = (body: string) => {
 }
 
 function bareCtx() {
-  return { cwd: process.cwd(), run: async () => ({ ok: true, output: '' }), http: async () => ({ ok: true, output: '' }), confirm: async () => false };
+  return makeCtx(process.cwd());
 }
 
 server.close();

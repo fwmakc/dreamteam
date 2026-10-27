@@ -39,7 +39,7 @@ process.chdir(base);
 // неймспейс, не деструктуризация: SESSIONS_DIR — летучая привязка (пустая до
 // открытия проекта), живое значение читаем в момент вызова
 const pathsMod = await import('../src/paths.js');
-writeModels(home, { mock: { adapter: 'mock' } });
+writeModels(home, { mock: { provider: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 

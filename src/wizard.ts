@@ -116,7 +116,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
       // settings.json нет/не читается — loadSettings ниже разберётся громко
     }
 
-    io.output.write(`\n  ${t('Тип адаптера:')}\n`);
+    io.output.write(`\n  ${t('Тип провайдера:')}\n`);
     io.output.write(`  1 — ${t('OpenAI-совместимый API (Z.ai GLM, OpenAI, OpenRouter, DeepSeek, Ollama…)')}\n`);
     io.output.write(`  2 — ${t('Anthropic (Claude)')}\n`);
     io.output.write(`  3 — GigaChat\n`);
@@ -131,7 +131,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
       const baseUrl = await ask(`  ${t('baseUrl API [https://api.openai.com/v1]:')} `) || 'https://api.openai.com/v1';
       const model = await ask(`  ${t('Модель [gpt-4o-mini]:')} `) || 'gpt-4o-mini';
       key = await askSecret(`  ${t('Ключ API (ввод скрыт; Enter — пропустить, если API локальный):')} `);
-      card = { adapter: 'openai-compatible', baseUrl, model };
+      card = { provider: 'openai-compatible', baseUrl, model };
       if (key) card.apiKey = key;
     } else if (pick === '2') {
       id = 'claude';
@@ -141,7 +141,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
         if (key) break;
         io.output.write(pc.yellow(`  ${t('без ключа Claude отвечать не сможет — возьми его в кабинете Anthropic')}\n`));
       }
-      card = { adapter: 'anthropic', model, apiKey: key };
+      card = { provider: 'anthropic-compatible', model, apiKey: key };
     } else if (pick === '3') {
       id = 'gigachat';
       for (;;) {
@@ -149,10 +149,10 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
         if (key) break;
         io.output.write(pc.yellow(`  ${t('без ключа GigaChat отвечать не сможет')}\n`));
       }
-      card = { adapter: 'gigachat', apiKey: key };
+      card = { provider: 'gigachat', apiKey: key };
     } else {
       id = 'mock';
-      card = { adapter: 'mock' };
+      card = { provider: 'mock' };
     }
 
     mkdirSync(modelsDir, { recursive: true });

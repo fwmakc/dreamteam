@@ -11,6 +11,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { makeCtx } from './tool-ctx.js';
 
 // DT_HOME читается при импорте paths — подменяем до загрузки модулей
 const home = mkdtempSync(join(tmpdir(), 'dt-mail-home-'));
@@ -39,8 +40,7 @@ const { default: makeTool } = await import('../src/tools/mail/mail.js');
 const { resolveEndpoints, loadAccounts } = await import('../src/mail.js');
 
 const tool = makeTool({});
-const run = (body: string): Promise<string> =>
-  tool.run(body, { cwd, run: async () => ({ ok: true, output: '' }), http: async () => ({ ok: true, output: '' }), confirm: async () => false });
+const run = (body: string): Promise<string> => tool.run(body, makeCtx(cwd));
 const errOf = async (body: string): Promise<string> => {
   try {
     await run(body);
@@ -112,6 +112,20 @@ const errOf = async (body: string): Promise<string> => {
   check('send: кривая строка шапки', (await errOf('send личное\nотправь скорее\n\nтекст')).includes('шапки'));
   check('send: файл наружу', (await errOf('send личное\nкому: a@b.ru\nфайлы: ../секрет.txt\n\nтекст')).includes('вне рабочей папки'));
   check('send: секретный файл', (await errOf('send личное\nкому: a@b.ru\nфайлы: .env\n\nтекст')).includes('секретный'));
+}
+
+// ─── прикладные папки проекта: префиксы inbox/mail/images ведут в дом ────────
+{
+  const { attachmentPath } = await import('../src/tools/mail/mail.js');
+  const { pathScan } = await import('../src/tools-api.js');
+  const store = join(home, 'projects', 'dev');
+  check('attachmentPath: images/… — папка проекта в доме', attachmentPath(cwd, 'images/pic.png') === join(store, 'images', 'pic.png'), attachmentPath(cwd, 'images/pic.png'));
+  check('attachmentPath: inbox/… — тоже дом', attachmentPath(cwd, 'inbox/акт.pdf') === join(store, 'inbox', 'акт.pdf'));
+  check('attachmentPath: обычный путь — рабочая папка', attachmentPath(cwd, 'акт.pdf') === join(cwd, 'акт.pdf'));
+  check('pathScan: абсолютный путь в прикладное проекта — можно', pathScan(`type "${join(store, 'inbox', 'акт.pdf')}"`, cwd, store) === null, String(pathScan(`type "${join(store, 'inbox', 'акт.pdf')}"`, cwd, store)));
+  check('pathScan: project.json — нельзя', pathScan(`type "${projFile}"`, cwd, store) !== null, String(pathScan(`type "${projFile}"`, cwd, store)));
+  check('pathScan: sessions/ — нельзя', pathScan(`type "${join(store, 'sessions', 'x.json')}"`, cwd, store) !== null);
+  check('pathScan: models/ дома — нельзя', pathScan(`type "${join(home, 'models', 'mock.json')}"`, cwd, store) !== null);
 }
 
 // ─── resolveEndpoints: явные хосты и переопределения ─────────────────────────

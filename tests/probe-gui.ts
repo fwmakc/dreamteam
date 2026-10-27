@@ -96,7 +96,8 @@ const rpcCases = caseLabels(slice(serveSrc, 'async function handleRpc', 'functio
 // манифест операций — единственный источник имён rpc (имена операций — с отступом 4)
 const operationsSrc = read('src/core/operations.ts');
 const manifestOps = new Set([...operationsSrc.matchAll(/\n    name: '([a-z.]+)'/g)].map((m) => m[1]));
-check('манифест: имена — группа.глагол без подчёркиваний', [...manifestOps].every((m) => /^[a-z]+(\.[a-z]+){1,2}$/.test(m)));
+check('манифест: имена — группа.глагол (или глобальный глагол) без подчёркиваний',
+  [...manifestOps].every((m) => /^[a-z]+(\.[a-z]+){0,2}$/.test(m)));
 const rpcWithoutManifest = [...rpcCases].filter((m) => m !== 'state' && !manifestOps.has(m));
 check('сервер: rpc не бывает вне манифеста (кроме state)', rpcWithoutManifest.length === 0,
   `вне манифеста: ${rpcWithoutManifest.join(', ')}`);

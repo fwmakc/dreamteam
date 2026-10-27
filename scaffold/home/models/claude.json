@@ -1,4 +1,5 @@
 {
-  "adapter": "anthropic",
-  "model": "claude-sonnet-4-5"
+  "provider": "anthropic-compatible",
+  "model": "claude-sonnet-4-5",
+  "apiKey": ""
 }

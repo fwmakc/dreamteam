@@ -105,7 +105,7 @@ export class MockProvider implements LLMProvider {
         text = wantsStatus
           ? 'Команда на месте: дубликатов нет, все на связи.'
           : wantsInChat
-            ? '{"say":"Зову Теста в этот чат.","actions":[{"op":"chat.add","who":"Тест"}]}'
+            ? '{"say":"Зову Теста в этот чат.","actions":[{"op":"chat.add","who":"test_probe"}]}'
             : hasTest
               ? '«Тест» уже в команде — второй раз не дублирую.'
               : '{"say":"Позываю нового участника «Тест».","actions":[{"op":"team.add","id":"test_probe","name":"Тест","role":"гость","prompt":"Ты — Тест, гость переговорки. Отвечай коротко.","emoji":"🧪","color":"cyan","tools":{"files":{},"shell":{}}}]}';
@@ -167,7 +167,7 @@ export class MockProvider implements LLMProvider {
   }
 }
 
-/** Адаптер "mock" — можно назначить провайдеру в providers.json явно. */
+/** Адаптер "mock" — заготовленные ответы; в карточке модели: "provider": "mock". */
 export const mockFactory: ProviderFactory = (id, config: ProviderConfig) => {
   const note = typeof config.note === 'string' ? config.note : undefined;
   const model = typeof config.model === 'string' ? config.model : 'mock';

@@ -8,16 +8,17 @@ export { operationHints as commandHints } from './core/operations.js';
 
 /** Живые данные для дополнения: список разговоров, команда, провайдеры. */
 export interface CompletionContext {
-  /** Разговоры в порядке /sessions (свежие сверху) — номер = индекс + 1 */
-  sessions(): { title: string }[];
-  teamNames(): string[];
+  /** Разговоры в порядке /sessions (свежие сверху) */
+  sessions(): { id: string; title: string }[];
+  /** id агентов команды — адресация в командах только по id */
+  agentIds(): string[];
   /** Участники текущего чата — их предлагает всплывашка @упоминаний */
-  chatAgents(): { name: string; role?: string }[];
-  /** Модели из models/ дома — для /model set|update|delete. */
+  chatAgents(): { id: string; name: string; role?: string }[];
+  /** Модели из models/ дома — для /model update|delete и model.id=. */
   modelIds(): string[];
   /** Имя менеджера переговорки (~/.dreamteam/manager.json) — первый пункт всплывашки @ */
   managerName(): string;
-  /** Имена проектов дома (папки в projects/) — для /project open|remove.
+  /** Имена проектов дома (папки в projects/) — для /project open|delete.
    *  Опционально: старые вызовы и пробы без дома подсказывать не обязаны. */
   projectNames?(): string[];
 }
@@ -69,11 +70,11 @@ function argValues(op: OpSpec, argPos: number, ctx: CompletionContext): string[]
   if (!arg) return [];
   switch (arg.hint) {
     case 'sessions':
-      return ctx.sessions().map((_, i) => String(i + 1));
-    case 'team':
-      return [...ctx.teamNames().map((_, i) => String(i + 1)), ...ctx.teamNames()];
+      return ctx.sessions().map((s) => s.id);
+    case 'agents':
+      return ctx.agentIds();
     case 'chat':
-      return [...ctx.chatAgents().map((_, i) => String(i + 1)), ...ctx.chatAgents().map((a) => a.name)];
+      return ctx.chatAgents().map((a) => a.id);
     case 'models':
       return ctx.modelIds();
     case 'projects':
@@ -126,7 +127,7 @@ export function makeCompleter(ctx: CompletionContext) {
     if (ses) {
       const fragment = ses[1];
       const hits = tabInsert(
-        ctx.sessions().map((_, i) => String(i + 1)),
+        ctx.sessions().map((s) => s.id),
         fragment,
       );
       return hits.length > 0 ? [hits, line.slice(line.length - fragment.length)] : [[], line];
@@ -152,18 +153,18 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
-/** Строки «номер — название» для панели: /session open и @session N. */
+/** Строки «id — название» для панели: /session open и @session <id>. */
 function sessionRows(ctx: CompletionContext, fragment: string): string[] {
   const hits = ctx
     .sessions()
-    .map((s, i) => ({ n: String(i + 1), title: s.title }))
-    .filter((x) => x.n.startsWith(fragment));
+    .filter((s) => s.id.startsWith(fragment))
+    .map((s) => ({ id: s.id, title: s.title }));
   if (hits.length === 0) {
-    return [pc.dim(tf('  нет разговора №{n} — см. /sessions', { n: fragment || '…' }))];
+    return [pc.dim(tf('  нет разговора с id «{id}» — см. /sessions', { id: fragment || '…' }))];
   }
   return hits
     .slice(0, 8)
-    .map((x) => `  ${x.n} ${pc.dim('—')} ${truncate(x.title, 46)}`);
+    .map((x) => `  ${x.id} ${pc.dim('—')} ${truncate(x.title, 46)}`);
 }
 
 /**
@@ -241,8 +242,8 @@ function valueRows(op: OpSpec, argPos: number, ctx: CompletionContext): string[]
   const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
   if (arg.hint === 'sessions') return sessionRows(ctx, '');
   let values: string[] | null = null;
-  if (arg.hint === 'team') values = [...ctx.teamNames(), 'shared'];
-  else if (arg.hint === 'chat') values = ctx.chatAgents().map((a) => a.name);
+  if (arg.hint === 'agents') values = ctx.agentIds();
+  else if (arg.hint === 'chat') values = ctx.chatAgents().map((a) => a.id);
   else if (arg.hint === 'models') values = ctx.modelIds();
   else if (arg.hint === 'projects') values = ctx.projectNames?.() ?? [];
   if (values === null) return [];

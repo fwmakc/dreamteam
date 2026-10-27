@@ -33,7 +33,7 @@ mkdirSync(home, { recursive: true });
 mkdirSync(proj, { recursive: true }); // project.open открывает существующую папку
 process.env.DT_HOME = home;
 process.chdir(base);
-writeModels(home, { mock: { adapter: 'mock' } });
+writeModels(home, { mock: { provider: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Босс', role: 'руководитель' }, null, 2) + '\n');
@@ -95,18 +95,22 @@ await gui.next((m) => m.type === 'state'); // первый state — без пр
 }
 
 // ── Шаг 1: создать новую сессию ──────────────────────────────────────────────
+let freshId = '';
 {
   gui.send({ type: 'command', text: '/session new' });
-  // /new → менеджер здоровается (say) и state приходит в конце раунда
+  // /session new → менеджер здоровается (say) и state приходит в конце раунда
   await gui.next((m) => m.type === 'say');
-  const st = await gui.next((m) => m.type === 'state' && (m.state as { sessions: unknown[] }).sessions.length === 2);
-  const sessions = (st.state as { sessions: { title: string }[] }).sessions;
-  check('GUI/TUI 1: сессия создана', sessions.length === 2, JSON.stringify(sessions.map((s) => s.title)));
+  const st = await gui.next(
+    (m) => m.type === 'state' && (m.state as { sessions: unknown[] }).sessions.length === 2,
+  );
+  const snap = st.state as { sessions: { title: string }[]; session: { id: string } };
+  freshId = snap.session.id;
+  check('GUI/TUI 1: сессия создана', snap.sessions.length === 2, JSON.stringify(snap.sessions.map((s) => s.title)));
 }
 
 // ── Шаг 2: создать агента-юриста ─────────────────────────────────────────────
 {
-  gui.send({ type: 'rpc', id: 'r2a', method: 'team.add', args: { id: 'lawyer', name: 'Юрист', role: 'право' } });
+  gui.send({ type: 'rpc', id: 'r2a', method: 'agent.new', args: { id: 'lawyer', name: 'Юрист', role: 'право' } });
   const st = await gui.next(
     (m) => m.type === 'state' && (m.state as { team: { id: string }[] }).team.some((a) => a.id === 'lawyer'),
   );
@@ -117,14 +121,14 @@ await gui.next((m) => m.type === 'state'); // первый state — без пр
 
 // ── Шаг 3: позвать юриста в сессию ───────────────────────────────────────────
 {
-  gui.send({ type: 'rpc', id: 'r3', method: 'chat.add', args: { name: 'Юрист' } });
+  gui.send({ type: 'rpc', id: 'r3', method: 'session.agent.add', args: { id: 'lawyer' } });
   const r = await gui.next((m) => m.type === 'rpc_result' && m.id === 'r3');
   check('GUI/TUI 3: юрист позван', String((r.result as { text: string }).text).includes('присоединился'));
 }
 
 // ── Шаг 4: переименовать сессию ──────────────────────────────────────────────
 {
-  gui.send({ type: 'command', text: '/session rename Юридическая экспертиза' });
+  gui.send({ type: 'command', text: '/session update title=Юридическая экспертиза' });
   const st = await gui.next(
     (m) => m.type === 'state' && (m.state as { session: { title: string } }).session.title === 'Юридическая экспертиза',
   );
@@ -146,18 +150,25 @@ await gui.next((m) => m.type === 'state'); // первый state — без пр
   check('GUI/TUI 5: сообщения записаны на диск', list.length === 2, JSON.stringify(list.map((s) => s.title)));
 }
 
+// ── Шаг 5b: вложение от человека — в inbox проекта в доме ─────────────────────
+{
+  gui.send({ type: 'file', name: 'заметка.txt', dataB64: Buffer.from('привет из GUI').toString('base64'), text: 'смотри вложение' });
+  await wait(500); // файл пишется до раунда — ждём только диск
+  check('GUI/TUI 5b: вложение легло в inbox проекта дома', existsSync(join(home, 'projects', 'proj', 'inbox', 'заметка.txt')));
+}
+
 // ── Шаг 6: экспорт сессии ────────────────────────────────────────────────────
 {
-  gui.send({ type: 'command', text: '/session export 1' });
+  gui.send({ type: 'command', text: '/session export' });
   await gui.next((m) => m.type === 'notice' && String(m.text).includes('Экспорт'));
   await wait(500);
-  const list = (await import('node:fs')).readdirSync(proj).filter((f: string) => f.startsWith('dt-')); // архив — в рабочую папку проекта
+  const list = (await import('node:fs')).readdirSync(join(home, 'projects', 'proj')).filter((f: string) => f.startsWith('session-')); // архив — в папке проекта в доме
   check('GUI/TUI 6: экспорт — файл на диске', list.length > 0, JSON.stringify(list));
 }
 
 // ── Шаг 7: удалить агента и сессию ───────────────────────────────────────────
 {
-  gui.send({ type: 'rpc', id: 'r7a', method: 'team.delete', args: { id: 'lawyer' } });
+  gui.send({ type: 'rpc', id: 'r7a', method: 'agent.delete', args: { id: 'lawyer' } });
   await gui.next(
     (m) => m.type === 'state' && !(m.state as { team: { id: string }[] }).team.some((a) => a.id === 'lawyer'),
   );
@@ -165,7 +176,7 @@ await gui.next((m) => m.type === 'state'); // первый state — без пр
   // создаём временную сессию: текущую удалить нельзя
   gui.send({ type: 'command', text: '/session new' });
   await gui.next((m) => m.type === 'say');
-  gui.send({ type: 'command', text: '/session delete 2' });
+  gui.send({ type: 'command', text: `/session delete ${freshId}` });
   const del = await gui.next((m) => m.type === 'notice' && String(m.text).includes('удалён'));
   check('GUI/TUI 7: разговор удалён', Boolean(del));
 }
@@ -173,11 +184,11 @@ await gui.next((m) => m.type === 'state'); // первый state — без пр
 // ── Шаг 8: импорт сессии ─────────────────────────────────────────────────────
 {
   // найти zip-файл экспорта
-  const files = (await import('node:fs')).readdirSync(proj).filter((f: string) => f.endsWith('.zip'));
+  const files = (await import('node:fs')).readdirSync(join(home, 'projects', 'proj')).filter((f: string) => f.endsWith('.zip'));
   if (files.length === 0) {
     check('GUI/TUI 8: импорт — файл найден', false, 'нет zip в песочнице');
   } else {
-    const zipData = readFileSync(join(proj, files[0]));
+    const zipData = readFileSync(join(home, 'projects', 'proj', files[0]));
     gui.send({ type: 'import_session', dataB64: zipData.toString('base64') });
     const rep = await gui.next((m) => m.type === 'notice' && String(m.text).includes('Импорт сессии'));
     check('GUI/TUI 8: сессия импортирована', Boolean(rep));

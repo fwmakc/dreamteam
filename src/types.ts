@@ -146,6 +146,8 @@ export interface Session {
 
   /** Накопительная статистика токенов (заполняется при раундах) */
   usage?: SessionUsage;
+  /** Та же статистика по каждой модели отдельно (id модели → счётчики) */
+  usageByModel?: Record<string, SessionUsage>;
 }
 
 /** Краткие сведения о разговоре для списка /sessions */
@@ -226,9 +228,9 @@ export type ManagerAction =
   | { op: 'chat.add'; who: string }
   | { op: 'chat.remove'; who: string }
   | { op: 'session.list' }
-  | { op: 'session.open'; n: number }
+  | { op: 'session.open'; id: string }
   | { op: 'session.new'; title?: string; participants?: string[] }
-  | { op: 'session.delete'; n: number }
+  | { op: 'session.delete'; id: string }
   /** Переименовать текущий разговор (имя придумывает менеджер или руководитель) */
   | { op: 'session.rename'; title: string }
   /** Включить тул агенту / обновить его карточку (tools в agents.json) */
@@ -271,7 +273,7 @@ export interface ManagerReply {
  * Конкретные API (Z.ai, Anthropic, GigaChat...) реализуют его в src/providers/.
  */
 export interface LLMProvider {
-  /** id провайдера из config/providers.json */
+  /** id карточки из models/<id>.json */
   readonly id: string;
   /** имя адаптера ('openai-compatible' | 'anthropic' | 'gigachat' | 'mock' | ...) */
   readonly kind: string;

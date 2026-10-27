@@ -49,8 +49,8 @@ mkdirSync(proj, { recursive: true });
 const j = (p: string, v: unknown): void =>
   writeFileSync(join(home, p), JSON.stringify(v, null, 2) + '\n');
 mkdirSync(join(home, 'models'), { recursive: true });
-j('models/mock.json', { adapter: 'mock' });
-j('models/mock-images.json', { adapter: 'mock-images' });
+j('models/mock.json', { provider: 'mock' });
+j('models/mock-images.json', { provider: 'mock-images' });
 j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000, model: { id: 'mock' } });
 j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
 // менеджер — вещь машины: в доме, на mock-модели
@@ -177,10 +177,10 @@ check(
   'tui: повторное обращение — ответ без действий',
   await waitFor('ответ менеджера', (s) => s.includes('Команда на месте'), 20000),
 );
-await write('/team\r');
+await write('/agents\r');
 check(
-  'tui: «Тест» появился в /team',
-  await waitFor('Тест в /team', (s) => /🧪 Тест/.test(s), 5000),
+  'tui: «Тест» появился в /agents',
+  await waitFor('Тест в /agents', (s) => /🧪 Тест/.test(s), 5000),
 );
 await write('\x15'); // Ctrl+U — стереть ввод (если что-то осталось) перед /exit
 

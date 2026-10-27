@@ -53,23 +53,27 @@ ControlNet). Агент передаёт 1–3 фото человека как 
 
 ## Как указать приложению
 
-В `config/providers.json` приложения адрес машины с контейнерами (в файле
-уже есть записи под каждую модель с `localhost` — поменяйте host, если
-контейнеры на другой машине):
+Модели приложения — карточки `models/<id>.json` в доме (`~/.dreamteam/models/`);
+под каждую модель файл уже есть, с `localhost` — поменяйте host, если
+контейнеры на другой машине:
 
 ```json
-"qwen3-vl-8b": { "adapter": "openai-compatible", "baseUrl": "http://192.168.1.50:8002/v1", "model": "Qwen3-VL-8B-Instruct", "vision": true },
-"flux-dev":    { "adapter": "openai-images", "baseUrl": "http://192.168.1.50:8102/v1", "model": "flux-dev" }
+{ "provider": "openai-compatible", "baseUrl": "http://192.168.1.50:8002/v1", "model": "Qwen3-VL-8B-Instruct", "vision": true }
+```
+
+```json
+{ "provider": "openai-images", "baseUrl": "http://192.168.1.50:8102/v1", "model": "flux-dev" }
 ```
 
 `localhost` — если контейнеры на том же ПК; IP машины в локалке — если на
-другой. Агентам модели назначаются в `config/team.json`: поле `"vision"` —
-чем агент смотрит картинки (блок look), поле `"image"` — чем рисует (блок
-image), в обоих случаях — id записи из providers.json.
+другой. Агентам модели назначаются в их карточках `agents/<id>.json`: поле
+`"vision"` — чем агент смотрит картинки (блок look), поле `"image"` — чем
+рисует (блок image), в обоих случаях — id модели из `models/`. Модель
+становится «видящей» флагом `"vision": true` в её карточке.
 
-Облачные варианты подключаются так же, без docker: запись с `baseUrl`
-облачного API и `apiKeyEnv` (в providers.json уже лежит пример `glm-vision` —
-GLM-4.6V через обычный Z.ai-ключ).
+Облачные варианты подключаются так же, без docker: карточка с `baseUrl`
+облачного API и `apiKey` прямо в карточке (в `models/` уже лежит пример
+`glm-vision` — GLM-4.6V через обычный Z.ai-ключ).
 
 ## Facade (facade/app.py)
 

@@ -26,9 +26,9 @@ mkdirSync(join(home, 'agents'), { recursive: true });
 mkdirSync(join(home, 'models'), { recursive: true });
 process.env.DT_HOME = home;
 writeFileSync(join(home, 'models', 'flagship.json'),
-  JSON.stringify({ adapter: 'mock' }, null, 2));
+  JSON.stringify({ provider: 'mock' }, null, 2));
 writeFileSync(join(home, 'models', 'service.json'),
-  JSON.stringify({ adapter: 'mock' }, null, 2));
+  JSON.stringify({ provider: 'mock' }, null, 2));
 writeFileSync(join(home, 'settings.json'),
   JSON.stringify({ ui: 'ru', width: 100, model: { id: 'flagship' }, serviceModel: { id: 'service' } }, null, 2) + '\n');
 
@@ -128,7 +128,7 @@ writeFileSync(join(home, 'settings.json'),
 {
   writeFileSync(
     join(home, 'models', 'flagship.json'),
-    JSON.stringify({ adapter: 'mock', note: 'тест' }, null, 2) + '\n',
+    JSON.stringify({ provider: 'mock', note: 'тест' }, null, 2) + '\n',
   );
   const { bootstrapApp } = await import('../src/core/bootstrap.js');
   const { Engine } = await import('../src/core/engine.js');

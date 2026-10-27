@@ -11,11 +11,12 @@
  *   convert <цель> <файл>  — перекодировать через мост soffice: doc→docx, xls→xlsx,
  *                            любой→pdf, docx→odt…
  *
- * Все пути — строго внутри рабочей папки (safePath), как у files. Мост soffice —
+ * Все пути — рабочая папка или прикладные подпапки проекта (inbox, mail,
+ * images; resolveToolPath), как у files. Мост soffice —
  * HTTP-сервис docker/soffice; адрес — карточка "soffice" (по умолчанию
  * http://127.0.0.1:8200). Шрифт с кириллицей для pdf — карточка "font".
  * Чтение и запись внутри рабочей папки — уровень доверия shell, поэтому check()
- * всегда 'allow'; безобразия режутся safePath-ом и лимитами вывода конвейера.
+ * всегда 'allow'; безобразия режутся резолвером путей и лимитами вывода конвейера.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
@@ -36,7 +37,7 @@ import {
   xlsxSheets,
   type DocSheet,
 } from '../../documents.js';
-import { safePath } from '../../actions.js';
+import { resolveToolPath } from '../../actions.js';
 import { checkCardKeys, resolveCard, splitArgs, type Tool, type ToolConfig, type ToolRunContext } from '../../tools-api.js';
 
 const DEFAULT_SOFFICE = 'http://127.0.0.1:8200';
@@ -55,11 +56,11 @@ function syntax(): string {
     'append <файл> (тело — абзацы для docx) · convert <цель> <файл> — имя файла с пробелами берите в кавычки';
 }
 
-/** Путь внутри рабочей папки; наружу — отказ. */
+/** Путь в рабочей папке или прикладных подпапках проекта (inbox, mail, images); наружу — отказ. */
 function localPath(cwd: string, rel: string): string {
   if (!rel) throw new Error('укажите файл');
-  const abs = safePath(cwd, rel);
-  if (!abs) throw new Error(`«${rel}» — выход за рабочую папку`);
+  const abs = resolveToolPath(cwd, rel);
+  if (!abs) throw new Error(`«${rel}» — выход за рабочую папку и прикладные папки проекта`);
   return abs;
 }
 

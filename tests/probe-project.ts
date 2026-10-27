@@ -5,11 +5,11 @@
  *    привязки ESM — setProjectRoot/clearProjectRoot пересчитывают весь слой;
  *  - реестр = сами папки: createProject (рабочая папка создаётся), список
  *    (битые папки пропускаются), авто-регистрация открытой папки (суффикс
- *    «-2»), remove/rename/path, запрет рабочей папки внутри дома, резолв
+ *    «-2»), delete/update, запрет рабочей папки внутри дома, резолв
  *    имени и пути;
  *  - команды ядра: старт без проекта — внятные подсказки вместо падений,
- *    /project new (создаёт и открывает), /project open (имя/путь/ошибки),
- *    /project rename, /project path, /project remove (текущий не удалить);
+ *    /project new (создаёт и открывает), /project open (id/путь/ошибки),
+ *    /project update (name=…, path=…), /project delete (текущий не удалить);
  *  - изоляция: разговоры и hosts (поле project.json) — по проектам, общая
  *    память и memory.json — в доме;
  *  - вливание памяти при смене проекта — в хранилище СТАРОГО проекта (фон не
@@ -17,7 +17,7 @@
  *  - менеджер: действие project.open — реплика сохраняется в СТАРЫЙ разговор,
  *    смена применяется после (pendingSwitches); мусорный путь — ✗ без смены;
  *  - подсказки: projectNames из папок дома в completion (/project open <Tab>);
- *  - serve (WS): rpc project.list/new/open/remove/rename/path, поля
+ *  - serve (WS): rpc project.list/new/open/delete/update, поля
  *    state.project/knownProjects, смена командой «/project open …» — паритет
  *    TUI и GUI.
  * Герметично: временный DT_HOME, mock-провайдер, порт 0.
@@ -55,7 +55,7 @@ for (const d of [p1, p2]) mkdirSync(d, { recursive: true });
 process.env.DT_HOME = home;
 process.chdir(base);
 
-writeModels(home, { mock: { adapter: 'mock' } });
+writeModels(home, { mock: { provider: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 
@@ -124,7 +124,7 @@ const projects = await import('../src/core/projects.js');
 
   threw = '';
   try { projects.removeProject('призрак', ''); } catch (e) { threw = (e as Error).message; }
-  check('remove: неизвестный — «нет — см. /project»', threw.includes('нет — см. /project'), threw);
+  check('remove: неизвестный — «нет — см. /projects»', threw.includes('нет — см. /projects'), threw);
 
   projects.renameProject('p2-2', 'p2x');
   check('rename: папка переименована, id обновлён', existsSync(join(home, 'projects', 'p2x')) && projects.loadProjectConfig('p2x')?.id === 'p2x');
@@ -213,10 +213,10 @@ const flushChain = () => (engine as unknown as { flushChain: Promise<void> }).fl
   check('старт: bootstrap не выбрал проект', app.store === null && app.session === null);
   const hint = (await run('/sessions'))[0] ?? '';
   check('гейт: /sessions без проекта — подсказка', hint.includes('нет открытого проекта') && hint.includes('/project new'), hint);
-  const gate = (await run('/project host add x=1.2.3.4'))[0] ?? '';
+  const gate = (await run('/project host add x'))[0] ?? '';
   check('гейт: секреты без проекта — та же подсказка', gate.includes('нет открытого проекта'), gate);
-  const list = await run('/project');
-  check('обзор: работает и без проекта', list.some((l) => l.includes('/project new')), list.join(' | '));
+  const list = await run('/projects');
+  check('список: работает и без проекта', list.some((l) => l.includes('/project new')), list.join(' | '));
 }
 
 // ── project new: создаёт проект в доме, рабочую папку и открывает ────────────
@@ -246,15 +246,17 @@ const alphaSessionId = app.session?.id ?? '';
 
 // ── изоляция: hosts — поле project.json проекта ──────────────────────────────
 {
-  await run('/project host add prod=10.0.0.9');
+  await run('/project host add prod');
+  await run('/project host update prod host=10.0.0.9');
   const cfg = JSON.parse(readFileSync(join(home, 'projects', 'alpha', 'project.json'), 'utf8')) as {
     hosts?: Record<string, { host?: string }>;
   };
   check('изоляция: сервер в поле hosts проекта', cfg.hosts?.prod?.host === '10.0.0.9');
-  const lines = await run('/project');
-  check('project: обзор — текущий с пометкой', lines.some((l) => l.includes('alpha') && l.includes('← текущий')));
-  check('project: обзор — beta в списке', lines.some((l) => l.includes('beta')));
-  check('project: обзор — серверы текущего проекта', lines.some((l) => l.includes('prod: 10.0.0.9')));
+  const lines = await run('/projects');
+  check('projects: список — текущий с пометкой', lines.some((l) => l.includes('alpha') && l.includes('← текущий')));
+  check('projects: список — beta в реестре', lines.some((l) => l.includes('beta')));
+  const hosts = await run('/project hosts');
+  check('project hosts: серверы текущего проекта', hosts.some((l) => l.includes('prod: 10.0.0.9')), hosts.join(' | '));
 }
 
 // ── смена проекта: вливание памяти в СТАРЫЙ проект, свежий магазин ───────────
@@ -291,46 +293,46 @@ const alphaSessionId = app.session?.id ?? '';
   check('project open: после ошибки проект не менялся', paths.WORKSPACE === p1);
 }
 
-// ── rename и path текущего, remove ───────────────────────────────────────────
+// ── update (name/path) текущего, delete ──────────────────────────────────────
 {
-  const rn = (await run('/project rename gamma'))[0] ?? '';
+  const rn = (await run('/project update name=gamma'))[0] ?? '';
   check(
-    'rename: папка и слой путей переехали',
+    'update name: папка и слой путей переехали',
     rn.includes('gamma') &&
       paths.PROJECT_DIR === join(home, 'projects', 'gamma') &&
       existsSync(join(home, 'projects', 'gamma', 'project.json')),
     rn,
   );
-  const list = await run('/project');
-  check('rename: обзор показывает новое имя текущим', list.some((l) => l.includes('gamma') && l.includes('← текущий')));
+  const list = await run('/projects');
+  check('update name: список показывает новое имя текущим', list.some((l) => l.includes('gamma') && l.includes('← текущий')));
 
   await run('/project open beta');
-  const rp = (await run(`/project path ${p3}`))[0] ?? '';
-  check('path: папка создана, WORKSPACE переехал', rp.includes('✓') && paths.WORKSPACE === p3 && existsSync(p3), rp);
+  const rp = (await run(`/project update path=${p3}`))[0] ?? '';
+  check('update path: папка создана, WORKSPACE переехал', rp.includes('✓') && paths.WORKSPACE === p3 && existsSync(p3), rp);
   const cfg = JSON.parse(readFileSync(join(home, 'projects', 'beta', 'project.json'), 'utf8')) as { path?: string };
-  check('path: project.json обновлён', cfg.path === p3);
+  check('update path: project.json обновлён', cfg.path === p3);
 
   let curThrew = '';
-  try { await run('/project remove beta'); } catch (e) { curThrew = (e as Error).message; }
-  check('remove: текущий не удалить', curThrew.includes('открыт сейчас'), curThrew);
-  const gone = (await run('/project remove gamma'))[0] ?? '';
+  try { await run('/project delete beta'); } catch (e) { curThrew = (e as Error).message; }
+  check('delete: текущий не удалить', curThrew.includes('открыт сейчас'), curThrew);
+  const gone = (await run('/project delete gamma'))[0] ?? '';
   check(
-    'remove: проект удалён из дома, рабочая папка цела',
+    'delete: проект удалён из дома, рабочая папка цела',
     gone.includes('удалён из дома') &&
       !existsSync(join(home, 'projects', 'gamma')) &&
       existsSync(join(p1, 'файл-работы.txt')),
     gone,
   );
   let threw = '';
-  try { await run('/project remove призрак'); } catch (e) { threw = (e as Error).message; }
-  check('remove: неизвестный — ошибка резолва', threw.includes('нет — см. /project'), threw);
+  try { await run('/project delete призрак'); } catch (e) { threw = (e as Error).message; }
+  check('delete: неизвестный — ошибка резолва', threw.includes('нет — см. /projects'), threw);
 }
 
 // ── подсказки: имена проектов из папок дома ──────────────────────────────────
 {
   const ctx = {
     sessions: () => [],
-    teamNames: () => [],
+    agentIds: () => [],
     chatAgents: () => [],
     modelIds: () => [],
     managerName: () => 'Менеджер',
@@ -439,20 +441,20 @@ const rpc = (c: Client, id: string, method: string, args: Record<string, unknown
   check('ws: state знает текущий проект', st0.project?.id === 'delta' && st0.project?.path === p4, JSON.stringify(st0.project));
   check('ws: state знает проекты дома', (st0.knownProjects ?? []).some((p) => p.name === 'beta') && (st0.knownProjects ?? []).some((p) => p.name === 'delta'));
 
-  rpc(c, 'r0', 'project.list');
+  rpc(c, 'r0', 'projects.list');
   const lst = await c.next((m) => m.type === 'rpc_result' && m.id === 'r0');
   const known = (lst.result as { known: { name: string }[]; current: { id: string } | null }).known;
-  check('ws: project.list — список и текущий', known.some((p) => p.name === 'beta') && (lst.result as { current: { id: string } }).current?.id === 'delta');
+  check('ws: projects.list — список и текущий', known.some((p) => p.name === 'beta') && (lst.result as { current: { id: string } }).current?.id === 'delta');
 
   // project.new по rpc — создание и сразу открытие
-  rpc(c, 'r1', 'project.new', { name: 'eps', path: p5 });
+  rpc(c, 'r1', 'project.new', { id: 'eps', path: p5 });
   const created = await c.next((m) => m.type === 'rpc_result' && m.id === 'r1');
   check('ws: project.new — отчёт ✓', String((created.result as { text: string }).text).includes('✓'));
   const st1 = (await c.next((m) => m.type === 'state' && (m.state as Snap).project?.id === 'eps')).state as Snap;
   check('ws: project.new — state переключился на новый', st1.project?.path === p5 && existsSync(join(home, 'projects', 'eps')));
 
-  // project.open по имени — возврат в delta
-  rpc(c, 'r2', 'project.open', { name: 'delta' });
+  // project.open по id — возврат в delta
+  rpc(c, 'r2', 'project.open', { id: 'delta' });
   const open = await c.next((m) => m.type === 'rpc_result' && m.id === 'r2');
   check('ws: project.open — отчёт ✓', String((open.result as { text: string }).text).includes('✓'));
   await c.next((m) => m.type === 'state' && (m.state as Snap).project?.id === 'delta');
@@ -460,43 +462,43 @@ const rpc = (c: Client, id: string, method: string, args: Record<string, unknown
 
   // неизвестное имя: смена идёт через runRound — ошибка уходит событием error,
   // rpc завершается обычным результатом (GUI покажет ✗ в журнале)
-  rpc(c, 'r3', 'project.open', { name: 'нет-такого' });
+  rpc(c, 'r3', 'project.open', { id: 'нет-такого' });
   const res3 = await c.next((m) => m.type === 'rpc_result' && m.id === 'r3');
   check('ws: project.open мимо — rpc завершился', typeof (res3.result as { text?: string }).text === 'string');
   const errEv = await c.next((m) => m.type === 'error' && String(m.text).includes('нет проекта'));
   check('ws: project.open мимо — событие error с подсказкой', String(errEv.text).includes('/project new'), String(errEv.text));
 
-  // rename текущего
-  rpc(c, 'r4', 'project.rename', { name: 'delta2' });
+  // update: переименование текущего
+  rpc(c, 'r4', 'project.update', { name: 'delta2' });
   const r4 = await c.next((m) => (m.type === 'rpc_result' || m.type === 'rpc_error') && m.id === 'r4');
-  check('ws: project.rename — отчёт ✓', r4.type === 'rpc_result' && String((r4.result as { text: string }).text).includes('delta2'), String(r4.error ?? (r4.result as { text: string }).text));
+  check('ws: project.update name — отчёт ✓', r4.type === 'rpc_result' && String((r4.result as { text: string }).text).includes('delta2'), String(r4.error ?? (r4.result as { text: string }).text));
 
-  // path текущего
-  rpc(c, 'r5', 'project.path', { path: p6 });
+  // update: смена рабочей папки
+  rpc(c, 'r5', 'project.update', { path: p6 });
   await c.next((m) => m.type === 'rpc_result' && m.id === 'r5');
   const st5 = (await c.next((m) => m.type === 'state' && (m.state as Snap).project?.path === p6)).state as Snap;
-  check('ws: project.path — state с новой рабочей папкой', st5.project?.path === p6);
+  check('ws: project.update path — state с новой рабочей папкой', st5.project?.path === p6);
 
-  // remove: текущий не удалится, чужой удалится
-  rpc(c, 'r6', 'project.remove', { name: 'delta2' });
+  // delete: текущий не удалится, чужой удалится
+  rpc(c, 'r6', 'project.delete', { id: 'delta2' });
   const rmCur = await c.next((m) => m.type === 'rpc_error' && m.id === 'r6');
-  check('ws: project.remove текущего — отказ', String(rmCur.error).includes('открыт сейчас'), String(rmCur.error));
-  rpc(c, 'r7', 'project.remove', { name: 'eps' });
+  check('ws: project.delete текущего — отказ', String(rmCur.error).includes('открыт сейчас'), String(rmCur.error));
+  rpc(c, 'r7', 'project.delete', { id: 'eps' });
   const rm = await c.next((m) => m.type === 'rpc_result' && m.id === 'r7');
-  check('ws: project.remove — отчёт', String((rm.result as { text: string }).text).includes('удалён из дома'));
+  check('ws: project.delete — отчёт', String((rm.result as { text: string }).text).includes('удалён из дома'));
   // из очереди может прийти и устаревший state — ждём именно свежий, без eps
   await c.next((m) => m.type === 'state' && !((m.state as Snap).knownProjects ?? []).some((p) => p.name === 'eps'));
-  check('ws: project.remove — ушёл из state', true);
+  check('ws: project.delete — ушёл из state', true);
 
   // смена обычной командой /project — тот же путь, что и в терминале
   c.send({ type: 'command', text: '/project open beta' });
   await c.next((m) => m.type === 'state' && (m.state as Snap).project?.id === 'beta');
   check('ws: /project open командой — работает', true);
 
-  // /project обзор командой — заметки со списком доходят до клиента
-  c.send({ type: 'command', text: '/project' });
+  // /projects список командой — заметки со списком доходят до клиента
+  c.send({ type: 'command', text: '/projects' });
   await c.next((m) => m.type === 'notice' && String(m.text).includes('← текущий'));
-  check('ws: /project обзор — заметки со списком', true);
+  check('ws: /projects список — заметки со списком', true);
 
   c.close();
   await handle.close();

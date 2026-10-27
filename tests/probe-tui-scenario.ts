@@ -4,9 +4,9 @@
  * на диске (sessions/, agents/, экспорт-архив), плюс маркер на экране.
  *
  *  0. /project new (старт без проекта → папка-проект в доме, консьерж
- *     здоровается)   1. /session new   2. /team add   3. /chat add
- *  4. /session rename   5. сообщения   6. /session export
- *  7. /chat remove + /session delete   8. /session import   9. delete снова
+ *     здоровается)   1. /session new   2. /agent new   3. /session agent add
+ *  4. /session update   5. сообщения   6. /session export
+ *  7. /session agent delete + /session delete   8. /session import   9. delete снова
  *
  * Герметично: временный дом DT_HOME, всё на mock-провайдере; проект живёт
  * в доме (projects/dev), рабочая папка — соседняя песочница.
@@ -47,10 +47,10 @@ process.env.DT_HOME = home;
 // cwd НЕ трогаем: относительные пути (node_modules/tsx, src/index.ts) резолвятся
 // из корня репозитория; песочница живёт в DT_HOME и в папке проекта
 mkdirSync(join(home, 'models'), { recursive: true });
-writeFileSync(join(home, 'models', 'mock.json'), JSON.stringify({ adapter: 'mock' }, null, 2) + '\n');
+writeFileSync(join(home, 'models', 'mock.json'), JSON.stringify({ provider: 'mock' }, null, 2) + '\n');
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000, model: { id: 'mock' } }, null, 2) + '\n');
 writeFileSync(join(home, 'manager.json'), JSON.stringify({ model: { id: 'mock' } }, null, 2) + '\n');
-// команду не сеем: agents/ появится, когда /team add запишет юриста
+// команду не сеем: agents/ появится, когда /agent new запишет юриста
 mkdirSync(join(home, 'tools'), { recursive: true });
 process.on('exit', () => { try { rmSync(base, { recursive: true, force: true }); } catch { /* Windows держит файлы */ } });
 process.on('SIGINT', () => process.exit(130));
@@ -120,27 +120,27 @@ async function main(): Promise<void> {
     'приветствие в новой сессии',
   );
   const freshFull = fresh ? readSessions().find((s) => s.id === fresh.id) : null;
-  check('1: /new — новая сессия на диске с приветствием менеджера',
+  check('1: /session new — новая сессия на диске с приветствием менеджера',
     Boolean(freshFull) && freshFull.title === 'Новый разговор' && (freshFull.messages ?? []).length >= 1);
 
   // ── 2. агент-юрист ───────────────────────────────────────────────────────
-  await type('/team add yurist Юрист право и договоры');
+  await type('/agent new yurist name=Юрист role=право и договоры');
   await waitDisk(() => agentCards().includes('yurist.json'), 'юрист в agents/');
   const yurist = readJson(join(agentsDir, 'yurist.json'));
-  check('2: /team add — юрист на диске с дефолтами',
+  check('2: /agent new — юрист на диске с дефолтами',
     yurist?.name === 'Юрист' && yurist?.emoji === '🤖' && String(yurist?.prompt).startsWith('Ты — Юрист'),
     JSON.stringify(yurist).slice(0, 160));
 
   // ── 3. позвать в сессию ──────────────────────────────────────────────────
-  await type('/chat add Юрист');
+  await type('/session agent add yurist');
   await waitDisk(() => (readSessions().find((s) => s.id === fresh.id)?.participants ?? []).includes('yurist'), 'юрист в participants');
-  check('3: /chat add — на диске participants = менеджер + юрист',
+  check('3: /session agent add — на диске participants = менеджер + юрист',
     (readSessions().find((s) => s.id === fresh.id)?.participants ?? []).includes('yurist'));
 
   // ── 4. переименовать ─────────────────────────────────────────────────────
-  await type('/session rename Юридический вопрос');
+  await type('/session update title=Юридический вопрос');
   await waitDisk(() => readSessions().find((s) => s.id === fresh.id)?.title === 'Юридический вопрос', 'новое имя на диске');
-  check('4: /session rename — title на диске изменился',
+  check('4: /session update — title на диске изменился',
     readSessions().find((s) => s.id === fresh.id)?.title === 'Юридический вопрос');
 
   // ── 5. несколько сообщений ───────────────────────────────────────────────
@@ -161,10 +161,10 @@ async function main(): Promise<void> {
     msgs.filter((m: any) => m.authorId !== 'user').every((m: any) => String(m.text).length > 5));
 
   // ── 6. экспорт ───────────────────────────────────────────────────────────
-  // архив разговора кладётся в рабочую папку проекта (path из project.json)
-  await type('/session export 1');
-  await waitDisk(() => existsSync(join(proj, `dt-session-${fresh.id}.zip`)), 'zip экспорта в рабочей папке');
-  const zipPath = join(proj, `dt-session-${fresh.id}.zip`);
+  // архив разговора кладётся в папку проекта в доме (projects/<id>/)
+  await type('/session export');
+  const zipPath = join(home, 'projects', 'dev', readdirSync(join(home, 'projects', 'dev')).find((f) => f.startsWith(`session-dev-${fresh.id}-`) && f.endsWith('.zip')) ?? 'нет-архива.zip');
+  await waitDisk(() => existsSync(zipPath), 'zip экспорта в папке проекта дома');
   check('6: /session export — архив на диске', existsSync(zipPath));
   const zip = new AdmZip(zipPath);
   const exported = JSON.parse(zip.readAsText('session.json'));
@@ -173,13 +173,14 @@ async function main(): Promise<void> {
     exported.messages.length === msgs.length);
 
   // ── 7. вывести из чата и удалить разговор ────────────────────────────────
-  await type('/chat remove Юрист');
+  await type('/session agent delete yurist');
   await waitDisk(() => !(readSessions().find((s) => s.id === fresh.id)?.participants ?? []).includes('yurist'), 'юрист выведен из чата');
-  check('7: /chat remove — юриста нет в participants на диске',
+  check('7: /session agent delete — юриста нет в participants на диске',
     !(readSessions().find((s) => s.id === fresh.id)?.participants ?? []).includes('yurist'));
-  await type('/session open 2'); // уходим из удаляемого (свежий — №1)
+  const other = readSessions().find((s) => s.id !== fresh.id).id; // стартовый разговор проекта
+  await type(`/session open ${other}`); // уходим из удаляемого
   await wait(600);
-  await type('/session delete 1');
+  await type(`/session delete ${fresh.id}`);
   await waitDisk(() => readSessions().length === 1, 'файл сессии удалён');
   check('7: /session delete — удалённый разговор исчез с диска',
     readSessions().length === 1 && readSessions()[0].id !== fresh.id);
@@ -188,13 +189,13 @@ async function main(): Promise<void> {
   await type(`/session import ${zipPath}`);
   await waitDisk(() => readSessions().length === 2, 'сессия вернулась из архива');
   const restored = readSessions().find((s) => s.title === 'Юридический вопрос');
-  check('8: /import — разговор вернулся «как новый» (другой id, содержимое на месте)',
+  check('8: /session import — разговор вернулся «как новый» (другой id, содержимое на месте)',
     Boolean(restored) && restored.id !== fresh.id && (restored.participants ?? []).includes('yurist'));
 
   // ── 9. снова удалить ─────────────────────────────────────────────────────
-  await type('/session open 2'); // импортированный свежее — №1, уходим на №2
+  await type(`/session open ${other}`); // гарантируем: удаляем не текущий
   await wait(600);
-  await type('/session delete 1');
+  await type(`/session delete ${restored.id}`);
   await waitDisk(() => readSessions().length === 1, 'импортированная сессия удалена');
   check('9: песочница в исходном состоянии',
     readSessions().length === 1 && readSessions()[0].id !== restored.id);

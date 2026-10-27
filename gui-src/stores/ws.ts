@@ -77,7 +77,20 @@ function rejectRpc(id: string, error: string): void {
   if (p) { rpcPending.delete(id); clearTimeout(p.timer); p.reject(new Error(error)); }
 }
 
+/** Токен из ?token= в адресе (готовая ссылка от serve): в localStorage — и
+ *  немедленно из адресной строки, чтобы не светился в истории и шаринге. */
+function consumeUrlToken(): void {
+  const q = new URLSearchParams(location.search);
+  const t = q.get('token')?.trim();
+  if (!t) return;
+  localStorage.setItem('dt-token', t);
+  q.delete('token');
+  const rest = q.toString();
+  history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
+}
+
 export function connectWs(): void {
+  consumeUrlToken();
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   // уже подключены (или подключаемся) — не создаём второй сокет (HMR/двойной mount)
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;

@@ -97,6 +97,6 @@ When fixing a bug, add a probe case first when practical.
 
 ## Issues
 
-Bug reports: OS, `node -v`, `dreamteam -v`, adapter, shell (TUI/serve), steps —
+Bug reports: OS, `node -v`, `dreamteam -v`, provider, shell (TUI/serve), steps —
 and never API keys or `.env` contents. Feature ideas: the use case first, then
 the proposed behavior.

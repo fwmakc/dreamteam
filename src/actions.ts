@@ -2,8 +2,9 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Agent, ImageProvider, LLMProvider } from './types.js';
-import { agentToolIds, BUILTIN_TOOL_IDS, type Tool } from './tools-api.js';
+import { agentToolIds, BUILTIN_TOOL_IDS, PROJECT_SUBDIRS, type Tool } from './tools-api.js';
 import { loadSettings } from './settings.js';
+import { DT_HOME, PROJECT_DIR } from './paths.js';
 import { t, tf } from './i18n.js';
 
 /**
@@ -195,12 +196,14 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
  */
 export function parseActions(text: string, extraTools: readonly string[] = []): Action[] {
   // виды блоков: встроенные имена + кастомные тула; сортировка по длине, чтобы
-  // «```runner» не съелся более коротким «```run» из альтернации
+  // «```runner» не съелся более коротким «```run» из альтернации. Экранируем:
+  // в id тула разрешена точка («pdf.export») — в регулярке она не должна
+  // превращаться в «любой символ»
   const kinds = [...new Set([...extraTools, 'file', 'run', 'ssh', 'look', 'image'])].sort(
     (a, b) => b.length - a.length,
   );
   const re = new RegExp(
-    '^```(' + kinds.join('|') + ')[ \\t]*([^\\n]*)\\n([\\s\\S]*?)^```[ \\t]*$',
+    '^```(' + kinds.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')[ \\t]*([^\\n]*)\\n([\\s\\S]*?)^```[ \\t]*$',
     'gm',
   );
   const actions: Action[] = [];
@@ -354,7 +357,27 @@ export function safePath(workspaceAbs: string, p: string): string | null {
   return target;
 }
 
-function killTree(child: ChildProcess): void {
+/**
+ * Прикладные подпапки проекта (PROJECT_SUBDIRS из tools-api: inbox, mail,
+ * images) живут в папке проекта в доме (projects/<id>/), не в рабочей:
+ * рабочая папка — только файлы работы, прикладное приложения — в доме.
+ */
+
+/** Где лежит прикладное проекта: projects/<id>/, без открытого проекта — дом. */
+export function projectStoreBase(): string {
+  return PROJECT_DIR || DT_HOME;
+}
+
+/**
+ * Куда указывает путь из блока или аргумента тула: с префиксом inbox/, mail/
+ * или images/ — в прикладные подпапки проекта (projectStoreBase()), остальное —
+ * рабочая папка, как safePath. null — выход за рамку своей папки.
+ */
+export function resolveToolPath(cwd: string, p: string): string | null {
+  const first = p.replaceAll('\\', '/').split('/')[0]!;
+  if (!(PROJECT_SUBDIRS as readonly string[]).includes(first)) return safePath(cwd, p);
+  return safePath(projectStoreBase(), p);
+}function killTree(child: ChildProcess): void {
   // shell:true порождает cmd.exe -> сама команда; убиваем всё дерево
   if (process.platform === 'win32' && child.pid) {
     spawn('taskkill', ['/T', '/F', '/PID', String(child.pid)], { stdio: 'ignore' });
@@ -516,9 +539,13 @@ export async function executeLookAction(
     return { ok: false, label, output: 'отказ: в блоке look не указан путь к картинке (```look путь/к/файлу.png)' };
   }
   const ws = workspaceFor(agent, action, cfg);
-  const target = safePath(ws, action.path);
+  const target = resolveToolPath(ws, action.path);
   if (!target) {
-    return { ok: false, label, output: `отказ: путь «${action.path}» вне рабочей папки ${ws}` };
+    return {
+      ok: false,
+      label,
+      output: `отказ: путь «${action.path}» вне рабочей папки ${ws} и прикладных папок проекта (inbox, mail, images)`,
+    };
   }
   const mediaType = MEDIA_TYPES[extname(target).slice(1).toLowerCase()];
   if (!mediaType) {
@@ -601,8 +628,8 @@ export async function executeImageAction(
   const ws = workspaceFor(agent, action, cfg);
   const refImages: string[] = [];
   for (const ref of p.refs ?? []) {
-    const abs = safePath(ws, ref);
-    if (!abs) return { ok: false, label, output: `отказ: референс «${ref}» вне рабочей папки ${ws}` };
+    const abs = resolveToolPath(ws, ref);
+    if (!abs) return { ok: false, label, output: `отказ: референс «${ref}» вне рабочей папки ${ws} и прикладных папок проекта (inbox, mail, images)` };
     const mediaType = MEDIA_TYPES[extname(abs).slice(1).toLowerCase()];
     if (!mediaType) return { ok: false, label, output: `отказ: референс «${ref}» — не картинка` };
     try {
@@ -628,7 +655,9 @@ export async function executeImageAction(
     return { ok: false, label, output: result.error ?? 'image-провайдер не вернул картинок' };
   }
 
-  const dir = join(ws, 'images');
+  // картинки — прикладное проекта: в доме (projects/<id>/images/), не в рабочей папке
+  const store = projectStoreBase();
+  const dir = join(store, 'images');
   mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   const slug =
@@ -641,7 +670,7 @@ export async function executeImageAction(
     saved.push(abs);
   });
   if (process.stdout.isTTY) openFiles(saved);
-  const rel = saved.map((abs) => relative(ws, abs).replace(/\\/g, '/'));
+  const rel = saved.map((abs) => relative(store, abs).replace(/\\/g, '/'));
   return {
     ok: true,
     label,
@@ -741,7 +770,8 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
   const ws = workspaceFor(agent, {}, cfg);
   const lines: string[] = [
     '## Инструменты',
-    `Ты можешь не только обсуждать, но и реально действовать. Твоя рабочая папка: ${ws} (абсолютный путь). Пути в блоках file — относительные, внутри рабочей папки.`,
+    `Ты можешь не только обсуждать, но и реально действовать. Твоя рабочая папка: ${ws} (абсолютный путь). Пути в блоках file — относительные, внутри рабочей папки. ` +
+      'Прикладное проекта живёт в доме, рядом с разговорами: пути с префиксом inbox/ (файлы от человека), mail/ (вложения писем) и images/ (нарисованные картинки) указывают туда — читай их в блоках look/docs/ocr и вкладывай в письма, всё остальное — рабочая папка.',
   ];
   if (projects.length > 0) {
     lines.push(
@@ -797,7 +827,8 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '```look относительный/путь/к/картинке.png',
       '<вопрос по картинке: что именно разглядеть>',
       '```',
-      'look показывает файл твоей vision-модели; описание придёт результатом действия.',
+      'look показывает файл твоей vision-модели; описание придёт результатом действия. ' +
+        'Префиксы inbox/, mail/, images/ — прикладные папки проекта в доме, остальные пути — рабочая папка.',
     );
   }
   if (ids.includes('image')) {
@@ -810,7 +841,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       'refs: images/файл1.png, images/файл2.png',
       '```',
       'image рисует image-моделью. Промпт, размер, число вариантов (n, до 8), шаги и референсы выбираешь ты сам; ' +
-        'refs — необязательны, включают режим перерисовки по образцам. Файлы сохраняются в images/ рабочей папки, ' +
+        'refs — необязательны, включают режим перерисовки по образцам. Файлы сохраняются в images/ папки проекта в доме (не в рабочей), ' +
         'пути придут в результате; прежде чем рассказывать, что получилось, посмотри файлы через look.',
     );
   }
@@ -821,7 +852,8 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '```docs write отчёт.docx',
       '<текст документа: абзацы построчно или markdown/TSV/CSV-таблица для xlsx/ods>',
       '```',
-      'docs читает (read, tables) и пишет (write) pdf/docx/xlsx/csv/odt/ods в твоей рабочей папке; ' +
+      'docs читает (read, tables) и пишет (write) pdf/docx/xlsx/csv/odt/ods: обычный путь — рабочая папка, ' +
+        'префиксы inbox/, mail/, images/ — прикладные папки проекта в доме; ' +
         'append дописывает абзацы в конец существующего docx; convert pdf файл.doc перекодирует формат.',
     );
   }
@@ -855,7 +887,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
       '<текст письма>',
       '```',
       'mail работает с ящиками из поля "mails" в project.json проекта (данные проекта живут в доме приложения; настроил хозяин): list/find — проверка почты, ' +
-        'read — письмо целиком (вложения сохраняются в mail/), send — отправка с вложениями.',
+        'read — письмо целиком (вложения сохраняются в mail/ папки проекта в доме), send — отправка; в файлы: можно и прикладные (images/…).',
     );
   }
   if (ids.includes('telegram')) {

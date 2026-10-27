@@ -43,8 +43,8 @@ process.env.DT_HOME = home;
 process.chdir(base);
 
 writeModels(home, {
-  mock: { adapter: 'mock' },
-  fake: { adapter: 'openai-compatible', baseUrl: 'https://api.test/v1', model: 'mock-1', apiKey: 'СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА' },
+  mock: { provider: 'mock' },
+  fake: { provider: 'openai-compatible', baseUrl: 'https://api.test/v1', model: 'mock-1', apiKey: 'СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА' },
 });
 writeFileSync(join(home, '.env'), 'TOKEN=секрет-токен-serve\n');
 writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Хозяин', role: 'босс' }, null, 2) + '\n');
@@ -118,7 +118,7 @@ check('сетап: открыт последний разговор (Бета)',
   const fakeEntry = entries.find((e) => e.rel === 'models/fake.json');
   const fakeText = fakeEntry ? fakeEntry.data.toString('utf8') : '';
   check('экспорт настроек: карточка модели с ключом — снимок полный',
-    fakeText.includes('"adapter": "openai-compatible"') && fakeText.includes('СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА'), fakeText);
+    fakeText.includes('"provider": "openai-compatible"') && fakeText.includes('СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА'), fakeText);
   check('экспорт настроек: разговоров и проектов в архиве нет',
     !rels.some((r) => r.startsWith('sessions/') || r.startsWith('projects/')), JSON.stringify(rels));
   const back = readZipEntries(packEntriesZip(entries));
@@ -262,8 +262,8 @@ check('сетап: открыт последний разговор (Бета)',
     { rel: 'sessions/x.json', data: Buffer.from(JSON.stringify({ id: 'x1', title: 'призрачный', messages: [], createdAt: 1, updatedAt: 1 }, null, 2)) },
   ]);
   const report3 = applyProjectImport(app, readZipEntries(ghost));
-  check('импорт проекта: чужой путь не тащится вслепую — подсказка /project path',
-    report3.includes('проект «ghost» создан') && report3.includes('/project path'), report3);
+  check('импорт проекта: чужой путь не тащится вслепую — подсказка /project update path',
+    report3.includes('проект «ghost» создан') && report3.includes('/project update path='), report3);
   check('импорт проекта: ghost остался без рабочей папки', loadProjectConfig('ghost')?.path === undefined);
 
   // битый архив — честный отказ, ничего не создаётся

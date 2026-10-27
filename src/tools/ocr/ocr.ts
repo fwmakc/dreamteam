@@ -9,10 +9,11 @@
  * Языки — карточка "lang" (по умолчанию rus+eng), офлайн-данные — "langPath",
  * плотность рендера pdf — "dpi" (72…600, по умолчанию 200). Языковые данные
  * tesseract при первом запуске качаются в ~/.dreamteam/cache/tesseract — дальше
- * работают без сети. Файлы только внутри рабочей папки (safePath), поэтому
+ * работают без сети. Файлы — рабочая папка и прикладные подпапки проекта
+ * (inbox, mail, images), поэтому
  * check() как у docs — всегда 'allow'.
  */
-import { safePath } from '../../actions.js';
+import { resolveToolPath } from '../../actions.js';
 import {
   collectImages,
   linesToRows,
@@ -34,11 +35,11 @@ function syntax(): string {
   return 'подкоманды: text <файл> [страницы] · tables <файл> [csv] [страницы] — файлы png/jpg/bmp/webp, pdf, docx';
 }
 
-/** Путь внутри рабочей папки; наружу — отказ. */
+/** Путь в рабочей папке или прикладных подпапках проекта (inbox, mail, images); наружу — отказ. */
 function localPath(cwd: string, rel: string): string {
   if (!rel) throw new Error('укажите файл');
-  const abs = safePath(cwd, rel);
-  if (!abs) throw new Error(`«${rel}» — выход за рабочую папку`);
+  const abs = resolveToolPath(cwd, rel);
+  if (!abs) throw new Error(`«${rel}» — выход за рабочую папку и прикладные папки проекта`);
   return abs;
 }
 

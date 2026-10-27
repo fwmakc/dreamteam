@@ -100,7 +100,7 @@ export function settingsEntries(): TransferEntry[] {
 /** Уровень 3 — один проект: project.json (секреты внутри) + все его разговоры. */
 export function projectEntries(id: string): TransferEntry[] {
   const cfg = loadProjectConfig(id);
-  if (!cfg) throw new Error(tf('проекта «{id}» нет — см. /project', { id }));
+  if (!cfg) throw new Error(tf('проекта «{id}» нет — см. /projects', { id }));
   const dir = join(PROJECTS_DIR, id);
   return [
     { rel: 'project.json', data: readFileSync(join(dir, 'project.json')) },
@@ -412,7 +412,7 @@ export function applyProjectImport(app: App, entries: TransferEntry[], idArg?: s
     // рабочая папка машины-экспортёра здесь может не существовать — не тащим
     // чужой путь вслепую: нет папки на диске → проект остаётся без workspace
     if (typeof raw.path === 'string' && raw.path.trim() && existsSync(raw.path.trim())) cfg.path = raw.path.trim();
-    else report.push(t('рабочей папки с машины-экспортёра здесь нет — задайте свою: /project path <папка>'));
+    else report.push(t('рабочей папки с машины-экспортёра здесь нет — задайте свою: /project update path=<папка>'));
     saveProjectConfig(cfg);
     report.push(tf('проект «{id}» создан', { id }));
   } else {

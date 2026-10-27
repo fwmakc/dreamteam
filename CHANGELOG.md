@@ -3,6 +3,135 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow
 semver while pre-1.0 (breaking changes may land in minors).
 
+## [0.0.9] — 2026-10-27
+
+### Breaking
+
+- **One command grammar: operations, ids, `update` with nested fields** — the
+  slash-command surface (and with it the rpc names: a text command and its rpc
+  method are the same operation from the manifest in `src/core/operations.ts`)
+  is reworked. No shims: the old commands are gone.
+  - Roster and chats: `/team` → `/agents`; `/team add|update|delete` →
+    `/agent new <id> [field=value…]`, `/agent update <id> field=value…`,
+    `/agent delete <id…>`; `/team grant <agent> <tool>` →
+    `/agent tool add <agent> <tool>` next to `/agent tool update|delete` and
+    the `/agent tools <id>` overview; `/chat add|remove <name|number>` →
+    `/session agent add|delete <id>`, `/session agents` shows who is in and
+    who can be called.
+  - Sessions: `/session open|delete` and `@session` take the session **id**
+    (list numbers are gone); new `/session close`; `/session rename` →
+    `/session update [title=…]` (no fields — the manager invents a name from
+    the digest); `/session history [from] [to]` is a slice, inclusive (one
+    argument — from N to the end); `/session export` archives the current
+    session only, as `session-<project>-<session>-<stamp>.zip`.
+  - Models: `/model add` → `/model new <id> field=value…`; `/model set` is
+    gone — switching a model is an owner's field, not a command:
+    `/settings update model.id=…` (the agents' default), `/agent update <id>
+    model.id=… model.temperature=…`, `/manager update model.id=…`.
+  - `field=value` pairs learned dotted paths: `/settings set` and
+    `/manager set` → `/settings update` / `/manager update` (nested
+    `model.id=`, `serviceModel.id=`, `model.temperature=`), and
+    `/profile set "Name; role; about"` → `/profile update name=… role=…
+    about=…`.
+  - Home transfer: `/home export|import` → `/export` and `/import <file.zip>`
+    — the whole home as `home-<stamp>.zip`; `/settings export|import` stay.
+  - Projects: `/project rename <name>` and `/project path <folder>` →
+    `/project update name=… | path=…`; `/project remove` → `/project delete`;
+    new `/project close` — the honest projectless state (the current project
+    refuses `delete` until closed). The secrets moved under the project:
+    `/mail …` → `/project mail add|update|delete <id> field=value…`, same for
+    `host` and `messenger`; `/project mails|hosts|messengers` are the lists,
+    `add` creates an empty entry, `update` fills it (`user= password= imap=
+    smtp=…` / `host= user= password= dir= port=` / `token=…`).
+  - The id mask (lowercase latin/digits, `. - _` inside) now covers sessions
+    and secret entries; old free-form entries still load, new ones need the
+    mask.
+  - State rules everywhere: `new` always opens (create + open); the lists
+    (`/sessions`, `/agents`, `/models`, `/projects`) work with nothing open;
+    commands about "the current one" refuse with a hint when there is none.
+    Completion and the GUI panels speak ids everywhere. (The manager's JSON
+    action protocol — `team.add`, `chat.add`, `session.rename`, `tool.grant`,
+    `mail.add`… — is untouched: it is the manager's internal vocabulary, not
+    commands.)
+- **Card field `adapter` renamed to `provider`** — `models/<id>.json` now reads
+  `{"provider": "openai-compatible", …}`. No compatibility shim: a card still
+  carrying `adapter` fails the regular validation — «не указан "provider"» or
+  «неизвестный параметр "adapter"», same as any other stale key. `/model
+  new|update` and the wizard/GUI forms take `provider=` too.
+- **Provider `anthropic` renamed to `anthropic-compatible`** — symmetry with
+  `openai-compatible`. The old name is gone: a card with
+  `"provider": "anthropic"` fails with «провайдер „anthropic“ неизвестен».
+  Rename the field and the value in `models/<id>.json`.
+
+### Fixed
+
+- **Startup crash on vision model cards** — the registry reads the `vision`
+  flag from every card, but the `openai-compatible` contract didn't declare
+  it, so shipped cards (`glm-vision`, Qwen-VL…) failed validation with
+  «неизвестный параметр "vision"». The flag is now a declared key of the
+  `openai-compatible`, `anthropic-compatible` and `gigachat` contracts.
+- **Ids may contain dots** — the id masks allowed letters/digits/-/_ while
+  names are full of dots: the shipped `qwen2.5-vl-7b.json` failed to load with
+  «id модели: строчные буквы…». One shared mask in `src/ids.ts` now covers
+  agents, tools, models and custom adapters; a dot is legal inside
+  (`qwen2.5-vl-7b`, `pdf.export`) but not at the edges and not doubled — ids
+  end up in file names, and Windows forbids trailing dots. `/agent new` used to
+  accept uppercase ids its own loader then rejected — now it enforces the same
+  mask the loader reads with. Tool names are escaped when ```fence kinds are
+  compiled into the action parser's regex.
+- Stale layout-v1 leftovers: «впиши ключ… в providers.json» in anthropic and
+  gigachat key errors, comments and env.example pointing at providers.json,
+  `apiKeyEnv` in docker/README.md — now the card `models/<id>.json` and the
+  `apiKey` field.
+
+### Added
+
+- **Honest "nothing open" state and the usage filter** — `/session close` and
+  `/project close` park the app with nothing open (lists keep working);
+  `/usage [model id]` filters token spend by model; `/session agents` shows
+  the current roster and who can be called.
+- **Launch with a project from the command line** — the same words as in the
+  conversation now work at start: `dreamteam <путь>` (sugar for open; `dreamteam
+  .` opens the current folder's project, an unknown folder registers itself),
+  `dreamteam open <имя|путь>`, `dreamteam new <имя> [папка]`; `serve` takes the
+  same forms (`dreamteam serve .`). Bare `dreamteam` still starts projectless.
+  Malformed forms fail fast before the app (and the wizard) loads; `.`/`..` are
+  now also accepted as paths by `/project open`.
+- **Ready tokenized link for `serve`** — the startup banner prints
+  `открыть с токеном: http://адрес/?token=…`, and `serve --open` opens that
+  link. The web shell picks the token up from the URL, stores it in the
+  browser and strips it from the address bar, so the auth form is only for
+  the case when the link is not at hand. The banner also states the real
+  auth state for a network-exposed HOST (по токену / без авторизации).
+- `npm run probe:models` (also in the `probe` chain) — loads every scaffold
+  card through the real registry and asserts the contract holds: keys legal,
+  `vision` reaches the model status, no `apiKeyEnv`/`keyEnv` anywhere,
+  keyless anthropic/gigachat cards stay a soft «не настроен», not a crash.
+- Scaffold cards that take a key (`claude`, `gigachat`, `glm-vision`,
+  `openai`) ship with an explicit `"apiKey": ""` — the field is visible in
+  edit forms as the place to paste the key; an empty string means «не задан»
+  and behaves like an absent field everywhere.
+
+### Changed
+
+- **The tool inbox and the export archives live in the project folder in the
+  home** — files attached in the web GUI land in `projects/<id>/inbox/` (they
+  used to go to the working folder), and every export zip — `session.export`,
+  `project.export`, the whole-home `export`, `settings.export` — lands in
+  `projects/<id>/` as well; with no project open, in the home, as before.
+  The working folder stays purely the files of work.
+- **Mail attachments and generated images join them** — `mail read` saves
+  into `projects/<id>/mail/`, the ```image block into `projects/<id>/images/`
+  (both used to litter the working folder). One fixed path rule for tools:
+  a path with the `inbox/`, `mail/` or `images/` prefix resolves to the
+  project's payload folders in the home (look, docs, ocr, image refs, `mail
+  send` files:), everything else stays in the working folder. The custom-tool
+  SDK gains `ctx.projectHome`, `ctx.workspaceFile(rel)` and
+  `ctx.projectFile(rel)` — absolute paths checked against their folder.
+  `shell` lets absolute paths into the payload folders (e.g. `cp …\images\x.png .`
+  to move a picture into the working folder); `project.json`, `sessions/` and
+  the rest of the home stay out of reach.
+
 ## [0.0.8] — 2026-10-26
 
 ### Breaking

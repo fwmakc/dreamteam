@@ -11,7 +11,7 @@
  *    (Z.ai, Coding Plan), файл models/glm.json:
  *
  *      {
- *        "adapter": "openai-compatible",
+ *        "provider": "openai-compatible",
  *        "baseUrl": "https://api.z.ai/api/coding/paas/v4",
  *        "model": "glm-4.6",
  *        "apiKey": "ваш_ключ"
@@ -47,11 +47,11 @@ process.chdir(proj);
 const modelsDir = join(userHome, 'models');
 const cards = (existsSync(modelsDir) ? readdirSync(modelsDir).filter((f) => f.endsWith('.json')) : [])
   .map((f) => {
-    try { return JSON.parse(rf(join(modelsDir, f), 'utf8')) as { adapter?: string; model?: string; apiKey?: string }; } catch { return null; }
+    try { return JSON.parse(rf(join(modelsDir, f), 'utf8')) as { provider?: string; model?: string; apiKey?: string }; } catch { return null; }
   })
-  .filter((c): c is { adapter?: string; model?: string; apiKey?: string } => c !== null);
-const conf = cards.find((c) => c.adapter && c.adapter !== 'mock' && c.apiKey);
-console.log(`Боевая модель: ${conf ? `${conf.model ?? '?'} (${conf.adapter})` : 'не найдена'}, дом ${userHome}`);
+  .filter((c): c is { provider?: string; model?: string; apiKey?: string } => c !== null);
+const conf = cards.find((c) => c.provider && c.provider !== 'mock' && c.apiKey);
+console.log(`Боевая модель: ${conf ? `${conf.model ?? '?'} (${conf.provider})` : 'не найдена'}, дом ${userHome}`);
 if (!conf) {
   console.log('В ~/.dreamteam/models/ нет карточки настоящего провайдера с ключом. См. шапку файла.');
   process.exit(2);

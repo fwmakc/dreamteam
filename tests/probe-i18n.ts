@@ -7,7 +7,7 @@
  *    игнорируются;
  *  - loadSettings: поле "ui" валидируется (непустая строка);
  *  - preloadLocale: лёгкое чтение "ui" до мастера;
- *  - через ядро: /settings set ui=en — интерфейс переключается на лету,
+ *  - через ядро: /settings update ui=en — интерфейс переключается на лету,
  *    отчёты операций (/help, /schedule add) сразу на английском; назад — на русском.
  *
  * Герметично: временный DT_HOME, mock-провайдер.
@@ -141,8 +141,8 @@ check('шаблон _*.json и не-id файлы игнорируются', okS
   writeFileSync(sf, JSON.stringify({ width: 100 }));
 }
 
-// ── через ядро: /settings set ui=… переключает интерфейс на лету ─────────────
-writeModels(home, { mock: { adapter: 'mock' } });
+// ── через ядро: /settings update ui=… переключает интерфейс на лету ─────────────
+writeModels(home, { mock: { provider: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 
@@ -174,7 +174,7 @@ const { app } = await bootstrapApp();
 const engine = new Engine(app, stub);
 const run = (_e: unknown, line: string): Promise<string[]> => runOperationText(engine, line);
 
-let lines = await run(engine, '/settings set ui=en');
+let lines = await run(engine, '/settings update ui=en');
 check('settings set ui=en — отчёт на английском', lines.some((l) => l.includes('Settings updated')), lines.join(' | '));
 check('t() переключилась на лету', t('Настройки') === 'Settings' && localeId() === 'en');
 
@@ -186,11 +186,11 @@ lines = await run(engine, '/schedule add проверка 5');
 check('отчёт операции на английском', lines.some((l) => l.includes('Task «проверка» every 5 min')), lines.join(' | '));
 
 threw = '';
-try { await run(engine, '/settings set ui=nope'); } catch (e) { threw = (e as Error).message; }
+try { await run(engine, '/settings update ui=nope'); } catch (e) { threw = (e as Error).message; }
 check('неизвестный ui — отказ со списком', threw.includes('не известен') && threw.includes('de'), threw);
 check('после отказа — язык не менялся', localeId() === 'en');
 
-lines = await run(engine, '/settings set ui=ru');
+lines = await run(engine, '/settings update ui=ru');
 check('назад на русский', lines.some((l) => l.includes('Настройки обновлены')) && t('Настройки') === 'Настройки', lines.join(' | '));
 check('settings.json хранит ui:ru', JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')).ui === 'ru');
 

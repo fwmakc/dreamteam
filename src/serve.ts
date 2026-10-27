@@ -11,16 +11,23 @@ import {
   managerAsAgent,
   updateTeamAgent,
   grantTool,
+  revokeTool,
   loadManagerConfig,
   loadHostsFile,
   addMailAccount,
   addMessengerBot,
+  addHostRecord,
+  addMailRecord,
+  addMessengerRecord,
   addProjectHosts,
   mergeTeamAgents,
   removeMailAccount,
   removeMessengerBot,
   removeProjectHost,
   removeTeamAgent,
+  updateHostRecord,
+  updateMailRecord,
+  updateMessengerRecord,
   updateManagerConfig,
 } from './manager.js';
 import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from './providers/registry.js';
@@ -32,8 +39,9 @@ import { agentToolIds } from './tools-api.js';
 import { safePath } from './actions.js';
 import { basename } from 'node:path';
 import { Engine, chatTeam, type App } from './core/engine.js';
+import { cliProjectArgs, parseCliProject } from './cli-project.js';
 import { bootstrapApp } from './core/bootstrap.js';
-import { operationHints } from './core/operations.js';
+import { operationHints, stamp, profileLabel } from './core/operations.js';
 import {
   applyHomeImport,
   applyProjectImport,
@@ -48,7 +56,7 @@ import {
 } from './core/transfer.js';
 import { loadSchedule, saveSchedule, type ScheduleTask } from './core/schedule.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
-import type { Agent, Session } from './types.js';
+import type { Agent, ModelRef, Session } from './types.js';
 import { localeId, localeDict, applyLocale } from './i18n.js';
 
 /**
@@ -65,10 +73,15 @@ import { localeId, localeDict, applyLocale } from './i18n.js';
  *  клиент → сервер: hello, user_message, command, abort, confirm_response,
  *    choose_response, export_home | export_settings | export_project |
  *    export_session, import_home | import_settings | import_project |
- *    import_session, rpc {method: state | sessions.list | session.open |
- *    session.new | session.delete | chat.add | chat.remove | model.set |
- *    project.list | project.new | project.open | project.remove |
- *    project.rename | project.path}.
+ *    import_session, rpc {method: …} — имена rpc-методов = имена операций
+ *    из src/core/operations.ts (sessions.list, session.open, session.new,
+ *    session.close, session.delete, session.update, session.history,
+ *    session.agents, session.agent.add/delete, agent.new/delete/update,
+ *    agent.tool.add/delete, agent.tools, auto.on/off, model.new/update/delete,
+ *    project.list/new/open/close/delete/update, project.host.add/update/delete,
+ *    project.mail.add/update/delete, project.messenger.add/update/delete,
+ *    profile.update, settings.show/update, manager.show/update,
+ *    schedule.list/add/delete/toggle).
  *
  * `command` — текст `/…`: ядро исполняет те же команды, что и терминал
  * (перехват в handleMessage), отчёты уходят notice-событиями. GUI посылает
@@ -149,7 +162,7 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
     settings: loadSettings(SETTINGS_FILE, 0),
     projects: projects ?? [],
     // текущий проект (null — не выбран) и все проекты дома (смена — project.open,
-    // создание — project.new; список — /project)
+    // создание — project.new; список — /projects)
     project: projectId ? { id: projectId, name: projectId, path: WORKSPACE } : null,
     knownProjects: listProjects().map((p) => ({ name: p.id, path: p.path ?? '', lastOpened: p.lastOpened ?? p.createdAt })),
     auto: engine ? { mode: engine.autoMode, left: engine.autoLeft } : { mode: false, left: 0 },
@@ -307,6 +320,8 @@ const GUI_DIR = fileURLToPath(new URL('../gui-dist/', import.meta.url));
 export interface ServeHandle {
   port: number;
   host: string;
+  /** Токен доступа (пусто — сервер без авторизации). */
+  authToken: string;
   close(): Promise<void>;
 }
 
@@ -314,6 +329,17 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   const { app } = await bootstrapApp();
   const presenter = new ServerPresenter();
   const engine = new Engine(app, presenter);
+
+  // Проект из аргументов запуска (`dreamteam serve .` / open / new): открываем
+  // до поднятия сервера — панели и снимок состояния сразу с проектом. Ошибка
+  // формы или папки — вверх, в фатальный catch точки входа (exit 1).
+  const cliForm = parseCliProject(cliProjectArgs());
+  if (cliForm.kind === 'error') throw new Error(cliForm.message);
+  if (cliForm.kind === 'open') engine.switchProject(cliForm.target);
+  else if (cliForm.kind === 'new') engine.newProject(cliForm.name, cliForm.path);
+  // заметки движка уходят клиентам WS (на старте их ещё нет) — строку проекта
+  // показываем и в консоль, рядом с адресом API
+  if (PROJECT_DIR) console.log(pc.dim(`  Проект: ${basename(PROJECT_DIR)}${WORKSPACE ? ` · ${WORKSPACE}` : ''}`));
 
   let activeAbort: (() => void) | null = null;
   // раунды выстраиваются в очередь: команды и сообщения никогда не «наезжают»
@@ -482,28 +508,29 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return;
       case 'export_home': {
         // уровень 1: всё приложение — дом и все проекты с разговорами
-        ws.send(JSON.stringify({ type: 'export_data', name: `dt-home-${stamp()}.zip`, dataB64: packEntriesZip(homeEntries()).toString('base64') }));
+        ws.send(JSON.stringify({ type: 'export_data', name: `home-${stamp()}.zip`, dataB64: packEntriesZip(homeEntries()).toString('base64') }));
         return;
       }
       case 'export_settings': {
         // уровень 2: настройки приложения без проектов
-        ws.send(JSON.stringify({ type: 'export_data', name: `dt-settings-${stamp()}.zip`, dataB64: packEntriesZip(settingsEntries()).toString('base64') }));
+        ws.send(JSON.stringify({ type: 'export_data', name: `settings-${profileLabel(app.profile.name)}-${stamp()}.zip`, dataB64: packEntriesZip(settingsEntries()).toString('base64') }));
         return;
       }
       case 'export_project': {
         // уровень 3: один проект (project.json с секретами + разговоры); без id — текущий
         const id = String(argsId(msg) ?? '').trim() || (PROJECT_DIR ? basename(PROJECT_DIR) : '');
-        if (!id) throw new Error('export_project: нет открытого проекта — укажите name');
+        if (!id) throw new Error('export_project: нет открытого проекта — укажите id');
         const entries = projectEntries(id);
-        ws.send(JSON.stringify({ type: 'export_data', name: `dt-project-${id}.zip`, dataB64: packEntriesZip(entries).toString('base64') }));
+        ws.send(JSON.stringify({ type: 'export_data', name: `project-${id}-${stamp()}.zip`, dataB64: packEntriesZip(entries).toString('base64') }));
         return;
       }
       case 'export_session': {
-        if (!app.store) throw new Error('нет открытого проекта — сначала /project new или /project open');
-        const meta = app.store.list()[Number(msg.n) - 1];
-        if (!meta) throw new Error(`не нашёл разговор №${String(msg.n)} — обновите список разговоров`);
+        if (!app.store) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        const id = String(msg.id ?? '').trim();
+        const meta = id ? app.store.list().find((s) => s.id === id) : undefined;
+        if (!meta) throw new Error(`не нашёл разговор с id «${id}» — обновите список разговоров`);
         const entries = sessionEntriesById(app, meta.id);
-        ws.send(JSON.stringify({ type: 'export_data', name: `dt-session-${meta.id}.zip`, dataB64: packEntriesZip(entries).toString('base64') }));
+        ws.send(JSON.stringify({ type: 'export_data', name: `session-${basename(PROJECT_DIR || DT_HOME)}-${meta.id}-${stamp()}.zip`, dataB64: packEntriesZip(entries).toString('base64') }));
         return;
       }
       case 'import_home': {
@@ -565,11 +592,11 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return;
       }
       case 'file': {
-        // файл от руководителя: кладём в inbox рабочей папки и шлём сообщение с меткой
-        if (!WORKSPACE) throw new Error('нет открытого проекта — некуда класть файл');
+        // файл от руководителя: кладём в inbox проекта (в доме) и шлём сообщение с меткой
+        if (!PROJECT_DIR) throw new Error('нет открытого проекта — некуда класть файл');
         const name = String(msg.name ?? 'file').replace(/[\/]/g, '_');
         const data = Buffer.from(String(msg.dataB64 ?? ''), 'base64');
-        const inbox = join(WORKSPACE, 'inbox');
+        const inbox = join(PROJECT_DIR, 'inbox');
         mkdirSync(inbox, { recursive: true });
         writeFileSync(join(inbox, name), data);
         const text = `[${name}] ${String(msg.text ?? '').trim()}`.trim();
@@ -609,53 +636,104 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       case 'sessions.list':
         return { sessions: app.store ? app.store.list() : [] };
       case 'session.open': {
-        const n = Number(args.n);
-        if (!Number.isInteger(n) || n <= 0) throw new Error('session.open: жду номер из sessions.list');
-        engine.openSessionByArg(String(n));
+        const id = String(args.id ?? '').trim();
+        if (!id) throw new Error('session.open: жду id разговора (sessions.list)');
+        engine.openSessionById(id);
         // состав чата зависит от разговора: после переключения всем нужен свежий state
         broadcastState();
         return { ok: true };
       }
-      case 'session.new':
-        await runRound((signal) => engine.newSession(signal));
+      case 'session.new': {
+        const id = args.id ? String(args.id) : undefined;
+        await runRound((signal) => engine.newSession(signal, id));
         return { ok: true };
+      }
+      case 'session.close': {
+        const text = engine.closeSession();
+        broadcastState();
+        return { text };
+      }
       case 'session.delete': {
-        const n = Number(args.n);
-        if (!Number.isInteger(n) || n <= 0) throw new Error('session.delete: жду номер из sessions.list');
-        const text = engine.deleteSession(n);
+        const id = String(args.id ?? '').trim();
+        if (!id) throw new Error('session.delete: жду id разговора (sessions.list)');
+        const text = engine.deleteSessionById(id);
         broadcastState(); // список разговоров изменился — всем свежий state
         return { text };
       }
-      case 'chat.add':
-      case 'chat.remove': {
-        const name = String(args.name ?? '').trim();
-        if (!name) throw new Error(`${method}: жду имя участника`);
+      case 'session.update': {
+        const title = args.title ? String(args.title) : '';
+        const report = await engine.renameSession(title);
+        broadcastState();
+        return { text: report };
+      }
+      case 'session.history': {
+        if (!app.store) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        if (!app.session) throw new Error('нет открытого разговора — /session new [id] или /session open <id>');
+        const from = Number(args.from);
+        const to = Number(args.to);
+        const all = app.session.messages;
+        let start = 0;
+        let end = all.length;
+        if (Number.isInteger(from) && from > 0) start = from - 1;
+        if (Number.isInteger(to) && to >= start + 1) end = to;
+        return { messages: all.slice(start, end) };
+      }
+      case 'session.agents': {
+        if (!app.session) throw new Error('нет открытого разговора — /session new [id] или /session open <id>');
+        const full = engine.team();
+        const inChat = new Set(chatTeam(app.session, full).map((a) => a.id));
+        return {
+          inChat: full.filter((a) => inChat.has(a.id)).map((a) => ({ id: a.id, name: a.name, emoji: a.emoji })),
+          outside: full.filter((a) => !inChat.has(a.id)).map((a) => ({ id: a.id, name: a.name, emoji: a.emoji })),
+        };
+      }
+      case 'session.agent.add':
+      case 'session.agent.delete': {
+        const id = String(args.id ?? '').trim();
+        if (!id) throw new Error(`${method}: жду id агента`);
         const team = engine.team();
-        const res = method === 'chat.add' ? engine.addToChat(name, team) : engine.removeFromChat(name, team);
+        const res = method === 'session.agent.add' ? engine.addToChat(id, team) : engine.removeFromChat(id, team);
         // событие чата — репликой менеджера в хронологии; уйдёт с этим же state
         if (res.changed) engine.serviceLine(res.text);
         broadcastState();
         return { text: res.text };
       }
-      case 'team.add': {
-        const report = addTeamAgent(AGENTS_DIR, { id: String(args.id ?? ''), name: String(args.name ?? ''), role: args.role ? String(args.role) : undefined }, engine.app.models);
+      case 'agent.new': {
+        const report = addTeamAgent(AGENTS_DIR, { id: String(args.id ?? ''), name: String(args.name ?? args.id ?? ''), role: args.role ? String(args.role) : undefined }, engine.app.models);
         broadcastState();
         return { text: report };
       }
-      case 'team.delete': {
+      case 'agent.delete': {
         const report = removeTeamAgent(AGENTS_DIR, String(args.id ?? ''));
         broadcastState();
         return { text: report };
       }
-      case 'team.update': {
+      case 'agent.update': {
         const report = updateTeamAgent(AGENTS_DIR, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>, engine.app.models);
         broadcastState();
         return { text: report };
       }
-      case 'team.grant': {
+      case 'agent.tool.add': {
         const report = grantTool(AGENTS_DIR, String(args.agent ?? ''), String(args.tool ?? ''), args.card, TOOLS_DIR);
         broadcastState();
         return { text: report };
+      }
+      case 'agent.tool.update': {
+        // тот же grantTool: переданная карточка — это поля поле=значение из команды
+        const report = grantTool(AGENTS_DIR, String(args.agent ?? ''), String(args.tool ?? ''), (args.fields ?? {}) as Record<string, unknown>, TOOLS_DIR);
+        broadcastState();
+        return { text: report };
+      }
+      case 'agent.tool.delete': {
+        const report = revokeTool(AGENTS_DIR, String(args.agent ?? ''), String(args.tool ?? ''));
+        broadcastState();
+        return { text: report };
+      }
+      case 'agent.tools': {
+        const id = String(args.id ?? '').trim().toLowerCase();
+        const agent = engine.team().find((a) => a.id === id);
+        if (!agent) throw new Error(`нет агента с id «${id}»`);
+        return { tools: agentToolIds(agent) };
       }
       case 'auto.on': {
         const turns = Math.min(Math.max(Number(args.n ?? 10) || 10, 1), 50);
@@ -668,26 +746,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { ok: true };
       }
-      case 'session.rename': {
-        const report = await engine.renameSession(String(args.name ?? ''));
-        broadcastState();
-        return { text: report };
-      }
-      case 'session.history': {
-        if (!app.session) throw new Error('нет открытого проекта — сначала /project new или /project open');
-        const n = Number(args.n);
-        const all = app.session.messages;
-        const messages = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
-        return { messages };
-      }
-      case 'model.set': {
-        const mid = String(args.id ?? '').trim();
-        const ok = engine.setModel(mid);
-        if (!ok) throw new Error(`Нет модели «${mid}». Доступны: ${[...app.models.keys()].join(', ')}`);
-        broadcastState();
-        return { ok: true };
-      }
-      case 'model.add': {
+      case 'model.new': {
         const report = addModelConfig(MODELS_DIR, String(args.id ?? ''), (args.config ?? {}) as Record<string, unknown>);
         const { models, images } = loadModels(MODELS_DIR);
         app.models = models;
@@ -715,7 +774,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         broadcastState();
         return { text: report };
       }
-      case 'project.list':
+      case 'projects.list':
         return {
           known: listProjects().map((p) => ({ name: p.id, path: p.path ?? '', lastOpened: p.lastOpened ?? p.createdAt })),
           current: PROJECT_DIR ? { id: basename(PROJECT_DIR), name: basename(PROJECT_DIR), path: WORKSPACE } : null,
@@ -723,22 +782,22 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       case 'project.new': {
         // новый проект: дом создаёт projects/<id>/ и открывает его (папка
         // рабочей области создаётся, если её нет)
-        const name = String(args.name ?? args.id ?? '').trim();
-        if (!name) throw new Error('project.new: жду имя проекта (name)');
+        const id = String(args.id ?? args.name ?? '').trim();
+        if (!id) throw new Error('project.new: жду id проекта (id)');
         const path = args.path ? String(args.path) : null;
         let report = '';
         await runRound(async () => {
-          report = engine.newProject(name, path);
+          report = engine.newProject(id, path);
         });
         await welcomeIfEmpty();
         broadcastState();
         return { text: report };
       }
       case 'project.open': {
-        // смена проекта: имя/папка → switchProject (шлёт session_opened);
+        // смена проекта: id/папка → switchProject (шлёт session_opened);
         // раунд — чтобы клиенты получили свежий state после подмены магазина
-        const arg = String(args.path ?? args.name ?? '').trim();
-        if (!arg) throw new Error('project.open: жду путь или имя проекта (список — /project)');
+        const arg = String(args.path ?? args.id ?? '').trim();
+        if (!arg) throw new Error('project.open: жду путь или id проекта (список — /projects)');
         let report = '';
         await runRound(async () => {
           report = engine.switchProject(arg);
@@ -746,39 +805,51 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         await welcomeIfEmpty();
         return { text: report };
       }
-      case 'project.remove': {
+      case 'project.close': {
+        const text = engine.closeProject();
+        broadcastState();
+        return { text };
+      }
+      case 'project.delete': {
         // из дома целиком (projects/<id>/); рабочая папка не трогается
-        const arg = String(args.path ?? args.name ?? '').trim();
-        if (!arg) throw new Error('project.remove: жду путь или имя проекта');
+        const arg = String(args.path ?? args.id ?? '').trim();
+        if (!arg) throw new Error('project.delete: жду путь или id проекта');
         const report = engine.deleteProject(arg);
         broadcastState();
         return { text: report };
       }
-      case 'project.rename': {
-        // переименовать текущий: папка в доме + id в project.json
-        const name = String(args.name ?? '').trim();
-        if (!name) throw new Error('project.rename: жду новое имя (name)');
-        const report = engine.renameCurrentProject(name);
+      case 'project.update': {
+        // текущий проект: name=… (переименовать) и/или path=… (рабочая папка)
+        const lines: string[] = [];
+        const name = args.name ? String(args.name).trim() : '';
+        const path = args.path ? String(args.path).trim() : '';
+        if (!name && !path) throw new Error('project.update: жду name=… и/или path=…');
+        if (name) lines.push(engine.renameCurrentProject(name));
+        if (path) lines.push(engine.repointProject(path));
         broadcastState();
-        return { text: report };
-      }
-      case 'project.path': {
-        // сменить рабочую папку текущего проекта
-        const path = String(args.path ?? '').trim();
-        if (!path) throw new Error('project.path: жду путь к рабочей папке (path)');
-        const report = engine.repointProject(path);
-        broadcastState();
-        return { text: report };
+        return { text: lines.join('\n') };
       }
       case 'project.host.add': {
-        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new или /project open');
-        const report = addProjectHosts(PROJECT_FILE, {
-          [String(args.hostName ?? 'main')]: {
-            host: String(args.host ?? ''),
-            user: args.user ? String(args.user) : undefined,
-            port: args.port ? Number(args.port) : undefined,
-          },
-        });
+        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        const id = String(args.id ?? args.hostName ?? '').trim();
+        if (!id) throw new Error('project.host.add: жду id сервера');
+        const spec: { host: string; user?: string; port?: number } = { host: String(args.host ?? '') };
+        if (args.user) spec.user = String(args.user);
+        if (args.port) spec.port = Number(args.port);
+        const report = spec.host
+          ? addProjectHosts(PROJECT_FILE, { [id]: spec })
+          : addHostRecord(PROJECT_FILE, id);
+        broadcastState();
+        return { text: report };
+      }
+      case 'project.host.update': {
+        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        const fields: Record<string, unknown> = {};
+        for (const key of ['host', 'user', 'password', 'dir'] as const) {
+          if (args[key] !== undefined) fields[key] = String(args[key]);
+        }
+        if (args.port !== undefined) fields.port = Number(args.port);
+        const report = updateHostRecord(PROJECT_FILE, String(args.id ?? ''), fields);
         broadcastState();
         return { text: report };
       }
@@ -787,65 +858,98 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       case 'settings.show':
         return { settings: loadSettings(SETTINGS_FILE, 0) };
       case 'project.host.delete': {
-        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new или /project open');
-        const report = removeProjectHost(PROJECT_FILE, String(args.name ?? ''));
+        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        const report = removeProjectHost(PROJECT_FILE, String(args.id ?? args.name ?? ''));
         broadcastState();
         return { text: report };
       }
-      case 'mail.add': {
-        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new или /project open');
-        // name — имя ящика, остальное (user/password/imap/smtp/порты/tlsNoVerify) уходит в валидацию как есть
-        const { name, ...spec } = args as Record<string, unknown>;
-        const report = addMailAccount(PROJECT_FILE, String(name ?? ''), spec);
+      case 'project.mail.add': {
+        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        // id + пусто — пустая запись; id + поля (user/password/imap/smtp/порты/tlsNoVerify) — готовый ящик
+        const { id, ...spec } = args as Record<string, unknown>;
+        const boxId = String(id ?? '').trim();
+        const hasSpec = Object.values(spec).some((v) => v !== undefined && v !== '');
+        const report = hasSpec ? addMailAccount(PROJECT_FILE, boxId, spec) : addMailRecord(PROJECT_FILE, boxId);
         presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
-      case 'mail.remove': {
-        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new или /project open');
-        const report = removeMailAccount(PROJECT_FILE, String(args.name ?? ''));
+      case 'project.mail.update': {
+        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        const report = updateMailRecord(PROJECT_FILE, String(args.id ?? ''), (args.fields ?? {}) as Record<string, unknown>);
         presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
-      case 'messenger.add': {
-        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new или /project open');
-        const report = addMessengerBot(PROJECT_FILE, String(args.key ?? ''), String(args.token ?? ''));
+      case 'project.mail.delete': {
+        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        const report = removeMailAccount(PROJECT_FILE, String(args.id ?? ''));
         presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
-      case 'messenger.remove': {
-        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new или /project open');
+      case 'project.messenger.add': {
+        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        const key = String(args.key ?? '');
+        const token = args.token ? String(args.token) : '';
+        const report = token ? addMessengerBot(PROJECT_FILE, key, token) : addMessengerRecord(PROJECT_FILE, key);
+        presenter.notice('  ' + report);
+        broadcastState();
+        return { text: report };
+      }
+      case 'project.messenger.update': {
+        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
+        const report = updateMessengerRecord(PROJECT_FILE, String(args.key ?? ''), { token: String(args.token ?? '') });
+        presenter.notice('  ' + report);
+        broadcastState();
+        return { text: report };
+      }
+      case 'project.messenger.delete': {
+        if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
         const report = removeMessengerBot(PROJECT_FILE, String(args.key ?? ''));
         presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
-      case 'profile.set': {
+      case 'profile.update': {
         // профиль владельца: форма настроек в обеих оболочках идёт через rpc
-        const report = engine.setProfile(String(args.name ?? ''), args.role ? String(args.role) : undefined, args.about ? String(args.about) : undefined);
+        const report = engine.updateProfile({
+          name: args.name !== undefined ? String(args.name) : undefined,
+          role: args.role !== undefined ? String(args.role) : undefined,
+          about: args.about !== undefined ? String(args.about) : undefined,
+        });
         presenter.notice('  ' + report);
         broadcastState();
         return { text: report };
       }
-      case 'settings.set': {
+      case 'settings.update': {
         const patch = (args.patch ?? {}) as Record<string, unknown>;
+        // ссылки на модели валидны только на существующие id (паритет /settings update)
+        for (const key of ['model', 'serviceModel'] as const) {
+          const ref = patch[key];
+          if (ref && typeof ref === 'object') {
+            const mid = String((ref as { id?: unknown }).id ?? '').trim();
+            if (mid && !app.models.has(mid)) throw new Error(`Нет модели «${mid}». Доступны: ${[...app.models.keys()].join(', ')}`);
+          }
+        }
         const rawSettings = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
         const merged = { ...rawSettings, ...patch };
         const tmp = SETTINGS_FILE + '.tmp';
         writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
         loadSettings(tmp, 0);
         renameSync(tmp, SETTINGS_FILE);
-        // язык интерфейса — сразу: в следующем state уйдёт новый словарь
+        // язык интерфейса и модели — сразу: в следующем state уйдёт новый словарь
         if (typeof patch.ui === 'string') applyLocale(patch.ui, DT_HOME);
+        if (patch.model && typeof patch.model === 'object') engine.app.settings.model = patch.model as ModelRef;
+        if (patch.serviceModel && typeof patch.serviceModel === 'object') engine.app.settings.serviceModel = patch.serviceModel as ModelRef;
         broadcastState();
         return { ok: true };
       }
-      case 'manager.set': {
+      case 'manager.update': {
         const fields = (args.fields ?? {}) as Record<string, unknown>;
         const known = [...app.models.keys()];
         const report = updateManagerConfig(MANAGER_FILE, fields, known);
+        engine.app.mgr = loadManagerConfig(MANAGER_FILE, known);
         broadcastState();
         return { text: report };
       }
@@ -917,6 +1021,8 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   return {
     port: realPort,
     host,
+    /** Токен доступа (пусто — сервер без авторизации): баннер и ссылка с ?token= */
+    authToken,
     close(): Promise<void> {
       clearInterval(scheduleTimer);
       return new Promise((resolve) => {
@@ -937,12 +1043,17 @@ const entry = (process.argv[1] ?? '').replace(/\\/g, '/');
 if (process.env.DT_SERVE === '1' || entry.endsWith('/src/serve.ts')) {
   const openFlag = process.argv.slice(2).includes('--open');
   startServe()
-    .then(({ port, host }) => {
-      console.log(pc.dim(`\n  API поднято: http://${host}:${port} (WS — /ws) · dreamteam v${APP_VERSION} · ${host === '127.0.0.1' ? 'только локально' : 'ОТКРЫТО В СЕТЬ — авторизации нет'} · Ctrl+C — останов`));
-      if (openFlag) {
-        // HOST=0.0.0.0 — браузеру всё равно нужен конкретный адрес
-        openBrowser(`http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}/`);
-      }
+    .then(({ port, host, authToken }) => {
+      // HOST=0.0.0.0 — браузеру и человеку нужен конкретный адрес
+      const base = `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`;
+      const net = host === '127.0.0.1'
+        ? 'только локально'
+        : authToken
+          ? 'ОТКРЫТО В СЕТЬ — доступ по токену'
+          : 'ОТКРЫТО В СЕТЬ — авторизации нет';
+      console.log(pc.dim(`\n  API поднято: ${base} (WS — /ws) · dreamteam v${APP_VERSION} · ${net} · Ctrl+C — останов`));
+      if (authToken) console.log(pc.dim(`  открыть с токеном: ${base}/?token=${authToken}`));
+      if (openFlag) openBrowser(authToken ? `${base}/?token=${authToken}` : `${base}/`);
     })
     .catch((err) => {
       console.error(pc.red(`Фатальная ошибка: ${err instanceof Error ? err.stack ?? err.message : err}`));

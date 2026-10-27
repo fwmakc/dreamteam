@@ -12,6 +12,7 @@
 import { createWriteStream, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { makeCtx } from './tool-ctx.js';
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import { Document as DocxDoc, ImageRun, Packer, Paragraph } from 'docx';
 import PDFDocument from 'pdfkit';
@@ -81,8 +82,7 @@ writeFileSync(join(cwd, 'таблица.png'), pngWithText([
 }
 
 const tool = (await import('../src/tools/ocr/ocr.js')).default({});
-const run = (body: string): Promise<string> =>
-  tool.run(body, { cwd, run: async () => ({ ok: true, output: '' }), http: async () => ({ ok: true, output: '' }), confirm: async () => false });
+const run = (body: string): Promise<string> => tool.run(body, makeCtx(cwd));
 
 // ─── text: png ───────────────────────────────────────────────────────────────
 {

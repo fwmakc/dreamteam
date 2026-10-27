@@ -16,7 +16,7 @@
  */
 import { basename, join } from 'node:path';
 import { statSync } from 'node:fs';
-import { safePath } from '../../actions.js';
+import { projectStoreBase, resolveToolPath } from '../../actions.js';
 import { SENSITIVE, checkCardKeys, resolveCard, splitArgs, type Tool, type ToolConfig, type ToolRunContext, type ToolVerdict } from '../../tools-api.js';
 import {
   findMail,
@@ -54,11 +54,11 @@ function parseSend(text: string): { to?: string; subject?: string; files?: strin
   return { ...meta, body: lines.slice(i).join('\n').trim() };
 }
 
-/** Путь внутри рабочей папки, не секретный; иначе — отказ. */
+/** Путь в рабочей папке или прикладных подпапках проекта (inbox, mail, images); не секретный. */
 export function attachmentPath(cwd: string, rel: string): string {
   if (SENSITIVE.test(rel)) throw new Error(`«${rel}» похоже на секретный файл — отправлять его нельзя`);
-  const abs = safePath(cwd, rel);
-  if (!abs) throw new Error(`файл «${rel}» вне рабочей папки — вкладываю только свои файлы`);
+  const abs = resolveToolPath(cwd, rel);
+  if (!abs) throw new Error(`файл «${rel}» вне рабочей папки и прикладных папок проекта — вкладываю только свои файлы`);
   return abs;
 }
 
@@ -112,7 +112,8 @@ export default (config: ToolConfig): Tool => {
           const uid = rest[1];
           if (!uid) throw new Error('синтаксис: read <ящик> <uid из «mail list»>');
           const mail = await readMail(acc, uid);
-          const dir = join(ctx.cwd, 'mail');
+          // вложения — прикладное проекта: в доме (projects/<id>/mail/), не в рабочей папке
+          const dir = join(projectStoreBase(), 'mail');
           const saved = saveAttachments(dir, mail.attachments);
           const attach = saved.length === 0
             ? 'вложений нет'

@@ -124,10 +124,10 @@ function ctxModel(e: MouseEvent, p: ModelInfo): void {
   if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => delModel(p) });
   openCtx(e, items);
 }
-function ctxSession(e: MouseEvent, i: number, title: string): void {
+function ctxSession(e: MouseEvent, id: string, title: string): void {
   openCtx(e, [
-    { label: tr('Переименовать'), fn: () => openSessionRename(i) },
-    { label: tr('Удалить'), fn: () => deleteSession(i, title) },
+    { label: tr('Переименовать'), fn: () => openSessionRename(id) },
+    { label: tr('Удалить'), fn: () => deleteSession(id, title) },
   ]);
 }
 function ctxSchedule(e: MouseEvent, t: ScheduleTaskInfo): void {
@@ -179,10 +179,10 @@ function rpcReport(p: Promise<{ text: string }>): void {
 }
 function openAgentCreate(): void {
   openForm(tr('Новый агент'), [
-    { key: 'id', label: tr('id (латиница, цифры, -/_)') },
+    { key: 'id', label: tr('id (латиница, цифры, ./-/_)') },
     { key: 'name', label: tr('Имя') },
     { key: 'role', label: tr('Роль (можно пропустить)') },
-  ], (v) => rpcReport(rpc('team.add', v)));
+  ], (v) => rpcReport(rpc('agent.new', v)));
 }
 function openAgentSettings(a: AgentInfo): void {
   openForm(tr('Настройки агента {name}', { name: a.name }), [
@@ -193,23 +193,31 @@ function openAgentSettings(a: AgentInfo): void {
     { key: 'tools', label: tr('Тулы через запятую (есть: {list})', { list: (a.tools ?? []).join(', ') || tr('нет') }) },
   ], (v) => {
     const fields: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) if (val !== '' && k !== 'tools') fields[k] = k === 'temperature' ? Number(val) : val;
-    if (Object.keys(fields).length > 0) rpcReport(rpc('team.update', { id: a.id, fields }));
-    // новые тула выдаём по одному (отзыв — руками в agents.json или словом менеджеру)
+    // модель и температура — вложенное поле model карточки ({model: {id, temperature}})
+    const model: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (val === '' || k === 'tools') continue;
+      if (k === 'model') model.id = val;
+      else if (k === 'temperature') model.temperature = Number(val);
+      else fields[k] = val;
+    }
+    if (Object.keys(model).length > 0) fields.model = model;
+    if (Object.keys(fields).length > 0) rpcReport(rpc('agent.update', { id: a.id, fields }));
+    // новые тула выдаём по одному (отзыв — /agent tool delete или словом менеджеру)
     const have = new Set(a.tools ?? []);
     for (const tool of (v.tools ?? '').split(',').map((t) => t.trim()).filter(Boolean)) {
       if (have.has(tool.toLowerCase())) continue;
-      rpcReport(rpc('team.grant', { agent: a.id, tool }));
+      rpcReport(rpc('agent.tool.add', { agent: a.id, tool }));
     }
   });
 }
 function agentDelete(a: AgentInfo): void {
-  askDelete(`агент «${a.name}»`, () => rpcReport(rpc('team.delete', { id: a.id })));
+  askDelete(`агент «${a.name}»`, () => rpcReport(rpc('agent.delete', { id: a.id })));
 }
 function toggleChat(a: AgentInfo): void {
   if (roundActive.value) return;
   // событие чата придёт репликой менеджера в ленте (со state) — журнал не дублируем
-  rpc(a.inChat ? 'chat.remove' : 'chat.add', { name: a.name })
+  rpc(a.inChat ? 'session.agent.delete' : 'session.agent.add', { id: a.id })
     .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 function delAgent(a: AgentInfo): void {
@@ -219,12 +227,12 @@ function delAgent(a: AgentInfo): void {
 // ── модели: создать/удалить/настроить ────────────────────────────────────────
 function modelCreate(): void {
   openForm(tr('Новая модель'), [
-    { key: 'id', label: tr('id (латиница)') },
-    { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat)'), value: 'openai-compatible' },
+    { key: 'id', label: tr('id (латиница, цифры, ./-/_)') },
+    { key: 'provider', label: tr('Провайдер (openai-compatible / anthropic-compatible / gigachat)'), value: 'openai-compatible' },
     { key: 'baseUrl', label: 'baseUrl' },
     { key: 'model', label: tr('Модель') },
     { key: 'apiKey', label: tr('Ключ API (можно пусто — для локальных API)') },
-  ], (v) => rpcReport(rpc('model.add', { id: v.id, config: v })));
+  ], (v) => rpcReport(rpc('model.new', { id: v.id, config: v })));
 }
 function modelDelete(p: ModelInfo): void {
   if (p.isDefault) return;
@@ -232,14 +240,16 @@ function modelDelete(p: ModelInfo): void {
 }
 function setModel(p: ModelInfo): void {
   if (roundActive.value || p.isDefault) return;
-  rpc('model.set', { id: p.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
+  // «сделать текущей» — поле владельца: settings.update model.id=…
+  rpc('settings.update', { patch: { model: { id: p.id } } })
+    .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 function delModel(p: ModelInfo): void {
   if (!roundActive.value) modelDelete(p);
 }
 function openModelSettings(p: ModelInfo): void {
   openForm(tr('Модель {id}', { id: p.id }), [
-    { key: 'adapter', label: tr('Адаптер (openai-compatible / anthropic / gigachat / mock)'), value: p.kind },
+    { key: 'provider', label: tr('Провайдер (openai-compatible / anthropic-compatible / gigachat / mock)'), value: p.kind },
     { key: 'model', label: tr('Модель'), value: p.model ?? '' },
     { key: 'baseUrl', label: tr('baseUrl (пусто — не менять)'), value: p.baseUrl ?? '' },
     { key: 'apiKey', label: tr('Ключ API (пусто — не менять)'), value: '' },
@@ -262,7 +272,7 @@ function openSettingsForm(): void {
   ], (v) => {
     const patch: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' ? Number(val) : val;
-    rpc('settings.set', { patch })
+    rpc('settings.update', { patch })
       .then(() => addFeed('notice', `· ${tr('настройки сохранены')}`))
       .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
   });
@@ -274,7 +284,7 @@ function openUserProfileForm(): void {
     { key: 'name', label: tr('Имя'), value: p.name ?? '' },
     { key: 'role', label: tr('Роль'), value: p.role ?? '' },
     { key: 'about', label: tr('О себе'), value: p.about ?? '' },
-  ], (v) => rpcReport(rpc('profile.set', v)));
+  ], (v) => rpcReport(rpc('profile.update', v)));
 }
 function openManagerForm(): void {
   const mgr = manager.value;
@@ -287,7 +297,7 @@ function openManagerForm(): void {
   ], (v) => {
     const fields: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
-    rpcReport(rpc('manager.set', { fields }));
+    rpcReport(rpc('manager.update', { fields }));
   });
 }
 
@@ -306,18 +316,18 @@ function openProjectForm(): void {
 function newProjectForm(): void {
   if (roundActive.value) return;
   openForm(tr('Новый проект'), [
-    { key: 'name', label: tr('Имя проекта (без пробелов)') },
+    { key: 'id', label: tr('id проекта (без пробелов)') },
     { key: 'path', label: tr('Рабочая папка (создастся, если нет — можно пропустить)') },
   ], (v) => {
-    const name = String(v.name ?? '').trim();
-    if (!name) return;
-    rpcReport(rpc('project.new', { name, path: String(v.path ?? '').trim() || undefined }));
+    const id = String(v.id ?? '').trim();
+    if (!id) return;
+    rpcReport(rpc('project.new', { id, path: String(v.path ?? '').trim() || undefined }));
   });
 }
 function switchProject(p: ProjectRecordInfo): void {
   if (roundActive.value) return;
   if (currentProject.value && p.name === currentProject.value.id) return;
-  rpcReport(rpc('project.open', p.path ? { path: p.path } : { name: p.name }));
+  rpcReport(rpc('project.open', p.path ? { path: p.path } : { id: p.name }));
 }
 /** Переименовать текущий проект (папка в доме + id). */
 function renameProjectForm(): void {
@@ -326,7 +336,7 @@ function renameProjectForm(): void {
     { key: 'name', label: tr('Новое имя (без пробелов)'), value: currentProject.value?.name ?? '' },
   ], (v) => {
     const name = String(v.name ?? '').trim();
-    if (name) rpcReport(rpc('project.rename', { name }));
+    if (name) rpcReport(rpc('project.update', { name }));
   });
 }
 /** Сменить рабочую папку текущего проекта. */
@@ -336,7 +346,7 @@ function projectPathForm(): void {
     { key: 'path', label: tr('Путь к папке (создастся, если нет)'), value: currentProject.value?.path ?? '' },
   ], (v) => {
     const path = String(v.path ?? '').trim();
-    if (path) rpcReport(rpc('project.path', { path }));
+    if (path) rpcReport(rpc('project.update', { path }));
   });
 }
 function ctxProjectCurrent(e: MouseEvent): void {
@@ -348,12 +358,12 @@ function ctxProjectCurrent(e: MouseEvent): void {
 }
 function ctxProjectKnown(e: MouseEvent, p: ProjectRecordInfo): void {
   openCtx(e, [{ label: tr('Удалить из дома (разговоры тоже)'), fn: () =>
-    askDelete(tr('проект «{name}»', { name: p.name }), () => rpcReport(rpc('project.remove', { name: p.name }))) }]);
+    askDelete(tr('проект «{name}»', { name: p.name }), () => rpcReport(rpc('project.delete', { id: p.name }))) }]);
 }
 /** Первый сервер проекта (когда список серверов ещё пуст): из контекстного меню. */
 function projectAdd(): void {
   openForm(tr('Новый сервер проекта'), [
-    { key: 'hostName', label: tr('Имя сервера (напр. prod)') },
+    { key: 'id', label: tr('id сервера (напр. prod)') },
     { key: 'host', label: tr('Хост (адрес)') },
     { key: 'user', label: tr('Пользователь (можно пропустить)') },
     { key: 'port', label: tr('Порт (можно пропустить)') },
@@ -362,15 +372,15 @@ function projectAdd(): void {
 function projectHostAdd(p: ProjectInfo): void {
   if (roundActive.value) return;
   openForm(tr('Сервер проекта «{id}»', { id: p.id }), [
-    { key: 'hostName', label: tr('Имя сервера (напр. prod)') },
+    { key: 'id', label: tr('id сервера (напр. prod)') },
     { key: 'host', label: tr('Хост (адрес)') },
     { key: 'user', label: tr('Пользователь (можно пропустить)') },
     { key: 'port', label: tr('Порт (можно пропустить)') },
-  ], (v) => rpcReport(rpc('project.host.add', { id: p.id, ...v })));
+  ], (v) => rpcReport(rpc('project.host.add', v)));
 }
 function projectHostDelete(p: ProjectInfo, h: ProjectHost): void {
   if (roundActive.value) return;
-  askDelete(tr('сервер «{name}» проекта «{id}»', { name: h.name, id: p.id }), () => rpcReport(rpc('project.host.delete', { name: h.name })));
+  askDelete(tr('сервер «{name}» проекта «{id}»', { name: h.name, id: p.id }), () => rpcReport(rpc('project.host.delete', { id: h.name })));
 }
 
 // ── расписание ───────────────────────────────────────────────────────────────
@@ -400,15 +410,15 @@ function scheduleDelete(t: ScheduleTaskInfo): void {
 }
 
 // ── сессии ───────────────────────────────────────────────────────────────────
-function openSessionRename(i: number): void {
+function openSessionRename(id: string): void {
   if (roundActive.value) return;
-  const meta = sessions.value[i - 1];
+  const meta = sessions.value.find((s) => s.id === id);
   if (!meta) return;
   openForm(tr('Переименовать «{title}»', { title: meta.title }), [
     { key: 'name', label: tr('Новое имя (пусто — менеджер придумает)'), value: meta.title },
   ], (v) => {
-    // session.rename правит ТЕКУЩИЙ разговор — сначала открываем выбранный
-    rpcReport(rpc('session.open', { n: i }).then(() => rpc('session.rename', { name: v.name })));
+    // session.update правит ТЕКУЩИЙ разговор — сначала открываем выбранный
+    rpcReport(rpc('session.open', { id }).then(() => rpc('session.update', { title: v.name })));
   });
 }
 function newSession(): void {
@@ -416,11 +426,11 @@ function newSession(): void {
   roundActive.value = true;
   rpc('session.new', {}).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
-function openSession(i: number): void {
-  if (!roundActive.value) rpc('session.open', { n: i }).catch(() => {});
+function openSession(id: string): void {
+  if (!roundActive.value) rpc('session.open', { id }).catch(() => {});
 }
-function deleteSession(i: number, title: string): void {
-  askDelete(tr('разговор «{title}»', { title }), () => rpcReport(rpc('session.delete', { n: i })));
+function deleteSession(id: string, title: string): void {
+  askDelete(tr('разговор «{title}»', { title }), () => rpcReport(rpc('session.delete', { id })));
 }
 
 // ── сворачивание секций (localStorage) ───────────────────────────────────────
@@ -484,8 +494,7 @@ function exportProject(): void {
   if (!roundActive.value) send({ type: 'export_project' });
 }
 function exportSession(): void {
-  const cur = sessions.value.findIndex((s) => s.id === currentSessionId.value) + 1;
-  if (cur > 0 && !roundActive.value) send({ type: 'export_session', n: cur });
+  if (currentSessionId.value && !roundActive.value) send({ type: 'export_session', id: currentSessionId.value });
 }
 
 // ── вложение ─────────────────────────────────────────────────────────────────
@@ -665,28 +674,30 @@ function argItems(cmdName: string, d: CompletionData): HintItem[] | null {
   return argHintItems(op, Math.max(0, typed), d);
 }
 
-/** Значения аргумента по подсказке из манифеста: номера, имена, id, shared. */
+/** Значения аргумента по машиночитаемой подсказке манифеста (id, тула, shared). */
 function argHintItems(op: OpHint, argPos: number, d: CompletionData): HintItem[] | null {
-  const m = /\[([^\]]+)\]/.exec((op.args ?? '').split(' ')[Math.min(argPos, (op.args ?? '').split(' ').length - 1)] ?? '');
-  const argName = m?.[1] ?? '';
-  if (argName === 'номер' && op.cmd.includes('session')) {
-    return d.sessions.map((s, i) => ({ label: String(i + 1), hint: s.title, insert: (i + 1) + ' ' }));
+  const hints = op.hints ?? [];
+  const hint = hints[Math.min(argPos, Math.max(hints.length - 1, 0))] ?? '';
+  if (hint === 'sessions') {
+    return d.sessions.map((s) => ({ label: s.id, hint: s.title, insert: s.id + ' ' }));
   }
-  if (argName === 'номер' || argName === 'имя|номер') {
-    return [
-      ...d.team.map((a, i) => ({ label: String(i + 1), hint: a.name, insert: (i + 1) + ' ' })),
-      ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
-      ...(argName === 'имя|номер' ? [] : []),
-    ];
+  if (hint === 'agents') {
+    return d.team.map((a) => ({ label: a.id, hint: a.name, insert: a.id + ' ' }));
   }
-  if (argName === 'кого|shared') {
+  if (hint === 'chat') {
+    return d.team.filter((a) => a.inChat).map((a) => ({ label: a.id, hint: a.name, insert: a.id + ' ' }));
+  }
+  if (hint === 'models') {
+    return d.modelIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
+  }
+  // память: «кого|shared» из имени аргумента; тула — тоже из имени
+  const args = (op.args ?? '').split(' ');
+  const argName = args[Math.min(argPos, args.length - 1)] ?? '';
+  if (argName.includes('shared')) {
     return [
-      ...d.team.map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
+      ...d.team.map((a) => ({ label: a.id, hint: a.name, insert: a.id + ' ' })),
       { label: 'shared', hint: tr('общая память'), insert: 'shared ' },
     ];
-  }
-  if (argName === 'id' && op.cmd.startsWith('/model')) {
-    return d.modelIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
   }
   if (argName === 'тул') {
     return ['files', 'shell', 'ssh', 'look', 'image'].map((t) => ({ label: t, hint: '', insert: t + ' ' }));
@@ -811,12 +822,12 @@ onMounted(connectWs);
         </div>
         <ul id="sessions">
           <li
-            v-for="(s, i) in sessions"
+            v-for="s in sessions"
             :key="s.id"
             :class="{ active: s.id === currentSessionId }"
             :title="`${s.title}\nid: ${s.id}\n${tr('сообщений:')} ${s.count}\n${tr('создан:')} ${fmtDate(s.createdAt)}\n${tr('последнее сообщение:')} ${fmtDate(s.updatedAt)}`"
-            @click="openSession(i + 1)"
-            @contextmenu.prevent="ctxSession($event, i + 1, s.title)"
+            @click="openSession(s.id)"
+            @contextmenu.prevent="ctxSession($event, s.id, s.title)"
           >
             <div class="content">
               <div class="sess-main"><span>{{ s.title }}</span></div>
@@ -826,7 +837,7 @@ onMounted(connectWs);
             <span
               v-if="s.id !== currentSessionId"
               class="del" :title="tr('Удалить разговор')"
-              @click.stop="deleteSession(i + 1, s.title)"
+              @click.stop="deleteSession(s.id, s.title)"
             >✕</span>
           </li>
         </ul>

@@ -62,7 +62,7 @@ const {
   const { io, out } = makeIo(['ru', '4', 'n'], true);
   const notes = await ensureLayers(io, home);
   const mockCard = JSON.parse(readFileSync(join(home, 'models', 'mock.json'), 'utf8'));
-  check('wizard mock: карточка mock, адаптер mock', mockCard.adapter === 'mock', JSON.stringify(mockCard));
+  check('wizard mock: карточка mock, адаптер mock', mockCard.provider === 'mock', JSON.stringify(mockCard));
   check('wizard: заметка о карточке модели', notes.some((n) => n.includes('mock.json')), notes.join(' | '));
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('настройки: созданы с дефолтами', settings.width === 100 && settings.screen === true, JSON.stringify(settings));
@@ -116,7 +116,7 @@ const {
       return cards.includes('openai.json') && cards.includes('mock.json') && cards.includes('claude.json');
     })());
   }
-  check('wizard: в выводе меню и приветствие', out().includes('Тип адаптера') && out().includes('живой менеджер'), out().slice(-200));
+  check('wizard: в выводе меню и приветствие', out().includes('Тип провайдера') && out().includes('живой менеджер'), out().slice(-200));
 
   // --- повторный ensureLayers: всё на месте — тишина, файлы не переписываются ---
   const before = readFileSync(join(home, 'settings.json'), 'utf8');
@@ -131,7 +131,7 @@ const {
   const { io, out } = makeIo(['ru', '1', 'https://api.test/v1', 'test-model', 'секрет-ключ-42', 'n'], true);
   const notes = await ensureLayers(io, home);
   const main = JSON.parse(readFileSync(join(home, 'models', 'main.json'), 'utf8'));
-  check('openai-совместимый: карточка main', main.adapter === 'openai-compatible', JSON.stringify(main));
+  check('openai-совместимый: карточка main', main.provider === 'openai-compatible', JSON.stringify(main));
   check('openai-совместимый: baseUrl и модель', main.baseUrl === 'https://api.test/v1' && main.model === 'test-model', JSON.stringify(main));
   check('openai-совместимый: ключ прямо в карточке', main.apiKey === 'секрет-ключ-42' && !('apiKeyEnv' in main), JSON.stringify(main));
   check('ключ не эхоится в выводе мастера', !out().includes('секрет-ключ-42'), out());

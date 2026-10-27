@@ -15,7 +15,8 @@ import type {
 } from './types.js';
 import { loadTeam, MENTION_TRIGGERS } from './agents.js';
 import { readAccount, type MailAccount } from './mail.js';
-import { agentToolIds, BUILTIN_TOOL_IDS, normalizeAgentTools, TOOL_ID_RE } from './tools-api.js';
+import { isAgentId, isRecordId, isToolId } from './ids.js';
+import { agentToolIds, BUILTIN_TOOL_IDS, normalizeAgentTools } from './tools-api.js';
 import { t, tf } from './i18n.js';
 
 export const MANAGER_ID = 'manager';
@@ -149,8 +150,8 @@ export const MANAGER_PROMPT =
   'Действия:\n' +
   '- {"op":"team.add","id":"логин-латиницей","name":"Имя","description":"чем занимается, одной фразой","prompt":"системный промпт от первого лица","emoji":"🎯","color":"blue","temperature":0.5,"tools":{"shell":{},"files":null}} — tools: объект-карточки, имя тула → настройки (объект или null = по умолчанию); модель наследуется (переопределить можно полем "model":"id-модели")\n' +
   '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","temperature":0.3,"name":"...","emoji":"...","color":"..."}}\n' +
-  '- {"op":"chat.add","who":"имя или id"} / {"op":"chat.remove","who":"имя или id"} — позвать или вывести из текущего чата\n' +
-  '- {"op":"session.list"} — показать разговоры; {"op":"session.open","n":2} — открыть №2; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","n":3} — удалить №3 (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (имя — по краткому содержанию)\n' +
+  '- {"op":"chat.add","who":"id"} / {"op":"chat.remove","who":"id"} — позвать или вывести из текущего чата\n' +
+  '- {"op":"session.list"} — показать разговоры; {"op":"session.open","id":"20261027-143052"} — открыть по id; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","id":"20261027-143052"} — удалить по id (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (имя — по краткому содержанию)\n' +
   '- {"op":"tool.grant","agent":"id_участника","tool":"files","card":{"allow":["git *"]}} — включить тул агенту или обновить его карточку; card можно опустить (настройки по умолчанию). Встроенные: files, shell, git, arch, ssh, look, image; свои — имя файла из tools/ (включить можно только существующий, код тулов пишет человек)\n' +
    '- {"op":"project.host.add","name":"prod","host":"203.0.113.10","user":"deploy","port":22,"dir":"/srv/app"} — сервер в текущий проект (password лучше не передавать в переписке — пусть человек впишет сам)\n' +
    '- {"op":"project.open","path":"путь или имя"} — сменить проект: рабочая папка и разговоры\n' +
@@ -199,7 +200,7 @@ export function managerStateInput(ctx: ManagerContext): string {
       : ctx.team.filter((a) => ctx.participants!.includes(a.id)).map((a) => a.id).join(', ') || 'никого';
   const sessions = ctx.sessions
     .map(
-      (s, i) => `${i + 1}. ${s.title} — ${s.count} сообщ.${s.id === ctx.currentSessionId ? ' (текущий)' : ''}`,
+      (s) => `- ${s.id} — ${s.title} — ${s.count} сообщ.${s.id === ctx.currentSessionId ? ' (текущий)' : ''}`,
     )
     .join('\n');
   const projects = (ctx.projects ?? [])
@@ -215,7 +216,7 @@ export function managerStateInput(ctx: ManagerContext): string {
     : '';
   return (
     `Текущее состояние.\nКоманда:\n${roster}\nВ этом чате: ${inChat}\n` +
-    `Разговоры (номер — это n для session.*):\n${sessions || '- нет'}\n` +
+    `Разговоры (id — для session.open/session.delete):\n${sessions || '- нет'}\n` +
     (projects ? `Проекты (реестр серверов для ssh):\n${projects}\n` : '') +
     (known ? `Известные проекты (для project.open):\n${known}\n` : '') +
     `Текущий разговор: ${ctx.currentSessionId} (имя: «${ctx.sessionTitle}»)\n` +
@@ -260,7 +261,7 @@ function isManagerAction(a: unknown): a is ManagerAction {
       return typeof o.who === 'string';
     case 'session.open':
     case 'session.delete':
-      return typeof o.n === 'number' && Number.isInteger(o.n);
+      return typeof o.id === 'string' && !!o.id.trim();
     case 'session.rename':
       return typeof o.title === 'string' && !!o.title.trim();
     case 'tool.grant':
@@ -379,7 +380,7 @@ function normalizeModelRef(value: string | ModelRef): ModelRef {
 export function addTeamAgent(dir: string, data: ManagerNewAgent, models: ReadonlyMap<string, unknown>): string {
   const id = String(data.id ?? '').trim();
   const name = String(data.name ?? '').trim();
-  if (!/^[a-z0-9_-]+$/i.test(id)) throw new Error(`неверный id «${data.id}» — нужна латиница, цифры, «-» и «_»`);
+  if (!isAgentId(id)) throw new Error(`неверный id «${data.id}» — нужна латиница, цифры, точка, «-» и «_»`);
   if (!name) throw new Error('не указано имя участника (name)');
   if (agentPathExists(dir, id)) throw new Error(`участник с id «${id}» уже есть`);
   const role = typeof data.role === 'string' && data.role.trim() ? data.role.trim() : 'участник';
@@ -470,8 +471,8 @@ export function updateTeamAgent(dir: string, id: string, fields: ManagerUpdateFi
 export function grantTool(dir: string, agentId: string, tool: string, card?: unknown, toolsDir?: string): string {
   const fid = String(agentId ?? '').trim();
   const tid = String(tool ?? '').trim().toLowerCase();
-  if (!TOOL_ID_RE.test(tid)) {
-    throw new Error(`неверный id тула «${tool}» — строчные буквы/цифры/-/_ от 2 символов`);
+  if (!isToolId(tid)) {
+    throw new Error(`неверный id тула «${tool}» — строчные буквы/цифры/./-/_ от 2 символов`);
   }
   if (!(BUILTIN_TOOL_IDS as readonly string[]).includes(tid)) {
     if (!toolsDir || !existsSync(join(toolsDir, `${tid}.ts`))) {
@@ -491,6 +492,21 @@ export function grantTool(dir: string, agentId: string, tool: string, card?: unk
   return had
     ? tf('✓ {name}: карточку тула «{tool}» обновил', { name: String(agentCard.name ?? fid), tool: tid })
     : tf('✓ {name}: тул «{tool}» включён', { name: String(agentCard.name ?? fid), tool: tid });
+}
+
+/** Убирает тул у агента: карточка из поля tools удаляется; не было — ошибка. */
+export function revokeTool(dir: string, agentId: string, tool: string): string {
+  const fid = String(agentId ?? '').trim();
+  const tid = String(tool ?? '').trim().toLowerCase();
+  const agentCard = readAgentFile(dir, fid);
+  const tools = (agentCard.tools ?? {}) as Record<string, unknown>;
+  if (tools[tid] === undefined && !(tid in tools)) {
+    throw new Error(`агенту «${fid}» тул «${tid}» и так не включён — см. /agent tools ${fid}`);
+  }
+  delete tools[tid];
+  agentCard.tools = tools;
+  writeAgentFile(dir, fid, agentCard);
+  return tf('✓ {name}: тул «{tool}» выключен', { name: String(agentCard.name ?? fid), tool: tid });
 }
 
 // ─── hosts: серверы проекта (поле "hosts" в project.json) ───────────────────
@@ -559,12 +575,12 @@ export function addProjectHosts(
   const registry = loadHostsFile(file);
   const added: string[] = [];
   for (const [hid, spec] of Object.entries(hosts)) {
-    if (!hid || /\s/.test(hid)) throw new Error('имя сервера — непустая строка без пробелов');
-    if (registry[hid] !== undefined) {
-      throw new Error(`сервер «${hid}» уже есть — /project host delete «${hid}», если нужно заменить`);
+    const id = requireRecordId(hid, 'id сервера');
+    if (registry[id] !== undefined) {
+      throw new Error(`сервер «${id}» уже есть — /project host delete «${id}», если нужно заменить`);
     }
-    registry[hid] = normalizeHost(`сервер «${hid}»`, spec);
-    added.push(hid);
+    registry[id] = normalizeHost(`сервер «${id}»`, spec);
+    added.push(id);
   }
   saveHostsFile(file, registry);
   return tf('✓ сервер(а) добавлены в проект: {list}', { list: added.join(', ') });
@@ -575,7 +591,7 @@ export function removeProjectHost(file: string, name: string): string {
   const hid = String(name ?? '').trim();
   const registry = loadHostsFile(file);
   if (registry[hid] === undefined) {
-    throw new Error(`сервера «${hid}» нет в проекте — см. /project`);
+    throw new Error(`сервера «${hid}» нет в проекте — см. /project hosts`);
   }
   delete registry[hid];
   saveHostsFile(file, registry);
@@ -617,15 +633,14 @@ function saveMailsFile(file: string, mails: MailsFile): void {
  * та же, что у тула mail (readAccount), до записи; пароль в отчёте не светится.
  */
 export function addMailAccount(file: string, name: string, spec: unknown): string {
-  const box = String(name ?? '').trim();
-  if (!box || /\s/.test(box)) throw new Error('имя ящика — непустая строка без пробелов');
+  const box = requireRecordId(name, 'id ящика');
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
     throw new Error('ящик — объект { "user", "password", "imap", "smtp" }');
   }
   const acc = readAccount(box, spec as Record<string, unknown>, file);
   const mails = loadMailsFile(file);
   if (mails[box] !== undefined) {
-    throw new Error(`ящик «${box}» уже есть — /mail remove «${box}», если нужно заменить`);
+    throw new Error(`ящик «${box}» уже есть — /project mail delete «${box}», если нужно заменить`);
   }
   mails[box] = acc;
   saveMailsFile(file, mails);
@@ -637,7 +652,7 @@ export function removeMailAccount(file: string, name: string): string {
   const box = String(name ?? '').trim();
   const mails = loadMailsFile(file);
   if (mails[box] === undefined) {
-    throw new Error(`ящика «${box}» нет — см. /mail`);
+    throw new Error(`ящика «${box}» нет — см. /project mails`);
   }
   delete mails[box];
   saveMailsFile(file, mails);
@@ -683,7 +698,7 @@ export function addMessengerBot(file: string, key: string, token: string): strin
   if (!tok) throw new Error('нужен токен (Telegram — @BotFather, MAX — dev.max.ru)');
   const cfg = loadMessengersFile(file);
   if (cfg[k] !== undefined) {
-    throw new Error(`бот «${k}» уже есть — /messenger remove ${k}, если нужно заменить`);
+    throw new Error(`бот «${k}» уже есть — /project messenger delete ${k}, если нужно заменить`);
   }
   cfg[k] = { token: tok };
   saveMessengersFile(file, cfg);
@@ -698,9 +713,129 @@ export function removeMessengerBot(file: string, key: string): string {
   }
   const cfg = loadMessengersFile(file);
   if (cfg[k] === undefined) {
-    throw new Error(`бота «${k}» нет — см. /messenger`);
+    throw new Error(`бота «${k}» нет — см. /project messengers`);
   }
   delete cfg[k];
   saveMessengersFile(file, cfg);
   return tf('✓ бот «{key}» убран из проекта', { key: k });
+}
+
+// ─── записи секретов уровня команд: пустой add + update по полям ─────────────
+// Команды (/project mail|host|messenger …) создают пустую запись и заполняют
+// её по полям; действия менеджера кладут готовые записи через add*-выше.
+
+/** id записи секрета (ящик/сервер): маска id; иначе Error с внятной причиной. */
+function requireRecordId(raw: string, what: string): string {
+  const id = String(raw ?? '').trim();
+  if (!isRecordId(id)) {
+    throw new Error(`${what} — по маске id: строчная латиница и цифры, внутри точка, «-», «_» (получено «${raw}»)`);
+  }
+  return id;
+}
+
+/** Запись полей в словарь проекта: строки как есть (пустая строка убирает поле), port* — числом, tlsNoVerify — булевым. */
+function applyRecordFields(
+  record: Record<string, unknown>,
+  fields: Record<string, unknown>,
+  allowed: readonly string[],
+): string[] {
+  const changes: string[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    if (!allowed.includes(key)) throw new Error(`поле «${key}» записи не узнаю (можно: ${allowed.join(', ')})`);
+    if (value === '' || value === undefined) {
+      delete record[key];
+      changes.push(`-${key}`);
+      continue;
+    }
+    if ((key === 'port' || key === 'smtpPort') && typeof value === 'string') {
+      const num = Number(value);
+      if (!Number.isInteger(num) || num <= 0) throw new Error(`${key} — целое число больше нуля, а не «${value}»`);
+      record[key] = num;
+      changes.push(`${key}=${num}`);
+      continue;
+    }
+    if (key === 'tlsNoVerify') {
+      record[key] = value === true || value === 'true';
+      changes.push(`${key}=${String(record[key])}`);
+      continue;
+    }
+    record[key] = String(value);
+    changes.push(`${key}="…"`); // значения секретов в отчёте не светятся
+  }
+  return changes;
+}
+
+/** /project host add: пустой сервер — поля заполнит host update. */
+export function addHostRecord(file: string, id: string): string {
+  const hid = requireRecordId(id, 'id сервера');
+  const registry = loadHostsFile(file);
+  if (registry[hid] !== undefined) throw new Error(`сервер «${hid}» уже есть — см. /project hosts`);
+  registry[hid] = { host: '' };
+  saveHostsFile(file, registry);
+  return tf('✓ сервер «{id}» добавлен (пустой) — заполни поля: /project host update {id} host=… user=… port=…', { id: hid });
+}
+
+/** /project host update: правка полей сервера (host, user, password, dir, port). */
+export function updateHostRecord(file: string, id: string, fields: Record<string, unknown>): string {
+  const hid = requireRecordId(id, 'id сервера');
+  const registry = loadHostsFile(file);
+  if (registry[hid] === undefined) throw new Error(`сервера «${hid}» нет — см. /project hosts`);
+  const record: Record<string, unknown> = { ...registry[hid] };
+  const changes = applyRecordFields(record, fields, ['host', 'user', 'password', 'dir', 'port']);
+  if (changes.length === 0) throw new Error('не понятно, что менять — жду поле=значение');
+  registry[hid] = record as unknown as ManagerHostSpec;
+  saveHostsFile(file, registry);
+  return tf('✓ сервер «{id}»: {changes}', { id: hid, changes: changes.join(', ') });
+}
+
+/** /project mail add: пустой ящик — поля заполнит mail update. */
+export function addMailRecord(file: string, id: string): string {
+  const box = requireRecordId(id, 'id ящика');
+  const mails = loadMailsFile(file);
+  if (mails[box] !== undefined) throw new Error(`ящик «${box}» уже есть — см. /project mails`);
+  mails[box] = {} as MailAccount;
+  saveMailsFile(file, mails);
+  return tf('✓ ящик «{id}» добавлен (пустой) — заполни поля: /project mail update {id} user=… password=… imap=… smtp=…', { id: box });
+}
+
+/** /project mail update: правка полей ящика (user, password, imap, smtp, port, smtpPort, tlsNoVerify). */
+export function updateMailRecord(file: string, id: string, fields: Record<string, unknown>): string {
+  const box = requireRecordId(id, 'id ящика');
+  const mails = loadMailsFile(file);
+  if (mails[box] === undefined) throw new Error(`ящика «${box}» нет — см. /project mails`);
+  const record: Record<string, unknown> = { ...mails[box] };
+  const changes = applyRecordFields(record, fields, ['user', 'password', 'imap', 'smtp', 'port', 'smtpPort', 'tlsNoVerify']);
+  if (changes.length === 0) throw new Error('не понятно, что менять — жду поле=значение');
+  mails[box] = record as unknown as MailAccount;
+  saveMailsFile(file, mails);
+  return tf('✓ ящик «{id}»: {changes}', { id: box, changes: changes.join(', ') });
+}
+
+/** /project messenger add: пустой бот (token зальёт update или менеджер). */
+export function addMessengerRecord(file: string, key: string): string {
+  const k = String(key ?? '').trim().toLowerCase();
+  if (!(MESSENGER_KEYS as readonly string[]).includes(k)) {
+    throw new Error(`id бота — «telegram» или «max», получено «${key}»`);
+  }
+  const cfg = loadMessengersFile(file);
+  if (cfg[k] !== undefined) throw new Error(`бот «${k}» уже есть — см. /project messengers`);
+  cfg[k] = { token: '' };
+  saveMessengersFile(file, cfg);
+  return tf('✓ бот «{key}» добавлен (без токена) — заполни: /project messenger update {id} token=…', { key: k });
+}
+
+/** /project messenger update: залить токен боту. */
+export function updateMessengerRecord(file: string, key: string, fields: Record<string, unknown>): string {
+  const k = String(key ?? '').trim().toLowerCase();
+  if (!(MESSENGER_KEYS as readonly string[]).includes(k)) {
+    throw new Error(`id бота — «telegram» или «max», получено «${key}»`);
+  }
+  const cfg = loadMessengersFile(file);
+  if (cfg[k] === undefined) throw new Error(`бота «${k}» нет — см. /project messengers`);
+  const record = (cfg[k] ?? {}) as Record<string, unknown>;
+  const changes = applyRecordFields(record, fields, ['token']);
+  if (changes.length === 0) throw new Error('не понятно, что менять — жду token=…');
+  cfg[k] = record;
+  saveMessengersFile(file, cfg);
+  return tf('✓ бот «{key}»: токен обновлён', { key: k });
 }

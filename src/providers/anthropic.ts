@@ -15,6 +15,7 @@ export const contract: AdapterContract = {
     maxTokens: { type: 'number', desc: 'потолок ответа (по умолчанию 2048)' },
     temperature: { type: 'number' },
     cache: { type: 'boolean', desc: 'кэш промптов (по умолчанию включён)' },
+    vision: { type: 'boolean', desc: 'модель видит картинки — тулу look (Claude мультимодален)' },
   },
   ref: ['temperature', 'maxTokens'],
 };
@@ -41,7 +42,7 @@ export const anthropicFactory: ProviderFactory = (
   const apiKey = config.apiKey ? String(config.apiKey) : undefined;
   if (!apiKey) {
     throw new ConfigurationError(
-      `в карточке провайдера «${id}» нет "apiKey" — впиши ключ из кабинета в providers.json`,
+      `в карточке провайдера «${id}» нет "apiKey" — впиши ключ из кабинета в карточку models/${id}.json`,
     );
   }
   const model = String(config.model ?? 'claude-sonnet-4-5');

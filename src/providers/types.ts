@@ -2,18 +2,12 @@ import type { ImageProvider, LLMProvider, LLMMessage, StreamRequest } from '../t
 
 export type { LLMProvider, LLMMessage, StreamRequest };
 
-/** Описание одного провайдера в config/providers.json */
+/** Карточка модели models/<id>.json: провайдер, соединение, имя модели. */
 export interface ProviderConfig {
-  /** Имя адаптера из реестра (src/providers/registry.ts) */
-  adapter: string;
+  /** Имя провайдера (адаптера) из реестра (src/providers/registry.ts) */
+  provider: string;
   model?: string;
   [key: string]: unknown;
-}
-
-/** Корень config/providers.json */
-export interface ProvidersFile {
-  default: string;
-  providers: Record<string, ProviderConfig>;
 }
 
 /** Фабрика: создаёт провайдера по конфигу. Кидает ConfigurationError, если не хватает настроек/ключей. */

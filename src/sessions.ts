@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { isSessionId } from './ids.js';
 import type { Session, SessionMeta } from './types.js';
 
 /** Хранилище разговоров: один JSON-файл на разговор в sessions/ проекта + человекочитаемый лог в transcripts/. */
@@ -16,17 +17,29 @@ export class SessionStore {
     return join(this.dir, `${id}.json`);
   }
 
-  create(): Session {
+  /** Новый разговор: без id — автоштамп; с id — проверка маски и занятости (кидают ошибку). */
+  create(id?: string): Session {
     const now = new Date();
     const p = (n: number) => String(n).padStart(2, '0');
-    const base =
-      `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}` +
-      `-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
-    let id = base;
-    let n = 2;
-    while (existsSync(this.file(id))) id = `${base}-${n++}`;
+    let final: string;
+    if (id !== undefined) {
+      if (!isSessionId(id)) {
+        throw new Error(
+          `id «${id}» не по маске: строчная латиница и цифры, внутри — точка, дефис, подчёркивание`,
+        );
+      }
+      if (existsSync(this.file(id))) throw new Error(`Разговор с id «${id}» уже есть — см. /sessions`);
+      final = id;
+    } else {
+      const base =
+        `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}` +
+        `-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+      final = base;
+      let n = 2;
+      while (existsSync(this.file(final))) final = `${base}-${n++}`;
+    }
     const session: Session = {
-      id,
+      id: final,
       title: 'Новый разговор',
       createdAt: Date.now(),
       updatedAt: Date.now(),

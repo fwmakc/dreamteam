@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import AdmZip from 'adm-zip';
 import { Table, TableCell, TableRow, WidthType } from 'docx';
+import { makeCtx } from './tool-ctx.js';
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -26,8 +27,7 @@ function check(name: string, cond: boolean, detail?: string): void {
 
 const cwd = mkdtempSync(join(tmpdir(), 'dt-docs-'));
 const tool = (await import('../src/tools/docs/docs.js')).default({});
-const run = (body: string): Promise<string> =>
-  tool.run(body, { cwd, run: async () => ({ ok: true, output: '' }), http: async () => ({ ok: true, output: '' }), confirm: async () => false });
+const run = (body: string): Promise<string> => tool.run(body, makeCtx(cwd));
 
 // ─── xlsx: markdown-таблица → write → read/tables ───────────────────────────
 {
@@ -142,14 +142,14 @@ const run = (body: string): Promise<string> =>
     check('odt без моста — внятный отказ', msg.includes('мост soffice') && msg.includes('docker compose'), msg.slice(0, 160));
   }
   try {
-    await tool.run('convert docx старый.doc', { cwd, run: async () => ({ ok: true, output: '' }), http: async () => ({ ok: true, output: '' }), confirm: async () => false });
+    await tool.run('convert docx старый.doc', makeCtx(cwd));
     check('convert без моста — внятный отказ', false, 'не бросил');
   } catch (e) {
     const msg = (e as Error).message;
     check('convert без моста — внятный отказ', msg.includes('мост soffice') || msg.includes('нет'), msg.slice(0, 160));
   }
   try {
-    await tool.run('convert docx нет-такого-файла.docx', { cwd, run: async () => ({ ok: true, output: '' }), http: async () => ({ ok: true, output: '' }), confirm: async () => false });
+    await tool.run('convert docx нет-такого-файла.docx', makeCtx(cwd));
     check('convert несуществующего — отказ', false, 'не бросил');
   } catch (e) {
     check('convert несуществующего — отказ', (e as Error).message.includes('нет'), (e as Error).message.slice(0, 120));

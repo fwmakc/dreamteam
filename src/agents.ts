@@ -1,16 +1,15 @@
 /**
  * Команда: полка agents/ в доме — по файлу на агента. id агента = имя файла
- * (латиница/цифры/-/_), карточка внутри обязана иметь тот же id (сверка при
+ * (латиница/цифры/./-/_), карточка внутри обязана иметь тот же id (сверка при
  * загрузке). Ростер — по алфавиту id: детерминированный порядок для
  * модератора и подсказок. Вызывается перед каждым раундом — правки карточек
  * подхватываются без перезапуска.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { isAgentId } from './ids.js';
 import { normalizeAgentTools } from './tools-api.js';
 import type { Agent, ModelRef, UserProfile } from './types.js';
-
-const AGENT_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
 /** Читает все карточки агентов из agents/ дома, сортирует по id. */
 export function loadTeam(dir: string): Agent[] {
@@ -24,8 +23,8 @@ export function loadTeam(dir: string): Agent[] {
   for (const name of names.filter((f) => f.endsWith('.json')).sort()) {
     const id = name.replace(/\.json$/, '');
     const path = join(dir, name);
-    if (!AGENT_ID_RE.test(id)) {
-      throw new Error(`${path}: «${id}» — id агента: строчные буквы/цифры/-/_`);
+    if (!isAgentId(id)) {
+      throw new Error(`${path}: «${id}» — id агента: строчные буквы/цифры/./-/_`);
     }
     let raw: unknown;
     try {

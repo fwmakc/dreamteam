@@ -1,5 +1,5 @@
 {
-  "adapter": "openai-compatible",
+  "provider": "openai-compatible",
   "baseUrl": "http://localhost:8003/v1",
   "model": "Qwen3-VL-4B-Instruct",
   "vision": true

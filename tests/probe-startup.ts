@@ -38,8 +38,8 @@ mkdirSync(proj, { recursive: true });
 const j = (p: string, v: unknown): void =>
   writeFileSync(join(home, p), JSON.stringify(v, null, 2) + '\n');
 mkdirSync(join(home, 'models'), { recursive: true });
-j('models/mock.json', { adapter: 'mock' });
-j('models/mock-images.json', { adapter: 'mock-images' });
+j('models/mock.json', { provider: 'mock' });
+j('models/mock-images.json', { provider: 'mock-images' });
 j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000, model: { id: 'mock' } });
 j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
 // менеджер и команда — вещь машины: в доме, на mock-моделях

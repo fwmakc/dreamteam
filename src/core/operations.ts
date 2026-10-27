@@ -8,6 +8,15 @@
  * разработки, легаси не тащим). Транспорт (`user_message`, `abort`, `file`,
  * диалоги confirm/choose) — не операции и здесь не живёт.
  *
+ * Адресация — только id (строчная латиница, цифры, внутри . - _): агенты —
+ * по id, разговоры — по id, проекты — по id, записи секретов (ящики, серверы,
+ * боты) — по id. Имена и номера из списков адресацией не являются.
+ *
+ * Состояние: `new` всегда создаёт и открывает; `close` — честное «ничего
+ * не открыто»; текущее (проект/разговор) удалить нельзя — сначала close.
+ * Операции с needsSession работают с ТЕКУЩИМ разговором и требуют, чтобы
+ * он был открыт.
+ *
  * Реализации опираются на те же helpers, что исполняет менеджер переговорки
  * своими JSON-действиями: валидация и tmp+rename-откат общие. Ошибки летят
  * вызывающему (терминал покажет, сервер ушлёт error/rpc_error).
@@ -16,9 +25,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from '
 import { basename, join } from 'node:path';
 import { loadTeam } from '../agents.js';
 import {
-  addMailAccount,
-  addMessengerBot,
-  addProjectHosts,
+  addMailRecord,
+  addHostRecord,
+  addMessengerRecord,
   addTeamAgent,
   grantTool,
   loadHostsFile,
@@ -29,7 +38,11 @@ import {
   removeMessengerBot,
   removeProjectHost,
   removeTeamAgent,
+  revokeTool,
+  updateHostRecord,
+  updateMailRecord,
   updateManagerConfig,
+  updateMessengerRecord,
   updateTeamAgent,
 } from '../manager.js';
 import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from '../providers/registry.js';
@@ -39,7 +52,7 @@ import { t, tf, applyLocale } from '../i18n.js';
 import { AGENTS_DIR, DT_HOME, MANAGER_FILE, MODELS_DIR, PROJECTS_DIR, PROJECT_DIR, PROJECT_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
 import { listProjects } from './projects.js';
 import { loadSettings } from '../settings.js';
-import { chatTeam, isSessionRef, requireProject, type App, type Engine } from './engine.js';
+import { chatTeam, isSessionRef, requireProject, requireSession, type App, type Engine } from './engine.js';
 import { loadSchedule, saveSchedule } from './schedule.js';
 import {
   applyHomeImport,
@@ -53,15 +66,15 @@ import {
   sessionEntriesById,
   settingsEntries,
 } from './transfer.js';
-import type { Agent, ManagerHostSpec, ModelRef } from '../types.js';
+import type { Agent, ManagerUpdateFields, ModelRef } from '../types.js';
 
 /** Аргумент операции — для справки, подсказок и проверки количества. */
 export interface OpArg {
-  /** Как зовём аргумент в подсказках: «номер», «id», «имя»… */
+  /** Как зовём аргумент в подсказках: «id», «файл.zip»… */
   name: string;
   required: boolean;
-  /** Уточнение для панели подсказок (что подставлять: номера, имена, id…) */
-  hint?: 'sessions' | 'team' | 'chat' | 'models' | 'projects' | 'schedule';
+  /** Уточнение для панели подсказок (что подставлять: id, файлы…) */
+  hint?: 'sessions' | 'agents' | 'chat' | 'models' | 'projects' | 'schedule';
 }
 
 export interface OpSpec {
@@ -70,26 +83,29 @@ export interface OpSpec {
   args?: OpArg[];
   title: string;
   help: string;
-  /** Обзор группы: разрешает вызов без глагола (`/team` = team.list) */
+  /** Обзор группы: разрешает вызов без глагола (`/agents` = agents.list) */
   implicit?: boolean;
-  /** Операция требует открытого проекта (разговоры, чат, секреты проекта) */
+  /** Операция требует открытого проекта (разговоры, секреты проекта) */
   needsProject?: boolean;
+  /** Операция работает с ТЕКУЩИМ разговором — он должен быть открыт */
+  needsSession?: boolean;
   run: (engine: Engine, rest: string[], signal?: AbortSignal) => Promise<string[]>;
 }
 
 // ── просмотры (бесцветные: терминал рисует свои цветные версии сам) ─────────
 
 function sessionsText(app: App): string[] {
-  const { session, store } = requireProject(app);
-  const list = store.list();
-  if (list.length === 0) return [t('Разговоров пока нет.')];
+  // список работает всегда, когда открыт проект — даже без разговора (/session close)
+  if (!app.store) return [t('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>')];
+  const list = app.store.list();
+  if (list.length === 0) return [t('Разговоров пока нет — /session new [id].')];
   const fmt = (ts: number) => new Date(ts).toLocaleString('ru-RU');
   const lines = ['', t('Разговоры (свежие сверху):')];
-  list.forEach((s, i) => {
-    const cur = s.id === session.id ? t(' ← текущий') : '';
-    lines.push(`${i + 1}. ${s.title} — ${t(`сообщ.:`)} ${s.count}${cur}`);
-    lines.push(`   ${t('создан')} ${fmt(s.createdAt)} · ${t('последнее сообщение')} ${fmt(s.updatedAt)} · id ${s.id}`);
-  });
+  for (const s of list) {
+    const cur = s.id === app.session?.id ? t(' ← текущий') : '';
+    lines.push(`• ${s.id} — ${s.title} — ${t('сообщ.:')} ${s.count}${cur}`);
+    lines.push(`   ${t('создан')} ${fmt(s.createdAt)} · ${t('последнее сообщение')} ${fmt(s.updatedAt)}`);
+  }
   lines.push('');
   return lines;
 }
@@ -101,32 +117,31 @@ function reloadModels(engine: Engine): void {
   engine.app.images = images;
 }
 
-function teamText(app: App): string[] {
+function agentsText(app: App): string[] {
   let fullTeam: Agent[] = [];
   try {
     fullTeam = loadTeam(AGENTS_DIR);
   } catch {
     return [t('agents.json недоступен.')];
   }
-  const { session } = requireProject(app);
-  const inChat = new Set(chatTeam(session, fullTeam).map((a) => a.id));
+  const inChat = new Set(app.session ? chatTeam(app.session, fullTeam).map((a) => a.id) : []);
   const lines = [
     tf('{emoji} {name} — менеджер переговорки: консьерж и шлюз настроек [модель: {model}]', {
       emoji: app.mgr.emoji, name: app.mgr.name, model: app.mgr.model.id ?? '',
     }),
   ];
-  fullTeam.forEach((a, i) => {
+  for (const a of fullTeam) {
     const tools = agentToolIds(a);
     const marks = [
       tools.length > 0 ? tf('тулы: {list}', { list: tools.join(', ') }) : '',
       a.model?.id ? tf('модель: {id}', { id: a.model.id }) : '',
     ].filter(Boolean);
     lines.push(
-      `${i + 1}. ${a.emoji} ${a.name} — ${a.role}${a.description ? ': ' + a.description : ''}` +
+      `• ${a.id} — ${a.emoji} ${a.name} — ${a.role}${a.description ? ': ' + a.description : ''}` +
       (marks.length > 0 ? ` [${marks.join(' · ')}]` : '') +
-      (inChat.has(a.id) ? '' : ` · ${t('не в этом чате')} (/chat add ${a.name})`),
+      (app.session && !inChat.has(a.id) ? ` · ${t('не в этом чате')} (/session agent add ${a.id})` : ''),
     );
-  });
+  }
   return lines;
 }
 
@@ -147,13 +162,28 @@ function modelsText(app: App): string[] {
   return lines;
 }
 
-function historyText(app: App, nStr?: string): string[] {
-  const n = Number.parseInt(nStr ?? '', 10);
-  const { session } = requireProject(app);
+/** /session history [from] [to]: срез включительно; один аргумент — от N до конца. */
+function historyText(app: App, fromStr?: string, toStr?: string): string[] {
+  const { session } = requireSession(app);
   const all = session.messages;
-  const shown = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
-  if (shown.length === 0) return [t('Разговор пуст.')];
-  const lines = [tf('Разговор «{title}» — показано {shown} из {all} сообщений:', { title: session.title, shown: shown.length, all: all.length }), ''];
+  let from = 1;
+  let to = all.length;
+  if (fromStr !== undefined) {
+    const f = Number.parseInt(fromStr, 10);
+    if (!Number.isInteger(f) || f <= 0) return [tf('from — номер сообщения (с 1), а не «{v}»', { v: fromStr })];
+    from = f;
+  }
+  if (toStr !== undefined) {
+    const to2 = Number.parseInt(toStr, 10);
+    if (!Number.isInteger(to2) || to2 < from) return [tf('to — номер сообщения не меньше from ({from}), а не «{v}»', { from, v: toStr })];
+    to = to2;
+  }
+  const shown = all.slice(from - 1, to);
+  if (shown.length === 0) return [t('Разговор пуст (или срез пустой — см. /session history).')];
+  const lines = [
+    tf('Разговор «{title}» — показано {shown} из {all} сообщений:', { title: session.title, shown: shown.length, all: all.length }),
+    '',
+  ];
   for (const m of shown) {
     const who = m.authorId === 'user'
       ? t('Вы')
@@ -175,7 +205,7 @@ function memoryText(app: App, arg: string): string[] {
   } catch {
     // без agents.json показываем только общую память
   }
-  const { session } = requireProject(app);
+  const { session } = requireSession(app);
   if (arg === 'shared') {
     if (!app.memory.shared) {
       return [t('Общая память пока пуста — заполняется при закрытии разговоров (/session new, /exit).')];
@@ -185,20 +215,19 @@ function memoryText(app: App, arg: string): string[] {
   if (!arg) {
     const withMem = memTeam.filter((a) => session.memories?.[a.id]);
     return [
-      t('Чья память: /memory show <имя> (например, /memory show Глеб), /memory show shared — общая.'),
+      t('Чья память: /memory <id> (например, /memory gleb), /memory shared — общая.'),
       withMem.length > 0
-        ? tf('Уже помнят что-то: {names}', { names: withMem.map((a) => a.name).join(', ') })
+        ? tf('Уже помнят что-то: {ids}', { ids: withMem.map((a) => a.id).join(', ') })
         : t('Пока никто не «осмыслил» разговор (память обновляется примерно раз в 12 сообщений).'),
     ];
   }
-  const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
-  const who = memTeam.find((a) => norm(a.name) === norm(arg) || a.id === norm(arg));
-  if (!who) return [tf('Нет участника «{name}» — см. /team', { name: arg })];
+  const who = memTeam.find((a) => a.id === arg.trim().toLowerCase());
+  if (!who) return [tf('Нет агента с id «{id}» — см. /agents', { id: arg })];
   const mine = session.memories?.[who.id];
   const glob = app.memory.agents[who.id];
   const lines = [
     '',
-    tf('Что {name} помнит в разговоре «{title}»:', { name: who.name, title: session.title }),
+    tf('Что {name} ({id}) помнит в разговоре «{title}»:', { name: who.name, id: who.id, title: session.title }),
     `${t('Задача:')} ${mine?.task ?? '—'}`,
     `${t('Отношение к вам:')} ${mine?.towardUser ?? '—'}`,
   ];
@@ -212,11 +241,11 @@ function memoryText(app: App, arg: string): string[] {
   return lines;
 }
 
-function projectListText(app: App): string[] {
-  const lines = ['', t('Проекты (смена: /project open <имя|путь>):')];
+function projectListText(): string[] {
+  const lines = ['', t('Проекты (открыть: /project open <id|путь>):')];
   const all = listProjects();
   if (all.length === 0 && !PROJECT_DIR) {
-    lines.push(t('  пока ни одного — /project new <имя> [папка] создаст первый'));
+    lines.push(t('  пока ни одного — /project new <id> [папка] создаст первый'));
   }
   const noPath = t('(папка не задана)');
   for (const p of all) {
@@ -227,56 +256,48 @@ function projectListText(app: App): string[] {
         : tf('• {id} — {path}', { id: p.id, path: p.path ?? noPath }),
     );
   }
-  // серверы текущего проекта (поле "hosts" в project.json)
-  if (app.store) {
-    const hosts = Object.entries(loadHostsFile(PROJECT_FILE)) as [string, { host: string; user?: string; port?: number }][];
-    lines.push(t('Серверы проекта (поле "hosts" в project.json):'));
-    if (hosts.length === 0) {
-      lines.push(t('  пусто — /project host add <имя>=[пользователь@]хост[:порт]'));
-    } else {
-      for (const [name, h] of hosts) {
-        lines.push(`  • ${name}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`);
-      }
-    }
+  lines.push('');
+  return lines;
+}
+
+/** Состав текущего чата: кто в разговоре, кого можно позвать. */
+function sessionAgentsText(engine: Engine): string[] {
+  const app = engine.app;
+  const { session } = requireSession(app);
+  let fullTeam: Agent[] = [];
+  try {
+    fullTeam = loadTeam(AGENTS_DIR);
+  } catch {
+    return [t('agents.json недоступен.')];
+  }
+  const inChat = chatTeam(session, fullTeam);
+  const outside = fullTeam.filter((a) => !inChat.some((c) => c.id === a.id));
+  const lines = [
+    tf('В чате разговора «{title}»:', { title: session.title }),
+    ...inChat.map((a) => `• ${a.id} — ${a.emoji} ${a.name}${a.id === 'manager' ? ` — ${t('менеджер')}` : ''}`),
+  ];
+  if (outside.length > 0) {
+    lines.push('', t('Можно позвать: /session agent add <id>'), ...outside.map((a) => `• ${a.id} — ${a.emoji} ${a.name}`));
   }
   lines.push('');
   return lines;
 }
 
-/** Разбор пар поле=значение для /mail add; голый «tlsNoVerify» = true, порты — числами. */
-function parseMailSpec(pairs: string[]): Record<string, unknown> | string {
-  const out: Record<string, unknown> = {};
-  for (const pair of pairs) {
-    const eq = pair.indexOf('=');
-    if (eq === -1) {
-      if (pair === 'tlsNoVerify') {
-        out.tlsNoVerify = true;
-        continue;
-      }
-      return tf('Синтаксис: пары поле=значение (например user=я@yandex.ru); «{pair}» — без "="', { pair });
-    }
-    out[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+/** /session agent add|delete <id>: событие чата пишется репликой менеджера. */
+function sessionAgentChange(engine: Engine, id: string, verb: 'add' | 'delete'): string[] {
+  if (!id) {
+    return [verb === 'add'
+      ? t('Кого позвать? /session agent add <id> (кто в чате — /session agents)')
+      : t('Кого вывести? /session agent delete <id> (кто в чате — /session agents)')];
   }
-  for (const key of ['port', 'smtpPort'] as const) {
-    if (typeof out[key] === 'string') out[key] = Number(out[key]);
-  }
-  if (typeof out.tlsNoVerify === 'string') out.tlsNoVerify = out.tlsNoVerify !== 'false';
-  return out;
-}
-
-// ── общая обвязка ────────────────────────────────────────────────────────────
-
-/** /chat add и /chat remove: пустой аргумент и недоступный agents.json. */
-function chatChangeText(engine: Engine, arg: string, verb: string): string[] {
-  if (!arg) return [tf('Кого {verb}? /chat {cmd} <имя или номер> (список — /team)', { verb, cmd: verb === 'позвать' ? 'add' : 'remove' })];
   let fullTeam: Agent[];
   try {
     fullTeam = loadTeam(AGENTS_DIR);
   } catch {
-    return [tf('agents.json недоступен — {verb} никого не получится.', { verb })];
+    return [t('agents.json недоступен — изменить чат не получится.')];
   }
-  const res = verb === 'позвать' ? engine.addToChat(arg, fullTeam) : engine.removeFromChat(arg, fullTeam);
-  // событие чата ядро уже записал в хронику репликой менеджера — заметкой не дублируем
+  const res = verb === 'add' ? engine.addToChat(id, fullTeam) : engine.removeFromChat(id, fullTeam);
+  // событие чата ядро уже записало в хронику репликой менеджера — заметкой не дублируем
   if (res.changed) {
     engine.serviceLine(res.text);
     return [];
@@ -284,18 +305,23 @@ function chatChangeText(engine: Engine, arg: string, verb: string): string[] {
   return [res.text];
 }
 
-/** Разбор `поле=значение` в словарь; temperature — числом. Ключи сохраняют регистр. */
-function parsePairs(pairs: string[]): Record<string, string | number> | string[] {
+/**
+ * Разбор `поле=значение` в словарь; ключи могут быть точечными путями
+ * (`model.id=…`) — вызывающий сам решает, какие пути разрешены. temperature
+ * и maxTokens — числом; пустое значение — ошибка.
+ */
+function parseFields(pairs: string[]): Record<string, string | number> | string[] {
   const out: Record<string, string | number> = {};
   for (const pair of pairs) {
     const eq = pair.indexOf('=');
     if (eq === -1) return [tf('Поле без значения: «{pair}» — жду поле=значение', { pair })];
-    const key = pair.slice(0, eq);
+    const key = pair.slice(0, eq).trim();
     const value = pair.slice(eq + 1);
+    if (!key) return [tf('Пустое имя поля: «{pair}»', { pair })];
     if (!value) return [tf('Пустое значение у поля «{key}»', { key })];
-    if (key.toLowerCase() === 'temperature') {
+    if (key === 'temperature' || key === 'maxTokens' || key.endsWith('.temperature') || key.endsWith('.maxTokens')) {
       const num = Number(value);
-      if (!Number.isFinite(num)) return [tf('temperature — жду числом, а не «{value}»', { value })];
+      if (!Number.isFinite(num)) return [tf('{key} — жду числом, а не «{value}»', { key, value })];
       out[key] = num;
     } else {
       out[key] = value;
@@ -305,84 +331,88 @@ function parsePairs(pairs: string[]): Record<string, string | number> | string[]
 }
 
 /**
- * Адрес в командной строке: [пользователь@]хост[:порт]. Пароля тут сознательно
- * нет — он остался бы в транскрипте; пароли через разговор с менеджером или
- * руками в projects.json.
+ * Точечные пути `model.*` / `serviceModel.*` (model.id, model.temperature…)
+ * в дополнение к плоским полям. Возвращает { fields, ошибки }: fields.model /
+ * fields.serviceModel — мердж текущей ссылки с патчем (id сохраняется).
  */
-function parseHostSpec(spec: string): ManagerHostSpec {
-  let rest = spec.trim();
-  let user: string | undefined;
-  let port: number | undefined;
-  const at = rest.lastIndexOf('@');
-  if (at !== -1) {
-    user = rest.slice(0, at);
-    rest = rest.slice(at + 1);
-  }
-  const colon = rest.lastIndexOf(':');
-  if (colon !== -1) {
-    const p = Number.parseInt(rest.slice(colon + 1), 10);
-    if (Number.isInteger(p) && p > 0) {
-      port = p;
-      rest = rest.slice(0, colon);
+function modelRefPatch(
+  parsed: Record<string, string | number>,
+  bases: readonly string[],
+  current: Record<string, ModelRef | undefined>,
+): { patch: Record<string, ModelRef>; error?: string[] } {
+  const patch: Record<string, ModelRef> = {};
+  const SUBS = new Set(['id', 'temperature', 'maxTokens', 'thinking', 'reasoning']);
+  for (const [k, v] of Object.entries(parsed)) {
+    const dot = k.indexOf('.');
+    if (dot === -1) continue;
+    const base = k.slice(0, dot);
+    const sub = k.slice(dot + 1);
+    if (!bases.includes(base) || sub.includes('.')) {
+      return { patch: {}, error: [tf('Вложенное поле «{key}» не знаю — можно {bases}.* (id, temperature, maxTokens…)', { key: k, bases: bases.join(', ') + '.*' })] };
     }
+    if (!SUBS.has(sub)) {
+      return { patch: {}, error: [tf('«{base}.{sub}» не знаю — можно: {subs}', { base, sub, subs: [...SUBS].join(', ') })] };
+    }
+    patch[base] = { ...(patch[base] ?? current[base] ?? {}), [sub]: v } as ModelRef;
   }
-  if (!rest) throw new Error(tf('в «{spec}» нет адреса хоста', { spec }));
-  const out: ManagerHostSpec = { host: rest };
-  if (user) out.user = user;
-  if (port !== undefined) out.port = port;
-  return out;
+  return { patch };
 }
 
-/** Куда класть архивы: рабочая папка проекта, а без проекта — дом. */
+// ── экспорт: имена файлов и папка ────────────────────────────────────────────
+
+/** Метка времени для имён архивов: «202610271430». */
+export const stamp = (): string => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+
+/** Имя профиля для имени файла: чужие символы → дефис. */
+export const profileLabel = (name: string): string =>
+  name.replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^[-.]+|[-.]+$/g, '') || 'me';
+
+/** Куда класть архивы экспорта: папка проекта в доме; нет проекта — дом. */
 function exportTargetDir(): string {
-  const dir = WORKSPACE || DT_HOME;
+  const dir = PROJECT_DIR || DT_HOME;
   // путь проекта мог быть зарегистрирован, а папка — ещё не создана
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-/** Экспорт всего приложения (дом целиком: настройки, команда, модели с ключами, все проекты и разговоры). */
+/** /export — весь дом: настройки, команда, модели с ключами, все проекты и разговоры. */
 function exportHomeZip(engine: Engine): string[] {
-  const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
   const entries = homeEntries();
-  const file = join(exportTargetDir(), `dt-home-${ts}.zip`);
+  const file = join(exportTargetDir(), `home-${stamp()}.zip`);
   writeFileSync(file, packEntriesZip(entries));
   return [tf('Экспорт: {file} ({n} записей, включая ключи моделей — хранить как пароль)', { file, n: entries.length })];
 }
 
-/** Экспорт настроек приложения (без проектов): settings, профиль, менеджер, модели с ключами. */
+/** /settings export — настройки без проектов; в имени файла — профиль. */
 function exportSettingsZip(engine: Engine): string[] {
-  const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
   const entries = settingsEntries();
-  const file = join(exportTargetDir(), `dt-settings-${ts}.zip`);
+  const file = join(exportTargetDir(), `settings-${profileLabel(engine.app.profile.name)}-${stamp()}.zip`);
   writeFileSync(file, packEntriesZip(entries));
   return [tf('Экспорт: {file} ({n} записей, включая ключи моделей — хранить как пароль)', { file, n: entries.length })];
 }
 
-/** Экспорт одного проекта (project.json + все его разговоры); без аргумента — текущий. */
-function exportProjectZip(engine: Engine, idArg?: string): string[] {
-  const id = (idArg ?? '').trim() || (PROJECT_DIR ? basename(PROJECT_DIR) : '');
-  if (!id) return [t('Укажите имя проекта: /project export <имя> (список — /project)')];
+/** /project export — только текущий проект: project.json (с секретами) и разговоры. */
+function exportProjectZip(engine: Engine): string[] {
+  if (!PROJECT_DIR) return [t('Нет открытого проекта — экспортировать нечего.')];
+  const id = basename(PROJECT_DIR);
   let entries: ReturnType<typeof projectEntries>;
   try {
     entries = projectEntries(id);
   } catch (err) {
     return [tf('Не удалось собрать архив проекта «{id}»: {err}', { id, err: err instanceof Error ? err.message : String(err) })];
   }
-  const file = join(exportTargetDir(), `dt-project-${id}.zip`);
+  const file = join(exportTargetDir(), `project-${id}-${stamp()}.zip`);
   writeFileSync(file, packEntriesZip(entries));
   return [tf('Экспорт: {file} ({n} записей — project.json и разговоры)', { file, n: entries.length })];
 }
 
-/** Экспорт разговора: номер резолвится в id один раз — архив и его имя
- *  всегда про один и тот же разговор, даже если список живёт своей жизнью. */
-function exportSessionZip(engine: Engine, n: number | undefined): string[] {
+/** /session export — только текущий разговор. */
+function exportSessionZip(engine: Engine): string[] {
   const app = engine.app;
-  const { session, store } = requireProject(app);
-  const id = n === undefined ? session.id : store.list()[n - 1]?.id;
-  if (!id) return [n === undefined ? t('Разговоров нет — экспортировать нечего.') : tf('Не нашёл разговор №{n} — см. /sessions', { n })];
-  const entries = sessionEntriesById(app, id);
-  const file = join(exportTargetDir(), `dt-session-${id}.zip`);
+  const { session } = requireSession(app);
+  const proj = PROJECT_DIR ? basename(PROJECT_DIR) : 'home';
+  const entries = sessionEntriesById(app, session.id);
+  const file = join(exportTargetDir(), `session-${proj}-${session.id}-${stamp()}.zip`);
   writeFileSync(file, packEntriesZip(entries));
   return [tf('Экспорт: {file} ({n} записей)', { file, n: entries.length })];
 }
@@ -393,67 +423,85 @@ export const OPERATIONS: OpSpec[] = [
   // разговоры
   {
     name: 'sessions.list', implicit: true, needsProject: true, title: 'список разговоров',
-    help: 'разговоры: свежие сверху, текущий отмечен',
+    help: 'разговоры проекта: id, свежие сверху, текущий отмечен',
     run: async (engine) => sessionsText(engine.app),
   },
   {
-    name: 'session.new', needsProject: true, title: 'новый разговор',
-    help: 'один на один с менеджером, он позовёт остальных',
-    run: async (engine, _rest, signal) => {
-      await engine.newSession(signal ?? new AbortController().signal);
+    name: 'session.new',
+    args: [{ name: 'id', required: false }],
+    needsProject: true,
+    title: 'новый разговор',
+    help: 'создаёт и открывает; без id — автоштамп вида 20261027-143052',
+    run: async (engine, rest, signal) => {
+      if (rest.length > 1) return [t('Синтаксис: /session new [id] — id одним словом (или вовсе без id — автоштамп)')];
+      const id = rest[0];
+      await engine.newSession(signal ?? new AbortController().signal, id);
       return [];
     },
   },
   {
     name: 'session.open',
-    args: [{ name: 'номер', required: true, hint: 'sessions' }],
+    args: [{ name: 'id', required: true, hint: 'sessions' }],
     needsProject: true,
     title: 'открыть разговор',
-    help: 'переключиться на разговор из списка',
+    help: 'переключиться на разговор по id (список — /sessions)',
     run: async (engine, rest) => {
-      engine.openSessionByArg(rest.join(' '));
+      const id = rest.join(' ').trim();
+      if (!id) return [t('Синтаксис: /session open <id> (список — /sessions)')];
+      engine.openSessionById(id);
       return [];
     },
   },
   {
+    name: 'session.close', needsProject: true,
+    title: 'закрыть разговор',
+    help: 'текущий разговор закрыт, проект остаётся открытым',
+    run: async (engine) => [engine.closeSession()],
+  },
+  {
     name: 'session.delete',
-    args: [{ name: 'номер', required: true, hint: 'sessions' }],
+    args: [{ name: 'id', required: true, hint: 'sessions' }],
     needsProject: true,
     title: 'удалить разговор',
-    help: 'текущий удалить нельзя — сначала откройте другой',
+    help: 'текущий удалить нельзя — сначала /session close',
     run: async (engine, rest) => {
-      const n = Number.parseInt(rest[0] ?? '', 10);
-      if (!Number.isInteger(n) || n <= 0) return [tf('Не нашёл разговор №{n} — см. /sessions', { n: rest[0] ?? '' })];
-      return [engine.deleteSession(n)];
+      const id = rest.join(' ').trim();
+      if (!id) return [t('Синтаксис: /session delete <id> (список — /sessions)')];
+      return [engine.deleteSessionById(id)];
     },
   },
   {
-    name: 'session.rename',
-    args: [{ name: 'имя', required: false }],
-    needsProject: true,
-    title: 'переименовать разговор',
-    help: 'текущий разговор; без имени менеджер придумает сам',
-    run: async (engine, rest) => [await engine.renameSession(rest.join(' '))],
+    name: 'session.update',
+    args: [{ name: 'title=…', required: false }],
+    needsProject: true, needsSession: true,
+    title: 'править разговор',
+    help: 'текущий разговор: title=… ; без полей менеджер придумает имя по дайджесту',
+    run: async (engine, rest) => {
+      const parsed = rest.length > 0 ? parseFields(rest) : {};
+      if (Array.isArray(parsed)) return parsed;
+      const keys = Object.keys(parsed);
+      if (keys.some((k) => k !== 'title')) {
+        return [t('У разговора одно поле: title=… (без полей имя придумает менеджер)')];
+      }
+      return [await engine.renameSession(typeof parsed.title === 'string' ? parsed.title : undefined)];
+    },
   },
   {
     name: 'session.history',
-    args: [{ name: 'N', required: false }],
-    needsProject: true,
+    args: [
+      { name: 'from', required: false },
+      { name: 'to', required: false },
+    ],
+    needsProject: true, needsSession: true,
     title: 'история разговора',
-    help: 'текущий разговор целиком или последние N сообщений',
-    run: async (engine, rest) => historyText(engine.app, rest[0]),
+    help: 'срез сообщений включительно; один аргумент — от N до конца; без — весь',
+    run: async (engine, rest) => historyText(engine.app, rest[0], rest[1]),
   },
   {
-    name: 'session.export',
-    args: [{ name: 'номер', required: false, hint: 'sessions' }],
-    needsProject: true,
+    name: 'session.export', needsProject: true, needsSession: true,
     title: 'экспорт разговора',
-    help: 'архив разговора в zip; без номера — текущий',
-    run: async (engine, rest) => {
-      const n = Number.parseInt(rest[0] ?? '', 10);
-      // без номера — текущий разговор (по id, не по позиции в списке)
-      return Number.isInteger(n) && n > 0 ? exportSessionZip(engine, n) : exportSessionZip(engine, undefined);
-    },
+    help: 'архив текущего разговора: session-<проект>-<разговор>-<штамп>.zip',
+    run: async (engine) => exportSessionZip(engine),
   },
   {
     name: 'session.import',
@@ -467,24 +515,52 @@ export const OPERATIONS: OpSpec[] = [
       if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
       const entries = readZipEntries(readFileSync(file));
       if (!entries.some((e) => e.rel === 'session.json')) {
-        return [t('В архиве нет session.json — это архив всего приложения? Тогда: /home import <файл>')];
+        return [t('В архиве нет session.json — это архив всего приложения? Тогда: /import <файл>')];
       }
       return [await applySessionImport(engine.app, entries)];
     },
   },
   {
-    name: 'home.export', title: 'экспорт всего приложения',
+    name: 'session.agents', needsProject: true, needsSession: true,
+    title: 'кто в чате',
+    help: 'участники текущего разговора и кого можно позвать',
+    run: async (engine) => sessionAgentsText(engine),
+  },
+  {
+    name: 'session.agent.add',
+    args: [
+      { name: 'id агента', required: true, hint: 'agents' },
+    ],
+    needsProject: true, needsSession: true,
+    title: 'позвать в чат',
+    help: 'по id из /agents',
+    run: async (engine, rest) => sessionAgentChange(engine, (rest[0] ?? '').trim(), 'add'),
+  },
+  {
+    name: 'session.agent.delete',
+    args: [
+      { name: 'id агента', required: true, hint: 'chat' },
+    ],
+    needsProject: true, needsSession: true,
+    title: 'вывести из чата',
+    help: 'реплики останутся в истории',
+    run: async (engine, rest) => sessionAgentChange(engine, (rest[0] ?? '').trim(), 'delete'),
+  },
+
+  // весь дом
+  {
+    name: 'export', title: 'экспорт всего приложения',
     help: 'дом целиком: настройки, команда, модели с ключами, память, расписание и ВСЕ проекты с разговорами; .env (TOKEN/PORT) — вещь машины',
     run: async (engine) => exportHomeZip(engine),
   },
   {
-    name: 'home.import',
+    name: 'import',
     args: [{ name: 'файл.zip', required: true }],
     title: 'импорт всего приложения',
     help: 'настройки/профиль/память/расписание заменяются, проекты и разговоры вливаются; с подтверждением',
     run: async (engine, rest) => {
       const file = rest.join(' ');
-      if (!file) return [t('Синтаксис: /home import <файл.zip>')];
+      if (!file) return [t('Синтаксис: /import <файл.zip>')];
       if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
       const entries = readZipEntries(readFileSync(file));
       const ok = await engine.confirmAction(
@@ -495,102 +571,88 @@ export const OPERATIONS: OpSpec[] = [
       return [applyHomeImport(engine.app, entries)];
     },
   },
-  {
-    name: 'settings.export', title: 'экспорт настроек',
-    help: 'настройки приложения без проектов: settings, профиль, менеджер, модели с ключами',
-    run: async (engine) => exportSettingsZip(engine),
-  },
-  {
-    name: 'settings.import',
-    args: [{ name: 'файл.zip', required: true }],
-    title: 'импорт настроек',
-    help: 'settings/профиль/менеджер/модели заменяются, проекты не трогаются; с подтверждением',
-    run: async (engine, rest) => {
-      const file = rest.join(' ');
-      if (!file) return [t('Синтаксис: /settings import <файл.zip>')];
-      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
-      const entries = readZipEntries(readFileSync(file));
-      const ok = await engine.confirmAction(
-        t('Импортировать настройки приложения из этого архива?'),
-        t('settings.json, профиль, менеджер и карточки моделей (с ключами) заменяются; проекты и разговоры не трогаются.'),
-      );
-      if (!ok) return [t('Импорт отменён.')];
-      return [applySettingsImport(engine.app, entries)];
-    },
-  },
-
-  // чат
-  {
-    name: 'chat.add',
-    args: [{ name: 'имя|номер', required: true, hint: 'team' }],
-    needsProject: true,
-    title: 'позвать участника',
-    help: 'в текущий чат',
-    run: async (engine, rest) => chatChangeText(engine, rest.join(' '), 'позвать'),
-  },
-  {
-    name: 'chat.remove',
-    args: [{ name: 'имя|номер', required: true, hint: 'team' }],
-    needsProject: true,
-    title: 'вывести участника',
-    help: 'из текущего чата',
-    run: async (engine, rest) => chatChangeText(engine, rest.join(' '), 'вывести'),
-  },
 
   // команда
   {
-    name: 'team.list', implicit: true, needsProject: true, title: 'состав команды',
-    help: 'кто в команде, у кого какие тула, кто в чате',
-    run: async (engine) => teamText(engine.app),
+    name: 'agents.list', implicit: true, title: 'состав команды',
+    help: 'кто в команде (id, имя, роль), у кого какие тула, кто в чате',
+    run: async (engine) => agentsText(engine.app),
   },
   {
-    name: 'team.add',
+    name: 'agent.new',
     args: [
       { name: 'id', required: true },
-      { name: 'имя', required: true },
-      { name: 'роль', required: false },
+      { name: 'поле=значение…', required: false },
     ],
-    title: 'новый участник',
-    help: 'дефолты как у менеджера: эмодзи 🤖, белый цвет, автопромпт',
+    title: 'новый агент',
+    help: 'имя по умолчанию = id; поля: name= role= emoji= color= description= prompt= model.id= temperature=',
     run: async (engine, rest) => {
-      const [id, name, ...roleParts] = rest;
-      if (!id || !name) return [t('Синтаксис: /team add <id> <Имя> [роль]')];
-      return [addTeamAgent(AGENTS_DIR, { id, name, role: roleParts.join(' ') || undefined }, engine.app.models)];
+      const [id, ...pairs] = rest;
+      if (!id) return [t('Синтаксис: /agent new <id> [поле=значение…] — затем /agent update <id> name=… role=…')];
+      if (!/^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9_-]+)*$/.test(id)) {
+        return [tf('id «{id}» не по маске: строчная латиница и цифры, внутри точка, «-», «_»', { id })];
+      }
+      const fields: Record<string, unknown> = { id, name: id };
+      if (pairs.length > 0) {
+        const parsed = parseFields(pairs);
+        if (Array.isArray(parsed)) return parsed;
+        const { patch, error } = modelRefPatch(parsed, ['model'], {});
+        if (error) return error;
+        if (patch.model && !patch.model.id) return [t('model.temperature= без model.id= — не знаю, к какой модели отнести')];
+        for (const [k, v] of Object.entries(parsed)) {
+          if (k.includes('.')) continue;
+          fields[k.toLowerCase()] = v;
+        }
+        if (patch.model) fields.model = patch.model;
+      }
+      return [addTeamAgent(AGENTS_DIR, fields as unknown as Parameters<typeof addTeamAgent>[1], engine.app.models)];
     },
   },
   {
-    name: 'team.update',
+    name: 'agent.update',
     args: [
-      { name: 'id', required: true },
+      { name: 'id', required: true, hint: 'agents' },
       { name: 'поле=значение…', required: true },
     ],
-    title: 'править участника',
-    help: 'поля: name, role, emoji, color, description, prompt, model, temperature',
+    title: 'править агента',
+    help: 'поля: name, role, emoji, color, description, prompt, temperature; вложенные: model.id, model.temperature',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
         return [
-          t('Синтаксис: /team update <id> поле=значение…'),
-          t('Поля: name, role, emoji, color, description, prompt, model, temperature'),
+          t('Синтаксис: /agent update <id> поле=значение…'),
+          t('Поля: name, role, emoji, color, description, prompt, temperature; вложенные: model.id, model.temperature'),
         ];
       }
-      const parsed = parsePairs(pairs);
+      const parsed = parseFields(pairs);
       if (Array.isArray(parsed)) return parsed;
-      // поля агента в нижнем регистре (белый список updateTeamAgent точный)
-      const fields: Record<string, string | number> = {};
-      for (const [k, v] of Object.entries(parsed)) fields[k.toLowerCase()] = v;
+      // текущая ссылка агента — база для мерджа model.*
+      let current: ModelRef | undefined;
+      try {
+        current = loadTeam(AGENTS_DIR).find((a) => a.id === id.trim().toLowerCase())?.model;
+      } catch {
+        // нет agents.json — updateTeamAgent сам ругнётся
+      }
+      const { patch, error } = modelRefPatch(parsed, ['model'], { model: current });
+      if (error) return error;
+      const fields: ManagerUpdateFields = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (k.includes('.')) continue;
+        (fields as Record<string, string | number>)[k.toLowerCase()] = v;
+      }
+      if (patch.model) fields.model = patch.model;
+      if (Object.keys(fields).length === 0) return [t('Не понял, что менять — жду поле=значение')];
       return [updateTeamAgent(AGENTS_DIR, id, fields, engine.app.models)];
     },
   },
   {
-    name: 'team.delete',
-    args: [{ name: 'id…', required: true }],
-    title: 'удалить участника',
-    help: 'можно несколько — через запятую или пробел; то же, что попросить менеджера',
+    name: 'agent.delete',
+    args: [{ name: 'id', required: true, hint: 'agents' }],
+    title: 'удалить агента',
+    help: 'из команды; можно несколько — через запятую или пробел',
     run: async (_engine, rest) => {
-      // «keks, volt, gosha» и «keks volt gosha» — одно и то же: запятые — разделители
-      const ids = rest.flatMap((t) => t.split(',')).map((s) => s.trim()).filter(Boolean);
-      if (ids.length === 0) return [t('Синтаксис: /team delete <id> [id…] — id через пробел или запятую')];
+      const ids = rest.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean);
+      if (ids.length === 0) return [t('Синтаксис: /agent delete <id> [id…] — id через пробел или запятую')];
       const lines: string[] = [];
       for (const id of ids) {
         try {
@@ -603,52 +665,93 @@ export const OPERATIONS: OpSpec[] = [
     },
   },
   {
-    name: 'team.grant',
+    name: 'agent.tools',
+    args: [{ name: 'id агента', required: true, hint: 'agents' }],
+    title: 'тулы агента',
+    help: 'какие тула включены и с какими настройками',
+    run: async (_engine, rest) => {
+      const id = (rest[0] ?? '').trim().toLowerCase();
+      if (!id) return [t('Синтаксис: /agent tools <id> (список — /agents)')];
+      let agent: Agent | undefined;
+      try {
+        agent = loadTeam(AGENTS_DIR).find((a) => a.id === id);
+      } catch {
+        return [t('agents.json недоступен.')];
+      }
+      if (!agent) return [tf('Нет агента с id «{id}» — см. /agents', { id })];
+      const tools = agentToolIds(agent);
+      if (tools.length === 0) return [tf('{name}: тулов нет — /agent tool add {id} <тул>', { name: agent.name, id })];
+      return ['', tf('{name} ({id}), тула:', { name: agent.name, id }), ...tools.map((tl) => `• ${tl}`), ''];
+    },
+  },
+  {
+    name: 'agent.tool.add',
     args: [
-      { name: 'агент', required: true, hint: 'team' },
+      { name: 'id агента', required: true, hint: 'agents' },
       { name: 'тул', required: true },
     ],
     title: 'включить тул',
     help: 'встроенные files/shell/ssh/look/image или свой из tools/',
     run: async (_engine, rest) => {
       const [who, tool] = rest;
-      if (!who || !tool) return [t('Синтаксис: /team grant <агент> <тул> (files, shell, ssh, look, image или свой из tools/)')];
+      if (!who || !tool) return [t('Синтаксис: /agent tool add <id агента> <тул> (files, shell, ssh, look, image или свой из tools/)')];
       return [grantTool(AGENTS_DIR, who, tool, undefined, TOOLS_DIR)];
+    },
+  },
+  {
+    name: 'agent.tool.update',
+    args: [
+      { name: 'id агента', required: true, hint: 'agents' },
+      { name: 'тул', required: true },
+      { name: 'поле=значение…', required: true },
+    ],
+    title: 'настроить тул',
+    help: 'карточка тула в agents.json: поле=значение…',
+    run: async (_engine, rest) => {
+      const [who, tool, ...pairs] = rest;
+      if (!who || !tool || pairs.length === 0) {
+        return [t('Синтаксис: /agent tool update <id агента> <тул> поле=значение…')];
+      }
+      const parsed = parseFields(pairs);
+      if (Array.isArray(parsed)) return parsed;
+      return [grantTool(AGENTS_DIR, who, tool, parsed, TOOLS_DIR)];
+    },
+  },
+  {
+    name: 'agent.tool.delete',
+    args: [
+      { name: 'id агента', required: true, hint: 'agents' },
+      { name: 'тул', required: true },
+    ],
+    title: 'выключить тул',
+    help: 'убрать карточку тула из агента',
+    run: async (_engine, rest) => {
+      const [who, tool] = rest;
+      if (!who || !tool) return [t('Синтаксис: /agent tool delete <id агента> <тул>')];
+      return [revokeTool(AGENTS_DIR, who, tool)];
     },
   },
 
   // модели
   {
-    name: 'model.list', implicit: true, title: 'модели',
+    name: 'models.list', implicit: true, title: 'модели',
     help: 'какие есть, кто готов, кто основная и менеджерская',
     run: async (engine) => modelsText(engine.app),
   },
   {
-    name: 'model.set',
-    args: [{ name: 'id', required: true, hint: 'models' }],
-    title: 'сменить основную',
-    help: 'у менеджера переговорки своя модель (/manager show)',
-    run: async (engine, rest) => {
-      const id = rest[0] ?? '';
-      return engine.setModel(id)
-        ? [tf('Основная модель: {id}', { id })]
-        : [tf('Нет модели «{id}». Доступны: {list}', { id, list: [...engine.app.models.keys()].join(', ') })];
-    },
-  },
-  {
-    name: 'model.add',
+    name: 'model.new',
     args: [
       { name: 'id', required: true },
       { name: 'поле=значение…', required: true },
     ],
     title: 'новая модель',
-    help: 'adapter обязателен; дальше model, baseUrl, apiKey и ключи контракта адаптера',
+    help: 'provider обязателен; дальше model, baseUrl, apiKey и ключи контракта провайдера',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return [t('Синтаксис: /model add <id> adapter=openai-compatible model=… baseUrl=… apiKey=…')];
+        return [t('Синтаксис: /model new <id> provider=openai-compatible model=… baseUrl=… apiKey=…')];
       }
-      const config = parsePairs(pairs);
+      const config = parseFields(pairs);
       if (Array.isArray(config)) return config;
       const report = addModelConfig(MODELS_DIR, id, config);
       reloadModels(engine);
@@ -662,19 +765,18 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: true },
     ],
     title: 'править модель',
-    help: 'adapter, model, baseUrl, apiKey, maxTokens, temperature, thinking…; пустое значение убирает поле',
+    help: 'provider, model, baseUrl, apiKey, maxTokens, temperature, thinking…; вложенных полей у карточки нет',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return [t('Синтаксис: /model update <id> model=… baseUrl=… apiKey=… adapter=…')];
+        return [t('Синтаксис: /model update <id> model=… baseUrl=… apiKey=… provider=…')];
       }
-      const parsed = parsePairs(pairs);
+      const parsed = parseFields(pairs);
       if (Array.isArray(parsed)) return parsed;
-      const fields: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(parsed)) {
-        if (k === 'temperature' || k === 'maxTokens') fields[k] = Number(v);
-        else fields[k] = v;
+      if (Object.keys(parsed).some((k) => k.includes('.'))) {
+        return [t('У карточки модели вложенных полей нет — только плоские: provider, model, baseUrl, apiKey…')];
       }
+      const fields: Record<string, unknown> = { ...parsed };
       const report = updateModelConfig(MODELS_DIR, id, fields);
       reloadModels(engine);
       return [report];
@@ -684,7 +786,7 @@ export const OPERATIONS: OpSpec[] = [
     name: 'model.delete',
     args: [{ name: 'id', required: true, hint: 'models' }],
     title: 'удалить модель',
-    help: 'основную не удалить — сначала /model set другой',
+    help: 'основную не удалить — сначала /settings update model.id=другая',
     run: async (engine, rest) => {
       const id = rest[0] ?? '';
       if (!id) return [t('Синтаксис: /model delete <id>')];
@@ -707,24 +809,33 @@ export const OPERATIONS: OpSpec[] = [
           role: p.role ? ` — ${p.role}` : '',
           about: p.about ? ` — ${p.about}` : '',
         }),
-        t('Представиться: /profile set Имя; роль; пара слов о себе'),
+        t('Поправить: /profile update name=… role=… about=…'),
       ];
     },
   },
   {
-    name: 'profile.set',
-    args: [{ name: 'Имя; роль; о себе', required: true }],
-    title: 'представиться',
-    help: 'разделитель — точка с запятой',
+    name: 'profile.update',
+    args: [{ name: 'поле=значение…', required: true }],
+    title: 'править профиль',
+    help: 'поля: name, role, about',
     run: async (engine, rest) => {
-      const parts = rest.join(' ').split(';').map((s) => s.trim()).filter(Boolean);
-      if (parts.length === 0) return [t('Синтаксис: /profile set Имя; роль; о себе')];
-      return [await engine.setProfile(parts[0], parts[1], parts[2])];
+      if (rest.length === 0) return [t('Синтаксис: /profile update name=… role=… about=…')];
+      const parsed = parseFields(rest);
+      if (Array.isArray(parsed)) return parsed;
+      const keys = Object.keys(parsed);
+      if (keys.some((k) => !['name', 'role', 'about'].includes(k))) {
+        return [t('Поля профиля: name, role, about')];
+      }
+      return [engine.updateProfile({
+        name: typeof parsed.name === 'string' ? parsed.name : undefined,
+        role: typeof parsed.role === 'string' ? parsed.role : undefined,
+        about: typeof parsed.about === 'string' ? parsed.about : undefined,
+      })];
     },
   },
   {
-    name: 'memory.show', implicit: true, needsProject: true,
-    args: [{ name: 'кого|shared', required: false, hint: 'team' }],
+    name: 'memory.show', implicit: true, needsProject: true, needsSession: true,
+    args: [{ name: 'id|shared', required: false, hint: 'agents' }],
     title: 'память',
     help: 'без аргумента — обзор; «shared» — общая память команды',
     run: async (engine, rest) => memoryText(engine.app, rest.join(' ')),
@@ -732,93 +843,93 @@ export const OPERATIONS: OpSpec[] = [
 
   // проекты
   {
-    name: 'project.list', implicit: true, title: 'проекты',
-    help: 'проекты дома и серверы текущего; смена — /project open, создание — /project new',
-    run: async (engine) => projectListText(engine.app),
+    name: 'projects.list', implicit: true, title: 'проекты',
+    help: 'реестр проектов дома; смена — /project open, создание — /project new',
+    run: async () => projectListText(),
   },
   {
     name: 'project.new',
     args: [
-      { name: 'имя', required: true },
+      { name: 'id', required: true },
       { name: 'папка', required: false },
     ],
     title: 'новый проект',
-    help: 'создаст проект в доме и откроет его; папка создаётся, если её нет',
+    help: 'создаёт и открывает; папка создаётся, если её нет',
     run: async (engine, rest) => {
-      const name = rest[0];
-      if (!name) return [t('Синтаксис: /project new <имя> [папка] — имя без пробелов; рабочая папка создаётся, если её нет')];
+      const id = rest[0];
+      if (!id) return [t('Синтаксис: /project new <id> [папка] — id без пробелов; рабочая папка создаётся, если её нет')];
       const dir = rest.length > 1 ? rest.slice(1).join(' ') : null;
-      return [engine.newProject(name, dir)];
+      return [engine.newProject(id, dir)];
     },
   },
   {
     name: 'project.open',
-    args: [{ name: 'имя|путь', required: true, hint: 'projects' }],
+    args: [{ name: 'id|путь', required: true, hint: 'projects' }],
     title: 'открыть проект',
     help: 'сменить проект не выходя из приложения; незнакомая папка — регистрируется',
     run: async (engine, rest) => {
       const arg = rest.join(' ').trim();
-      if (!arg) return [t('Синтаксис: /project open <имя|путь> (список — /project)')];
+      if (!arg) return [t('Синтаксис: /project open <id|путь> (список — /projects)')];
       return [engine.switchProject(arg)];
     },
   },
   {
-    name: 'project.remove',
-    args: [{ name: 'имя|путь', required: true, hint: 'projects' }],
+    name: 'project.close', title: 'закрыть проект',
+    help: 'остаться без проекта: разговоры сохранены, состояние как после запуска',
+    run: async (engine) => [engine.closeProject()],
+  },
+  {
+    name: 'project.delete',
+    args: [{ name: 'id|путь', required: true, hint: 'projects' }],
     title: 'удалить проект',
     help: 'из дома (projects/<id>/ вместе с разговорами); рабочая папка не трогается; текущий не удалить',
     run: async (engine, rest) => {
       const arg = rest.join(' ').trim();
-      if (!arg) return [t('Синтаксис: /project remove <имя|путь>')];
+      if (!arg) return [t('Синтаксис: /project delete <id|путь>')];
       return [engine.deleteProject(arg)];
     },
   },
   {
-    name: 'project.rename',
-    args: [{ name: 'новое имя', required: true }],
+    name: 'project.update',
+    args: [{ name: 'поле=значение…', required: true }],
     needsProject: true,
-    title: 'переименовать проект',
-    help: 'текущий проект: папка в доме и id в project.json',
+    title: 'править проект',
+    help: 'текущий проект: name=… (переименовать, папка в доме) или path=… (сменить рабочую папку)',
     run: async (engine, rest) => {
-      const name = rest.join(' ').trim();
-      if (!name) return [t('Синтаксис: /project rename <новое имя> (текущий проект; имя без пробелов)')];
-      return [engine.renameCurrentProject(name)];
+      if (rest.length === 0) return [t('Синтаксис: /project update name=новое-id или path=папка')];
+      const parsed = parseFields(rest);
+      if (Array.isArray(parsed)) return parsed;
+      const keys = Object.keys(parsed);
+      if (keys.some((k) => k !== 'name' && k !== 'path')) {
+        return [t('У проекта два поля: name=… (переименовать) и path=… (рабочая папка)')];
+      }
+      const lines: string[] = [];
+      if (typeof parsed.name === 'string') lines.push(engine.renameCurrentProject(parsed.name));
+      if (typeof parsed.path === 'string') lines.push(engine.repointProject(parsed.path));
+      return lines;
     },
   },
   {
-    name: 'project.path',
-    args: [{ name: 'папка', required: true }],
-    needsProject: true,
-    title: 'сменить рабочую папку',
-    help: 'текущего проекта; папка создаётся, если её нет',
-    run: async (engine, rest) => {
-      const dir = rest.join(' ').trim();
-      if (!dir) return [t('Синтаксис: /project path <папка> (текущий проект; папка создаётся, если её нет)')];
-      return [engine.repointProject(dir)];
-    },
-  },
-  {
-    name: 'project.export',
-    args: [{ name: 'имя', required: false, hint: 'projects' }],
+    name: 'project.export', needsProject: true,
     title: 'экспорт проекта',
-    help: 'архив проекта: project.json (с секретами) и все разговоры; без имени — текущий',
-    run: async (engine, rest) => exportProjectZip(engine, rest.join(' ')),
+    help: 'архив текущего проекта: project-<id>-<штамп>.zip (project.json с секретами и все разговоры)',
+    run: async (engine) => exportProjectZip(engine),
   },
   {
     name: 'project.import',
     args: [
       { name: 'файл.zip', required: true },
-      { name: 'имя', required: false },
+      { name: 'id', required: false },
     ],
     title: 'импорт проекта',
-    help: 'имя занято — разговоры вольются в него по id, свободно — новый проект; с подтверждением',
+    help: 'id занят — разговоры вольются в него по id, свободен — новый проект; с подтверждением',
     run: async (engine, rest) => {
       const file = rest[0] ?? '';
-      if (!file) return [t('Синтаксис: /project import <файл.zip> [имя]')];
+      if (!file) return [t('Синтаксис: /project import <файл.zip> [id]')];
       if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
       const entries = readZipEntries(readFileSync(file));
       if (!entries.some((e) => e.rel === 'project.json')) {
-        return [t('В архиве нет project.json — это архив всего приложения? Тогда: /home import <файл>')];
+        return [t('В архиве нет project.json — это архив всего приложения? Тогда: /import <файл>')];
       }
       const ok = await engine.confirmAction(
         t('Импортировать проект из этого архива?'),
@@ -828,134 +939,199 @@ export const OPERATIONS: OpSpec[] = [
       return [applyProjectImport(engine.app, entries, rest.slice(1).join(' ').trim() || undefined)];
     },
   },
-  {
-    name: 'project.host.add',
-    args: [
-      { name: 'имя=хост', required: true },
-    ],
-    needsProject: true,
-    title: 'добавить сервер',
-    help: 'в текущий проект (поле "hosts" в project.json); формат [пользователь@]хост[:порт]',
-    run: async (_engine, rest) => {
-      const body = rest.join(' ');
-      const eq = body.indexOf('=');
-      if (!body || eq === -1) {
-        return [t('Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]')];
-      }
-      const name = body.slice(0, eq).trim();
-      const spec = body.slice(eq + 1).trim();
-      if (!name || !spec) return [t('Синтаксис: /project host add <имя>=[пользователь@]хост[:порт]')];
-      return [addProjectHosts(PROJECT_FILE, { [name]: parseHostSpec(spec) })];
-    },
-  },
-  {
-    name: 'project.host.delete',
-    args: [{ name: 'имя', required: true }],
-    needsProject: true,
-    title: 'убрать сервер',
-    help: 'из текущего проекта (поле "hosts" в project.json)',
-    run: async (_engine, rest) => {
-      const [name] = rest;
-      if (!name) return [t('Синтаксис: /project host delete <имя>')];
-      return [removeProjectHost(PROJECT_FILE, name)];
-    },
-  },
 
-  // почта и боты проекта
+  // секреты проекта
   {
-    name: 'mail.list', implicit: true, needsProject: true, title: 'ящики',
-    help: 'реестр ящиков (поле "mails" в project.json проекта)',
+    name: 'project.mails', needsProject: true, title: 'ящики',
+    help: 'реестр ящиков (поле "mails" в project.json); добавить — /project mail add <id>',
     run: async () => {
       const mails = loadMailsFile(PROJECT_FILE);
-      const names = Object.keys(mails);
-      if (names.length === 0) {
-        return [t('Ящиков нет — /mail add <имя> user=… password=… imap=… smtp=… или попросите менеджера')];
+      const ids = Object.keys(mails);
+      if (ids.length === 0) {
+        return [t('Ящиков нет — /project mail add <id>, затем /project mail update <id> user=… password=… imap=… smtp=…')];
+      }
+      const lines = ['', t('Ящики:')];
+      for (const [id, a] of Object.entries(mails)) {
+        if (!a.user) {
+          lines.push(`• ${id} — ${t('не заполнен: /project mail update')} ${id} user=… password=… imap=… smtp=…`);
+          continue;
+        }
+        try {
+          const ep = resolveEndpoints(a);
+          lines.push(`• ${id}: ${a.user} — imap ${ep.imap.host}:${ep.imap.port}, smtp ${ep.smtp.host}:${ep.smtp.port}${a.tlsNoVerify ? ` ${t('(без сверки сертификата)')}` : ''}`);
+        } catch {
+          lines.push(`• ${id}: ${a.user} — ${t('настройки неполные')}`);
+        }
+      }
+      lines.push('');
+      return lines;
+    },
+  },
+  {
+    name: 'project.mail.add',
+    args: [{ name: 'id', required: true }],
+    needsProject: true,
+    title: 'новый ящик',
+    help: 'пустая запись; поля заполнит /project mail update',
+    run: async (_engine, rest) => {
+      const id = (rest[0] ?? '').trim();
+      if (!id) return [t('Синтаксис: /project mail add <id>')];
+      return [addMailRecord(PROJECT_FILE, id)];
+    },
+  },
+  {
+    name: 'project.mail.update',
+    args: [
+      { name: 'id', required: true },
+      { name: 'поле=значение…', required: true },
+    ],
+    needsProject: true,
+    title: 'править ящик',
+    help: 'поля: user, password, imap, smtp, port, smtpPort, tlsNoVerify',
+    run: async (_engine, rest) => {
+      const [id, ...pairs] = rest;
+      if (!id || pairs.length === 0) return [t('Синтаксис: /project mail update <id> user=… password=… imap=… smtp=… [port=…] [smtpPort=…] [tlsNoVerify=true]')];
+      const parsed = parseFields(pairs);
+      if (Array.isArray(parsed)) return parsed;
+      return [updateMailRecord(PROJECT_FILE, id, parsed)];
+    },
+  },
+  {
+    name: 'project.mail.delete',
+    args: [{ name: 'id', required: true }],
+    needsProject: true,
+    title: 'убрать ящик',
+    help: 'из поля "mails" project.json проекта',
+    run: async (_engine, rest) => {
+      const id = (rest[0] ?? '').trim();
+      if (!id) return [t('Синтаксис: /project mail delete <id>')];
+      return [removeMailAccount(PROJECT_FILE, id)];
+    },
+  },
+  {
+    name: 'project.hosts', needsProject: true, title: 'серверы',
+    help: 'серверы проекта (поле "hosts" в project.json); добавить — /project host add <id>',
+    run: async () => {
+      const hosts = loadHostsFile(PROJECT_FILE);
+      const ids = Object.keys(hosts);
+      if (ids.length === 0) {
+        return [t('Серверов нет — /project host add <id>, затем /project host update <id> host=… user=… port=…')];
       }
       return [
         '',
-        t('Ящики:'),
-        ...Object.entries(mails).map(([n, a]) => {
-          const ep = resolveEndpoints(a);
-          return `• ${n}: ${a.user} — imap ${ep.imap.host}:${ep.imap.port}, smtp ${ep.smtp.host}:${ep.smtp.port}${a.tlsNoVerify ? ` ${t('(без сверки сертификата)')}` : ''}`;
+        t('Серверы проекта (поле "hosts" в project.json):'),
+        ...Object.entries(hosts).map(([id, h]) => {
+          if (!h.host) return `• ${id} — ${t('не заполнен: /project host update')} ${id} host=… user=… port=…`;
+          return `• ${id}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`;
         }),
         '',
       ];
     },
   },
   {
-    name: 'mail.add',
+    name: 'project.host.add',
+    args: [{ name: 'id', required: true }],
+    needsProject: true,
+    title: 'новый сервер',
+    help: 'пустая запись; поля заполнит /project host update',
+    run: async (_engine, rest) => {
+      const id = (rest[0] ?? '').trim();
+      if (!id) return [t('Синтаксис: /project host add <id>')];
+      return [addHostRecord(PROJECT_FILE, id)];
+    },
+  },
+  {
+    name: 'project.host.update',
     args: [
-      { name: 'имя', required: true },
-      { name: 'user=… password=… imap=… smtp=…', required: true },
+      { name: 'id', required: true },
+      { name: 'поле=значение…', required: true },
     ],
     needsProject: true,
-    title: 'добавить ящик',
-    help: 'пароль приложения; в поле "mails" project.json — руками, командой или через менеджера',
+    title: 'править сервер',
+    help: 'поля: host, user, password, dir, port',
     run: async (_engine, rest) => {
-      const [name, ...pairs] = rest;
-      if (!name || pairs.length === 0) {
-        return [t('Синтаксис: /mail add <имя> user=… password=… imap=… smtp=… [port=…] [smtpPort=…] [tlsNoVerify]')];
-      }
-      const spec = parseMailSpec(pairs);
-      if (typeof spec === 'string') return [spec];
-      return [addMailAccount(PROJECT_FILE, name, spec)];
+      const [id, ...pairs] = rest;
+      if (!id || pairs.length === 0) return [t('Синтаксис: /project host update <id> host=… [user=…] [password=…] [dir=…] [port=…]')];
+      const parsed = parseFields(pairs);
+      if (Array.isArray(parsed)) return parsed;
+      return [updateHostRecord(PROJECT_FILE, id, parsed)];
     },
   },
   {
-    name: 'mail.remove',
-    args: [{ name: 'имя', required: true }],
+    name: 'project.host.delete',
+    args: [{ name: 'id', required: true }],
     needsProject: true,
-    title: 'убрать ящик',
-    help: 'из поля "mails" project.json проекта',
+    title: 'убрать сервер',
+    help: 'из поля "hosts" project.json проекта',
     run: async (_engine, rest) => {
-      const [name] = rest;
-      if (!name) return [t('Синтаксис: /mail remove <имя>')];
-      return [removeMailAccount(PROJECT_FILE, name)];
+      const id = (rest[0] ?? '').trim();
+      if (!id) return [t('Синтаксис: /project host delete <id>')];
+      return [removeProjectHost(PROJECT_FILE, id)];
     },
   },
   {
-    name: 'messenger.list', implicit: true, needsProject: true, title: 'боты',
-    help: 'токены ботов (поле "messengers" в project.json проекта)',
+    name: 'project.messengers', needsProject: true, title: 'боты',
+    help: 'токены ботов (поле "messengers" в project.json); добавить — /project messenger add <telegram|max>',
     run: async () => {
       const cfg = loadMessengersFile(PROJECT_FILE);
-      const rows = (['telegram', 'max'] as const).filter((k) => cfg[k] !== undefined).map((k) => `• ${k}: ${t('токен сохранён')}`);
-      if (rows.length === 0) return [t('Ботов нет — /messenger add <telegram|max> <токен> или попросите менеджера')];
+      const rows = (['telegram', 'max'] as const)
+        .filter((k) => cfg[k] !== undefined)
+        .map((k) => {
+          const token = (cfg[k] as { token?: string } | undefined)?.token;
+          return `• ${k}: ${token ? t('токен сохранён') : t('токен не задан — /project messenger update')} ${k} token=…`;
+        });
+      if (rows.length === 0) return [t('Ботов нет — /project messenger add <telegram|max>, затем /project messenger update <id> token=…')];
       return ['', t('Боты:'), ...rows, ''];
     },
   },
   {
-    name: 'messenger.add',
-    args: [
-      { name: 'telegram|max', required: true },
-      { name: 'токен', required: true },
-    ],
+    name: 'project.messenger.add',
+    args: [{ name: 'telegram|max', required: true }],
     needsProject: true,
-    title: 'токен бота',
-    help: 'в поле "messengers" project.json проекта; Telegram — @BotFather, MAX — dev.max.ru',
+    title: 'новый бот',
+    help: 'пустая запись; токен зальёт /project messenger update',
     run: async (_engine, rest) => {
-      const [key, token] = rest;
-      if (!key || !token) return [t('Синтаксис: /messenger add <telegram|max> <токен>')];
-      return [addMessengerBot(PROJECT_FILE, key, token)];
+      const key = (rest[0] ?? '').trim();
+      if (!key) return [t('Синтаксис: /project messenger add <telegram|max>')];
+      return [addMessengerRecord(PROJECT_FILE, key)];
     },
   },
   {
-    name: 'messenger.remove',
+    name: 'project.messenger.update',
+    args: [
+      { name: 'telegram|max', required: true },
+      { name: 'token=…', required: true },
+    ],
+    needsProject: true,
+    title: 'залить токен',
+    help: 'Telegram — @BotFather, MAX — dev.max.ru; токен в отчёте не светится',
+    run: async (_engine, rest) => {
+      const [key, ...pairs] = rest;
+      if (!key || pairs.length === 0) return [t('Синтаксис: /project messenger update <telegram|max> token=…')];
+      const parsed = parseFields(pairs);
+      if (Array.isArray(parsed)) return parsed;
+      return [updateMessengerRecord(PROJECT_FILE, key, parsed)];
+    },
+  },
+  {
+    name: 'project.messenger.delete',
     args: [{ name: 'telegram|max', required: true }],
     needsProject: true,
     title: 'убрать бота',
     help: 'из поля "messengers" project.json проекта',
     run: async (_engine, rest) => {
-      const [key] = rest;
-      if (!key) return [t('Синтаксис: /messenger remove <telegram|max>')];
+      const key = (rest[0] ?? '').trim();
+      if (!key) return [t('Синтаксис: /project messenger delete <telegram|max>')];
       return [removeMessengerBot(PROJECT_FILE, key)];
     },
   },
+
+  // расписание, автономный режим, статистика
   {
     name: 'schedule.list', implicit: true, title: 'расписание',
     help: 'задачи, которые serve запускает сам по интервалу',
-    run: async (engine) => {
-      const tasks = loadSchedule(scheduleDir());
-      void engine;
+    run: async () => {
+      const tasks = loadSchedule(DT_HOME);
       if (tasks.length === 0) return [t('Задач нет — /schedule add <задание> [минуты]')];
       return [
         '',
@@ -980,7 +1156,7 @@ export const OPERATIONS: OpSpec[] = [
       const every = Number.isInteger(minutes) && minutes > 0 ? minutes : 10;
       const message = (Number.isInteger(minutes) && minutes > 0 ? rest.slice(0, -1) : rest).join(' ');
       if (!message) return [t('Синтаксис: /schedule add <задание> [минуты]')];
-      const dir = scheduleDir();
+      const dir = DT_HOME;
       const tasks = loadSchedule(dir);
       const id = `task-${Date.now().toString(36)}`;
       tasks.push({ id, message, intervalMinutes: every, enabled: true });
@@ -996,7 +1172,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (_engine, rest) => {
       const id = rest[0];
       if (!id) return [t('Синтаксис: /schedule toggle <id>')];
-      const dir = scheduleDir();
+      const dir = DT_HOME;
       const tasks = loadSchedule(dir);
       const task = tasks.find((t2) => t2.id === id);
       if (!task) return [tf('Нет задачи «{id}» — см. /schedule', { id })];
@@ -1013,14 +1189,13 @@ export const OPERATIONS: OpSpec[] = [
     run: async (_engine, rest) => {
       const id = rest[0];
       if (!id) return [t('Синтаксис: /schedule delete <id>')];
-      const dir = scheduleDir();
+      const dir = DT_HOME;
       const tasks = loadSchedule(dir).filter((t2) => t2.id !== id);
       saveSchedule(dir, tasks);
       return [tf('Удалено: задач осталось {n}', { n: tasks.length })];
     },
   },
 
-  // настройки и менеджер
   {
     name: 'auto.on',
     args: [{ name: 'N', required: false }],
@@ -1042,6 +1217,47 @@ export const OPERATIONS: OpSpec[] = [
   },
 
   {
+    name: 'usage.show', implicit: true, needsProject: true, needsSession: true,
+    args: [{ name: 'id модели', required: false, hint: 'models' }],
+    title: 'статистика токенов',
+    help: 'вход/выход/кэш накопительно; с id модели — только по ней',
+    run: async (engine, rest) => {
+      const { session } = requireProject(engine.app);
+      const mid = (rest[0] ?? '').trim();
+      const line = (u: { promptTokens: number; cachedTokens: number; outputTokens: number; rounds: number }): string[] => {
+        const pct = u.promptTokens > 0 ? Math.round((u.cachedTokens / u.promptTokens) * 100) : 0;
+        return [
+          tf('Раундов: {rounds}', { rounds: u.rounds }),
+          tf('Вход: {in} · Выход: {out} · Из кэша: {cached} ({pct}%)', {
+            in: u.promptTokens.toLocaleString('ru-RU'),
+            out: u.outputTokens.toLocaleString('ru-RU'),
+            cached: u.cachedTokens.toLocaleString('ru-RU'),
+            pct,
+          }),
+        ];
+      };
+      if (mid) {
+        const u = session.usageByModel?.[mid];
+        if (!u || u.rounds === 0) {
+          return [tf('По модели «{id}» статистики нет (срез по моделям собирается с этого обновления).', { id: mid })];
+        }
+        return [tf('Модель {id}:', { id: mid }), ...line(u)];
+      }
+      const u = session.usage;
+      if (!u || u.rounds === 0) return [t('Статистики пока нет — сделайте раунд с API (не mock).')];
+      const lines = ['', t('Итого за разговор:'), ...line(u)];
+      const byModel = Object.entries(session.usageByModel ?? {}).filter(([, v]) => v.rounds > 0);
+      if (byModel.length > 1) {
+        lines.push('', t('По моделям:'));
+        for (const [id, v] of byModel) lines.push(`• ${id} — ${tf('{r} раунд(ов), вход {in}, выход {out}', { r: v.rounds, in: v.promptTokens.toLocaleString('ru-RU'), out: v.outputTokens.toLocaleString('ru-RU') })}`);
+      }
+      lines.push('');
+      return lines;
+    },
+  },
+
+  // настройки, менеджер
+  {
     name: 'settings.show', implicit: true, title: 'настройки',
     help: 'язык, maxTurns, ширина и остальные поля settings.json',
     run: async (engine) => {
@@ -1050,67 +1266,76 @@ export const OPERATIONS: OpSpec[] = [
         '',
         t('Настройки (settings.json):'),
         ...Object.entries(s).map(([k, v]) => `    ${k} = ${String(v)}`),
-        t('Поменять: /settings set поле=значение (например, /settings set maxTurns=2 или /settings set ui=en)'),
+        t('Поменять: /settings update поле=значение (например, /settings update maxTurns=2 или /settings update ui=en; модель — model.id=…)'),
         '',
       ];
     },
   },
   {
-    name: 'settings.set',
+    name: 'settings.update',
     args: [{ name: 'поле=значение…', required: true }],
     title: 'поменять настройки',
-    help: 'вступают в силу со следующего раунда; запись с валидацией и откатом',
+    help: 'вступают в силу со следующего раунда; вложенные: model.id=…, serviceModel.id=…, model.temperature=…',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /settings set поле=значение… (см. /settings)')];
-      const parsed = parsePairs(rest);
+      if (rest.length === 0) return [t('Синтаксис: /settings update поле=значение… (см. /settings)')];
+      const parsed = parseFields(rest);
       if (Array.isArray(parsed)) return parsed;
+      // ссылки на модели через точечные пути: id с проверкой существования
+      const { patch, error } = modelRefPatch(parsed, ['model', 'serviceModel'], {
+        model: engine.app.settings.model,
+        serviceModel: engine.app.settings.serviceModel,
+      });
+      if (error) return error;
+      for (const [base, ref] of Object.entries(patch)) {
+        if (!ref.id) return [tf('{base}.id пуст — укажите существующую модель', { base })];
+        if (!engine.app.models.has(ref.id)) {
+          return [tf('Нет модели «{id}». Доступны: {list}', { id: ref.id, list: [...engine.app.models.keys()].join(', ') })];
+        }
+      }
       // настройки типизированы: числа и булевы приводим сразу
       const fields: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(parsed)) {
-        if (k === 'model' || k === 'serviceModel') {
-          // ссылки на модели: id строкой → {"id": …}; существование проверено здесь
-          const mid = String(v);
-          if (!engine.app.models.has(mid)) {
-            return [tf('Нет модели «{id}». Доступны: {list}', { id: mid, list: [...engine.app.models.keys()].join(', ') })];
-          }
-          fields[k] = { id: mid };
-          continue;
-        }
+        if (k.includes('.')) continue;
         if (v === 'true' || v === 'false') fields[k] = v === 'true';
         else if (typeof v === 'string' && v !== '' && Number.isFinite(Number(v))) fields[k] = Number(v);
         else fields[k] = v;
       }
+      if (patch.model) fields.model = patch.model;
+      if (patch.serviceModel) fields.serviceModel = patch.serviceModel;
       const raw = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
       const merged = { ...raw, ...fields };
       const tmp = SETTINGS_FILE + '.tmp';
       writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
       loadSettings(tmp, 0); // валидация
       renameSync(tmp, SETTINGS_FILE);
-      // язык интерфейса и основная модель вступают в силу сразу
+      // язык интерфейса и модели вступают в силу сразу
       if (typeof fields.ui === 'string') applyLocale(fields.ui, DT_HOME);
-      if (fields.model && typeof fields.model === 'object') engine.app.settings.model = fields.model as ModelRef;
-      if (fields.serviceModel && typeof fields.serviceModel === 'object') {
-        engine.app.settings.serviceModel = fields.serviceModel as ModelRef;
-      }
+      if (patch.model) engine.app.settings.model = patch.model;
+      if (patch.serviceModel) engine.app.settings.serviceModel = patch.serviceModel;
       return [t('✓ Настройки обновлены (язык и лимиты — со следующего раунда)')];
     },
   },
   {
-    name: 'usage.show', implicit: true, needsProject: true, title: 'статистика токенов',
-    help: 'вход/выход/кэш — накопительно за текущий разговор',
-    run: async (engine) => {
-      const u = requireProject(engine.app).session.usage;
-      if (!u || u.rounds === 0) return [t('Статистики пока нет — сделайте раунд с API (не mock).')];
-      const pct = u.promptTokens > 0 ? Math.round((u.cachedTokens / u.promptTokens) * 100) : 0;
-      return [
-        tf('Раундов: {rounds}', { rounds: u.rounds }),
-        tf('Вход: {in} · Выход: {out} · Из кэша: {cached} ({pct}%)', {
-          in: u.promptTokens.toLocaleString('ru-RU'),
-          out: u.outputTokens.toLocaleString('ru-RU'),
-          cached: u.cachedTokens.toLocaleString('ru-RU'),
-          pct,
-        }),
-      ];
+    name: 'settings.export', title: 'экспорт настроек',
+    help: 'настройки без проектов: settings-<профиль>-<штамп>.zip (settings, профиль, менеджер, модели с ключами)',
+    run: async (engine) => exportSettingsZip(engine),
+  },
+  {
+    name: 'settings.import',
+    args: [{ name: 'файл.zip', required: true }],
+    title: 'импорт настроек',
+    help: 'settings/профиль/менеджер/модели заменяются, проекты не трогаются; с подтверждением',
+    run: async (engine, rest) => {
+      const file = rest.join(' ');
+      if (!file) return [t('Синтаксис: /settings import <файл.zip>')];
+      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
+      const entries = readZipEntries(readFileSync(file));
+      const ok = await engine.confirmAction(
+        t('Импортировать настройки приложения из этого архива?'),
+        t('settings.json, профиль, менеджер и карточки моделей (с ключами) заменяются; проекты и разговоры не трогаются.'),
+      );
+      if (!ok) return [t('Импорт отменён.')];
+      return [applySettingsImport(engine.app, entries)];
     },
   },
 
@@ -1121,19 +1346,32 @@ export const OPERATIONS: OpSpec[] = [
       '',
       tf('Менеджер: {emoji} {name}', { emoji: engine.app.mgr.emoji, name: engine.app.mgr.name }),
       `    ${t('модель:')} ${engine.app.mgr.model.id} · ${t('температура:')} ${engine.app.mgr.temperature ?? '—'}`,
-      t('Поменять: /manager set model=… temperature=… name=… emoji=… color=…'),
+      t('Поменять: /manager update model.id=… model.temperature=… name=… emoji=… color=…'),
       '',
     ],
   },
   {
-    name: 'manager.set',
+    name: 'manager.update',
     args: [{ name: 'поле=значение…', required: true }],
     title: 'настроить менеджера',
-    help: 'model, temperature, name, emoji, color',
+    help: 'поля: name, emoji, color, temperature; вложенные: model.id, model.temperature',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /manager set model=… temperature=… name=… emoji=… color=…')];
-      const fields = parsePairs(rest);
-      if (Array.isArray(fields)) return fields;
+      if (rest.length === 0) return [t('Синтаксис: /manager update model.id=… model.temperature=… name=… emoji=… color=…')];
+      const parsed = parseFields(rest);
+      if (Array.isArray(parsed)) return parsed;
+      const { patch, error } = modelRefPatch(parsed, ['model'], { model: engine.app.mgr.model });
+      if (error) return error;
+      if (patch.model && !patch.model.id) return [t('model.temperature= без model.id= — не знаю, к какой модели отнести')];
+      const fields: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (k.includes('.')) continue;
+        if (!['name', 'emoji', 'color', 'temperature'].includes(k)) {
+          return [tf('Поле «{key}» не знаю — можно: name, emoji, color, temperature, model.id, model.temperature', { key: k })];
+        }
+        fields[k] = v;
+      }
+      if (patch.model) fields.model = patch.model;
+      if (Object.keys(fields).length === 0) return [t('Не понял, что менять — жду поле=значение')];
       const known = [...engine.app.models.keys()];
       const report = updateManagerConfig(MANAGER_FILE, fields, known);
       engine.app.mgr = loadManagerConfig(MANAGER_FILE, known);
@@ -1141,10 +1379,6 @@ export const OPERATIONS: OpSpec[] = [
     },
   },
 ];
-
-// ── расписание: schedule.json лежит в доме, общее для всех проектов ──
-
-const scheduleDir = (): string => DT_HOME;
 
 // ── поиск и исполнение ───────────────────────────────────────────────────────
 
@@ -1154,21 +1388,40 @@ export function findOperation(name: string): OpSpec | undefined {
   return byName.get(name);
 }
 
-/** Гейт «без проекта»: операции с needsProject отвечают подсказкой вместо падения. */
+/** Гейты «без проекта»/«без разговора»: операции отвечают подсказкой вместо падения. */
 async function runOp(engine: Engine, op: OpSpec, args: string[], signal?: AbortSignal): Promise<string[]> {
-  if (op.needsProject && !engine.app.store) {
-    return [t('нет открытого проекта — сначала /project new <имя> [папка] или /project open <имя|путь>')];
+  if ((op.needsProject || op.needsSession) && !engine.app.store) {
+    return [t('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>')];
+  }
+  if (op.needsSession && !engine.app.session) {
+    return [t('нет открытого разговора — /session new [id] или /session open <id>; список — /sessions')];
   }
   return op.run(engine, args, signal);
 }
 
-/** Канонический текст команды операции: обзор группы — без глагола. */
-export function operationCommand(op: OpSpec): string {
-  const [group, verb] = op.name.split('.');
-  return op.implicit ? `/${group}` : `/${group} ${verb}`;
+/**
+ * Для операций с парами `поле=значение…` (и `title=…`) склеивает токены
+ * обратно: значение с пробелами (`title=Привет мир`) живёт до следующего
+ * токена вида «ключ=».
+ */
+function pairArgs(op: OpSpec, tokens: string[]): string[] {
+  if (!op.args?.some((a) => a.name.includes('='))) return tokens;
+  const out: string[] = [];
+  for (const tok of tokens) {
+    if (out.length === 0 || /^[^\s=]+=/.test(tok)) out.push(tok);
+    else out[out.length - 1] += ' ' + tok;
+  }
+  return out;
 }
 
-/** Строка аргументов для справки: `<номер> [роль]`. */
+/** Канонический текст команды операции: обзор группы — без глагола. */
+export function operationCommand(op: OpSpec): string {
+  const parts = op.name.split('.');
+  if (parts.length === 1) return `/${op.name}`; // одиночные: /export, /import
+  return op.implicit ? `/${parts[0]}` : `/${parts[0]} ${parts.slice(1).join(' ')}`;
+}
+
+/** Строка аргументов для справки: `<id> [роль]`. */
 export function operationArgs(op: OpSpec): string {
   return (op.args ?? []).map((a) => (a.required ? `<${a.name}>` : `[${a.name}]`)).join(' ');
 }
@@ -1177,6 +1430,8 @@ export function operationArgs(op: OpSpec): string {
 export interface OpHint {
   cmd: string;
   args?: string;
+  /** Машиночитаемые подсказки аргументов (sessions/agents/chat/models/…) — по одной на аргумент. */
+  hints?: string[];
   help: string;
 }
 
@@ -1184,14 +1439,20 @@ export function operationHints(): OpHint[] {
   return OPERATIONS.map((op) => {
     const cmd = operationCommand(op);
     const args = operationArgs(op);
-    return { cmd, args: args || undefined, help: t(op.title) };
+    return {
+      cmd,
+      args: args || undefined,
+      hints: (op.args ?? []).map((a) => a.hint ?? ''),
+      help: t(op.title),
+    };
   });
 }
 
 /**
  * Исполняет `/группа глагол аргументы…` и возвращает строки отчёта — без
  * отступов, оболочка печатает их как хочет. Обзор группы можно звать без
- * глагола (`/team`, `/memory Глеб`). Ошибки летят вызывающему.
+ * глагола (`/agents`, `/memory gleb`). Одиночные имена (/export, /import) —
+ * целиком. Ошибки летят вызывающему.
  */
 export async function runOperationText(
   engine: Engine,
@@ -1205,17 +1466,20 @@ export async function runOperationText(
   if (group === 'exit' || group === 'quit' || group === 'q') {
     return [t('/exit — команда терминала. В веб-оболочке просто закройте страницу.')];
   }
-  // трёхсловные имена (project host add) важнее двухсловных: ищем с хвоста
+  // трёхсловные имена (project mail add) важнее двухсловных: ищем с хвоста
   const explicit3 = second && rest.length > 0 ? byName.get(`${group}.${second}.${rest[0].toLowerCase()}`) : undefined;
-  if (explicit3) return runOp(engine, explicit3, rest.slice(1), signal);
+  if (explicit3) return runOp(engine, explicit3, pairArgs(explicit3, rest.slice(1)), signal);
   const explicit = second ? byName.get(`${group}.${second.toLowerCase()}`) : undefined;
-  if (explicit) return runOp(engine, explicit, rest, signal);
-  // обзор группы: verb-less (`/team`) или имплицитная операция с аргументом
-  // (`/memory Глеб`, `/memory shared`) — глагол не нужен
+  if (explicit) return runOp(engine, explicit, pairArgs(explicit, rest), signal);
+  // одиночная команда без группы (/export, /import)
+  const single = second ? undefined : byName.get(group.toLowerCase());
+  if (single) return runOp(engine, single, pairArgs(single, rest), signal);
+  // обзор группы: verb-less (`/agents`) или имплицитная операция с аргументом
+  // (`/memory gleb`, `/memory shared`) — глагол не нужен
   const implicit = OPERATIONS.find((o) => o.name.startsWith(`${group}.`) && o.implicit);
   if (implicit) {
     const args = second ? [second, ...rest] : rest;
-    return runOp(engine, implicit, args, signal);
+    return runOp(engine, implicit, pairArgs(implicit, args), signal);
   }
   // не похоже ни на что: подсказываем ближайшую группу
   const groups = [...new Set(OPERATIONS.map((o) => o.name.split('.')[0]))];
@@ -1236,13 +1500,13 @@ function helpLines(): string[] {
       group = g;
       lines.push('');
     }
-    const label = (operationCommand(op) + (op.args ? ' ' + operationArgs(op) : '')).padEnd(24);
+    const label = (operationCommand(op) + (op.args ? ' ' + operationArgs(op) : '')).padEnd(30);
     lines.push(`    ${label} — ${t(op.help)}`);
   }
   lines.push(
     '',
     t('  @имя или !имя — обратиться к участнику; @менеджер — к менеджеру переговорки;'),
-    t('  @session N — приложить конспект другого разговора.'),
+    t('  @session <id разговора> — приложить конспект другого разговора.'),
   );
   return lines;
 }

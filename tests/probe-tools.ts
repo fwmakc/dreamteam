@@ -16,6 +16,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { makeCtx, makeCheckCtx } from './tool-ctx.js';
 import {
   commandCheck,
   maskDeny,
@@ -252,9 +253,9 @@ const tctx: ToolContext = {
   check('shell.check: цепочка целиком из разрешённых', shell.check('echo a && echo b') === 'allow');
 
   const files = toolset.get('files')!;
-  const ctxBase = { cwd: root, run: async () => ({ ok: false, output: '' }), http: async () => ({ ok: false, output: '' }), confirm: async () => false };
-  check('files.check: путь внутри папки — молча', files.check('sub/x.txt', { cwd: root }) === 'allow');
-  check('files.check: выход за папку — вопрос', files.check('../outside.txt', { cwd: root }) === 'ask');
+  const ctxBase = makeCtx(root);
+  check('files.check: путь внутри папки — молча', files.check('sub/x.txt', makeCheckCtx(root)) === 'allow');
+  check('files.check: выход за папку — вопрос', files.check('../outside.txt', makeCheckCtx(root)) === 'ask');
   const writeOut = await files.run('привет из пробника', { ...ctxBase, arg: 'sub/dir/x.txt' });
   check('files.run: файл записан', writeOut.includes('x.txt') && existsSync(join(root, 'sub', 'dir', 'x.txt')), writeOut);
   check('files.run: содержимое на месте', readFileSync(join(root, 'sub', 'dir', 'x.txt'), 'utf8') === 'привет из пробника');
@@ -285,36 +286,36 @@ const tctx: ToolContext = {
 
   const isWin = process.platform === 'win32';
   const readCmd = (c: string) => (isWin ? c : c.replace(/^dir\b/, 'ls').replace(/^type\b/, 'cat').replace(/^findstr\b/, 'grep'));
-  check('shell дефолт: листинг папки — молча', shell.check(readCmd('dir'), { cwd: root }) === 'allow');
-  check('shell дефолт: чтение файла внутри папки — молча', shell.check(readCmd('type package.json'), { cwd: root }) === 'allow');
-  check('shell дефолт: git — вопрос (репозиторий — тул git, не shell)', shell.check('git status && git log -1', { cwd: root }) === 'ask');
+  check('shell дефолт: листинг папки — молча', shell.check(readCmd('dir'), makeCheckCtx(root)) === 'allow');
+  check('shell дефолт: чтение файла внутри папки — молча', shell.check(readCmd('type package.json'), makeCheckCtx(root)) === 'allow');
+  check('shell дефолт: git — вопрос (репозиторий — тул git, не shell)', shell.check('git status && git log -1', makeCheckCtx(root)) === 'ask');
   check('shell дефолт: git push — вопрос', shell.check('git push origin main') === 'ask');
   check('shell дефолт: git branch с аргументом — вопрос', shell.check('git branch feature') === 'ask');
   check('shell дефолт: npm test — вопрос', shell.check('npm test') === 'ask');
-  check('shell дефолт: find -delete — вопрос', shell.check(readCmd('find . -name "*.tmp" -delete'), { cwd: root }) === 'ask');
+  check('shell дефолт: find -delete — вопрос', shell.check(readCmd('find . -name "*.tmp" -delete'), makeCheckCtx(root)) === 'ask');
   check('shell дефолт: подстановка — вопрос', shell.check('echo $(cat .env)') === 'ask');
   check('shell дефолт: вывод в файл — вопрос', shell.check('echo hi > out.txt') === 'ask');
   check('shell дефолт: %переменная% cmd — вопрос', shell.check('echo %ANY_SECRET%') === 'ask');
-  const esc = shell.check(readCmd('type ../outside.txt'), { cwd: root });
+  const esc = shell.check(readCmd('type ../outside.txt'), makeCheckCtx(root));
   check('shell дефолт: «..» вне папки — отказ с обоснованием', typeof esc === 'object' && esc.deny.includes('вне рабочей папки'), JSON.stringify(esc));
-  check('shell дефолт: листинг выше папки — отказ', typeof shell.check(readCmd('dir ..'), { cwd: root }) === 'object');
+  check('shell дефолт: листинг выше папки — отказ', typeof shell.check(readCmd('dir ..'), makeCheckCtx(root)) === 'object');
   // на POSIX «C:/...» — относительный путь; честно абсолютный — только с ведущим /
   const outsideAbs = isWin ? 'type C:/Windows/win.ini' : 'cat /etc/passwd';
-  check('shell дефолт: абсолютный путь мимо папки — отказ', typeof shell.check(readCmd(outsideAbs), { cwd: root }) === 'object');
-  const secret = shell.check(readCmd('type .env'), { cwd: root });
+  check('shell дефолт: абсолютный путь мимо папки — отказ', typeof shell.check(readCmd(outsideAbs), makeCheckCtx(root)) === 'object');
+  const secret = shell.check(readCmd('type .env'), makeCheckCtx(root));
   check('shell дефолт: .env — отказ «секретный»', typeof secret === 'object' && secret.deny.includes('секретн'), JSON.stringify(secret));
   check('shell дефолт: ssh-ключ — отказ', typeof shell.check(readCmd('type ~/.ssh/id_rsa')) === 'object');
   if (isWin) {
     check('shell: desc предупреждает про cmd.exe', shell.desc.includes('cmd.exe') && shell.desc.includes('bash-команды'));
-    check('shell: bash-команды на Windows — вопрос', shell.check('ls -la', { cwd: root }) === 'ask' && shell.check('pwd') === 'ask');
-    check('shell: findstr — молча', shell.check('findstr "х" package.json', { cwd: root }) === 'allow');
-    check('shell: where — молча', shell.check('where git', { cwd: root }) === 'allow');
+    check('shell: bash-команды на Windows — вопрос', shell.check('ls -la', makeCheckCtx(root)) === 'ask' && shell.check('pwd') === 'ask');
+    check('shell: findstr — молча', shell.check('findstr "х" package.json', makeCheckCtx(root)) === 'allow');
+    check('shell: where — молча', shell.check('where git', makeCheckCtx(root)) === 'allow');
   } else {
     check('shell: desc POSIX', shell.desc.includes('ls, cat, grep'));
   }
-  const svc = shell.check(readCmd('type .dreamteam/agents.json'), { cwd: root });
+  const svc = shell.check(readCmd('type .dreamteam/agents.json'), makeCheckCtx(root));
   check('shell дефолт: служебная .dreamteam — отказ', typeof svc === 'object' && svc.deny.includes('dreamteam'), JSON.stringify(svc));
-  check('shell дефолт: запись в .dreamteam — отказ', typeof shell.check(readCmd('dir .dreamteam/tools'), { cwd: root }) === 'object');
+  check('shell дефолт: запись в .dreamteam — отказ', typeof shell.check(readCmd('dir .dreamteam/tools'), makeCheckCtx(root)) === 'object');
   check('ssh дефолт: .dreamteam на сервере тоже запрет', typeof ssh.check('cat .dreamteam/agents.json') === 'object');
 
   // ── arch: zip/tar/tgz без внешних программ, zip-slip/секреты/лимиты ──────
@@ -445,7 +446,7 @@ const tctx: ToolContext = {
   try { gitFactory({ maxOutput: -5 }); } catch (e) { threw = (e as Error).message; }
   check('git: кривой maxOutput — отказ', threw.includes('maxOutput'), threw);
 
-  const base = { run: async () => ({ ok: false, output: '' }), http: async () => ({ ok: false, output: '' }), confirm: async () => false };
+  const base = { ...makeCtx(dir), run: async () => ({ ok: false, output: '' }) };
   let notRepo = '';
   try { await git.run('status', { ...base, cwd: dir }); } catch (e) { notRepo = (e as Error).message; }
   check('git: запуск мимо репозитория — ошибка', notRepo.includes('код выхода'), notRepo);
@@ -506,7 +507,7 @@ const tctx: ToolContext = {
       { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p', tools: { ssh: card }, projects: ['shop'] },
       cfgS, tctx, undefined, new Map(),
     ).get('ssh')!;
-  const ctx = { cwd: root, project: 'shop', arg: 'shop:prod' };
+  const ctx = { ...makeCheckCtx(root), project: 'shop', arg: 'shop:prod' };
 
   const ssh = mk({});
   check('ssh+dir: uptime — молча', ssh.check('uptime', ctx) === 'allow');
@@ -552,14 +553,14 @@ const tctx: ToolContext = {
     localCfg, tctx, undefined, new Map(),
   );
   const files = toolset.get('files')!;
-  const key = files.check('server.key', { cwd: root });
+  const key = files.check('server.key', makeCheckCtx(root));
   check('files+маски: ключ — отказ под маской', typeof key === 'object' && key.deny.includes('под маской'), JSON.stringify(key));
-  check('files+маски: «!»-исключение — можно', files.check('safe.key', { cwd: root }) === 'allow');
-  check('files+маски: глубже тоже под маской', typeof files.check('etc/server.key', { cwd: root }) === 'object');
-  check('files+маски: обычный файл — молча', files.check('readme.md', { cwd: root }) === 'allow');
-  const svc = files.check('.dreamteam/agents.json', { cwd: root });
+  check('files+маски: «!»-исключение — можно', files.check('safe.key', makeCheckCtx(root)) === 'allow');
+  check('files+маски: глубже тоже под маской', typeof files.check('etc/server.key', makeCheckCtx(root)) === 'object');
+  check('files+маски: обычный файл — молча', files.check('readme.md', makeCheckCtx(root)) === 'allow');
+  const svc = files.check('.dreamteam/agents.json', makeCheckCtx(root));
   check('files: служебная .dreamteam — отказ', typeof svc === 'object' && svc.deny.includes('dreamteam'), JSON.stringify(svc));
-  const svcDeep = files.check('.dreamteam/tools/x.ts', { cwd: root });
+  const svcDeep = files.check('.dreamteam/tools/x.ts', makeCheckCtx(root));
   check('files: .dreamteam на глубине — отказ', typeof svcDeep === 'object' && svcDeep.deny.includes('dreamteam'), JSON.stringify(svcDeep));
   rmSync(root, { recursive: true, force: true });
 }

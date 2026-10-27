@@ -17,6 +17,7 @@ import { AGENTS_DIR, APP_VERSION, DT_HOME, PROJECT_DIR, PROJECT_FILE, SETTINGS_F
 import { agentHeader, colorFn, printDim, printError, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 // ядро: раунды, менеджер, инструменты, память — общение только через Presenter
 import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
+import { cliProjectArgs, parseCliProject } from './cli-project.js';
 import { bootstrapApp } from './core/bootstrap.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, ChatMessage, Session } from './types.js';
@@ -234,26 +235,26 @@ async function readMultiline(): Promise<string | null> {
  */
 let completionCache: {
   at: number;
-  sessions: { title: string }[];
-  team: string[];
-  chat: { name: string; role?: string }[];
+  sessions: { id: string; title: string }[];
+  agentIds: string[];
+  chat: { id: string; name: string; role?: string }[];
 } | null = null;
 
 function refreshCompletionCache(): void {
   const now = Date.now();
   if (completionCache && now - completionCache.at < 1000) return;
-  const sessions = appRef?.store ? appRef.store.list().map((s) => ({ title: s.title })) : [];
-  let team: string[] = [];
-  let chat: { name: string; role?: string }[] = [];
+  const sessions = appRef?.store ? appRef.store.list().map((s) => ({ id: s.id, title: s.title })) : [];
+  let agentIds: string[] = [];
+  let chat: { id: string; name: string; role?: string }[] = [];
   try {
     const agents = loadTeam(AGENTS_DIR);
-    team = agents.map((a) => a.name);
+    agentIds = agents.map((a) => a.id);
     // всплывашка @упоминаний предлагает только позванных в текущий чат
-    if (appRef?.session) chat = chatTeam(appRef.session, agents).map((a) => ({ name: a.name, role: a.role }));
+    if (appRef?.session) chat = chatTeam(appRef.session, agents).map((a) => ({ id: a.id, name: a.name, role: a.role }));
   } catch {
     // без agents.json дополняем без имён
   }
-  completionCache = { at: now, sessions, team, chat };
+  completionCache = { at: now, sessions, agentIds, chat };
 }
 
 function completionCtx(): CompletionContext {
@@ -262,9 +263,9 @@ function completionCtx(): CompletionContext {
       refreshCompletionCache();
       return completionCache?.sessions ?? [];
     },
-    teamNames() {
+    agentIds() {
       refreshCompletionCache();
-      return completionCache?.team ?? [];
+      return completionCache?.agentIds ?? [];
     },
     chatAgents() {
       refreshCompletionCache();
@@ -538,7 +539,7 @@ function printTeam(app: App): void {
     for (const agent of fullTeam) {
       const own = agent.model?.id ? pc.dim(` [${t('модель:')} ${agent.model.id}]`) : '';
       const access = accessLine(agent, cfg);
-      const mark = inChat.has(agent.id) ? '' : pc.dim(` · ${tf('не в этом чате (/add {name})', { name: agent.name })}`);
+      const mark = inChat.has(agent.id) ? '' : pc.dim(` · ${tf('не в этом чате (/session agent add {id})', { id: agent.id })}`);
       console.log(rosterLine(agent) + own + access + mark);
     }
     console.log();
@@ -589,8 +590,8 @@ function printProviders(app: App): void {
       console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}`);
     }
   }
-  printDim(t('  Сменить основную: /model <id> — она для агентов; у менеджера переговорки своя (manager.json в доме).'));
-  printDim(t('  Своя модель у агента — поля "model", "vision", "image" в его карточке (agents.json).'));
+  printDim(t('  Сменить основную: /settings update model.id=<id>; у менеджера своя — /manager update model.id=<id>.'));
+  printDim(t('  Своя модель у агента: /agent update <id> model.id=<id> (и model.temperature=… при желании).'));
 }
 
 function replaySession(session: Session): void {
@@ -612,20 +613,37 @@ function replaySession(session: Session): void {
 }
 
 // ─── Команды: терминал оставляет себе цветные просмотры и /exit ─────────────
-// Цветной показ — только безглагольные формы обзора (/sessions, /team,
-// /provider) и /session history; всё остальное исполняет ядро (манифест).
+// Цветной показ — только безглагольные формы обзора (/sessions, /agents,
+// /providers) и /session history; всё остальное исполняет ядро (манифест).
 
 type CommandVerdict = 'exit' | 'handled' | 'unknown';
 
-/** Цветная история разговора — /session history. */
-function printHistory(app: App, nStr?: string): void {
+/** Цветная история разговора — /session history [from] [to], срез включительно. */
+function printHistory(app: App, fromStr?: string, toStr?: string): void {
   if (!app.session) {
-    printDim(t('  Нет открытого проекта — /project new <имя> [папка] или /project open <имя|путь>.'));
+    printDim(t('  Нет открытого разговора — /session new [id] или /session open <id>.'));
     return;
   }
-  const n = Number.parseInt(nStr ?? '', 10);
   const all = app.session.messages;
-  const shown = Number.isInteger(n) && n > 0 ? all.slice(-n) : all;
+  let start = 0;
+  let end = all.length;
+  if (fromStr !== undefined) {
+    const from = Number.parseInt(fromStr, 10);
+    if (!Number.isInteger(from) || from < 1) {
+      printDim(t('  from — номер сообщения (с 1); один аргумент = от N до конца.'));
+      return;
+    }
+    start = Math.min(from, all.length) - 1;
+  }
+  if (toStr !== undefined) {
+    const to = Number.parseInt(toStr, 10);
+    if (!Number.isInteger(to) || to < start + 1) {
+      printDim(t('  to — номер сообщения не меньше from.'));
+      return;
+    }
+    end = Math.min(to, all.length);
+  }
+  const shown = all.slice(start, end);
   if (shown.length === 0) {
     printDim(t('  Разговор пуст.'));
     return;
@@ -650,7 +668,7 @@ function runCommand(engine: Engine, line: string): CommandVerdict {
   const app = engine.app;
   const [cmd, second, ...rest] = line.slice(1).trim().split(/\s+/);
   if (cmd === 'session' && second === 'history') {
-    printHistory(app, rest[0]);
+    printHistory(app, rest[0], rest[1]);
     return 'handled';
   }
   if (second !== undefined) return 'unknown';
@@ -660,8 +678,9 @@ function runCommand(engine: Engine, line: string): CommandVerdict {
       printHelp();
       return 'handled';
     case 'sessions': {
-      if (!app.store || !app.session) {
-        printDim(t('  Нет открытого проекта — /project new <имя> [папка] или /project open <имя|путь>.'));
+      // список работает всегда, когда проект открыт (сессия не обязательна)
+      if (!app.store) {
+        printDim(t('  Нет открытого проекта — /project new <id> [папка] или /project open <id|путь>.'));
         return 'handled';
       }
       const list = app.store.list();
@@ -669,21 +688,17 @@ function runCommand(engine: Engine, line: string): CommandVerdict {
         printDim(t('  Разговоров пока нет.'));
         return 'handled';
       }
-      const currentId = app.session.id;
+      const currentId = app.session?.id;
       console.log(pc.dim(`\n  ${t('Разговоры (свежие сверху):')}`));
-      list.forEach((s, i) => {
+      list.forEach((s) => {
         const date = fmtDate(s.updatedAt);
         const cur = s.id === currentId ? pc.cyan(` ${t('← текущий')}`) : '';
-        console.log(`    ${i + 1}. ${s.title} — ${tf('{n} сообщ.', { n: s.count })}, ${date}${cur}`);
+        console.log(`    ${s.id} — ${s.title} — ${tf('{n} сообщ.', { n: s.count })}, ${date}${cur}`);
       });
       console.log();
       return 'handled';
     }
-    case 'team':
-      if (!app.store || !app.session) {
-        printDim(t('  Нет открытого проекта — /project new <имя> [папка] или /project open <имя|путь>.'));
-        return 'handled';
-      }
+    case 'agents':
       printTeam(app);
       return 'handled';
     case 'providers':
@@ -710,6 +725,23 @@ async function main(): Promise<void> {
   const { app, ui } = await bootstrapApp();
   appRef = app;
   const engine = new Engine(app, new CliPresenter());
+
+  // Проект из аргументов запуска (`dreamteam .` / open / new): применяем до
+  // входа в управляемый экран — ошибка формы или папки уходит в обычный
+  // stdout с кодом 1, а заметки ядра в экранном режиме всё равно сотрутся
+  // при смене буфера, поэтому строку проекта после баннера печатаем отдельно.
+  const cliForm = parseCliProject(cliProjectArgs());
+  if (cliForm.kind === 'error') {
+    console.error(`  ${cliForm.message}`);
+    process.exit(1);
+  }
+  try {
+    if (cliForm.kind === 'open') engine.switchProject(cliForm.target);
+    else if (cliForm.kind === 'new') engine.newProject(cliForm.name, cliForm.path);
+  } catch (err) {
+    console.error(`  ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
+  }
 
   // Управляемый экран: альтернативный буфер, зоны чата/подсказок/ввода и свой
   // редактор строки. В пайпе (не TTY) — прежний readline-режим ниже.
@@ -810,8 +842,12 @@ async function main(): Promise<void> {
     tf('  Вы — {name}{role}', { name: app.profile.name, role: app.profile.role ? ` (${app.profile.role})` : '' }) + '. ' +
     t('Представиться команде: /profile set Имя; роль; о себе'),
   );
-  // Проект человек выбирает сам — стартуем без него и показываем путь.
-  if (!app.session) {
+  // Проект человек выбирает сам: без аргументов стартуем без него и показываем
+  // путь; с аргументами проект уже открыт (выше), но его заметки в экранном
+  // режиме до альтернативного буфера не видны — дублируем строку у баннера.
+  if (PROJECT_DIR) {
+    if (screen) printDim(`  ${t('Проект:')} ${basename(PROJECT_DIR)}${WORKSPACE ? ` · ${WORKSPACE}` : ''}`);
+  } else if (!app.session) {
     printDim(t('  Проект не выбран — /project new <имя> [папка] создаст, /project open <имя|путь> откроет, /project — список.'));
   }
   // Прошлый разговор сразу в панель: внизу виден хвост, вся старая история —

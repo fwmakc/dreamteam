@@ -21,6 +21,7 @@ export const contract: AdapterContract = {
     model: { type: 'string', desc: 'по умолчанию GigaChat' },
     maxTokens: { type: 'number' },
     temperature: { type: 'number' },
+    vision: { type: 'boolean', desc: 'модель видит картинки — тулу look (GigaChat Vision)' },
   },
   ref: ['temperature', 'maxTokens'],
 };
@@ -114,7 +115,7 @@ export const gigachatFactory: ProviderFactory = (
     const key = config.apiKey ? String(config.apiKey) : undefined;
     if (!key) {
       throw new ConfigurationError(
-        `в карточке провайдера «${id}» нет "apiKey" (или пары "clientId"/"clientSecret") — впиши ключ из кабинета в providers.json`,
+        `в карточке провайдера «${id}» нет "apiKey" (или пары "clientId"/"clientSecret") — впиши ключ из кабинета в карточку models/${id}.json`,
       );
     }
     // Ключ из личного кабинета GigaChat — это уже base64(client_id:secret)

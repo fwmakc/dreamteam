@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isToolId } from './ids.js';
 import type { Agent, AgentTools } from './types.js';
 import type { ToolsConfig, ToolContext } from './actions.js';
 
@@ -41,6 +42,9 @@ export interface ToolResult {
 export interface ToolCheckContext {
   /** Рабочая папка действия: проект из префикса, иначе папка агента/workspace */
   cwd: string;
+  /** Папка проекта в доме (projects/<id>/) или null. Прикладное проекта —
+   *  подпапки PROJECT_SUBDIRS (inbox, mail, images) — живёт в ней. */
+  projectHome: string | null;
   /** id проекта, если блок адресован проекту («shop:…») */
   project?: string;
   /** Аргумент строки блока: путь у file/look, цель хоста у ssh */
@@ -54,6 +58,28 @@ export interface ToolRunContext extends ToolCheckContext {
   http(url: string, body?: unknown): Promise<ToolResult>;
   /** Живой вопрос человеку — тот же y/n, что у действий агентов */
   confirm(text: string): Promise<boolean>;
+  /** Абсолютный путь в рабочей папке действия; наружу рамка не пускает. */
+  workspaceFile(rel: string): string;
+  /** Абсолютный путь в папке проекта в доме (projects/<id>/<rel>); нет
+   *  открытого проекта — ошибка. Родительские папки сам не создаёт. */
+  projectFile(rel: string): string;
+}
+
+/**
+ * Прикладные подпапки проекта — фиксированные имена, на которые тула могут
+ * опираться: «inbox/…» — файлы от человека (скрепка в GUI), «mail/…» —
+ * вложения писем, «images/…» — нарисованные картинки. Живут в папке проекта
+ * в доме; рабочая папка остаётся только файлами работы.
+ */
+export const PROJECT_SUBDIRS = ['inbox', 'mail', 'images'] as const;
+
+/** Путь (уже абсолютный) лежит в прикладной подпапке проекта — не в project.json и не в sessions/. */
+export function inProjectStore(projectHome: string | null | undefined, abs: string): boolean {
+  if (!projectHome) return false;
+  const rel = relative(projectHome, abs);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return false;
+  const first = rel.replaceAll('\\', '/').split('/')[0]!;
+  return (PROJECT_SUBDIRS as readonly string[]).includes(first);
 }
 
 export interface Tool {
@@ -73,8 +99,7 @@ export type ToolFactory = (config: ToolConfig) => Tool;
 /** Встроенные тула: их имена нельзя занимать файлами в tools/ */
 export const BUILTIN_TOOL_IDS = ['files', 'shell', 'git', 'arch', 'ssh', 'look', 'image', 'docs', 'ocr', 'web', 'mail', 'telegram', 'max'] as const;
 
-/** id тула: имя файла в tools/ или встроенный; строчные буквы/цифры/-/_ от 2 символов */
-export const TOOL_ID_RE = /^[a-z][a-z0-9_-]{1,}$/;
+/** id тула: имя файла в tools/ или встроенный — маска в src/ids.ts. */
 
 // ─── Карточки агентов: объект {тул: {…карточка…}} ───────────────────────────
 
@@ -93,8 +118,8 @@ export function normalizeAgentTools(agentId: string, tools: unknown): AgentTools
   if (tools && typeof tools === 'object') {
     const cards: Record<string, ToolConfig> = {};
     for (const [id, v] of Object.entries(tools as Record<string, unknown>)) {
-      if (!TOOL_ID_RE.test(id)) {
-        throw new Error(`агент «${agentId}»: tools.${id} — неверный id тула (строчные буквы/цифры/-/_ от 2 символов)`);
+      if (!isToolId(id)) {
+        throw new Error(`агент «${agentId}»: tools.${id} — неверный id тула (строчные буквы/цифры/./-/_ от 2 символов)`);
       }
       if (v === null) {
         cards[id] = {};
@@ -285,7 +310,7 @@ export function protectedPath(rel: string): string | null {
  * синтаксика: абсолютный путь, «..» и «~» считаются выходом, относительные —
  * своим.
  */
-export function pathScan(segment: string, cwd: string | undefined): string | null {
+export function pathScan(segment: string, cwd: string | undefined, projectHome?: string | null): string | null {
   for (const a of splitArgs(segment).slice(1)) {
     if (a.startsWith('-')) continue; // флаги — не пути
     if (!(a === '.' || a === '..' || a.startsWith('~') || a.startsWith('.') || a.includes('/') || a.includes('\\'))) continue;
@@ -295,9 +320,14 @@ export function pathScan(segment: string, cwd: string | undefined): string | nul
       return protectedPath(a);
     }
     if (cwd) {
-      const rel = relative(cwd, resolve(cwd, a));
+      const abs = resolve(cwd, a);
+      const rel = relative(cwd, abs);
       const inside = rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-      if (!inside) return `путь «${a}» вне рабочей папки «${cwd}» — работа только внутри неё`;
+      // прикладные подпапки проекта в доме (inbox, mail, images) — свои файлы,
+      // не секреты: из shell их можно прочитать и переписать в рабочую папку
+      if (!inside && !inProjectStore(projectHome, abs)) {
+        return `путь «${a}» вне рабочей папки «${cwd}» — работа только внутри неё`;
+      }
       const prot = protectedPath(rel);
       if (prot) return prot;
     } else if (a === '..' || a.startsWith('../') || a.startsWith('..\\') || /^[\\/]|[a-zA-Z]:/.test(a)) {
@@ -321,6 +351,8 @@ export function defaultCommandCheck(
     safe: ReadonlySet<string>;
     nested?: { command: string; readonlySet: ReadonlySet<string>; bareOnly?: string[] };
     cwd?: string;
+    /** Папка проекта в доме: прикладные подпапки (inbox, mail, images) shell разрешает */
+    projectHome?: string | null;
     askIf?: RegExp;
   },
 ): ToolVerdict {
@@ -338,7 +370,7 @@ export function defaultCommandCheck(
       return 'ask';
     }
     if (policy.askIf?.test(seg)) return 'ask';
-    const bad = pathScan(seg, policy.cwd);
+    const bad = pathScan(seg, policy.cwd, policy.projectHome);
     if (bad) return { deny: bad };
   }
   return 'allow';

@@ -13,11 +13,11 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ToolsConfig, ToolContext } from './actions.js';
+import { isToolId } from './ids.js';
 import {
   agentToolConfig,
   agentToolIds,
   BUILTIN_TOOL_IDS,
-  TOOL_ID_RE,
   type BuiltinFactory,
   type Tool,
   type ToolConfig,
@@ -90,8 +90,8 @@ export async function loadUserTools(toolsDir: string): Promise<Map<string, ToolF
   }
   for (const name of names.filter((f) => f.endsWith('.ts') || f.endsWith('.js'))) {
     const id = name.replace(/\.(ts|js)$/, '');
-    if (!TOOL_ID_RE.test(id)) {
-      throw new Error(`tools/${name}: «${id}» — id тула: строчные буквы/цифры/-/_ от 2 символов`);
+    if (!isToolId(id)) {
+      throw new Error(`tools/${name}: «${id}» — id тула: строчные буквы/цифры/./-/_ от 2 символов`);
     }
     if ((BUILTIN_TOOL_IDS as readonly string[]).includes(id)) {
       throw new Error(`tools/${name}: «${id}» — имя занято встроенным тулом, переименуйте файл`);

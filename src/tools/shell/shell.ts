@@ -61,10 +61,12 @@ export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
     ? 'Команды cmd.exe этого ПК (```run, тело — команда). Это Windows: bash-команды ' +
       '(ls, pwd, cat, grep) недоступны — используй dir, type, findstr, tree, where, ' +
       'а для git — отдельный тул git. Read-only — молча, но только внутри рабочей ' +
-      'папки (выход, секреты и подстановки %переменные% — отказ); ' +
+      'папки и прикладных подпапок проекта inbox/mail/images (выход, секреты и ' +
+      'подстановки %переменные% — отказ); ' +
       'остальное — по правилам карточки shell или вопрос человеку.'
     : 'Команды оболочки этого ПК (```run). Read-only (ls, cat, grep…) — ' +
-      'молча, но только внутри рабочей папки (выход и секреты — отказ); ' +
+      'молча, но только внутри рабочей папки и прикладных подпапок проекта ' +
+      'inbox/mail/images (выход и секреты — отказ); ' +
       'для git — отдельный тул git (```git), для серверов — ssh; ' +
       'остальное — по правилам карточки shell или вопрос человеку.';
   return {
@@ -75,6 +77,7 @@ export default (config: ToolConfig, deps?: BuiltinDeps): Tool => {
         : defaultCommandCheck(body, {
             safe: SHELL_SAFE,
             cwd: ctx?.cwd,
+            projectHome: ctx?.projectHome,
             askIf: FIND_MUTATIONS,
           }),
     async run(body, ctx) {

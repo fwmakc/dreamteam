@@ -155,9 +155,9 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 }
 {
   const r = parseManagerReply(
-    '{"say":"делаю","actions":[{"op":"chat.add","who":"Катя"},{"op":"взломать.все"},{"op":"session.open","n":2}]}',
+    '{"say":"делаю","actions":[{"op":"chat.add","who":"katya"},{"op":"взломать.все"},{"op":"session.open","n":2}]}',
   );
-  check('парсер: чужие op отсеяны', r.actions.length === 2 && r.actions[1].op === 'session.open', JSON.stringify(r.actions));
+  check('парсер: чужие op и session.open без id отсеяны', r.actions.length === 1 && r.actions[0].op === 'chat.add', JSON.stringify(r.actions));
 }
 {
   const r = parseManagerReply('Модель написала ерунду {не json и не скобка}');
@@ -212,14 +212,14 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     history: [{ authorId: 'user', authorName: 'Хозяин', text: 'привет', ts: 1 }],
     request: '@менеджер, позови Глеба',
     projects: [{ id: 'shop', hosts: ['prod', 'staging'] }],
-    operations: [{ cmd: '/session new', help: 'новый разговор' }, { cmd: '/session open', args: '<номер>', help: 'открыть разговор' }],
+    operations: [{ cmd: '/session new', help: 'новый разговор' }, { cmd: '/session open', args: '<id>', help: 'открыть разговор' }],
   });
   check('стейт: ростер с провайдером и temp', input.includes('katya — Катя, модель: claude, temp 0.3'), input);
   check('стейт: тула агента в ростере', input.includes('тула: files, look') && input.includes('тула нет'), input);
   check('стейт: состав чата', input.includes('В этом чате: katya'));
-  check('стейт: список разговоров с номерами и текущим', input.includes('1. Текущий — 4 сообщ. (текущий)') && input.includes('2. Прошлый — 9 сообщ.'), input);
+  check('стейт: список разговоров с id и текущим', input.includes('- s1 — Текущий — 4 сообщ. (текущий)') && input.includes('- s2 — Прошлый — 9 сообщ.'), input);
   check('стейт: проект с серверами', input.includes('- shop: серверы prod, staging'), input);
-  check('стейт: операции манифеста с аргументами', input.includes('/session open <номер>'), input);
+  check('стейт: операции манифеста с аргументами', input.includes('/session open <id>'), input);
   check('стейт: просьба руководителя', input.includes('Просьба руководителя: «@менеджер, позови Глеба»'));
   check('стейт: имя и краткое содержание разговора', input.includes('имя: «Текущий»') && input.includes('Краткое содержание разговора:'), input.slice(-400));
 }
@@ -355,7 +355,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('project.host add: дубликат — отказ', threw.includes('уже есть'), threw);
   threw = '';
   try { addProjectHosts(projFile, { 'two words': { host: 'x' } }); } catch (e) { threw = (e as Error).message; }
-  check('project.host add: пробелы в имени — отказ', threw.includes('пробел'), threw);
+  check('project.host add: пробелы в имени — отказ', threw.includes('two words') && threw.includes('маске'), threw);
   threw = '';
   try { addProjectHosts(projFile, { badport: { host: 'x', port: -1 } }); } catch (e) { threw = (e as Error).message; }
   check('project.host add: кривой порт — отказ', threw.includes('port'), threw);
@@ -382,39 +382,42 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     JSON.stringify({ id: 'm', createdAt: 1, mails: { личное: { user: 'я@yandex.ru', password: 'секрет', imap: 'imap.yandex.ru', smtp: 'smtp.yandex.ru' } } }, null, 2) + '\n',
   );
 
-  const report = addMailAccount(mailsFile, 'работа', { user: 'робот@corp.ru', password: 'пароль-приложения', imap: 'imap.corp.ru', smtp: 'smtp.corp.ru', smtpPort: 587, tlsNoVerify: true });
-  check('mail add: отчёт', report.includes('работа') && report.includes('smtp.corp.ru'), report);
+  const report = addMailAccount(mailsFile, 'work', { user: 'робот@corp.ru', password: 'пароль-приложения', imap: 'imap.corp.ru', smtp: 'smtp.corp.ru', smtpPort: 587, tlsNoVerify: true });
+  check('mail add: отчёт', report.includes('work') && report.includes('smtp.corp.ru'), report);
   check('mail add: пароль в отчёт не попал', !report.includes('пароль-приложения'), report);
   const mails = loadMailsFile(mailsFile);
-  check('mail add: loadMailsFile видит ящик', mails['работа']?.smtpPort === 587 && mails['работа']?.tlsNoVerify === true);
+  check('mail add: loadMailsFile видит ящик', mails['work']?.smtpPort === 587 && mails['work']?.tlsNoVerify === true);
   check('mail add: старый ящик на месте', mails['личное']?.imap === 'imap.yandex.ru');
   check('mail add: файл валиден по loadAccounts', (() => { try { return Object.keys(loadAccounts(mailsFile)).length === 2; } catch { return false; } })());
 
   const before = readFileSync(mailsFile, 'utf8');
   let threw = '';
-  try { addMailAccount(mailsFile, 'работа', { user: 'x', password: 'p', imap: 'i', smtp: 's' }); } catch (e) { threw = (e as Error).message; }
+  try { addMailAccount(mailsFile, 'work', { user: 'x', password: 'p', imap: 'i', smtp: 's' }); } catch (e) { threw = (e as Error).message; }
   check('mail add: дубликат — отказ', threw.includes('уже есть'), threw);
   threw = '';
   try { addMailAccount(mailsFile, 'два слова', { user: 'x', password: 'p', imap: 'i', smtp: 's' }); } catch (e) { threw = (e as Error).message; }
-  check('mail add: пробелы в имени — отказ', threw.includes('пробел'), threw);
+  check('mail add: пробелы в имени — отказ по маске', threw.includes('два слова') && threw.includes('маске'), threw);
   threw = '';
-  try { addMailAccount(mailsFile, 'лишнее', { user: 'x', password: 'p', imap: 'i', smtp: 's', preset: 'yandex' }); } catch (e) { threw = (e as Error).message; }
+  try { addMailAccount(mailsFile, 'работа', { user: 'x', password: 'p', imap: 'i', smtp: 's' }); } catch (e) { threw = (e as Error).message; }
+  check('mail add: кириллический id — отказ по маске', threw.includes('работа') && threw.includes('маске'), threw);
+  threw = '';
+  try { addMailAccount(mailsFile, 'extra', { user: 'x', password: 'p', imap: 'i', smtp: 's', preset: 'yandex' }); } catch (e) { threw = (e as Error).message; }
   check('mail add: неизвестное поле — отказ', threw.includes('неизвестные поля'), threw);
   threw = '';
-  try { addMailAccount(mailsFile, 'безпароля', { user: 'x', imap: 'i', smtp: 's' }); } catch (e) { threw = (e as Error).message; }
+  try { addMailAccount(mailsFile, 'nopass', { user: 'x', imap: 'i', smtp: 's' }); } catch (e) { threw = (e as Error).message; }
   check('mail add: нет пароля — отказ', threw.includes('password'), threw);
   threw = '';
-  try { addMailAccount(mailsFile, 'безсерверов', { user: 'x', password: 'p' }); } catch (e) { threw = (e as Error).message; }
+  try { addMailAccount(mailsFile, 'noservers', { user: 'x', password: 'p' }); } catch (e) { threw = (e as Error).message; }
   check('mail add: нет imap/smtp — отказ', threw.includes('imap'), threw);
   threw = '';
-  try { addMailAccount(mailsFile, 'кривойпорт', { user: 'x', password: 'p', imap: 'i', smtp: 's', port: '993' }); } catch (e) { threw = (e as Error).message; }
+  try { addMailAccount(mailsFile, 'badport', { user: 'x', password: 'p', imap: 'i', smtp: 's', port: '993' }); } catch (e) { threw = (e as Error).message; }
   check('mail add: порт строкой — отказ', threw.includes('port'), threw);
   threw = '';
   try { removeMailAccount(mailsFile, 'nope'); } catch (e) { threw = (e as Error).message; }
   check('mail remove: нет ящика — отказ', threw.includes('nope'), threw);
   check('mail: неудачные правки файл не меняли', readFileSync(mailsFile, 'utf8') === before);
   check('mail: tmp-файл убран за собой', !existsSync(mailsFile + '.tmp'));
-  check('mail remove: убирает ящик', removeMailAccount(mailsFile, 'работа').includes('работа'));
+  check('mail remove: убирает ящик', removeMailAccount(mailsFile, 'work').includes('work'));
   check('mail remove: остался один ящик', Object.keys(loadMailsFile(mailsFile)).length === 1);
   check('mail: чужие поля project.json не тронуты',
     (JSON.parse(readFileSync(mailsFile, 'utf8')) as Record<string, unknown>).id === 'm');
