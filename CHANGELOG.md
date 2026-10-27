@@ -3,6 +3,37 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow
 semver while pre-1.0 (breaking changes may land in minors).
 
+## [0.0.10] — 2026-10-27
+
+### Added
+
+- **Several ids at once and `all`** in the id-taking commands: `/session agent
+  add <id…|all>` (several members at once; `all` — the whole team) and
+  `/session agent delete <id…|all>` (`all` — everyone but the manager),
+  `/session delete <id…>`, `/model delete <id…>`, `/project delete <id|path…>`,
+  `/agent tool add <id> <tool…>` and `/agent tool delete <id> <tool…|all>`
+  (`all` — all the agent's tools), `/project mail delete <id…>`,
+  `/project host delete <id…>`, `/schedule toggle <id…>` and
+  `/schedule delete <id…>`. Ids are separated by spaces or commas; one bad id
+  doesn't sink the rest — it gets its own `✗` line.
+
+### Fixed
+
+- The hint panel, Tab and the web hints know the three-word operations now:
+  `/session agent add` used to answer «нет такой команды»; after
+  `/session agent ` the panel offers `add` and `delete`, and the exact command
+  shows its usage and argument values.
+- Schedule task ids no longer collide when two tasks are created within the
+  same millisecond.
+
+### Changed
+
+- Launch forms are down to the path: `dreamteam <путь>` (and
+  `dreamteam serve <путь>`) open the project of that working folder; the
+  `dreamteam open <имя|путь>` and `dreamteam new <имя> [папка]` subcommands are
+  gone — working by name stays inside the app (`/project open <имя>`,
+  `/project new <имя> [папка]`) and in the web panel.
+
 ## [0.0.9] — 2026-10-27
 
 ### Breaking

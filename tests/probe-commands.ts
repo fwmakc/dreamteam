@@ -4,7 +4,7 @@
  * Герметично: временный DT_HOME, mock-провайдер, команды не пишутся
  * в историю разговора. Запуск: npm run probe:commands
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeModels } from './models.js';
@@ -128,6 +128,19 @@ const threw = async (line: string): Promise<string> => {
   lines = await run(engine, `/session delete ${older}`);
   check('session delete: не-текущий удалён', !app.store!.list().some((s) => s.id === older));
 
+  // несколько за раз: трое запасных, двое не-текущих уходят одной командой
+  await run(engine, '/session new');
+  const x1 = app.session!.id;
+  await run(engine, '/session new');
+  const x2 = app.session!.id;
+  await run(engine, '/session new');
+  const x3 = app.session!.id;
+  lines = await run(engine, `/session delete ${x1} ${x2}`);
+  check('session delete: список — оба удалены', !app.store!.list().some((s) => s.id === x1 || s.id === x2), JSON.stringify(lines));
+  lines = await run(engine, `/session delete ${x1}`);
+  check('session delete: список с чужим id — отказ', lines[0]?.includes('нет') ?? false);
+  void x3;
+
   await run(engine, '/session open abc');
   check('session open: нет такого id — заметка через presenter', notices.some((t) => t.includes('Разговора с id «abc» нет')));
 
@@ -206,6 +219,18 @@ const threw = async (line: string): Promise<string> => {
   check('model update: модель на диске', card.model === 'mock-9');
   const miss = await threw('/model update nope model=x');
   check('model update: нет модели — отказ', miss.includes('«nope» нет'));
+
+  // список: лишняя модель уходит, чужой id даёт ✗, основную не трогает
+  await run(engine, '/model new spare provider=mock');
+  lines = await run(engine, '/model delete spare nope');
+  check(
+    'model delete: список — ✓ и ✗',
+    lines.length === 2 && lines[0].startsWith('✓') && lines[1].startsWith('✗') && lines[1].includes('nope'),
+    JSON.stringify(lines),
+  );
+  check('model delete: карточки spare нет на диске', !existsSync(join(home, 'models', 'spare.json')));
+  lines = await run(engine, '/model delete mock');
+  check('model delete: основная — отказ', lines[0]?.includes('основная') ?? false);
 }
 
 // ── команда: /agent new/update/tool/delete ───────────────────────────────────
@@ -241,8 +266,29 @@ const threw = async (line: string): Promise<string> => {
   check('agent tool add: отчёт ✓', lines[0]?.startsWith('✓') ?? false);
   team = await load();
   check('agent tool add: тул files у агента', Boolean((team.find((a) => a.id === 'test2')?.tools as { files?: unknown })?.files));
-  const noTool = await threw('/agent tool add test2 nosuchtool');
-  check('agent tool add: неизвестный тул — отказ', noTool.includes('nosuchtool'));
+  lines = await run(engine, '/agent tool add test2 nosuchtool');
+  check('agent tool add: неизвестный тул — ✗', (lines[0]?.startsWith('✗') && lines[0].includes('nosuchtool')) ?? false);
+
+  // несколько тулов за раз; all снимает все; чужой тул не валит остальных
+  lines = await run(engine, '/agent tool add test2 shell, look');
+  check('agent tool add: список — два отчёта ✓', lines.filter((l) => l.startsWith('✓')).length === 2);
+  team = await load();
+  const toolsOf = (id: string) => Object.keys(((team.find((a) => a.id === id)?.tools ?? {}) as Record<string, unknown>));
+  check('agent tool add: список — оба тула у агента', toolsOf('test2').includes('shell') && toolsOf('test2').includes('look'));
+  lines = await run(engine, '/agent tool delete test2 shell look, призрак');
+  check(
+    'agent tool delete: список с чужим — два ✓ и один ✗',
+    lines.filter((l) => l.startsWith('✓')).length === 2 && lines.some((l) => l.startsWith('✗') && l.includes('призрак')),
+    JSON.stringify(lines),
+  );
+  lines = await run(engine, '/agent tool delete test2 all');
+  team = await load();
+  check(
+    'agent tool delete: all — снял всё',
+    Object.keys((team.find((a) => a.id === 'test2')?.tools ?? {}) as Record<string, unknown>).length === 0,
+  );
+  lines = await run(engine, '/agent tool delete test2 all');
+  check('agent tool delete: all на пустых тулах — «и так нет»', lines[0]?.includes('и так нет') ?? false);
 
   lines = await run(engine, '/agent delete test2');
   check('agent delete: отчёт', (lines[0]?.includes('test2') || lines[0]?.includes('Второй')) ?? false);
@@ -264,6 +310,54 @@ const threw = async (line: string): Promise<string> => {
   );
   lines = await run(engine, '/agent delete');
   check('agent delete: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false);
+}
+
+// ── чат со списками и all: несколько агентов за раз ──────────────────────────
+{
+  const chronicle = () => app.session!.messages.at(-1)?.text ?? '';
+  const participants = () => (app.session!.participants ?? []).join(',');
+  for (const id of ['c1', 'c2']) await run(engine, `/agent new ${id} name=Чат-${id}`);
+  const before = app.session!.messages.length;
+  let lines = await run(engine, '/session agent add c1 c2');
+  check(
+    'session agent add: список — двое за раз, события в хронике',
+    lines.length === 0 && app.session!.messages.length === before + 2 && participants() === 'manager,c1,c2',
+    `lines=${JSON.stringify(lines)} participants=${participants()}`,
+  );
+  lines = await run(engine, '/session agent add all');
+  check(
+    'session agent add: all — вся команда в чате',
+    lines.length === 0 &&
+      (await (await import('../src/agents.js')).loadTeam(join(home, 'agents'))).every((a) => (app.session!.participants ?? []).includes(a.id)),
+    `lines=${JSON.stringify(lines)} participants=${participants()}`,
+  );
+  lines = await run(engine, '/session agent add all');
+  check('session agent add: all повторно — «вся команда уже в чате»', lines[0]?.includes('уже в чате') ?? false);
+  lines = await run(engine, '/session agent delete c1, ghost c2');
+  check(
+    'session agent delete: список с чужим id — двое вышли, чужой в заметке',
+    lines.length === 1 &&
+      lines[0].includes('ghost') &&
+      chronicle().includes('покинул') &&
+      !(app.session!.participants ?? []).some((id) => id === 'c1' || id === 'c2'),
+    `lines=${JSON.stringify(lines)} participants=${participants()}`,
+  );
+  lines = await run(engine, '/session agent delete all');
+  check(
+    'session agent delete: all — чат при менеджере',
+    lines.length === 0 && participants() === MANAGER_ID,
+    `participants=${participants()}`,
+  );
+  lines = await run(engine, '/session agent delete all');
+  check('session agent delete: all повторно — «кроме менеджера никого»', lines[0]?.includes('Кроме менеджера') ?? false);
+  lines = await run(engine, '/session agent add ghost, c1');
+  check(
+    'session agent add: список с чужим id — c1 позван, ghost в заметке',
+    lines.length === 1 && lines[0].includes('ghost') && participants() === 'manager,c1',
+    `lines=${JSON.stringify(lines)} participants=${participants()}`,
+  );
+  await run(engine, '/session agent delete all');
+  await run(engine, '/agent delete c1 c2');
 }
 
 // ── проекты: реестр + секреты (серверы) ──────────────────────────────────────
@@ -289,6 +383,18 @@ const threw = async (line: string): Promise<string> => {
   check('project hosts: список серверов', lines.some((l) => l.includes('prod: deploy@10.0.0.1:2202')) ?? false);
   lines = await run(engine, '/project host delete backup');
   check('project host delete: сервер убран', !(readProj().hosts as typeof hosts).backup);
+
+  // несколько за раз: оба ушли, чужой id даёт ✗ без падения
+  await run(engine, '/project host add b1');
+  await run(engine, '/project host add b2');
+  lines = await run(engine, '/project host delete b1 b2');
+  check(
+    'project host delete: список — оба ✓',
+    lines.filter((l) => l.startsWith('✓')).length === 2 && !(readProj().hosts as typeof hosts).b1 && !(readProj().hosts as typeof hosts).b2,
+    JSON.stringify(lines),
+  );
+  lines = await run(engine, '/project host delete b1');
+  check('project host delete: чужой id — ✗', lines[0]?.startsWith('✗') ?? false);
   const badId = await threw('/project host add Сервер');
   check('project host add: кириллический id — маска отклоняет', badId.includes('маске'));
 }
@@ -323,6 +429,18 @@ const threw = async (line: string): Promise<string> => {
   check('project mail update: порт не число — отказ валидатора', badPort.includes('целое число больше нуля'));
   lines = await run(engine, '/project mail delete work');
   check('project mail delete: ящик убран', !(readProj().mails as typeof mails).work);
+
+  // несколько за раз: оба ушли одной командой, чужой id даёт ✗
+  await run(engine, '/project mail add w1');
+  await run(engine, '/project mail add w2');
+  lines = await run(engine, '/project mail delete w1 w2');
+  check(
+    'project mail delete: список — оба ✓',
+    lines.filter((l) => l.startsWith('✓')).length === 2 && !(readProj().mails as typeof mails).w1 && !(readProj().mails as typeof mails).w2,
+    JSON.stringify(lines),
+  );
+  lines = await run(engine, '/project mail delete w1');
+  check('project mail delete: чужой id — ✗', lines[0]?.startsWith('✗') ?? false);
 }
 
 // ── мессенджеры: list/add/update/delete ──────────────────────────────────────
@@ -355,12 +473,21 @@ const threw = async (line: string): Promise<string> => {
   check('schedule: обзор пуст — подсказка', lines[0]?.includes('Задач нет') ?? false);
   lines = await run(engine, '/schedule add Напомнить о перерыве 15');
   check('schedule add: отчёт с интервалом', lines[0]?.includes('каждые 15 мин') ?? false);
+  await run(engine, '/schedule add Полить цветы 7');
   const schedule = JSON.parse(readFileSync(join(home, 'schedule.json'), 'utf8')) as Array<{ id: string; message: string; intervalMinutes: number; enabled: boolean }>;
-  check('schedule add: задача на диске', schedule.length === 1 && schedule[0].message === 'Напомнить о перерыве' && schedule[0].intervalMinutes === 15);
-  lines = await run(engine, `/schedule toggle ${schedule[0].id}`);
-  check('schedule toggle: выключена', lines[0]?.includes('⏸') ?? false);
-  lines = await run(engine, `/schedule delete ${schedule[0].id}`);
-  check('schedule delete: удалена', (JSON.parse(readFileSync(join(home, 'schedule.json'), 'utf8')) as unknown[]).length === 0);
+  check(
+    'schedule add: обе задачи на диске',
+    schedule.length === 2 && schedule[0].message === 'Напомнить о перерыве' && schedule[0].intervalMinutes === 15 && schedule[1].intervalMinutes === 7,
+  );
+  lines = await run(engine, `/schedule toggle ${schedule[0].id}, ${schedule[1].id}`);
+  check('schedule toggle: список — обе ⏸', lines.length === 2 && lines.every((l) => l.includes('⏸')), JSON.stringify(lines));
+  lines = await run(engine, `/schedule toggle ${schedule[0].id} ${schedule[1].id} нет-такой`);
+  check('schedule toggle: список с чужим id — две строки и отказ', lines.length === 3 && lines[2].includes('Нет задачи'), JSON.stringify(lines));
+  lines = await run(engine, `/schedule delete ${schedule[0].id} ${schedule[1].id}`);
+  check('schedule delete: список — обе удалены', (JSON.parse(readFileSync(join(home, 'schedule.json'), 'utf8')) as unknown[]).length === 0);
+  check('schedule delete: список — без «не нашёл»', lines[0]?.includes('осталось 0') && lines.length === 1, JSON.stringify(lines));
+  lines = await run(engine, '/schedule delete нет-такой');
+  check('schedule delete: чужой id — «не нашёл»', lines[1]?.includes('Не нашёл') ?? false);
 }
 
 // ── настройки и менеджер ─────────────────────────────────────────────────────

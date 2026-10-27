@@ -64,6 +64,30 @@ const lastToken = (rest: string): string => (/(\S*)$/.exec(rest))![1];
 const verbsOf = (group: string): string[] =>
   [...new Set(OPERATIONS.filter((o) => o.name.startsWith(group + '.') && !o.implicit).map((o) => o.name.split('.')[1]))];
 
+/** Подглаголы третьего уровня: уникальные третьи слова group.sub.* (session agent add|delete). */
+function subVerbsOf(group: string, sub: string): string[] {
+  const prefix = `${group}.${sub}.`;
+  return [...new Set(OPERATIONS.filter((o) => o.name.startsWith(prefix) && !o.implicit).map((o) => o.name.split('.')[2]))];
+}
+
+/** Операция по набранным словам: три слова — подглагольная, два — обычная, одно — обзорная. */
+function resolveCommand(parts: string[]): { op: OpSpec; cmdWords: number } | null {
+  const [group, second, third] = parts.map((p) => p.toLowerCase());
+  if (group && second && third) {
+    const op = findOperation(`${group}.${second}.${third}`);
+    if (op) return { op, cmdWords: 3 };
+  }
+  if (group && second) {
+    const op = findOperation(`${group}.${second}`);
+    if (op) return { op, cmdWords: 2 };
+  }
+  if (group) {
+    const op = OPERATIONS.find((o) => o.name.startsWith(group + '.') && o.implicit);
+    if (op) return { op, cmdWords: 1 };
+  }
+  return null;
+}
+
 /** Значения аргумента по подсказке манифеста; [] — подсказывать нечего, null — операция неизвестна. */
 function argValues(op: OpSpec, argPos: number, ctx: CompletionContext): string[] | null {
   const arg = op.args?.[Math.min(argPos, (op.args?.length ?? 1) - 1)];
@@ -97,17 +121,26 @@ function argOptions(body: string, ctx: CompletionContext): string[] | null {
     if (implicitOp && verbs.length === 0) return argValues(implicitOp, 0, ctx) ?? [];
     return verbs.map((v) => v + ' ');
   }
-  // '/group ве' — завершаем глагол
+  // '/group ве' — завершаем глагол; точный глагол с подглаголами (session agent) не дотягиваем до соседнего
   if (parts.length === 2 && !trailing) {
-    return tabInsert(verbs.map((v) => v + ' '), parts[1].toLowerCase());
+    const typed = parts[1].toLowerCase();
+    if (verbs.includes(typed) && subVerbsOf(group, typed).length > 0) return [];
+    return tabInsert(verbs.map((v) => v + ' '), typed);
   }
 
-  const explicit = parts[1] ? findOperation(`${group}.${parts[1].toLowerCase()}`) : undefined;
-  const op = explicit ?? implicitOp;
-  if (!op) return null;
-  const hasVerb = Boolean(explicit);
-  const typed = parts.length - (hasVerb ? 2 : 1) + (trailing ? 1 : 0);
-  return argValues(op, Math.max(0, typed), ctx);
+  // '/group под …' — третий уровень: сначала завершаем подглагол
+  const sub = parts.length >= 2 ? subVerbsOf(group, parts[1].toLowerCase()) : [];
+  if (sub.length > 0) {
+    if (parts.length === 2 && trailing) return sub.map((v) => v + ' ');
+    if (parts.length === 3 && !trailing && !findOperation(`${group}.${parts[1].toLowerCase()}.${parts[2].toLowerCase()}`)) {
+      return tabInsert(sub.map((v) => v + ' '), parts[2].toLowerCase());
+    }
+  }
+
+  const resolved = resolveCommand(parts);
+  if (!resolved) return null;
+  const typed = parts.length - resolved.cmdWords + (trailing ? 1 : 0);
+  return argValues(resolved.op, Math.max(0, typed - 1), ctx);
 }
 
 /** Completer для readline: операции, их аргументы, @упоминания, номера разговоров. */
@@ -219,20 +252,46 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
   }
   // завершаем глагол
   if (parts.length === 2 && !trailing) {
-    const hits = verbs.filter((v) => v.startsWith(parts[1].toLowerCase()) && v !== parts[1].toLowerCase());
-    if (hits.length === 0) return [pc.dim(t('  нет такого глагола — см. /help'))];
-    return [
-      pc.dim(tf('  /{group} <{verb}>:', { group, verb: t('глагол') })),
-      pc.dim('    ' + hits.slice(0, PANEL_MAX).join('   ')),
-    ];
+    const typed = parts[1].toLowerCase();
+    // точный глагол с подглаголами (session agent …) — показываем сразу их
+    const exactSub = verbs.includes(typed) ? subVerbsOf(group, typed) : [];
+    if (exactSub.length > 0) {
+      return [
+        pc.dim(tf('  /{group} <{verb}>:', { group: `${group} ${parts[1]}`, verb: t('глагол') })),
+        pc.dim('    ' + exactSub.slice(0, PANEL_MAX).join('   ')),
+      ];
+    }
+    const hits = verbs.filter((v) => v.startsWith(typed) && v !== typed);
+    if (hits.length === 0) {
+      // точный глагол без подглаголов (session delete) — использование покажет путь ниже
+      if (!findOperation(`${group}.${typed}`)) return [pc.dim(t('  нет такого глагола — см. /help'))];
+    } else {
+      return [
+        pc.dim(tf('  /{group} <{verb}>:', { group, verb: t('глагол') })),
+        pc.dim('    ' + hits.slice(0, PANEL_MAX).join('   ')),
+      ];
+    }
   }
 
-  const explicit = parts[1] ? findOperation(`${group}.${parts[1].toLowerCase()}`) : undefined;
-  const op = explicit ?? implicitOp;
-  if (!op) return [pc.dim(t('  нет такой команды — см. /help'))];
-  const hasVerb = Boolean(explicit);
-  const argPos = Math.max(0, parts.length - (hasVerb ? 2 : 1) + (trailing ? 1 : 0) - 1);
-  return [usageRow(op), ...valueRows(op, argPos, ctx)];
+  // '/group под …' — третий уровень: подглаголы, затем обычная подсказка аргументов
+  const sub = parts.length >= 2 ? subVerbsOf(group, parts[1].toLowerCase()) : [];
+  if (sub.length > 0) {
+    const subRows = (verbs2: string[]) => [
+      pc.dim(tf('  /{group} <{verb}>:', { group: `${group} ${parts[1]}`, verb: t('глагол') })),
+      pc.dim('    ' + verbs2.slice(0, PANEL_MAX).join('   ')),
+    ];
+    if (parts.length === 2 && trailing) return subRows(sub);
+    if (parts.length === 3 && !trailing && !findOperation(`${group}.${parts[1].toLowerCase()}.${parts[2].toLowerCase()}`)) {
+      const hits = sub.filter((v) => v.startsWith(parts[2].toLowerCase()) && v !== parts[2].toLowerCase());
+      if (hits.length === 0) return [pc.dim(t('  нет такого глагола — см. /help'))];
+      return subRows(hits);
+    }
+  }
+
+  const resolved = resolveCommand(parts);
+  if (!resolved) return [pc.dim(t('  нет такой команды — см. /help'))];
+  const argPos = Math.max(0, parts.length - resolved.cmdWords + (trailing ? 1 : 0) - 1);
+  return [usageRow(resolved.op), ...valueRows(resolved.op, argPos, ctx)];
 }
 
 /** Живые значения аргумента (номера, имена, id) — для панели. */

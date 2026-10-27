@@ -24,7 +24,7 @@ are greeted by the **war-room manager**, who will summon members on request, ena
 tools for someone, and set up projects with servers. Who exactly answers in a given
 conversation is decided by the chat roster — the `participants` list in the session
 file: an empty list means everyone you have summoned answers (`/session agent
-add|delete <id>`, or asking the manager to "bring Elena in").
+add|delete <id…|all>`, or asking the manager to "bring Elena in").
 
 ## Quick start
 
@@ -47,13 +47,12 @@ myproj .` creates a project (the data lives in the home,
 `~/.dreamteam/projects/myproj/`; the working folder is the current one) and opens
 it. After that it's just you and the war-room manager: tell it what you need.
 
-A project can be opened right at launch — with the same `open`/`new` words as in
-the conversation (an unknown folder registers itself, id = folder name):
+A project can be opened right at launch — by naming its working folder (an
+unknown folder registers itself, id = folder name; opening by name happens in
+the chat — `/project open <name>`):
 
 ```bash
 dreamteam .                  # TUI + the project of the current folder
-dreamteam open myproj        # TUI + a project by name (/projects lists them) or path
-dreamteam new myproj ./site  # TUI + a new project (and its folder) opened right away
 dreamteam serve .            # the web shell with the current folder's project
 ```
 
@@ -83,7 +82,7 @@ You can switch projects without leaving the app: `/project open <id or path>`
 changes the working folder, the list of conversations and the project's secrets —
 the team, the models and the shared memory stay with you. An unknown folder
 registers itself (the id is the folder name). Overview: `/projects`, rename with
-`/project update name=<new name>`, forget with `/project delete <id or path>`
+`/project update name=<new name>`, forget with `/project delete <id or path…>`
 (the current one must be closed first — `/project close`; the working folder is
 left untouched). In the web shell there is a
 "Projects" panel: with no project chosen it is expanded and comes first, a click
@@ -301,8 +300,8 @@ There are no aliases or short forms: one name — one operation.
 | `session.export` | `/session export` | archive of the current session: `session-<project>-<session>-<stamp>.zip` |
 | `session.import <file.zip>` | `/session import dt-session-….zip` | restore a session from an archive (merges into the open project as a new one) |
 | `session.agents` | `/session agents` | who is in the current conversation and who can be summoned |
-| `session.agent.add <id>` | `/session agent add yurist` | summon a member into the conversation (by id from `/agents`) |
-| `session.agent.delete <id>` | `/session agent delete yurist` | send out of the conversation (the remarks stay in the history) |
+| `session.agent.add <id…\|all>` | `/session agent add yurist, keks` | summon members into the conversation: a comma- or space-separated list; `all` — the whole team (by id from `/agents`) |
+| `session.agent.delete <id…\|all>` | `/session agent delete yurist keks` | send out of the conversation: several at once; `all` — everyone but the manager (the remarks stay in the history) |
 | `export` | `/export` | the whole home: settings, the team, models with keys, memory, the schedule and ALL projects with their conversations (`home-<stamp>.zip`, no .env — a thing of the machine); store it like a password |
 | `import <file.zip>` | `/import dt-home-….zip` | unfold a home from an archive (with keys): settings/profile/memory/schedule are replaced, projects and conversations merge by id; asks for confirmation |
 | `settings.export` | `/settings export` | settings without projects: settings.json, the profile, the manager and the models with keys |
@@ -312,13 +311,13 @@ There are no aliases or short forms: one name — one operation.
 | `agent.update <id> field=value…` | `/agent update yurist role=sourcream model.temperature=0.4` | edit: name= role= emoji= color= description= prompt= temperature= and the nested model.id= model.temperature= |
 | `agent.delete <id…>` | `/agent delete yurist, keks` | delete members: a comma- or space-separated list |
 | `agent.tools <id>` | `/agent tools yurist` | which tools are enabled and with what settings |
-| `agent.tool add <id> <tool>` | `/agent tool add yurist files` | enable a tool: files, shell, ssh, look, image or a custom one from tools/ |
+| `agent.tool add <id> <tool…>` | `/agent tool add yurist files shell` | enable tools (several at once): files, shell, ssh, look, image or a custom one from tools/ |
 | `agent.tool update <id> <tool> field=value…` | `/agent tool update gleb git repo=C:/dev/shop` | configure the tool card in agents.json |
-| `agent.tool delete <id> <tool>` | `/agent tool delete yurist files` | disable a tool |
+| `agent.tool delete <id> <tool…\|all>` | `/agent tool delete yurist files shell` | disable tools: several at once; `all` — all of them |
 | `models.list` | `/models` | the models and their status |
 | `model.new <id> field=value…` | `/model new glm provider=openai-compatible model=glm-4.6 baseUrl=… apiKey=…` | a new card (provider is required) |
 | `model.update <id> field=value…` | `/model update glm model=glm-4.6` | edit a card: provider, model, baseUrl, apiKey, maxTokens, temperature… |
-| `model.delete <id>` | `/model delete glm` | delete a model; the main one can't be deleted — `/settings update model.id=other` first |
+| `model.delete <id…>` | `/model delete glm spare` | delete models (several at once); the main one can't be deleted — `/settings update model.id=other` first |
 | `profile.show` | `/profile` | how the team sees you (user.json) |
 | `profile.update field=value…` | `/profile update name=Alexey role=founder about=brief` | fields: name, role, about |
 | `memory.show [id\|shared]` | `/memory gleb`, `/memory shared` | what a member remembers; no argument — an overview; `shared` — the team's shared memory |
@@ -326,25 +325,25 @@ There are no aliases or short forms: one name — one operation.
 | `project.new <id> [folder]` | `/project new shop .` | create a project in the home and open it; the working folder is created if missing |
 | `project.open <id\|path>` | `/project open ../other` | switch project; an unknown folder registers itself |
 | `project.close` | `/project close` | stay without a project: conversations are kept, the state is like after a launch |
-| `project.delete <id\|path>` | `/project delete old` | delete a project from the home (projects/<id>/ whole, with conversations); the working folder is untouched; the current one can't be deleted |
+| `project.delete <id\|path…>` | `/project delete old, older` | delete projects from the home (projects/<id>/ whole, with conversations); several at once; the working folder is untouched; the current one can't be deleted |
 | `project.update field=value…` | `/project update name=shop2`, `/project update path=../other` | rename the current one (its folder in the home) or change the working folder (created if missing) |
 | `project.export` | `/project export` | an archive of the current project: project.json (secrets included) and all conversations |
 | `project.import <file.zip> [id]` | `/project import dt-project-….zip` | unfold a project from an archive; a taken id merges conversations by id |
 | `project.mails` | `/project mails` | the project's mailbox registry (the "mails" field of project.json) |
 | `project.mail add <id>` | `/project mail add work` | an empty mailbox entry; update fills the fields |
 | `project.mail update <id> field=value…` | `/project mail update work user=… password=… imap=… smtp=…` | fields: user, password, imap, smtp, port, smtpPort, tlsNoVerify |
-| `project.mail delete <id>` | `/project mail delete work` | remove a mailbox |
+| `project.mail delete <id…>` | `/project mail delete work, spam` | remove mailboxes (several at once) |
 | `project.hosts` | `/project hosts` | the project's servers (the "hosts" field of project.json) |
 | `project.host add <id>` | `/project host add prod` | an empty server entry; update fills the fields |
 | `project.host update <id> field=value…` | `/project host update prod host=deploy@203.0.113.10 dir=/var/www/app` | fields: host, user, password, dir, port |
-| `project.host delete <id>` | `/project host delete prod` | remove a server from the current project |
+| `project.host delete <id…>` | `/project host delete prod, backup` | remove servers from the current project (several at once) |
 | `project.messengers` | `/project messengers` | bot tokens (the "messengers" field of project.json) |
 | `project.messenger add <telegram\|max>` | `/project messenger add telegram` | an empty entry; update fills the token |
 | `project.messenger update <telegram\|max> token=…` | `/project messenger update telegram token=123456:ABC…` | a bot token (never shown in reports) |
 | `project.messenger delete <telegram\|max>` | `/project messenger delete max` | remove a bot |
 | `schedule.list` | `/schedule` | the tasks serve runs by itself |
 | `schedule.add <task> [minutes]` | `/schedule add "standup" 60` | a new task; the default interval is 10 minutes |
-| `schedule.toggle <id>` / `schedule.delete <id>` | `/schedule toggle task-…` | pause and delete a task |
+| `schedule.toggle <id…>` / `schedule.delete <id…>` | `/schedule toggle task-… task-…` | pause and delete tasks: several at once |
 | `auto.on [N]` / `auto.off` | `/auto on 5`, `/auto off` | autonomous mode: the agents decide on their own for up to N turns |
 | `usage.show [model id]` | `/usage`, `/usage glm` | token spend: input/output/cache cumulative; with an id — only that model |
 | `settings.show` | `/settings` | the current settings |
@@ -375,7 +374,10 @@ input line (a short description for each); as you type, the list is filtered.
 **Tab** autocompletes the command, and for commands with arguments it hints and
 completes them too: session ids (with titles) for `/session open` and
 `/session delete`, member ids for `/session agent add` and `/agent update`,
-model ids for `/usage` and `/model update`, `id|shared` for `/memory`.
+model ids for `/usage` and `/model update`, `id|shared` for `/memory`. Three-word
+commands (`/session agent`, `/agent tool`, `/project mail|host|messenger`) know
+their sub-verbs too: after `/session agent ` the panel offers `add` and `delete`,
+and `/session agent add` shows its syntax and the ids.
 
 The same for mentions: type `@` in the middle of a message — a popup with the
 members of the current chat and `@session` opens above the input line (each with
@@ -392,7 +394,7 @@ works the same, including the hint popup.
 **Chat roster.** A new conversation (`/session new` and the very first one) always
 starts one-on-one with the manager: it's the concierge — ask it to call in the
 people you need. After that the roster changes on the fly: `/session agent add
-<id>` — summon, `/session agent delete <id>` — send out (their remarks and
+<id…|all>` — summon (several at once, `all` — the whole team), `/session agent delete <id…|all>` — send out (their remarks and
 memory stay in the history); the manager does the same on request. Chat events —
 "Gleb joined the chat", "Katya left the chat" — go into the general chronology of
 the conversation as a manager line (in the terminal, in the web chat and in the
@@ -424,7 +426,7 @@ The same thing — in the browser:
 ```bash
 dreamteam serve         # or: npm run serve; the port is PORT, 8080 by default
 dreamteam serve --open  # + open the web shell in the browser
-dreamteam serve .       # with the current folder's project right away (open/new too)
+dreamteam serve .       # with the current folder's project right away
 ```
 
 A local server comes up: `http://127.0.0.1:8080` serves the web shell from `gui-dist/`

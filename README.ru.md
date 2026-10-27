@@ -18,7 +18,7 @@
 просьбе позовёт участников, включит кому-нибудь инструменты и заведёт проекты с
 серверами. Кто именно отвечает в конкретном разговоре, решает состав чата —
 список `participants` в файле разговора: пустой список — отвечают все, кого
-позвали (`/session agent add|delete <id>` или просьба менеджеру «позови Елену»).
+позвали (`/session agent add|delete <id…|all>` или просьба менеджеру «позови Елену»).
 
 ## Быстрый старт
 
@@ -41,13 +41,12 @@ dreamteam
 его. Дальше вы один на один с менеджером
 переговорки: скажите, что нужно.
 
-Проект можно открыть сразу при запуске — теми же словами `open`/`new`, что и
-в разговоре (незнакомая папка регистрируется сама, id — имя папки):
+Проект можно открыть сразу при запуске — указав рабочую папку (незнакомая
+регистрируется сама, id — имя папки; по имени проект открывают уже в чате —
+`/project open <имя>`):
 
 ```bash
 dreamteam .                  # TUI + проект текущей папки
-dreamteam open myproj        # TUI + проект по имени (список — /project) или пути
-dreamteam new myproj ./site  # TUI + новый проект (и рабочая папка) сразу открыты
 dreamteam serve .            # веб-оболочка сразу с проектом текущей папки
 ```
 
@@ -76,7 +75,7 @@ dreamteam serve .            # веб-оболочка сразу с проек�
 меняет рабочую папку, список разговоров и секреты проекта — команда, модели
 и общая память остаются при вас. Незнакомая папка регистрируется сама
 (id — имя папки). Обзор — `/projects`, переименовать —
-`/project update name=<новое имя>`, забыть — `/project delete <id или путь>`
+`/project update name=<новое имя>`, забыть — `/project delete <id или путь…>`
 (текущий сначала закройте — `/project close`; рабочая папка не трогается).
 В веб-оболочке — панель
 «Проекты»: при пустом выборе она развёрнута и первична, клик по записи
@@ -283,8 +282,8 @@ probe`) на боевой API не ходят — они бесплатны и �
 | `session.export` | `/session export` | архив текущего разговора: `session-<проект>-<разговор>-<штамп>.zip` |
 | `session.import <файл.zip>` | `/session import dt-session-….zip` | вернуть разговор из архива (вливается в открытый проект как новый) |
 | `session.agents` | `/session agents` | кто в текущем разговоре и кого можно позвать |
-| `session.agent.add <id>` | `/session agent add yurist` | позвать участника в разговор (по id из `/agents`) |
-| `session.agent.delete <id>` | `/session agent delete yurist` | вывести из разговора (реплики остаются в истории) |
+| `session.agent.add <id…\|all>` | `/session agent add yurist, keks` | позвать участников в разговор: список через запятую или пробел; `all` — вся команда (по id из `/agents`) |
+| `session.agent.delete <id…\|all>` | `/session agent delete yurist keks` | вывести из разговора: можно несколько; `all` — все, кроме менеджера (реплики остаются в истории) |
 | `export` | `/export` | дом целиком: настройки, команда, модели с ключами, память, расписание и ВСЕ проекты с разговорами (`home-<штамп>.zip`, без .env — вещь машины); хранить как пароль |
 | `import <файл.zip>` | `/import dt-home-….zip` | развернуть дом из архива (с ключами): настройки/профиль/память/расписание заменяются, проекты и разговоры вливаются по id; с подтверждением |
 | `settings.export` | `/settings export` | настройки без проектов: settings.json, профиль, менеджер и модели с ключами |
@@ -294,13 +293,13 @@ probe`) на боевой API не ходят — они бесплатны и �
 | `agent.update <id> поле=знач…` | `/agent update yurist role=сметана model.temperature=0.4` | править: name= role= emoji= color= description= prompt= temperature= и вложенные model.id= model.temperature= |
 | `agent.delete <id…>` | `/agent delete yurist, keks` | удалить участников: список через запятую или пробел |
 | `agent.tools <id>` | `/agent tools yurist` | какие тула включены и с какими настройками |
-| `agent.tool add <id> <тул>` | `/agent tool add yurist files` | включить тул: files, shell, ssh, look, image или свой из tools/ |
+| `agent.tool add <id> <тул…>` | `/agent tool add yurist files shell` | включить тула (можно несколько): files, shell, ssh, look, image или свой из tools/ |
 | `agent.tool update <id> <тул> поле=знач…` | `/agent tool update gleb git repo=C:/dev/shop` | настроить карточку тула в agents.json |
-| `agent.tool delete <id> <тул>` | `/agent tool delete yurist files` | выключить тул |
+| `agent.tool delete <id> <тул…\|all>` | `/agent tool delete yurist files shell` | выключить тула: можно несколько; `all` — все |
 | `models.list` | `/models` | модели и их статус |
 | `model.new <id> поле=знач…` | `/model new glm provider=openai-compatible model=glm-4.6 baseUrl=… apiKey=…` | новая карточка (provider обязателен) |
 | `model.update <id> поле=знач…` | `/model update glm model=glm-4.6` | править карточку: provider, model, baseUrl, apiKey, maxTokens, temperature… |
-| `model.delete <id>` | `/model delete glm` | удалить модель; основную не удалить — сначала `/settings update model.id=другая` |
+| `model.delete <id…>` | `/model delete glm spare` | удалить модели (можно несколько); основную не удалить — сначала `/settings update model.id=другая` |
 | `profile.show` | `/profile` | как вас видит команда (user.json) |
 | `profile.update поле=знач…` | `/profile update name=Алексей role=основатель about=краткость` | поля: name, role, about |
 | `memory.show [id\|shared]` | `/memory gleb`, `/memory shared` | что помнит участник; без аргумента — обзор; `shared` — общая память |
@@ -308,25 +307,25 @@ probe`) на боевой API не ходят — они бесплатны и �
 | `project.new <id> [папка]` | `/project new shop .` | создать проект в доме и открыть его; рабочая папка создаётся, если её нет |
 | `project.open <id\|путь>` | `/project open ../other` | сменить проект; незнакомая папка регистрируется сама |
 | `project.close` | `/project close` | остаться без проекта: разговоры сохранены, состояние как после запуска |
-| `project.delete <id\|путь>` | `/project delete old` | удалить проект из дома (projects/<id>/ целиком, с разговорами); рабочая папка не трогается; текущий так не удалить |
+| `project.delete <id\|путь…>` | `/project delete old, older` | удалить проекты из дома (projects/<id>/ целиком, с разговорами); можно несколько; рабочая папка не трогается; текущий так не удалить |
 | `project.update поле=знач…` | `/project update name=shop2`, `/project update path=../other` | переименовать текущий (папку в доме) или сменить рабочую папку (создаётся, если её нет) |
 | `project.export` | `/project export` | архив текущего проекта: project.json (с секретами) и все разговоры |
 | `project.import <файл.zip> [id]` | `/project import dt-project-….zip` | развернуть проект из архива; занятый id — влив разговоров по id |
 | `project.mails` | `/project mails` | реестр ящиков проекта (поле "mails" в project.json) |
 | `project.mail add <id>` | `/project mail add work` | пустая запись ящика; поля заполнит update |
 | `project.mail update <id> поле=знач…` | `/project mail update work user=… password=… imap=… smtp=…` | поля: user, password, imap, smtp, port, smtpPort, tlsNoVerify |
-| `project.mail delete <id>` | `/project mail delete work` | убрать ящик |
+| `project.mail delete <id…>` | `/project mail delete work, spam` | убрать ящики (можно несколько) |
 | `project.hosts` | `/project hosts` | серверы проекта (поле "hosts" в project.json) |
 | `project.host add <id>` | `/project host add prod` | пустая запись сервера; поля заполнит update |
 | `project.host update <id> поле=знач…` | `/project host update prod host=deploy@203.0.113.10 dir=/var/www/app` | поля: host, user, password, dir, port |
-| `project.host delete <id>` | `/project host delete prod` | убрать сервер из текущего проекта |
+| `project.host delete <id…>` | `/project host delete prod, backup` | убрать серверы из текущего проекта (можно несколько) |
 | `project.messengers` | `/project messengers` | токены ботов (поле "messengers" в project.json) |
 | `project.messenger add <telegram\|max>` | `/project messenger add telegram` | пустая запись; токен зальёт update |
 | `project.messenger update <telegram\|max> token=…` | `/project messenger update telegram token=123456:ABC…` | токен бота (в отчёте не светится) |
 | `project.messenger delete <telegram\|max>` | `/project messenger delete max` | убрать бота |
 | `schedule.list` | `/schedule` | задачи, которые serve запускает сам |
 | `schedule.add <задание> [минуты]` | `/schedule add «планёрка» 60` | новая задача; интервал по умолчанию 10 минут |
-| `schedule.toggle <id>` / `schedule.delete <id>` | `/schedule toggle task-…` | пауза и удаление задачи |
+| `schedule.toggle <id…>` / `schedule.delete <id…>` | `/schedule toggle task-… task-…` | пауза и удаление задач: можно несколько за раз |
 | `auto.on [N]` / `auto.off` | `/auto on 5`, `/auto off` | автономный режим: агенты решают сами до N ходов |
 | `usage.show [id модели]` | `/usage`, `/usage glm` | расход токенов: вход/выход/кэш накопительно; с id — только по модели |
 | `settings.show` | `/settings` | текущие настройки |
@@ -357,7 +356,10 @@ model.id=…` — основная для агентов, `/agent update <id> mo
 автодополняет команду, а у команд с аргументами подсказывает и дополняет их:
 id разговоров (с названиями) для `/session open` и `/session delete`, id участников
 для `/session agent add` и `/agent update`, id моделей для `/usage` и
-`/model update`, `id|shared` для `/memory`.
+`/model update`, `id|shared` для `/memory`. Трёхсловные команды (`/session agent`,
+`/agent tool`, `/project mail|host|messenger`) тоже знают свои подглаголы:
+после `/session agent ` подсказка предложит `add` и `delete`, а у `/session agent add`
+покажет синтаксис и id.
 
 То же самое для упоминаний: введите `@` посреди сообщения — над строкой ввода
 откроется всплывашка с участниками текущего чата и `@session` (у каждого —
@@ -372,7 +374,8 @@ id разговоров (с названиями) для `/session open` и `/se
 
 **Состав чата.** Новый разговор (`/session new` и самый первый) — всегда один на один
 с менеджером: он консьерж, попросите его позвать нужных людей. Дальше состав
-меняется на лету: `/session agent add <id>` — позвать, `/session agent delete <id>` —
+меняется на лету: `/session agent add <id…|all>` — позвать (можно несколько, `all` — всю
+команду), `/session agent delete <id…|all>` —
 вывести (его реплики и память остаются в истории); то же самое менеджер делает
 по просьбе. События чата — «Глеб присоединился к чату», «Катя покинула чат» —
 идут в общей хронологии разговора репликой менеджера (и в терминале, и в веб-чате,
@@ -404,7 +407,7 @@ id разговоров (с названиями) для `/session open` и `/se
 ```bash
 dreamteam serve         # или: npm run serve; порт — PORT, по умолчанию 8080
 dreamteam serve --open  # + открыть веб-оболочку в браузере
-dreamteam serve .       # сразу с проектом текущей папки (open/new — тоже)
+dreamteam serve .       # сразу с проектом текущей папки
 ```
 
 Флаг `--open` заставляет serve самому открыть браузер; при первом запуске мастер предлагает создать ярлык «Dream Team» на рабочем столе — он запускает ровно эту команду (одинаково на Windows, Linux и macOS).

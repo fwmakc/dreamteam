@@ -312,9 +312,8 @@ const alphaSessionId = app.session?.id ?? '';
   const cfg = JSON.parse(readFileSync(join(home, 'projects', 'beta', 'project.json'), 'utf8')) as { path?: string };
   check('update path: project.json обновлён', cfg.path === p3);
 
-  let curThrew = '';
-  try { await run('/project delete beta'); } catch (e) { curThrew = (e as Error).message; }
-  check('delete: текущий не удалить', curThrew.includes('открыт сейчас'), curThrew);
+  const cur = (await run('/project delete beta'))[0] ?? '';
+  check('delete: текущий не удалить', cur.startsWith('✗') && cur.includes('открыт сейчас'), cur);
   const gone = (await run('/project delete gamma'))[0] ?? '';
   check(
     'delete: проект удалён из дома, рабочая папка цела',
@@ -323,9 +322,11 @@ const alphaSessionId = app.session?.id ?? '';
       existsSync(join(p1, 'файл-работы.txt')),
     gone,
   );
-  let threw = '';
-  try { await run('/project delete призрак'); } catch (e) { threw = (e as Error).message; }
-  check('delete: неизвестный — ошибка резолва', threw.includes('нет — см. /projects'), threw);
+  const ghost = await run('/project delete призрак');
+  check('delete: неизвестный — ✗ с подсказкой', ghost[0]?.startsWith('✗') && ghost[0].includes('нет — см. /projects'), JSON.stringify(ghost));
+  projects.createProject('tmpdel', p4);
+  const many = await run('/project delete призрак tmpdel');
+  check('delete: список — чужой ✗, существующий ✓', many.length === 2 && many[0].startsWith('✗') && many[1].startsWith('✓'), JSON.stringify(many));
 }
 
 // ── подсказки: имена проектов из папок дома ──────────────────────────────────
@@ -342,6 +343,20 @@ const alphaSessionId = app.session?.id ?? '';
   check('подсказки: Tab дополняет имя проекта', Array.isArray(hits) && hits[0] === 'beta', JSON.stringify(hits));
   const rows = hintRowsFor('/project open ', ctx) ?? [];
   check('подсказки: панель показывает имена', rows.some((r) => r.includes('beta')), JSON.stringify(rows));
+
+  // трёхсловные операции: подсказка знает их, а не отвечает «нет такой команды»
+  const rows3 = hintRowsFor('/session agent add', ctx) ?? [];
+  check('подсказки: /session agent add — использование с <id…|all>', rows3.some((r) => r.includes('/session agent add') && r.includes('id…|all')), JSON.stringify(rows3));
+  const rows3b = hintRowsFor('/session agent ', ctx) ?? [];
+  check('подсказки: /session agent — подглаголы add/delete', rows3b.some((r) => r.includes('add')) && rows3b.some((r) => r.includes('delete')), JSON.stringify(rows3b));
+  const rows3c = hintRowsFor('/session agent', ctx) ?? [];
+  check('подсказки: /session agent без пробела — тоже подглаголы', rows3c.some((r) => r.includes('add')), JSON.stringify(rows3c));
+  const [hits3] = makeCompleter(ctx)('/session agent ad');
+  check('подсказки: Tab дополняет подглагол', Array.isArray(hits3) && hits3[0] === 'add ', JSON.stringify(hits3));
+  const rowsTool = hintRowsFor('/agent tool delete test2 ', ctx) ?? [];
+  check('подсказки: /agent tool delete — синтаксис с all', rowsTool.some((r) => r.includes('тул…|all')), JSON.stringify(rowsTool));
+  const rowsDel = hintRowsFor('/session delete', ctx) ?? [];
+  check('подсказки: двухсловные не сломаны', rowsDel.some((r) => r.includes('/session delete')), JSON.stringify(rowsDel));
 }
 
 // ── менеджер: действие project.open ──────────────────────────────────────────

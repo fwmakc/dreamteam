@@ -283,26 +283,47 @@ function sessionAgentsText(engine: Engine): string[] {
   return lines;
 }
 
-/** /session agent add|delete <id>: событие чата пишется репликой менеджера. */
-function sessionAgentChange(engine: Engine, id: string, verb: 'add' | 'delete'): string[] {
-  if (!id) {
-    return [verb === 'add'
-      ? t('Кого позвать? /session agent add <id> (кто в чате — /session agents)')
-      : t('Кого вывести? /session agent delete <id> (кто в чате — /session agents)')];
-  }
+/** id из хвоста команды: через пробел или запятую, без пустых и повторов. */
+function expandIds(rest: string[]): string[] {
+  return [...new Set(rest.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean))];
+}
+
+/** /session agent add|delete <id…|all>: событие чата пишется репликой менеджера. */
+function sessionAgentChange(engine: Engine, rest: string[], verb: 'add' | 'delete'): string[] {
+  const emptyHint = verb === 'add'
+    ? t('Кого позвать? /session agent add <id…|all> (кто в чате — /session agents)')
+    : t('Кого вывести? /session agent delete <id…|all> (кто в чате — /session agents)');
   let fullTeam: Agent[];
   try {
     fullTeam = loadTeam(AGENTS_DIR);
   } catch {
     return [t('agents.json недоступен — изменить чат не получится.')];
   }
-  const res = verb === 'add' ? engine.addToChat(id, fullTeam) : engine.removeFromChat(id, fullTeam);
-  // событие чата ядро уже записало в хронику репликой менеджера — заметкой не дублируем
-  if (res.changed) {
-    engine.serviceLine(res.text);
-    return [];
+  const req = expandIds(rest);
+  if (req.length === 0) return [emptyHint];
+  // all — вся команда (позвать) или все, кто в чате (вывести)
+  const session = engine.app.session;
+  let ids = req;
+  if (req.length === 1 && req[0].toLowerCase() === 'all') {
+    if (verb === 'add') {
+      const inChat = new Set(session ? chatTeam(session, fullTeam).map((a) => a.id) : []);
+      ids = fullTeam.map((a) => a.id).filter((id) => !inChat.has(id));
+      if (ids.length === 0) {
+        return [fullTeam.length === 0 ? t('В команде никого нет — /agent new <id> создаст.') : t('Вся команда уже в чате.')];
+      }
+    } else {
+      ids = session ? chatTeam(session, fullTeam).map((a) => a.id) : [];
+      if (ids.length === 0) return [t('Кроме менеджера в чате никого.')];
+    }
   }
-  return [res.text];
+  const notes: string[] = [];
+  for (const id of ids) {
+    const res = verb === 'add' ? engine.addToChat(id, fullTeam) : engine.removeFromChat(id, fullTeam);
+    if (res.changed) engine.serviceLine(res.text);
+    else notes.push(res.text);
+  }
+  // событие чата ядро уже записало в хронику репликой менеджера — заметкой не дублируем
+  return notes;
 }
 
 /**
@@ -460,14 +481,14 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'session.delete',
-    args: [{ name: 'id', required: true, hint: 'sessions' }],
+    args: [{ name: 'id…', required: true, hint: 'sessions' }],
     needsProject: true,
     title: 'удалить разговор',
-    help: 'текущий удалить нельзя — сначала /session close',
+    help: 'текущий удалить нельзя — сначала /session close; можно несколько',
     run: async (engine, rest) => {
-      const id = rest.join(' ').trim();
-      if (!id) return [t('Синтаксис: /session delete <id> (список — /sessions)')];
-      return [engine.deleteSessionById(id)];
+      const ids = expandIds(rest);
+      if (ids.length === 0) return [t('Синтаксис: /session delete <id…> (список — /sessions)')];
+      return ids.map((id) => engine.deleteSessionById(id));
     },
   },
   {
@@ -529,22 +550,22 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'session.agent.add',
     args: [
-      { name: 'id агента', required: true, hint: 'agents' },
+      { name: 'id…|all', required: true, hint: 'agents' },
     ],
     needsProject: true, needsSession: true,
     title: 'позвать в чат',
-    help: 'по id из /agents',
-    run: async (engine, rest) => sessionAgentChange(engine, (rest[0] ?? '').trim(), 'add'),
+    help: 'по id из /agents; можно несколько; all — вся команда',
+    run: async (engine, rest) => sessionAgentChange(engine, rest, 'add'),
   },
   {
     name: 'session.agent.delete',
     args: [
-      { name: 'id агента', required: true, hint: 'chat' },
+      { name: 'id…|all', required: true, hint: 'chat' },
     ],
     needsProject: true, needsSession: true,
     title: 'вывести из чата',
-    help: 'реплики останутся в истории',
-    run: async (engine, rest) => sessionAgentChange(engine, (rest[0] ?? '').trim(), 'delete'),
+    help: 'реплики останутся в истории; можно несколько; all — все',
+    run: async (engine, rest) => sessionAgentChange(engine, rest, 'delete'),
   },
 
   // весь дом
@@ -680,7 +701,7 @@ export const OPERATIONS: OpSpec[] = [
       }
       if (!agent) return [tf('Нет агента с id «{id}» — см. /agents', { id })];
       const tools = agentToolIds(agent);
-      if (tools.length === 0) return [tf('{name}: тулов нет — /agent tool add {id} <тул>', { name: agent.name, id })];
+      if (tools.length === 0) return [tf('{name}: тулов и так нет — /agent tool add {id} <тул>', { name: agent.name, id })];
       return ['', tf('{name} ({id}), тула:', { name: agent.name, id }), ...tools.map((tl) => `• ${tl}`), ''];
     },
   },
@@ -688,14 +709,23 @@ export const OPERATIONS: OpSpec[] = [
     name: 'agent.tool.add',
     args: [
       { name: 'id агента', required: true, hint: 'agents' },
-      { name: 'тул', required: true },
+      { name: 'тул…', required: true },
     ],
     title: 'включить тул',
-    help: 'встроенные files/shell/ssh/look/image или свой из tools/',
+    help: 'встроенные files/shell/ssh/look/image или свой из tools/; можно несколько',
     run: async (_engine, rest) => {
-      const [who, tool] = rest;
-      if (!who || !tool) return [t('Синтаксис: /agent tool add <id агента> <тул> (files, shell, ssh, look, image или свой из tools/)')];
-      return [grantTool(AGENTS_DIR, who, tool, undefined, TOOLS_DIR)];
+      const [who, ...req] = rest;
+      const tools = req.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean);
+      if (!who || tools.length === 0) return [t('Синтаксис: /agent tool add <id агента> <тул…> (files, shell, ssh, look, image или свой из tools/)')];
+      const lines: string[] = [];
+      for (const tool of tools) {
+        try {
+          lines.push(grantTool(AGENTS_DIR, who, tool, undefined, TOOLS_DIR));
+        } catch (err) {
+          lines.push(`✗ ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      return lines;
     },
   },
   {
@@ -721,14 +751,34 @@ export const OPERATIONS: OpSpec[] = [
     name: 'agent.tool.delete',
     args: [
       { name: 'id агента', required: true, hint: 'agents' },
-      { name: 'тул', required: true },
+      { name: 'тул…|all', required: true },
     ],
     title: 'выключить тул',
-    help: 'убрать карточку тула из агента',
+    help: 'убрать карточку тула из агента; можно несколько; all — все тула',
     run: async (_engine, rest) => {
-      const [who, tool] = rest;
-      if (!who || !tool) return [t('Синтаксис: /agent tool delete <id агента> <тул>')];
-      return [revokeTool(AGENTS_DIR, who, tool)];
+      const [who, ...req] = rest;
+      if (!who || req.length === 0) return [t('Синтаксис: /agent tool delete <id агента> <тул…|all>')];
+      let tools = req.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean);
+      if (tools.length === 1 && tools[0].toLowerCase() === 'all') {
+        let agent: Agent | undefined;
+        try {
+          agent = loadTeam(AGENTS_DIR).find((a) => a.id === who.trim().toLowerCase());
+        } catch {
+          return [t('agents.json недоступен.')];
+        }
+        if (!agent) return [tf('Нет агента с id «{id}» — см. /agents', { id: who })];
+        tools = agentToolIds(agent);
+        if (tools.length === 0) return [tf('{name}: тулов и так нет — /agent tool add {id} <тул>', { name: agent.name, id: agent.id })];
+      }
+      const lines: string[] = [];
+      for (const tool of tools) {
+        try {
+          lines.push(revokeTool(AGENTS_DIR, who, tool));
+        } catch (err) {
+          lines.push(`✗ ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      return lines;
     },
   },
 
@@ -784,16 +834,23 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'model.delete',
-    args: [{ name: 'id', required: true, hint: 'models' }],
+    args: [{ name: 'id…', required: true, hint: 'models' }],
     title: 'удалить модель',
-    help: 'основную не удалить — сначала /settings update model.id=другая',
+    help: 'основную не удалить — сначала /settings update model.id=другая; можно несколько',
     run: async (engine, rest) => {
-      const id = rest[0] ?? '';
-      if (!id) return [t('Синтаксис: /model delete <id>')];
+      const ids = expandIds(rest);
+      if (ids.length === 0) return [t('Синтаксис: /model delete <id…>')];
       const s = engine.app.settings;
-      const report = removeModelConfig(MODELS_DIR, id, [s.model?.id, s.serviceModel?.id, engine.app.mgr.model.id].filter((x): x is string => Boolean(x)));
+      const protectedIds = [s.model?.id, s.serviceModel?.id, engine.app.mgr.model.id].filter((x): x is string => Boolean(x));
+      const lines = ids.map((id) => {
+        try {
+          return removeModelConfig(MODELS_DIR, id, protectedIds);
+        } catch (err) {
+          return `✗ ${err instanceof Error ? err.message : err}`;
+        }
+      });
       reloadModels(engine);
-      return [report];
+      return lines;
     },
   },
 
@@ -880,13 +937,19 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'project.delete',
-    args: [{ name: 'id|путь', required: true, hint: 'projects' }],
+    args: [{ name: 'id|путь…', required: true, hint: 'projects' }],
     title: 'удалить проект',
-    help: 'из дома (projects/<id>/ вместе с разговорами); рабочая папка не трогается; текущий не удалить',
+    help: 'из дома (projects/<id>/ вместе с разговорами); рабочая папка не трогается; текущий не удалить; можно несколько',
     run: async (engine, rest) => {
-      const arg = rest.join(' ').trim();
-      if (!arg) return [t('Синтаксис: /project delete <id|путь>')];
-      return [engine.deleteProject(arg)];
+      const args = expandIds(rest);
+      if (args.length === 0) return [t('Синтаксис: /project delete <id|путь…>')];
+      return args.map((arg) => {
+        try {
+          return engine.deleteProject(arg);
+        } catch (err) {
+          return `✗ ${err instanceof Error ? err.message : err}`;
+        }
+      });
     },
   },
   {
@@ -998,14 +1061,20 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'project.mail.delete',
-    args: [{ name: 'id', required: true }],
+    args: [{ name: 'id…', required: true }],
     needsProject: true,
     title: 'убрать ящик',
-    help: 'из поля "mails" project.json проекта',
+    help: 'из поля "mails" project.json проекта; можно несколько',
     run: async (_engine, rest) => {
-      const id = (rest[0] ?? '').trim();
-      if (!id) return [t('Синтаксис: /project mail delete <id>')];
-      return [removeMailAccount(PROJECT_FILE, id)];
+      const ids = expandIds(rest);
+      if (ids.length === 0) return [t('Синтаксис: /project mail delete <id…>')];
+      return ids.map((id) => {
+        try {
+          return removeMailAccount(PROJECT_FILE, id);
+        } catch (err) {
+          return `✗ ${err instanceof Error ? err.message : err}`;
+        }
+      });
     },
   },
   {
@@ -1059,14 +1128,20 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'project.host.delete',
-    args: [{ name: 'id', required: true }],
+    args: [{ name: 'id…', required: true }],
     needsProject: true,
     title: 'убрать сервер',
-    help: 'из поля "hosts" project.json проекта',
+    help: 'из поля "hosts" project.json проекта; можно несколько',
     run: async (_engine, rest) => {
-      const id = (rest[0] ?? '').trim();
-      if (!id) return [t('Синтаксис: /project host delete <id>')];
-      return [removeProjectHost(PROJECT_FILE, id)];
+      const ids = expandIds(rest);
+      if (ids.length === 0) return [t('Синтаксис: /project host delete <id…>')];
+      return ids.map((id) => {
+        try {
+          return removeProjectHost(PROJECT_FILE, id);
+        } catch (err) {
+          return `✗ ${err instanceof Error ? err.message : err}`;
+        }
+      });
     },
   },
   {
@@ -1158,7 +1233,7 @@ export const OPERATIONS: OpSpec[] = [
       if (!message) return [t('Синтаксис: /schedule add <задание> [минуты]')];
       const dir = DT_HOME;
       const tasks = loadSchedule(dir);
-      const id = `task-${Date.now().toString(36)}`;
+      const id = `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       tasks.push({ id, message, intervalMinutes: every, enabled: true });
       saveSchedule(dir, tasks);
       return [tf('✓ Задача «{msg}» каждые {n} мин [{id}]', { msg: message.slice(0, 60), n: every, id })];
@@ -1166,33 +1241,47 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'schedule.toggle',
-    args: [{ name: 'id', required: true, hint: 'schedule' }],
+    args: [{ name: 'id…', required: true, hint: 'schedule' }],
     title: 'вкл/выкл задачу',
-    help: 'пауза и возврат без удаления',
+    help: 'пауза и возврат без удаления; можно несколько',
     run: async (_engine, rest) => {
-      const id = rest[0];
-      if (!id) return [t('Синтаксис: /schedule toggle <id>')];
+      const ids = expandIds(rest);
+      if (ids.length === 0) return [t('Синтаксис: /schedule toggle <id…>')];
       const dir = DT_HOME;
       const tasks = loadSchedule(dir);
-      const task = tasks.find((t2) => t2.id === id);
-      if (!task) return [tf('Нет задачи «{id}» — см. /schedule', { id })];
-      task.enabled = !task.enabled;
-      saveSchedule(dir, tasks);
-      return [tf('{state}: {msg}', { state: task.enabled ? t('▶ Включена') : t('⏸ Выключена'), msg: task.message.slice(0, 60) })];
+      const lines: string[] = [];
+      let touched = false;
+      for (const id of ids) {
+        const task = tasks.find((t2) => t2.id === id);
+        if (!task) {
+          lines.push(tf('Нет задачи «{id}» — см. /schedule', { id }));
+          continue;
+        }
+        task.enabled = !task.enabled;
+        touched = true;
+        lines.push(tf('{state}: {msg}', { state: task.enabled ? t('▶ Включена') : t('⏸ Выключена'), msg: task.message.slice(0, 60) }));
+      }
+      if (touched) saveSchedule(dir, tasks);
+      return lines;
     },
   },
   {
     name: 'schedule.delete',
-    args: [{ name: 'id', required: true, hint: 'schedule' }],
+    args: [{ name: 'id…', required: true, hint: 'schedule' }],
     title: 'удалить задачу',
-    help: 'полностью',
+    help: 'полностью; можно несколько',
     run: async (_engine, rest) => {
-      const id = rest[0];
-      if (!id) return [t('Синтаксис: /schedule delete <id>')];
+      const ids = expandIds(rest);
+      if (ids.length === 0) return [t('Синтаксис: /schedule delete <id…>')];
       const dir = DT_HOME;
-      const tasks = loadSchedule(dir).filter((t2) => t2.id !== id);
+      const gone = new Set(ids);
+      const before = loadSchedule(dir);
+      const tasks = before.filter((t2) => !gone.has(t2.id));
       saveSchedule(dir, tasks);
-      return [tf('Удалено: задач осталось {n}', { n: tasks.length })];
+      const missing = ids.length - (before.length - tasks.length);
+      const lines = [tf('Удалено: задач осталось {n}', { n: tasks.length })];
+      if (missing > 0) lines.push(tf('Не нашёл: {n} (список — /schedule)', { n: missing }));
+      return lines;
     },
   },
 

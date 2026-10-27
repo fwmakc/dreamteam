@@ -1,6 +1,6 @@
 {
   "name": "dreamteam",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Чат с командой ИИ-агентов: терминальный TUI и локальный веб-GUI на одном ядре",
   "type": "module",
   "bin": {

@@ -630,10 +630,8 @@ function updateHints(): void {
         return;
       }
     } else {
-      const cmdName = before.slice(0, sp);
-      const tail = before.slice(sp + 1);
-      const last = (/(\S*)$/.exec(tail) || [''])[1];
-      const all = argItems(cmdName, d);
+      const last = (/(\S*)$/.exec(before) || [''])[1];
+      const all = argItems(before, d);
       if (all) {
         const items = all.filter((o) => norm(o.label).startsWith(norm(last)));
         if (items.length > 0) {
@@ -655,23 +653,41 @@ function hideHints(): void {
   hint.sel = 0;
 }
 
-/** Варианты после группы: глаголы операций или значения аргумента (hint манифеста). */
-function argItems(cmdName: string, d: CompletionData): HintItem[] | null {
-  const parts = cmdName.slice(1).toLowerCase().split(/\s+/).filter(Boolean);
+/** Варианты после первого слова: подглаголы третьего уровня, глаголы или значения аргументов. */
+function argItems(before: string, d: CompletionData): HintItem[] | null {
+  const trailing = /\s$/.test(before);
+  const parts = before.slice(1).trim().toLowerCase().split(/\s+/).filter(Boolean);
   const group = parts[0] ?? '';
+  const verbItems = (list: string[]) => list.map((v) => ({ label: v, hint: '', insert: v + ' ' }));
   const verbs = [...new Set(d.operations
-    .filter((o) => o.cmd.startsWith('/' + group + ' '))
+    .filter((o) => o.cmd.toLowerCase().startsWith('/' + group + ' '))
     .map((o) => o.cmd.split(' ')[1] ?? ''))].filter(Boolean);
-  const implicit = d.operations.find((o) => o.cmd === '/' + group);
+  const implicit = d.operations.find((o) => o.cmd.toLowerCase() === '/' + group);
   if (parts.length === 1) {
     if (implicit && verbs.length === 0) return argHintItems(implicit, 0, d);
-    return verbs.map((v) => ({ label: v, hint: '', insert: v + ' ' }));
+    return verbItems(verbs);
   }
-  const verb = parts[1] ?? '';
-  const op = d.operations.find((o) => o.cmd === `/${group} ${verb}`) ?? implicit;
-  if (!op) return null;
-  const typed = parts.length - (verb && !implicit || op.cmd !== '/' + group ? 1 : 0) - 1;
-  return argHintItems(op, Math.max(0, typed), d);
+  // третий уровень: подглаголы (session agent add|delete, agent tool …)
+  const sub = [...new Set(d.operations
+    .filter((o) => o.cmd.toLowerCase().startsWith(`/${group} ${parts[1]} `))
+    .map((o) => o.cmd.split(' ')[2] ?? ''))].filter(Boolean);
+  const exact = parts.length >= 3
+    ? d.operations.find((o) => o.cmd.toLowerCase() === `/${group} ${parts[1]} ${parts[2]}`)
+    : undefined;
+  if (sub.length > 0) {
+    if (parts.length === 2) return verbItems(sub);
+    if (exact) {
+      const argPos = Math.max(0, parts.length - 3 + (trailing ? 1 : 0) - 1);
+      return argHintItems(exact, argPos, d);
+    }
+    if (parts.length === 3) {
+      return verbItems(sub.filter((v) => v.startsWith(parts[2]) && v !== parts[2]));
+    }
+  }
+  const op = d.operations.find((o) => o.cmd.toLowerCase() === `/${group} ${parts[1]}`) ?? implicit;
+  if (!op) return parts.length === 2 && !trailing ? verbItems(verbs) : null;
+  const argPos = Math.max(0, parts.length - (op === implicit ? 1 : 2) + (trailing ? 1 : 0) - 1);
+  return argHintItems(op, argPos, d);
 }
 
 /** Значения аргумента по машиночитаемой подсказке манифеста (id, тула, shared). */

@@ -12,7 +12,7 @@
 
 界面与本文档提供三种语言：英语、俄语和中文（`README.md`、`README.ru.md`、`README.zh.md`）。界面语言在首次启动（向导）时选择，之后随时可用 `/settings update ui=en`（`ru`、`zh`，或 `~/.dreamteam/lang/<id>.json` 中自定义语言的 id）更改。
 
-团队属于这台机器：它住在主目录（`~/.dreamteam/agents/`）里，被所有项目共享。初始为空 —— 迎接你的是**会议室经理**：按需召集成员、为某人开启工具、配置项目和服务器。某场谈话里究竟由谁回答，由聊天名单决定 —— 即会话文件里的 `participants` 列表：空列表表示你召来的所有人都会回答（`/session agent add|delete <id>`，或请经理“把 Elena 叫进来”）。
+团队属于这台机器：它住在主目录（`~/.dreamteam/agents/`）里，被所有项目共享。初始为空 —— 迎接你的是**会议室经理**：按需召集成员、为某人开启工具、配置项目和服务器。某场谈话里究竟由谁回答，由聊天名单决定 —— 即会话文件里的 `participants` 列表：空列表表示你召来的所有人都会回答（`/session agent add|delete <id…|all>`，或请经理“把 Elena 叫进来”）。
 
 ## 快速开始
 
@@ -28,12 +28,10 @@ dreamteam
 
 首次启动时向导会带你完成设置（见“首次启动向导”）：选择界面语言和服务商，输入 API 密钥（输入隐藏），并自我介绍 —— 随之创建家目录 `~/.dreamteam`（设置与团队）。应用以**无项目**状态启动 —— 项目由你选择：`/project new myproj .` 创建项目（数据存于家目录 `~/.dreamteam/projects/myproj/`，工作文件夹是当前目录）并打开它。之后就是你和会议室经理的对话：直接告诉它你需要什么。
 
-项目也可以在启动时就打开 —— 用词与对话里的 `open`/`new` 相同（陌生文件夹自动注册，id 即文件夹名）：
+项目也可以在启动时就打开 —— 只需指定工作文件夹（陌生文件夹自动注册，id 即文件夹名；按名称打开请在对话里用 `/project open <id>`）：
 
 ```bash
 dreamteam .                  # TUI + 当前文件夹的项目
-dreamteam open myproj        # TUI + 按名称打开项目（/projects 列出）或按路径
-dreamteam new myproj ./site  # TUI + 新建项目（及工作文件夹）并立即打开
 dreamteam serve .            # 网页外壳直接带着当前文件夹的项目
 ```
 
@@ -51,7 +49,7 @@ dreamteam serve .            # 网页外壳直接带着当前文件夹的项目
 
 工具的工作文件夹是 project.json 里的 `"path"`：创建项目时指定（`/project new <id> [文件夹]`，文件夹不存在则创建），之后可用 `/project update path=<文件夹>` 更改。家目录内部禁止作为工作文件夹 —— 那里是模型密钥和设置。通常它是你启动应用所在的 git 仓库：团队直接为它干活，无需在任何地方配置路径。
 
-可以不退出应用切换项目：`/project open <id或路径>` 更换工作文件夹、谈话列表和项目机密 —— 团队、模型和共享记忆跟着你走。陌生文件夹自动注册（id 即文件夹名）。总览：`/projects`，重命名 —— `/project update name=<新名字>`，遗忘 —— `/project delete <id或路径>`（当前的先 `/project close`；工作文件夹不受影响）。网页外壳里有“项目”面板：点条目切换，“＋”按钮（带路径字段的表单）创建新项目。也可以请经理切换项目。
+可以不退出应用切换项目：`/project open <id或路径>` 更换工作文件夹、谈话列表和项目机密 —— 团队、模型和共享记忆跟着你走。陌生文件夹自动注册（id 即文件夹名）。总览：`/projects`，重命名 —— `/project update name=<新名字>`，遗忘 —— `/project delete <id或路径…>`（当前的先 `/project close`；工作文件夹不受影响）。网页外壳里有“项目”面板：点条目切换，“＋”按钮（带路径字段的表单）创建新项目。也可以请经理切换项目。
 
 各层可被环境变量 `DT_HOME` 覆盖 —— 探针和隔离就是这样工作的：应用的所有数据都在一个文件夹里，工作仓库里不会多出任何东西。
 
@@ -199,8 +197,8 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `session.export` | `/session export` | 当前谈话的归档：`session-<项目>-<谈话>-<时间戳>.zip` |
 | `session.import <file>` | `/session import dt-session-….zip` | 从归档恢复谈话（作为新谈话并入打开的项目） |
 | `session.agents` | `/session agents` | 当前谈话里有谁、能叫谁 |
-| `session.agent.add <id>` | `/session agent add lawyer` | 请成员进谈话（id 见 `/agents`） |
-| `session.agent.delete <id>` | `/session agent delete lawyer` | 请出谈话（发言保留在历史里） |
+| `session.agent.add <id…\|all>` | `/session agent add lawyer, keks` | 请成员进谈话：逗号或空格分隔的列表；`all` —— 整个团队（id 见 `/agents`） |
+| `session.agent.delete <id…\|all>` | `/session agent delete lawyer keks` | 请出谈话：可以多个；`all` —— 除经理外全部（发言保留在历史里） |
 | `export` | `/export` | 整个家目录：设置、团队、带密钥的模型、记忆、日程和**所有项目**及其谈话（`home-<时间戳>.zip`，不含 .env —— 属于机器的东西）；像密码一样保管 |
 | `import <file>` | `/import dt-home-….zip` | 从归档展开家目录（含密钥）：设置/资料/记忆/日程被替换，项目和谈话按 id 并入；需确认 |
 | `settings.export` | `/settings export` | 不含项目的设置：settings.json、个人资料、经理和带密钥的模型 |
@@ -210,13 +208,13 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `agent.update <id> field=value…` | `/agent update lawyer role=法律 model.temperature=0.4` | 编辑：name= role= emoji= color= description= prompt= temperature= 及嵌套的 model.id= model.temperature= |
 | `agent.delete <id…>` | `/agent delete lawyer, keks` | 删除成员：逗号或空格分隔的列表 |
 | `agent.tools <id>` | `/agent tools lawyer` | 启用了哪些工具、什么设置 |
-| `agent.tool add <id> <tool>` | `/agent tool add lawyer files` | 启用工具：files、shell、ssh、look、image 或 tools/ 里自定义的 |
+| `agent.tool add <id> <tool…>` | `/agent tool add lawyer files shell` | 启用工具（可多个）：files、shell、ssh、look、image 或 tools/ 里自定义的 |
 | `agent.tool update <id> <tool> field=value…` | `/agent tool update gleb git repo=C:/dev/shop` | 设置 agents.json 里的工具卡片 |
-| `agent.tool delete <id> <tool>` | `/agent tool delete lawyer files` | 停用工具 |
+| `agent.tool delete <id> <tool…\|all>` | `/agent tool delete lawyer files shell` | 停用工具：可以多个；`all` —— 全部 |
 | `models.list` | `/models` | 模型及其状态 |
 | `model.new <id> field=value…` | `/model new glm provider=openai-compatible model=glm-4.6 baseUrl=… apiKey=…` | 新卡片（provider 必填） |
 | `model.update <id> field=value…` | `/model update glm model=glm-4.6` | 编辑卡片：provider、model、baseUrl、apiKey、maxTokens、temperature… |
-| `model.delete <id>` | `/model delete glm` | 删除模型；默认的删不掉 —— 先 `/settings update model.id=别的` |
+| `model.delete <id…>` | `/model delete glm spare` | 删除模型（可多个）；默认的删不掉 —— 先 `/settings update model.id=别的` |
 | `profile.show` | `/profile` | 团队如何看你（user.json） |
 | `profile.update field=value…` | `/profile update name=阿辽沙 role=创业者 about=重视简短` | 字段：name、role、about |
 | `memory.show [id\|shared]` | `/memory gleb`、`/memory shared` | 某成员记得什么；不带参数 —— 总览；`shared` — 共享记忆 |
@@ -224,25 +222,25 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `project.new <id> [folder]` | `/project new shop .` | 在家目录创建项目并打开；工作文件夹不存在则创建 |
 | `project.open <id\|path>` | `/project open ../other` | 切换项目；陌生文件夹自动注册 |
 | `project.close` | `/project close` | 无项目状态：谈话已保存，如同刚启动 |
-| `project.delete <id\|path>` | `/project delete old` | 从家目录删除项目（整个 projects/<id>/，连同谈话）；工作文件夹不动；当前的不能这样删 |
+| `project.delete <id\|path…>` | `/project delete old, older` | 从家目录删除项目（整个 projects/<id>/，连同谈话）；可多个；工作文件夹不动；当前的不能这样删 |
 | `project.update field=value…` | `/project update name=shop2`、`/project update path=../other` | 重命名当前项目（家目录里的文件夹）或换工作文件夹（不存在则创建） |
 | `project.export` | `/project export` | 当前项目的归档：project.json（含机密）和全部谈话 |
 | `project.import <file> [id]` | `/project import dt-project-….zip` | 从归档展开项目；id 已被占用则按 id 合并谈话 |
 | `project.mails` | `/project mails` | 项目邮箱注册表（project.json 的 "mails" 字段） |
 | `project.mail add <id>` | `/project mail add work` | 空邮箱记录；字段由 update 填 |
 | `project.mail update <id> field=value…` | `/project mail update work user=… password=… imap=… smtp=…` | 字段：user、password、imap、smtp、port、smtpPort、tlsNoVerify |
-| `project.mail delete <id>` | `/project mail delete work` | 移除邮箱 |
+| `project.mail delete <id…>` | `/project mail delete work, spam` | 移除邮箱（可多个） |
 | `project.hosts` | `/project hosts` | 项目服务器（project.json 的 "hosts" 字段） |
 | `project.host add <id>` | `/project host add prod` | 空服务器记录；字段由 update 填 |
 | `project.host update <id> field=value…` | `/project host update prod host=deploy@203.0.113.10 dir=/var/www/app` | 字段：host、user、password、dir、port |
-| `project.host delete <id>` | `/project host delete prod` | 从当前项目移除服务器 |
+| `project.host delete <id…>` | `/project host delete prod, backup` | 从当前项目移除服务器（可多个） |
 | `project.messengers` | `/project messengers` | 机器人令牌（project.json 的 "messengers" 字段） |
 | `project.messenger add <telegram\|max>` | `/project messenger add telegram` | 空记录；令牌由 update 填 |
 | `project.messenger update <telegram\|max> token=…` | `/project messenger update telegram token=123456:ABC…` | 机器人令牌（不进报告） |
 | `project.messenger delete <telegram\|max>` | `/project messenger delete max` | 移除机器人 |
 | `schedule.list` | `/schedule` | serve 自动按间隔运行的任务 |
 | `schedule.add <task> [minutes]` | `/schedule add "晨会" 60` | 新任务；间隔默认 10 分钟 |
-| `schedule.toggle <id>` / `schedule.delete <id>` | `/schedule toggle task-…` | 暂停/恢复与删除任务 |
+| `schedule.toggle <id…>` / `schedule.delete <id…>` | `/schedule toggle task-… task-…` | 暂停/恢复与删除任务：可多个 |
 | `auto.on [N]` / `auto.off` | `/auto on 5`、`/auto off` | 自主模式：智能体自行决定，最多 N 步 |
 | `usage.show [模型 id]` | `/usage`、`/usage glm` | token 用量：输入/输出/缓存累计；带 id —— 仅该模型 |
 | `settings.show` | `/settings` | 当前设置 |
@@ -258,13 +256,13 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 
 **会话命名。** 名字取自第一条消息，第一次回答之后经理会为会话起个简短标题（基于首条消息）。随时可以重命名：`/session update title=<新名字>` —— 或者请经理：“给这场谈话起个名字” —— 它会用简短摘要，如果会话还没压缩过，就用第一条和最后一条消息。
 
-**命令提示。** 以 `/` 开头输入 —— 输入行上方出现命令列表（每条带简短说明）；随着输入过滤。**Tab** 补全命令，带参数的命令还会提示并补全参数：`/session open` 和 `/session delete` 提示会话 id（带标题），`/session agent add` 和 `/agent update` 提示成员 id，`/usage` 和 `/model update` 提示模型 id，`/memory` 提示 `id|shared`。
+**命令提示。** 以 `/` 开头输入 —— 输入行上方出现命令列表（每条带简短说明）；随着输入过滤。**Tab** 补全命令，带参数的命令还会提示并补全参数：`/session open` 和 `/session delete` 提示会话 id（带标题），`/session agent add` 和 `/agent update` 提示成员 id，`/usage` 和 `/model update` 提示模型 id，`/memory` 提示 `id|shared`。三词命令（`/session agent`、`/agent tool`、`/project mail|host|messenger`）也认识自己的子动词：`/session agent ` 之后提示 `add` 和 `delete`，`/session agent add` 会显示语法和成员 id。
 
 @提及同理：在消息中间输入 `@` —— 输入行上方弹出当前聊天成员和 `@session` 的面板（各带角色）。输入即过滤，**上下方向键**移动选择（循环），**Enter** 或 **Tab** 插入选中名字，**Esc** 关闭面板并保留已输入的 `@片段`。大小写无关，俄语 е/ё 也不区分。`@session` 后加空格会提示带标题的会话 id。
 
 **`!` 是 `@` 的完全同义词**（任何键盘布局、任何语言下都是 Shift+1）：`!Katya, look at the mockup`、`!manager, bring Gleb in`、`!session 20261027-143052` —— 一切照旧，包括提示面板。
 
-**聊天名单。** 新谈话（`/session new` 和第一场）总是一对一始于经理：它是礼宾 —— 让它叫你需要的人。之后名单随时可变：`/session agent add <id>` — 召唤，`/session agent delete <id>` — 请出（其发言和记忆保留在历史里）；经理也可以按请求这样做。聊天事件 —— “Gleb 加入聊天”、“Katya 离开聊天” —— 以经理一行进入谈话的统一时间线（终端、网页聊天和保存的历史都是如此），而不是单独的日志。如果最后一名成员被请出，经理会留下 —— 作战室不能没有团队。当前名单在 `/agents` 和 `/session agents` 可见。关闭谈话的摘要在后台并入团队共享记忆，无需等待。
+**聊天名单。** 新谈话（`/session new` 和第一场）总是一对一始于经理：它是礼宾 —— 让它叫你需要的人。之后名单随时可变：`/session agent add <id…|all>` — 召唤（可多个，`all` —— 整个团队），`/session agent delete <id…|all>` — 请出（其发言和记忆保留在历史里）；经理也可以按请求这样做。聊天事件 —— “Gleb 加入聊天”、“Katya 离开聊天” —— 以经理一行进入谈话的统一时间线（终端、网页聊天和保存的历史都是如此），而不是单独的日志。如果最后一名成员被请出，经理会留下 —— 作战室不能没有团队。当前名单在 `/agents` 和 `/session agents` 可见。关闭谈话的摘要在后台并入团队共享记忆，无需等待。
 
 **多行消息。** 消息内换行：`\` + Enter（任何终端都行）或 **Ctrl+Enter** / **Alt+Enter**。输入未结束时提示符变成 `… `；空行是段落分隔；普通 **Enter** 发送消息，**双击 Enter** 或 `.` 按原样结束输入。行尾 `\\` 是字面反斜杠。从剪贴板多行粘贴（Windows Terminal 里 Ctrl+V、Shift+Ins、右键）也会粘成一条消息而不是发出第一行；如果粘贴以换行结尾，之后再按一次 Enter。
 
@@ -277,7 +275,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 ```bash
 dreamteam serve         # 或：npm run serve；端口取 PORT，默认 8080
 dreamteam serve --open  # + 在浏览器中打开网页外壳
-dreamteam serve .       # 直接带着当前文件夹的项目（也支持 open/new）
+dreamteam serve .       # 直接带着当前文件夹的项目
 ```
 
 本地服务器启动：`http://127.0.0.1:8080` 提供 `gui-dist/` 的网页外壳（由 `gui-src/` 构建的 Vue 应用，`npm run build:gui` 构建）并通过 WebSocket 与之通信。默认只监听 127.0.0.1 —— 机器外部看不到服务器。端口和地址由 `PORT` 和 `HOST` 变量设置 —— 可以放进 `~/.dreamteam/.env`：全局重装和切换项目后设置仍在。**注意：** `HOST=0.0.0.0` 会把服务器暴露到网络 —— API 没有鉴权，只在自己的网络里这样做。谈话、团队和配置与终端共享 `--open` 标志让 serve 自己打开浏览器；首次启动时向导会提议在桌面创建「Dream Team」快捷方式 — 它运行的就是这条命令（Windows、Linux、macOS 上行为一致）。：可以在 TUI 工作，再到浏览器继续。
