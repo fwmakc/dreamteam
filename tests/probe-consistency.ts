@@ -109,7 +109,7 @@ function makeClient(port: number): Promise<{
 /** Взгляд GUI: sessions + сообщения текущего разговора из state-снапшота. */
 type GuiView = {
   sessions: { id: string; title: string; createdAt: number; updatedAt: number; count: number }[];
-  messages: { authorId: string; authorName: string; text: string; ts: number }[];
+  messages: { authorId: string; authorName: string; authorRole?: string; text: string; ts: number }[];
 };
 async function guiView(port: number): Promise<GuiView> {
   const c = await makeClient(port);
@@ -126,7 +126,7 @@ function tuiView(): GuiView {
   return {
     sessions: list,
     messages: (fresh.load(list[0].id)?.messages ?? []).map((m) => ({
-      authorId: m.authorId, authorName: m.authorName, text: m.text, ts: m.ts,
+      authorId: m.authorId, authorName: m.authorName, authorRole: m.authorRole, text: m.text, ts: m.ts,
     })),
   };
 }
@@ -162,10 +162,12 @@ let handle = await startServe({ port: 0 });
 {
   const gui = await guiView(handle.port);
   const tui = tuiView();
+  const gj = JSON.stringify(gui.messages);
+  const tj = JSON.stringify(tui.messages);
   check(
     'сообщения: состав и порядок совпадают',
-    JSON.stringify(gui.messages) === JSON.stringify(tui.messages),
-    JSON.stringify({ gui: gui.messages.length, tui: tui.messages.length }),
+    gj === tj,
+    `gui=${gj} tui=${tj}`,
   );
 }
 
