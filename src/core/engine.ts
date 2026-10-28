@@ -1010,19 +1010,20 @@ export class Engine {
     return t('✓ Проект закрыт: /projects, /project new <id> [папка] или /project open <id|путь>.');
   }
 
-  /** project.open: имя проекта или путь к папке (незарегистрированная — регистрируем). */
-  switchProject(arg: string): string {
+  /** project.open: имя проекта или путь к папке (незарегистрированная — регистрируем).
+   *  announce=false — вызов из команды: подтверждением служит сам ответ, без заметки-дубля. */
+  switchProject(arg: string, announce = true): string {
     const { config, created } = projects.resolveProjectTarget(arg, WORKSPACE || process.cwd());
     const registered = created
       ? tf('Проект «{id}» зарегистрировал в доме (папка была открыта впервые).\n', { id: config.id })
       : '';
-    return registered + this.applyProjectSwitch(config.id);
+    return registered + this.applyProjectSwitch(config.id, announce);
   }
 
   /** project.new: создать проект (+ рабочую папку, если задана) и открыть его. */
-  newProject(name: string, pathRaw: string | null): string {
+  newProject(name: string, pathRaw: string | null, announce = true): string {
     const cfg = projects.createProject(name, pathRaw);
-    return tf('✓ Проект «{id}» создал (данные — в доме, projects/{id}/)\n', { id: cfg.id }) + this.applyProjectSwitch(cfg.id);
+    return tf('✓ Проект «{id}» создал (данные — в доме, projects/{id}/)\n', { id: cfg.id }) + this.applyProjectSwitch(cfg.id, announce);
   }
 
   /** project.remove: удалить проект ИЗ ДОМА (projects/<id>/); рабочая папка не трогается. */
@@ -1076,7 +1077,7 @@ export class Engine {
    * или создать новый. Итоги старого разговора вливаются в общую память ДО
    * подмены хранилища: фоновое вливание должно писать в проект, где разговор жил.
    */
-  applyProjectSwitch(id: string): string {
+  applyProjectSwitch(id: string, announce = true): string {
     const dir = join(PROJECTS_DIR, id);
     const cfg = projects.loadProjectConfig(id);
     if (!cfg) throw new Error(tf('проект «{id}» не читается (нет project.json) — /project new {id} создаст заново', { id }));
@@ -1092,7 +1093,7 @@ export class Engine {
     this.app.store = new SessionStore(SESSIONS_DIR);
     const list = this.app.store.list();
     this.app.session = list.length > 0 ? this.app.store.load(list[0].id) ?? this.app.store.create() : this.app.store.create();
-    this.presenter.notice(`  ${t('Проект:')} ${cfg.id}${WORKSPACE ? ` · ${WORKSPACE}` : ''}`);
+    if (announce) this.presenter.notice(`  ${t('Проект:')} ${cfg.id}${WORKSPACE ? ` · ${WORKSPACE}` : ''}`);
     this.presenter.notice(tf('  Открыт разговор «{title}» ({n} сообщ.)', { title: this.app.session.title, n: this.app.session.messages.length }));
     this.presenter.sessionOpened(this.app.session);
     return tf('✓ Проект: {id}{ws}', { id: cfg.id, ws: WORKSPACE ? ` (${WORKSPACE})` : '' });

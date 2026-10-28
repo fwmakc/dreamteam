@@ -916,7 +916,7 @@ export const OPERATIONS: OpSpec[] = [
       const id = rest[0];
       if (!id) return [t('Синтаксис: /project new <id> [папка] — id без пробелов; рабочая папка создаётся, если её нет')];
       const dir = rest.length > 1 ? rest.slice(1).join(' ') : null;
-      return [engine.newProject(id, dir)];
+      return [engine.newProject(id, dir, false)];
     },
   },
   {
@@ -927,7 +927,7 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine, rest) => {
       const arg = rest.join(' ').trim();
       if (!arg) return [t('Синтаксис: /project open <id|путь> (список — /projects)')];
-      return [engine.switchProject(arg)];
+      return [engine.switchProject(arg, false)];
     },
   },
   {

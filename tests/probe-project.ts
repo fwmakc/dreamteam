@@ -230,7 +230,7 @@ const flushChain = () => (engine as unknown as { flushChain: Promise<void> }).fl
   check('project new: разговор создан в projects/alpha/sessions', existsSync(join(paths.SESSIONS_DIR, `${app.session?.id}.json`)));
   const cfg = JSON.parse(readFileSync(join(home, 'projects', 'alpha', 'project.json'), 'utf8')) as { id?: string };
   check('project new: project.json знает id', cfg.id === 'alpha');
-  check('project new: заметки оболочке (проект + разговор)', notices.some((n) => n.includes('Проект:')) && opened > 0);
+  check('project new: заметки оболочке (открытый разговор; проект — в отчёте)', notices.some((n) => n.includes('Открыт разговор')) && opened > 0);
   // маркер рабочей папки: удаление проекта из дома не трогает файлы работы
   writeFileSync(join(p1, 'файл-работы.txt'), 'рабочие файлы не принадлежат приложению');
   // второй проект — для смен (без открытия)

@@ -826,6 +826,49 @@ onMounted(connectWs);
   <main id="layout">
     <!-- ── сайдбар ────────────────────────────────────────────────────────── -->
     <aside id="sidebar">
+      <section class="side-sec" :class="{ collapsed: isCollapsed('projects') }" data-sec="projects">
+        <div class="side-head" @click="toggleSec('projects')">
+          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <span class="sec-name">{{ tr('Проекты') }}</span>
+          <button class="sec-add" :title="tr('Новый проект')" @click.stop="newProjectForm">📁＋</button>
+          <button class="sec-add" :title="tr('Открыть проект (имя или папка)')" @click.stop="openProjectForm">📂</button>
+        </div>
+        <div class="sec-btns">
+          <button :title="tr('Экспорт текущего проекта в zip (project.json и разговоры)')" @click="exportProject">⬇ {{ tr('проект') }}</button>
+          <button :title="tr('Импорт проекта из zip')" @click="pickImport('project')">⬆ {{ tr('импорт') }}</button>
+        </div>
+        <ul id="projects">
+          <li
+            class="proj-current"
+            data-project-current
+            :title="tr('Текущий проект — его данные в доме, projects/<id>/ · правая кнопка — переименовать/папка')"
+            @contextmenu.prevent="ctxProjectCurrent($event)"
+          >
+            <span>📁 {{ currentProject?.name ?? tr('не выбран — выберите или создайте') }}</span><span class="meta">{{ currentProject?.path }}</span>
+          </li>
+          <li
+            v-for="p in knownProjects.filter((k) => k.name !== currentProject?.id)"
+            :key="p.name"
+            class="proj-row"
+            :title="p.path + ' — ' + tr('переключиться · правая кнопка — удалить из дома')"
+            @click.stop="switchProject(p)"
+            @contextmenu.prevent="ctxProjectKnown($event, p)"
+          >
+            <span>{{ p.name }}</span><span class="meta">{{ p.path }}</span>
+          </li>
+          <li
+            v-for="ph in projects.flatMap((p) => (p.hosts ?? []).map((h) => ({ p, h })))"
+            :key="ph.p.id + ':' + ph.h.name"
+            title="✕ — удалить сервер · ＋ — добавить сервер · правая кнопка — удалить"
+            @contextmenu.prevent="ctxHost($event, ph.p, ph.h)"
+          >
+            <span>{{ ph.p.id }}</span><span class="meta">{{ ph.h.name }}: {{ ph.h.host }}</span>
+            <span class="del" :title="tr('Добавить сервер в проект')" @click.stop="projectHostAdd(ph.p)">＋</span>
+            <span class="del" :title="tr('Удалить сервер')" @click.stop="projectHostDelete(ph.p, ph.h)">✕</span>
+          </li>
+        </ul>
+      </section>
+
       <section class="side-sec" :class="{ collapsed: collapsed.has('sessions') }" data-sec="sessions">
         <div class="side-head" @click="toggleSec('sessions')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
@@ -939,48 +982,6 @@ onMounted(connectWs);
         </ul>
       </section>
 
-      <section class="side-sec" :class="{ collapsed: isCollapsed('projects') }" data-sec="projects">
-        <div class="side-head" @click="toggleSec('projects')">
-          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
-          <span class="sec-name">{{ tr('Проекты') }}</span>
-          <button class="sec-add" :title="tr('Новый проект')" @click.stop="newProjectForm">📁＋</button>
-          <button class="sec-add" :title="tr('Открыть проект (имя или папка)')" @click.stop="openProjectForm">📂</button>
-        </div>
-        <div class="sec-btns">
-          <button :title="tr('Экспорт текущего проекта в zip (project.json и разговоры)')" @click="exportProject">⬇ {{ tr('проект') }}</button>
-          <button :title="tr('Импорт проекта из zip')" @click="pickImport('project')">⬆ {{ tr('импорт') }}</button>
-        </div>
-        <ul id="projects">
-          <li
-            class="proj-current"
-            data-project-current
-            :title="tr('Текущий проект — его данные в доме, projects/<id>/ · правая кнопка — переименовать/папка')"
-            @contextmenu.prevent="ctxProjectCurrent($event)"
-          >
-            <span>📁 {{ currentProject?.name ?? tr('не выбран — выберите или создайте') }}</span><span class="meta">{{ currentProject?.path }}</span>
-          </li>
-          <li
-            v-for="p in knownProjects.filter((k) => k.name !== currentProject?.id)"
-            :key="p.name"
-            class="proj-row"
-            :title="p.path + ' — ' + tr('переключиться · правая кнопка — удалить из дома')"
-            @click.stop="switchProject(p)"
-            @contextmenu.prevent="ctxProjectKnown($event, p)"
-          >
-            <span>{{ p.name }}</span><span class="meta">{{ p.path }}</span>
-          </li>
-          <li
-            v-for="ph in projects.flatMap((p) => (p.hosts ?? []).map((h) => ({ p, h })))"
-            :key="ph.p.id + ':' + ph.h.name"
-            title="✕ — удалить сервер · ＋ — добавить сервер · правая кнопка — удалить"
-            @contextmenu.prevent="ctxHost($event, ph.p, ph.h)"
-          >
-            <span>{{ ph.p.id }}</span><span class="meta">{{ ph.h.name }}: {{ ph.h.host }}</span>
-            <span class="del" :title="tr('Добавить сервер в проект')" @click.stop="projectHostAdd(ph.p)">＋</span>
-            <span class="del" :title="tr('Удалить сервер')" @click.stop="projectHostDelete(ph.p, ph.h)">✕</span>
-          </li>
-        </ul>
-      </section>
     </aside>
 
     <!-- ── чат ────────────────────────────────────────────────────────────── -->

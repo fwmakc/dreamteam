@@ -11,6 +11,11 @@ compatibility is promised across earlier versions.
 
 ### Fixed
 
+- `/project open` and `/project new` printed the project line twice in the
+  feed — the «Проект: …» notice and the «✓ Проект: …» operation reply carried
+  the same information. The interactive commands now return only the reply
+  (plus «Открыт разговор …»); the notice stays for the startup paths that
+  have no reply to show.
 - The commands the engine accepts outside the registry — `/help`, `/exit`,
   `/quit`, `/q` — were missing from the completion hints of both the terminal
   and the GUI (typing `/q` even answered «нет такой команды — см. /help»).

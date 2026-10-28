@@ -799,7 +799,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         if (!arg) throw new Error('project.open: жду путь или id проекта (список — /projects)');
         let report = '';
         await runRound(async () => {
-          report = engine.switchProject(arg);
+          report = engine.switchProject(arg, false);
         });
         await welcomeIfEmpty();
         return { text: report };
