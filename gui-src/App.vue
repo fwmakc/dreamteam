@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue';
 import type {
-  AgentInfo, ChatMessage, OpHint, ProjectHost, ProjectInfo, ProjectRecordInfo,
-  ModelInfo, ScheduleTaskInfo, SessionMeta,
+  AgentInfo, CardSchema, ChatMessage, FieldSpec, OpHint, ProjectHost, ProjectInfo,
+  ProjectRecordInfo, ModelInfo, ScheduleTaskInfo, SessionMeta,
 } from './types';
 import {
   addFeed, answerChoose, answerConfirm, authError, authNeeded, authed, busyCount, busyLabel,
@@ -126,7 +126,7 @@ function ctxModel(e: MouseEvent, p: ModelInfo): void {
 }
 function ctxSession(e: MouseEvent, id: string, title: string): void {
   openCtx(e, [
-    { label: tr('Переименовать'), fn: () => openSessionRename(id) },
+    { label: tr('Изменить'), fn: () => openSessionEdit(id) },
     { label: tr('Удалить'), fn: () => deleteSession(id, title) },
   ]);
 }
@@ -140,21 +140,27 @@ function ctxHost(e: MouseEvent, p: ProjectInfo, h: ProjectHost): void {
   openCtx(e, [{ label: tr('Удалить'), fn: () => projectHostDelete(p, h) }]);
 }
 
-// ── модальная форма: поля [{key,label,value,placeholder?}] ───────────────────
-type FormField = { key: string; label: string; value?: string; placeholder?: string };
+// ── модальная форма: поля [{key,label,value,placeholder?,type?,values?}] ─────
+type FormField = {
+  key: string; label: string; value?: string; placeholder?: string;
+  type?: FieldSpec['type']; values?: string[];
+};
 const modal = reactive({
   show: false, title: '', error: '',
-  fields: [] as { key: string; label: string; value: string; placeholder?: string }[],
+  fields: [] as { key: string; label: string; value: string; placeholder?: string; type?: FieldSpec['type']; values?: string[] }[],
   onSave: null as null | ((v: Record<string, string>) => void),
 });
 const modalBox = ref<HTMLElement | null>(null);
 function openForm(title: string, fields: FormField[], onSave: (v: Record<string, string>) => void): void {
   modal.title = title;
-  modal.fields = fields.map((f) => ({ key: f.key, label: f.label, value: f.value ?? '', placeholder: f.placeholder }));
+  modal.fields = fields.map((f) => ({
+    key: f.key, label: f.label, value: f.value ?? '', placeholder: f.placeholder,
+    type: f.type, values: f.values,
+  }));
   modal.error = '';
   modal.onSave = onSave;
   modal.show = true;
-  nextTick(() => modalBox.value?.querySelector('input')?.focus());
+  nextTick(() => modalBox.value?.querySelector<HTMLElement>('input, textarea, select')?.focus());
 }
 function closeForm(): void {
   modal.show = false;
@@ -172,6 +178,49 @@ function submitForm(): void {
   }
 }
 
+// ── формы из схемы карточек: поля и типы берутся из snapshot.schemas ─────────
+function schemaOf(entity: string): CardSchema | undefined {
+  return snapshot.schemas?.[entity];
+}
+function getPath(obj: unknown, path: string): string {
+  let v: unknown = obj;
+  for (const part of path.split('.')) {
+    if (v == null || typeof v !== 'object') return '';
+    v = (v as Record<string, unknown>)[part];
+  }
+  return v == null ? '' : String(v);
+}
+/** Поля формы по схеме сущности; значения — из текущей карточки по путям. */
+function schemaFields(entity: string, current: unknown): FormField[] {
+  const schema = schemaOf(entity);
+  if (!schema) return [];
+  return schema.fields.map((f) => ({
+    key: f.path, label: tr(f.label), value: getPath(current, f.path),
+    type: f.type, values: f.values ? [...f.values] : undefined,
+    placeholder: f.placeholder ? tr(f.placeholder) : undefined,
+  }));
+}
+/** Значения формы → вложенный объект по путям схемы (пусто — поле не менять). */
+function fieldsFromForm(schema: CardSchema, values: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of schema.fields) {
+    const raw = (values[f.path] ?? '').trim();
+    if (!raw) continue;
+    const num = Number(raw);
+    if (f.type === 'number' && !Number.isFinite(num)) continue;
+    const v: unknown = f.type === 'number' ? num : raw;
+    const parts = f.path.split('.');
+    let node = out;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const k = parts[i];
+      if (node[k] === null || typeof node[k] !== 'object') node[k] = {};
+      node = node[k] as Record<string, unknown>;
+    }
+    node[parts[parts.length - 1]] = v;
+  }
+  return out;
+}
+
 // ── агенты: создать/удалить/настроить ────────────────────────────────────────
 function rpcReport(p: Promise<{ text: string }>): void {
   p.then((r) => addFeed('notice', `· ${r.text}`))
@@ -184,23 +233,26 @@ function openAgentCreate(): void {
     { key: 'role', label: tr('Роль (можно пропустить)') },
   ], (v) => rpcReport(rpc('agent.new', v)));
 }
-function openAgentSettings(a: AgentInfo): void {
+async function openAgentSettings(a: AgentInfo): Promise<void> {
+  const schema = schemaOf('agent');
+  if (!schema) return;
+  // полная карточка (rpc agent.get) — в снапшоте команды её вложенных полей нет
+  let card: Record<string, unknown> = {};
+  try {
+    const r = await rpc<{ card: Record<string, unknown> }>('agent.get', { id: a.id });
+    card = r.card ?? {};
+  } catch (err) {
+    addFeed('error', `✗ ${(err as Error).message}`);
+    return;
+  }
   openForm(tr('Настройки агента {name}', { name: a.name }), [
-    { key: 'role', label: tr('Роль'), value: a.role ?? '' },
-    { key: 'model', label: tr('Модель'), value: a.model ?? '' },
-    { key: 'temperature', label: tr('Температура (0–2)'), value: a.temperature != null ? String(a.temperature) : '' },
-    { key: 'prompt', label: tr('Промпт'), value: a.prompt ?? '' },
-    { key: 'tools', label: tr('Тулы через запятую (есть: {list})', { list: (a.tools ?? []).join(', ') || tr('нет') }) },
+    ...schemaFields('agent', card),
+    { key: 'tools', label: tr('Тулы через запятую (есть: {list})', { list: (a.tools ?? []).join(', ') || tr('нет') }), type: 'text' },
   ], (v) => {
-    const fields: Record<string, unknown> = {};
-    // модель и температура — вложенное поле model карточки ({model: {id, temperature}})
-    const model: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) {
-      if (val === '' || k === 'tools') continue;
-      if (k === 'model') model.id = val;
-      else if (k === 'temperature') model.temperature = Number(val);
-      else fields[k] = val;
-    }
+    const fields = fieldsFromForm(schema, v);
+    // model.* шлём целиком — мердж правок с текущей ссылкой (её прочие поля не теряются)
+    const model = { ...((card.model as Record<string, unknown>) ?? {}), ...((fields.model as Record<string, unknown>) ?? {}) };
+    delete fields.model;
     if (Object.keys(model).length > 0) fields.model = model;
     if (Object.keys(fields).length > 0) rpcReport(rpc('agent.update', { id: a.id, fields }));
     // новые тулы выдаём по одному (отзыв — /agent tool delete или словом менеджеру)
@@ -248,15 +300,12 @@ function delModel(p: ModelInfo): void {
   if (!roundActive.value) modelDelete(p);
 }
 function openModelSettings(p: ModelInfo): void {
-  openForm(tr('Модель {id}', { id: p.id }), [
-    { key: 'provider', label: tr('Провайдер (openai-compatible / anthropic-compatible / gigachat / mock)'), value: p.kind },
-    { key: 'model', label: tr('Модель'), value: p.model ?? '' },
-    { key: 'baseUrl', label: tr('baseUrl (пусто — не менять)'), value: p.baseUrl ?? '' },
-    { key: 'apiKey', label: tr('Ключ API (пусто — не менять)'), value: '' },
-  ], (v) => {
-    const fields: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = val;
-    rpcReport(rpc('model.update', { id: p.id, fields }));
+  const schema = schemaOf('model');
+  if (!schema) return;
+  openForm(tr('Модель {id}', { id: p.id }), schemaFields('model', {
+    provider: p.kind, model: p.model, baseUrl: p.baseUrl,
+  }), (v) => {
+    rpcReport(rpc('model.update', { id: p.id, fields: fieldsFromForm(schema, v) }));
   });
 }
 
@@ -339,14 +388,15 @@ function renameProjectForm(): void {
     if (name) rpcReport(rpc('project.update', { name }));
   });
 }
-/** Сменить рабочую папку текущего проекта. */
+/** Сменить рабочую папку текущего проекта (форма из схемы project). */
 function projectPathForm(): void {
   if (roundActive.value) return;
-  openForm(tr('Рабочая папка проекта'), [
-    { key: 'path', label: tr('Путь к папке (создастся, если нет)'), value: currentProject.value?.path ?? '' },
-  ], (v) => {
-    const path = String(v.path ?? '').trim();
-    if (path) rpcReport(rpc('project.update', { path }));
+  const cur = currentProject.value;
+  const schema = schemaOf('project');
+  if (!cur || !schema) return;
+  openForm(tr('Проект {name}', { name: cur.name }), schemaFields('project', cur), (v) => {
+    const fields = fieldsFromForm(schema, v);
+    if (fields.path) rpcReport(rpc('project.update', { path: fields.path }));
   });
 }
 function ctxProjectCurrent(e: MouseEvent): void {
@@ -410,15 +460,17 @@ function scheduleDelete(t: ScheduleTaskInfo): void {
 }
 
 // ── сессии ───────────────────────────────────────────────────────────────────
-function openSessionRename(id: string): void {
+function openSessionEdit(id: string): void {
   if (roundActive.value) return;
   const meta = sessions.value.find((s) => s.id === id);
   if (!meta) return;
-  openForm(tr('Переименовать «{title}»', { title: meta.title }), [
-    { key: 'name', label: tr('Новое имя (пусто — менеджер придумает)'), value: meta.title },
-  ], (v) => {
+  const schema = schemaOf('session');
+  if (!schema) return;
+  openForm(tr('Изменить разговор «{title}»', { title: meta.title }), schemaFields('session', meta), (v) => {
+    const fields = fieldsFromForm(schema, v);
+    if (!fields.title) return;
     // session.update правит ТЕКУЩИЙ разговор — сначала открываем выбранный
-    rpcReport(rpc('session.open', { id }).then(() => rpc('session.update', { title: v.name })));
+    rpcReport(rpc('session.open', { id }).then(() => rpc('session.update', { title: fields.title })));
   });
 }
 function newSession(): void {
@@ -1098,7 +1150,12 @@ onMounted(connectWs);
       <div>
         <div v-for="f in modal.fields" :key="f.key" class="fld">
           <label>{{ f.label }}</label>
-          <input v-model="f.value" :placeholder="f.placeholder">
+          <textarea v-if="f.type === 'text'" v-model="f.value" :placeholder="f.placeholder" rows="4"></textarea>
+          <select v-else-if="f.type === 'enum'" v-model="f.value">
+            <option v-for="v in f.values" :key="v" :value="v">{{ v }}</option>
+          </select>
+          <input v-else-if="f.type === 'password'" v-model="f.value" type="password" :placeholder="f.placeholder" autocomplete="new-password">
+          <input v-else v-model="f.value" :type="f.type === 'number' ? 'number' : 'text'" :placeholder="f.placeholder" :step="f.type === 'number' ? 'any' : undefined">
         </div>
       </div>
       <div v-if="modal.error" class="errline">{{ modal.error }}</div>

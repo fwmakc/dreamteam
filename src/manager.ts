@@ -335,6 +335,7 @@ const UPDATABLE_FIELDS = new Set([
   'prompt',
   'model',
   'temperature',
+  'workspace',
 ]);
 
 /** Корень полки агентов: один файл — один агент (tmp-файл → валидация loadTeam → rename). */

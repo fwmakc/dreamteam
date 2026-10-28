@@ -42,6 +42,7 @@ import { Engine, chatTeam, type App } from './core/engine.js';
 import { cliProjectArgs, parseCliProject } from './cli-project.js';
 import { bootstrapApp } from './core/bootstrap.js';
 import { operationHints, stamp, profileLabel } from './core/operations.js';
+import { CARD_SCHEMAS } from './card-schema.js';
 import {
   applyHomeImport,
   applyProjectImport,
@@ -170,6 +171,9 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
     // (разговоры, команда, состав чата, провайдеры, имя менеджера) выводятся
     // клиентом из остальных полей этого же снапшота
     completion: { operations: operationHints() },
+    // схемы карточек (агент/модель/разговор/проект) — формы «Изменить» в GUI
+    // рендерятся из них, значения полей — rpc agent.get / поля снапшота
+    schemas: CARD_SCHEMAS,
     // язык интерфейса и его словарь: оболочка переводит строки через tr(s)
     ui: { id: localeId(), strings: localeDict() },
   };
@@ -727,6 +731,12 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         const report = revokeTool(AGENTS_DIR, String(args.agent ?? ''), String(args.tool ?? ''));
         broadcastState();
         return { text: report };
+      }
+      case 'agent.get': {
+        const id = String(args.id ?? '').trim().toLowerCase();
+        const agent = engine.team().find((a) => a.id === id);
+        if (!agent) throw new Error(`нет агента с id «${id}»`);
+        return { card: agent };
       }
       case 'agent.tools': {
         const id = String(args.id ?? '').trim().toLowerCase();

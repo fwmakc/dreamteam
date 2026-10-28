@@ -31,6 +31,7 @@
     "probe:frugal": "tsx tests/probe-frugal.ts",
     "probe:bin": "tsx tests/probe-bin.ts",
     "probe:commands": "tsx tests/probe-commands.ts",
+    "probe:schemas": "tsx tests/probe-schemas.ts",
     "probe:project": "tsx tests/probe-project.ts",
     "probe:docs": "tsx tests/probe-docs.ts",
     "probe:ocr": "tsx tests/probe-ocr.ts",

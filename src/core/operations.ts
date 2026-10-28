@@ -636,13 +636,13 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: true },
     ],
     title: 'править агента',
-    help: 'поля: name, role, emoji, color, description, prompt, temperature; вложенные: model.id, model.temperature',
+    help: 'поля: name, role, emoji, color, description, prompt, temperature, workspace; вложенные: model.id, model.temperature, model.maxTokens',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
         return [
           t('Синтаксис: /agent update <id> поле=значение…'),
-          t('Поля: name, role, emoji, color, description, prompt, temperature; вложенные: model.id, model.temperature'),
+          t('Поля: name, role, emoji, color, description, prompt, temperature, workspace; вложенные: model.id, model.temperature, model.maxTokens'),
         ];
       }
       const parsed = parseFields(pairs);
@@ -664,6 +664,19 @@ export const OPERATIONS: OpSpec[] = [
       if (patch.model) fields.model = patch.model;
       if (Object.keys(fields).length === 0) return [t('Не понял, что менять — жду поле=значение')];
       return [updateTeamAgent(AGENTS_DIR, id, fields, engine.app.models)];
+    },
+  },
+  {
+    name: 'agent.get',
+    args: [{ name: 'id', required: true, hint: 'agents' }],
+    title: 'показать агента',
+    help: 'полная карточка JSON — все поля, включая вложенные model/vision/image/context',
+    run: async (_engine, rest) => {
+      const id = (rest[0] ?? '').trim().toLowerCase();
+      if (!id) return [t('Синтаксис: /agent get <id> (список — /agents)')];
+      const agent = loadTeam(AGENTS_DIR).find((a) => a.id === id);
+      if (!agent) return [tf('нет агента с id «{id}» — список: /agents', { id })];
+      return [JSON.stringify(agent, null, 2)];
     },
   },
   {

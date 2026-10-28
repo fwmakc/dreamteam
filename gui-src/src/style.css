@@ -81,7 +81,7 @@
 .modal-box h2 { margin: 0 0 12px; font-size: 16px; }
 .modal-box .fld { margin-bottom: 10px; }
 .modal-box .fld label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 3px; }
-.modal-box .fld input, .modal-box .fld select {
+.modal-box .fld input, .modal-box .fld select, .modal-box .fld textarea {
   width: 100%;
   background: var(--panel2);
   color: var(--text);
@@ -90,6 +90,7 @@
   padding: 7px 9px;
   font: inherit;
 }
+.modal-box .fld textarea { resize: vertical; }
 .modal-box .row { display: flex; gap: 8px; margin-top: 14px; }
 .confirm-subject { color: var(--dim); margin: 0; font-size: 13px; }
 .side-err { margin: 4px 10px; font-size: 12px; }

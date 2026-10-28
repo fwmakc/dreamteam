@@ -76,6 +76,23 @@ export interface OpHint {
   help: string;
 }
 
+/** Поле схемы карточки (card-schema.ts ядра) — форма «Изменить» рендерится из него */
+export interface FieldSpec {
+  /** Путь значения в карточке: «name», «model.temperature» */
+  path: string;
+  type: 'string' | 'text' | 'number' | 'enum' | 'password';
+  /** Метка поля — русский ключ, переводится словарём ui.strings */
+  label: string;
+  /** Варианты для enum */
+  values?: string[];
+  placeholder?: string;
+}
+
+export interface CardSchema {
+  entity: string;
+  fields: FieldSpec[];
+}
+
 export interface StateSnapshot {
   /** null — проект не выбран: оболочка показывает панель выбора проекта */
   session: { id: string; title: string; messages: ChatMessage[] } | null;
@@ -95,6 +112,8 @@ export interface StateSnapshot {
   auto: { mode: boolean; left: number };
   settings: { width: number; language: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string };
   completion: { operations: OpHint[] };
+  /** схемы карточек: формы «Изменить» (агент/модель/разговор/проект) рендерятся из них */
+  schemas?: Record<string, CardSchema>;
   /** язык интерфейса и словарь переводов (русский ключ → перевод) */
   ui?: { id: string; strings: Record<string, string> };
   /** кэш последнего события schedule (в снапшот state не входит) */

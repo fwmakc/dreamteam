@@ -9,6 +9,22 @@ compatibility is promised across earlier versions.
 
 ## [Unreleased]
 
+### Added
+
+- **The «Edit» forms are generated from the card schemas.** A new core
+  module `card-schema.ts` declares, per home card (agent, model, session,
+  project), the editable fields with their kinds — string, text, number,
+  enum, password — and paths (`model.temperature` for the nested ones); the
+  compiler checks the paths against the interfaces. `serve` ships the
+  schemas in the state snapshot, so the GUI builds the «Edit» forms of the
+  agent (full scalar set + model.* + tools), the model, the session and the
+  project from them instead of a hardcoded couple of fields: text areas for
+  prompts, selects for colors, masked inputs for API keys (empty = keep),
+  numbers parsed as numbers, `model.*` merged into the agent's current
+  model reference. The full agent card travels on demand: rpc `agent.get`
+  (and the matching `/agent get` operation) return it; `agent.update` now
+  also accepts `workspace`.
+
 ### Fixed
 
 - `/project open` and `/project new` printed the project line twice in the

@@ -207,6 +207,8 @@ export interface ManagerUpdateFields {
   /** id модели строкой или объект-ссылка */
   model?: string | ModelRef;
   temperature?: number;
+  /** Подпапка рабочей папки или абсолютный путь — блоки без префикса */
+  workspace?: string;
 }
 
 /** Действие менеджера из его ответа (JSON-объект после текста) */
