@@ -99,6 +99,42 @@ function openCtx(e: MouseEvent, items: CtxItem[]): void {
 }
 function closeCtx(): void { ctx.show = false; }
 function runCtx(it: CtxItem): void { closeCtx(); it.fn(); }
+// Esc закрывает меню, даже когда фокус вне его: слушаем документ, пока меню открыто
+watch(
+  () => ctx.show,
+  (open) => {
+    if (open) document.addEventListener('keydown', onCtxKey);
+    else document.removeEventListener('keydown', onCtxKey);
+  },
+);
+function onCtxKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') closeCtx();
+}
+
+// ── ширина сайдбара: тянуть за правую границу, запоминать в localStorage ─────
+const SB_MIN = 280;
+const SB_MAX = 640;
+const sbWidth = ref(Math.min(SB_MAX, Math.max(SB_MIN, Number(localStorage.getItem('dt.sbwidth')) || 280)));
+let sbDrag: { x: number; w: number } | null = null;
+function startSidebarResize(e: MouseEvent): void {
+  sbDrag = { x: e.clientX, w: sbWidth.value };
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  document.addEventListener('mousemove', onSidebarResize);
+  document.addEventListener('mouseup', endSidebarResize);
+}
+function onSidebarResize(e: MouseEvent): void {
+  if (!sbDrag) return;
+  sbWidth.value = Math.min(SB_MAX, Math.max(SB_MIN, sbDrag.w + e.clientX - sbDrag.x));
+}
+function endSidebarResize(): void {
+  sbDrag = null;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  document.removeEventListener('mousemove', onSidebarResize);
+  document.removeEventListener('mouseup', endSidebarResize);
+  localStorage.setItem('dt.sbwidth', String(sbWidth.value));
+}
 
 const delConfirm = reactive({ show: false, subject: '', fn: null as null | (() => void) });
 function askDelete(subject: string, fn: () => void): void {
@@ -592,7 +628,10 @@ function autosize(): void {
   const el = inputEl.value;
   if (!el) return;
   el.style.height = 'auto';
-  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  const max = 160;
+  el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+  // под лимитом скролла не место: округление scrollHeight даёт лишний пиксель
+  el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
 }
 function sendUserMessage(): void {
   const text = draft.value.trim();
@@ -768,7 +807,8 @@ function argHintItems(op: OpHint, argPos: number, d: CompletionData): HintItem[]
     ];
   }
   if (argName === 'тул') {
-    return ['files', 'shell', 'ssh', 'look', 'image'].map((t) => ({ label: t, hint: '', insert: t + ' ' }));
+    return ['files', 'shell', 'git', 'arch', 'ssh', 'look', 'image', 'docs', 'ocr', 'web', 'mail', 'telegram', 'max']
+      .map((t) => ({ label: t, hint: '', insert: t + ' ' }));
   }
   return null;
 }
@@ -877,7 +917,7 @@ onMounted(connectWs);
 
   <main id="layout">
     <!-- ── сайдбар ────────────────────────────────────────────────────────── -->
-    <aside id="sidebar">
+    <aside id="sidebar" :style="{ width: sbWidth + 'px' }">
       <section class="side-sec" :class="{ collapsed: isCollapsed('projects') }" data-sec="projects">
         <div class="side-head" @click="toggleSec('projects')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
@@ -1035,6 +1075,9 @@ onMounted(connectWs);
       </section>
 
     </aside>
+
+    <!-- ширина сайдбара меняется перетаскиванием этой границы -->
+    <div id="sb-resize" :title="tr('Потянуть — изменить ширину')" @mousedown.prevent="startSidebarResize"></div>
 
     <!-- ── чат ────────────────────────────────────────────────────────────── -->
     <section id="chatwrap">

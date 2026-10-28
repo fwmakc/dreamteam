@@ -14,6 +14,14 @@
 
 * { box-sizing: border-box; }
 
+/* ── скроллбары: тонкие, в цвет темы (Chrome/Edge; Firefox — scrollbar-*) ──── */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+::-webkit-scrollbar-corner { background: transparent; }
+
 /* ── вход по токену ─────────────────────────────────────────── */
 #auth {
   position: fixed;
@@ -203,6 +211,13 @@ button.bad { border-color: var(--bad); color: var(--bad); }
   border-right: 1px solid var(--border);
   padding: 10px;
 }
+/* ручка между сайдбаром и чатом: тянуть — ширина сайдбара меняется */
+#sb-resize {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: transparent;
+}
+#sb-resize:hover, #sb-resize:active { background: var(--accent); opacity: 0.4; }
 #sidebar section { margin-bottom: 18px; }
 .side-sec { margin-bottom: 14px; }
 .side-sec.collapsed ul, .side-sec.collapsed .sec-btns { display: none; }
@@ -335,6 +350,8 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 }
 
 .msg { margin-bottom: 12px; max-width: 860px; }
+/* свои сообщения — у правого края, пузырём */
+.msg.user { margin-left: auto; text-align: right; }
 .msg .head { font-weight: 600; margin-bottom: 2px; }
 .msg .txt { white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.user .txt {
@@ -434,6 +451,8 @@ button.bad { border-color: var(--bad); color: var(--bad); }
   padding: 8px 10px;
   font: inherit;
   max-height: 160px;
+  /* скролл включает autosize() — только когда контент дорос до лимита */
+  overflow-y: hidden;
 }
 #input:focus { outline: none; border-color: var(--accent); }
 #btn-send { padding: 8px 14px; }
