@@ -1,0 +1,6 @@
+{
+  "provider": "openai-compatible",
+  "baseUrl": "http://localhost:11434",
+  "model": "qwen3-vl:2b",
+  "apiKey": ""
+}
