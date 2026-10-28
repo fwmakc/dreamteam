@@ -59,10 +59,12 @@ const {
 // --- ensureLayers на пустом доме: wizard (mock) + настройки + скаффолдинг дома ---
 {
   const home = join(root, 'h1');
-  const { io, out } = makeIo(['ru', '4', 'n'], true);
+  // скаффолд уже положил карточки-примеры в models/ — мастер предлагает их
+  // списком; «mock» выбирает существующую (по id до « — …»), ярлык не нужен
+  const { io, out } = makeIo(['ru', 'mock', 'n'], true);
   const notes = await ensureLayers(io, home);
   const mockCard = JSON.parse(readFileSync(join(home, 'models', 'mock.json'), 'utf8'));
-  check('wizard mock: карточка mock, адаптер mock', mockCard.provider === 'mock', JSON.stringify(mockCard));
+  check('wizard: существующая карточка mock выбрана из списка', mockCard.provider === 'mock', JSON.stringify(mockCard));
   check('wizard: заметка о карточке модели', notes.some((n) => n.includes('mock.json')), notes.join(' | '));
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('настройки: созданы с дефолтами', settings.width === 100 && settings.screen === true, JSON.stringify(settings));
@@ -116,7 +118,7 @@ const {
       return cards.includes('openai.json') && cards.includes('mock.json') && cards.includes('claude.json');
     })());
   }
-  check('wizard: в выводе меню и приветствие', out().includes('Тип провайдера') && out().includes('живой менеджер'), out().slice(-200));
+  check('wizard: в выводе список моделей и приветствие', out().includes('Модель для команды') && out().includes('живой менеджер'), out().slice(-200));
 
   // --- повторный ensureLayers: всё на месте — тишина, файлы не переписываются ---
   const before = readFileSync(join(home, 'settings.json'), 'utf8');
@@ -128,7 +130,7 @@ const {
 // --- openai-compatible: baseUrl/модель/ключ; ключ не эхоится и лежит в карточке ---
 {
   const home = join(root, 'h2');
-  const { io, out } = makeIo(['ru', '1', 'https://api.test/v1', 'test-model', 'секрет-ключ-42', 'n'], true);
+  const { io, out } = makeIo(['ru', 'создать новую модель', '1', 'https://api.test/v1', 'test-model', 'секрет-ключ-42', 'n'], true);
   const notes = await ensureLayers(io, home);
   const main = JSON.parse(readFileSync(join(home, 'models', 'main.json'), 'utf8'));
   check('openai-совместимый: карточка main', main.provider === 'openai-compatible', JSON.stringify(main));
@@ -144,13 +146,13 @@ const {
 // --- обязательный ключ: пустой ввод переспрашивается (anthropic/gigachat) ---
 {
   const home = join(root, 'h3');
-  const { io, out } = makeIo(['ru', '3', '', 'giga-ключ', 'n'], true);
+  const { io, out } = makeIo(['ru', 'создать новую модель', '3', '', 'giga-ключ', 'n'], true);
   await runWizard(io, home);
   const giga = JSON.parse(readFileSync(join(home, 'models', 'gigachat.json'), 'utf8'));
   check('gigachat: apiKey + повтор вопроса при пустом вводе', giga.apiKey === 'giga-ключ' && out().includes('без ключа GigaChat'), JSON.stringify(giga));
 
   const home4 = join(root, 'h4');
-  const { io: io4, out: out4 } = makeIo(['ru', '2', '', '', '', 'claude-ключ', 'n'], true);
+  const { io: io4, out: out4 } = makeIo(['ru', 'создать новую модель', '2', '', '', '', 'claude-ключ', 'n'], true);
   await runWizard(io4, home4);
   const claude = JSON.parse(readFileSync(join(home4, 'models', 'claude.json'), 'utf8'));
   check('anthropic: два отказа ключа — два повтора', claude.model === 'claude-sonnet-4-5' && claude.apiKey === 'claude-ключ' && (out4().match(/без ключа Claude/g) ?? []).length === 2, out4());
@@ -174,6 +176,22 @@ const {
   const home = join(root, 'h6');
   mkdirSync(join(home, 'models'), { recursive: true });
   check('пустой models/: defaultModelId → mock', defaultModelId(join(home, 'models')) === 'mock');
+}
+
+// --- выбор существующей карточки: она не переписывается, дефолт = выбранная ---
+{
+  const home = join(root, 'h7');
+  mkdirSync(join(home, 'models'), { recursive: true });
+  writeFileSync(
+    join(home, 'models', 'my.json'),
+    JSON.stringify({ provider: 'openai-compatible', baseUrl: 'https://x/v1', model: 'm1' }, null, 2),
+  );
+  const { io } = makeIo(['ru', 'my', 'n'], true);
+  const notes = await ensureLayers(io, home);
+  check('wizard: выбрал существующую — settings.model=my', JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')).model?.id === 'my');
+  check('wizard: существующая карточка не переписана', (JSON.parse(readFileSync(join(home, 'models', 'my.json'), 'utf8')) as { model?: string }).model === 'm1');
+  check('wizard: заметка про взятую модель', notes.some((n) => n.includes('my.json')), notes.join(' | '));
+  check('wizard: менеджер на выбранной модели', JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')).model?.id === 'my');
 }
 
 rmSync(root, { recursive: true, force: true });

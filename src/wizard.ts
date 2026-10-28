@@ -14,7 +14,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
@@ -33,8 +33,14 @@ export interface WizardIo {
 /** --- вопросы --- */
 
 function makeAsk(io: WizardIo) {
-  const rl = createInterface({ input: io.input, output: io.output, terminal: io.isTTY });
-  const anyRl = rl as unknown as { output?: NodeJS.WritableStream };
+  let rl = createInterface({ input: io.input, output: io.output, terminal: io.isTTY });
+  let anyRl = rl as unknown as { output?: NodeJS.WritableStream };
+
+  /** Свежая строка ввода: прежняя закрыта — её клавиатура была у пикера. */
+  const reopen = (): void => {
+    rl = createInterface({ input: io.input, output: io.output, terminal: io.isTTY });
+    anyRl = rl as unknown as { output?: NodeJS.WritableStream };
+  };
 
   /** Обычный вопрос: ответ виден. */
   const ask = async (prompt: string): Promise<string> => {
@@ -50,6 +56,70 @@ function makeAsk(io: WizardIo) {
       if (!a) return fallback;
       if (allowed.includes(a)) return a;
       io.output.write(pc.yellow(`  ${t('скажи один из:')} ${allowed.join(', ')}\n`));
+    }
+  };
+
+  /**
+   * Выбор из списка. В живом терминале — стрелки: ↑/↓ — шаг, PgUp/PgDn —
+   * страница, Home/End — края, Enter — подтвердить. В трубе (пробы, пайпы) —
+   * номер или текст пункта строкой, пустой ввод — пункт по умолчанию.
+   */
+  const pick = async (title: string, items: string[], def = 0): Promise<number> => {
+    io.output.write(`\n  ${title}\n`);
+    const realTty = io.isTTY && (io.input as { isTTY?: unknown }).isTTY === true;
+    if (realTty && items.length > 1) {
+      rl.close(); // на время списка клавиатура принадлежит только пикеру
+      io.output.write(pc.dim(`  ${t('выбор: стрелки ↑/↓, PgUp/PgDn, Home/End, Enter')}\n`));
+      const sel = await new Promise<number>((resolve) => {
+        let cur = Math.min(Math.max(def, 0), items.length - 1);
+        let drawn = 0;
+        const draw = (): void => {
+          if (drawn > 0) io.output.write(`\x1b[${drawn}A\x1b[J`); // вверх и стереть прежний список
+          io.output.write(
+            items.map((it, i) => `  ${i === cur ? pc.inverse(` ${i + 1}. ${it} `) : `  ${i + 1}. ${it}`}`).join('\n') + '\n',
+          );
+          drawn = items.length;
+        };
+        draw();
+        const stream = io.input as Readable & { setRawMode?: (m: boolean) => void; isRaw?: boolean };
+        const wasRaw = stream.isRaw === true;
+        stream.setRawMode?.(true);
+        const onKey = (_s: string, key?: { name?: string; ctrl?: boolean }): void => {
+          const k = key?.name ?? '';
+          if (key?.ctrl && k === 'c') {
+            cleanup();
+            process.exit(130); // в сыром режиме Ctrl+C не приходит SIGINT'ом — выходим сами
+          }
+          if (k === 'up') cur = Math.max(0, cur - 1);
+          else if (k === 'down') cur = Math.min(items.length - 1, cur + 1);
+          else if (k === 'pageup') cur = Math.max(0, cur - 6);
+          else if (k === 'pagedown') cur = Math.min(items.length - 1, cur + 6);
+          else if (k === 'home') cur = 0;
+          else if (k === 'end') cur = items.length - 1;
+          else if (k === 'return' || k === 'enter') {
+            cleanup();
+            resolve(cur);
+            return;
+          } else return;
+          draw();
+        };
+        const cleanup = (): void => {
+          io.input.removeListener('keypress', onKey);
+          stream.setRawMode?.(wasRaw);
+        };
+        io.input.on('keypress', onKey);
+      });
+      reopen();
+      return sel;
+    }
+    for (;;) {
+      const a = await ask(`  ${t('Выбор [1]:')} `);
+      if (!a) return Math.min(Math.max(def, 0), items.length - 1);
+      const n = Number(a);
+      if (Number.isInteger(n) && n >= 1 && n <= items.length) return n - 1;
+      const byText = items.findIndex((it) => it === a || it.split(' — ')[0] === a);
+      if (byText >= 0) return byText;
+      io.output.write(pc.yellow(`  ${t('скажи один из:')} ${items.map((_, i) => i + 1).join(', ')}\n`));
     }
   };
 
@@ -75,7 +145,7 @@ function makeAsk(io: WizardIo) {
   };
 
   const close = (): void => rl.close();
-  return { ask, askChoice, askSecret, close };
+  return { ask, askChoice, askSecret, pick, close };
 }
 
 /** Дописывает «ИМЯ=значение» в .env, убрав прежнее значение того же имени. */
@@ -90,22 +160,36 @@ function writeEnvKey(file: string, name: string, value: string): void {
   writeFileSync(file, lines.join('\n'), { mode: 0o600 });
 }
 
+/** Строка списка моделей: «id — provider · model · baseUrl» из карточки. */
+function cardLine(file: string): string {
+  const id = file.replace(/.*[/\\]/, '').replace(/\.json$/, '');
+  try {
+    const c = JSON.parse(readFileSync(file, 'utf8')) as { provider?: string; model?: string; baseUrl?: string };
+    const rest = [c.provider, c.model, c.baseUrl].filter(Boolean).join(' · ');
+    return rest ? `${id} — ${rest}` : id;
+  } catch {
+    return `${id} — ${t('карточка не читается')}`;
+  }
+}
+
 /** Мастер: язык интерфейса → модель (адаптер + параметры) → models/<id>.json (+ настройки, + .env дома). */
 export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promise<string[]> {
   const modelsDir = join(homeDir, 'models');
   const envFile = join(homeDir, '.env');
   const settingsFile = join(homeDir, 'settings.json');
-  const { ask, askChoice, askSecret, close } = makeAsk(io);
+  const { ask, askChoice, askSecret, pick, close } = makeAsk(io);
   const notes: string[] = [];
   try {
     io.output.write(pc.bold('\n  Первый запуск: настроим модель — без неё команде нечем говорить.\n\n'));
     // Язык интерфейса — первый вопрос, и сам он на трёх встроенных языках:
     // дальше мастер (и всё приложение) говорит на выбранном.
-    io.output.write('  Язык интерфейса / Interface language / 界面语言:\n');
-    for (const l of knownLanguages(homeDir)) {
-      io.output.write(`  · ${l.id} — ${l.name}${l.builtIn ? '' : ` (${join(homeDir, 'lang', l.id + '.json')})`}\n`);
-    }
-    const lang = await askChoice('  Language [en]: ', knownLanguages(homeDir).map((l) => l.id), 'en');
+    const langs = knownLanguages(homeDir);
+    const langIdx = await pick(
+      'Язык интерфейса / Interface language / 界面语言:',
+      langs.map((l) => `${l.id} — ${l.name}${l.builtIn ? '' : ` (${t('свой')})`}`),
+      Math.max(0, langs.findIndex((l) => l.id === 'en')),
+    );
+    const lang = langs[langIdx].id;
     applyLocale(lang, homeDir);
     // выбранный язык — в settings.json (его ensureHome скаффолдил раньше мастера)
     try {
@@ -116,52 +200,65 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
       // settings.json нет/не читается — loadSettings ниже разберётся громко
     }
 
-    io.output.write(`\n  ${t('Тип провайдера:')}\n`);
-    io.output.write(`  1 — ${t('OpenAI-совместимый API (Z.ai GLM, OpenAI, OpenRouter, DeepSeek, Ollama…)')}\n`);
-    io.output.write(`  2 — ${t('Anthropic (Claude)')}\n`);
-    io.output.write(`  3 — GigaChat\n`);
-    io.output.write(`  4 — ${t('mock — без API, заготовленные ответы (посмотреть, как всё работает)')}\n`);
-    const pick = await askChoice(`  ${t('Выбор [1]:')} `, ['1', '2', '3', '4'], '1');
+    // ── модель: сперва существующие карточки дома, отдельным пунктом — новая ──
+    mkdirSync(modelsDir, { recursive: true });
+    const cards = readdirSync(modelsDir).filter((f) => f.endsWith('.json')).sort();
+    const mpick = await pick(
+      t('Модель для команды:'),
+      [...cards.map((f) => cardLine(join(modelsDir, f))), t('создать новую модель')],
+      cards.length, // по умолчанию — создать новую (как велел прежний мастер)
+    );
 
     let id: string;
     let card: Record<string, unknown>;
     let key = '';
-    if (pick === '1') {
-      id = 'main';
-      const baseUrl = await ask(`  ${t('baseUrl API [https://api.openai.com/v1]:')} `) || 'https://api.openai.com/v1';
-      const model = await ask(`  ${t('Модель [gpt-4o-mini]:')} `) || 'gpt-4o-mini';
-      key = await askSecret(`  ${t('Ключ API (ввод скрыт; Enter — пропустить, если API локальный):')} `);
-      card = { provider: 'openai-compatible', baseUrl, model };
-      if (key) card.apiKey = key;
-    } else if (pick === '2') {
-      id = 'claude';
-      const model = await ask(`  ${t('Модель [claude-sonnet-4-5]:')} `) || 'claude-sonnet-4-5';
-      for (;;) {
-        key = await askSecret(`  ${t('Ключ API (ввод скрыт):')} `);
-        if (key) break;
-        io.output.write(pc.yellow(`  ${t('без ключа Claude отвечать не сможет — возьми его в кабинете Anthropic')}\n`));
-      }
-      card = { provider: 'anthropic-compatible', model, apiKey: key };
-    } else if (pick === '3') {
-      id = 'gigachat';
-      for (;;) {
-        key = await askSecret(`  ${t('Ключ из кабинета GigaChat (ввод скрыт):')} `);
-        if (key) break;
-        io.output.write(pc.yellow(`  ${t('без ключа GigaChat отвечать не сможет')}\n`));
-      }
-      card = { provider: 'gigachat', apiKey: key };
+    if (mpick < cards.length) {
+      // существующая карточка — ничего не пишем, только выбираем её основной
+      id = cards[mpick].replace(/\.json$/, '');
+      notes.push(tf('взял существующую модель «{id}» (карточка {file})', { id, file: join(modelsDir, cards[mpick]) }));
     } else {
-      id = 'mock';
-      card = { provider: 'mock' };
-    }
+      const ppick = await pick(t('Тип провайдера:'), [
+        t('OpenAI-совместимый API (Z.ai GLM, OpenAI, OpenRouter, DeepSeek, Ollama…)'),
+        t('Anthropic (Claude)'),
+        'GigaChat',
+        t('mock — без API, заготовленные ответы (посмотреть, как всё работает)'),
+      ]);
+      if (ppick === 0) {
+        id = 'main';
+        const baseUrl = (await ask(`  ${t('baseUrl API [https://api.openai.com/v1]:')} `)) || 'https://api.openai.com/v1';
+        const model = (await ask(`  ${t('Модель [gpt-4o-mini]:')} `)) || 'gpt-4o-mini';
+        key = await askSecret(`  ${t('Ключ API (ввод скрыт; Enter — пропустить, если API локальный):')} `);
+        card = { provider: 'openai-compatible', baseUrl, model };
+        if (key) card.apiKey = key;
+      } else if (ppick === 1) {
+        id = 'claude';
+        const model = (await ask(`  ${t('Модель [claude-sonnet-4-5]:')} `)) || 'claude-sonnet-4-5';
+        for (;;) {
+          key = await askSecret(`  ${t('Ключ API (ввод скрыт):')} `);
+          if (key) break;
+          io.output.write(pc.yellow(`  ${t('без ключа Claude отвечать не сможет — возьми его в кабинете Anthropic')}\n`));
+        }
+        card = { provider: 'anthropic-compatible', model, apiKey: key };
+      } else if (ppick === 2) {
+        id = 'gigachat';
+        for (;;) {
+          key = await askSecret(`  ${t('Ключ из кабинета GigaChat (ввод скрыт):')} `);
+          if (key) break;
+          io.output.write(pc.yellow(`  ${t('без ключа GigaChat отвечать не сможет')}\n`));
+        }
+        card = { provider: 'gigachat', apiKey: key };
+      } else {
+        id = 'mock';
+        card = { provider: 'mock' };
+      }
 
-    mkdirSync(modelsDir, { recursive: true });
-    writeFileSync(join(modelsDir, `${id}.json`), JSON.stringify(card, null, 2) + '\n');
-    notes.push(tf('создал {file} (модель «{id}» по умолчанию)', { file: join(modelsDir, `${id}.json`), id }));
-    if (key) {
-      notes.push(tf('ключ сохранил в {file} (поле "apiKey")', { file: join(modelsDir, `${id}.json`) }));
-    } else {
-      notes.push(t('ключ не указан — модель будет работать в mock-режиме'));
+      writeFileSync(join(modelsDir, `${id}.json`), JSON.stringify(card, null, 2) + '\n');
+      notes.push(tf('создал {file} (модель «{id}» по умолчанию)', { file: join(modelsDir, `${id}.json`), id }));
+      if (key) {
+        notes.push(tf('ключ сохранил в {file} (поле "apiKey")', { file: join(modelsDir, `${id}.json`) }));
+      } else {
+        notes.push(t('ключ не указан — модель будет работать в mock-режиме'));
+      }
     }
     // модель по умолчанию — в settings.json (его ensureHome скаффолдил раньше)
     try {
