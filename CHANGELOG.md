@@ -1,9 +1,21 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow
-semver while pre-1.0 (breaking changes may land in minors).
+Format follows [Keep a Changelog](https://keepachangelog.com/). Starting with
+0.0.10 the public API and the contracts — the operations (text commands and
+their rpc names), the file formats of the home and the serve WebSocket
+protocol — are stable and follow semver: breaking changes land only in a major
+version. Before 0.0.10 the interface was still stabilizing, so no
+compatibility is promised across earlier versions.
 
 ## [Unreleased]
+
+### Added
+
+- **The API and the contracts are stable as of 0.0.10** and will be supported:
+  the operations (slash commands and the same-named rpc methods), the home
+  file formats and the serve protocol; breaking changes are reserved for
+  major versions. Earlier releases promised no compatibility — the interface
+  was still stabilizing. Declared at the top of every README.
 
 ### Fixed
 

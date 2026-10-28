@@ -12,6 +12,14 @@ address a specific member with `@name`. Every conversation is saved.
 
 Two shells, one core: a terminal TUI and a local web GUI (`dreamteam serve`).
 
+> **The API and the contracts are stable as of 0.0.10.** They are frozen and
+> will be supported: the operations (slash commands and the same-named
+> WebSocket rpc methods), the home file formats (`settings.json`, `models/`,
+> `manager.json`, `user.json`, `agents/`, projects and sessions) and the web
+> shell protocol (`/ws`). The semver promise: breaking changes only in a major
+> version, each announced in the CHANGELOG. Before 0.0.10 the interface was
+> still stabilizing, so earlier versions promised no compatibility.
+
 The interface — and this documentation — come in three languages: English, Russian and
 Chinese (`README.md`, `README.ru.md`, `README.zh.md`). The UI language is chosen at
 first launch (in the wizard) and can be changed at any time with

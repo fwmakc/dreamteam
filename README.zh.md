@@ -10,6 +10,8 @@
 
 两套外壳，一个内核：终端 TUI 和本地网页 GUI（`dreamteam serve`）。
 
+> **API 与契约自 0.0.10 版本起稳定。** 它们已固定并会长期支持：操作（斜杠命令与同名的 WebSocket rpc 方法）、主目录文件格式（`settings.json`、`models/`、`manager.json`、`user.json`、`agents/`、项目与谈话）以及网页外壳协议（`/ws`）。语义化版本承诺：破坏性变更只出现在主版本，并在 CHANGELOG 中说明。0.0.10 之前接口仍在打磨，因此更早的版本之间不承诺兼容。
+
 界面与本文档提供三种语言：英语、俄语和中文（`README.md`、`README.ru.md`、`README.zh.md`）。界面语言在首次启动（向导）时选择，之后随时可用 `/settings update ui=en`（`ru`、`zh`，或 `~/.dreamteam/lang/<id>.json` 中自定义语言的 id）更改。
 
 团队属于这台机器：它住在主目录（`~/.dreamteam/agents/`）里，被所有项目共享。初始为空 —— 迎接你的是**会议室经理**：按需召集成员、为某人开启工具、配置项目和服务器。某场谈话里究竟由谁回答，由聊天名单决定 —— 即会话文件里的 `participants` 列表：空列表表示你召来的所有人都会回答（`/session agent add|delete <id…|all>`，或请经理“把 Elena 叫进来”）。
