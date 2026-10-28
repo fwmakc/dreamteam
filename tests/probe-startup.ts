@@ -130,12 +130,17 @@ function check(name: string, cond: boolean, detail = ''): void {
     console.log(`FAIL  ${name} — ${detail}`);
   }
 }
+const saveDump = (name: string, text: string): void => {
+  const p = join(tmpdir(), name);
+  writeFileSync(p, text, 'utf8');
+  console.log(`  дамп: ${p}`);
+};
 const pane = (): string => vt.lines().slice(2, 22).join('\n'); // панель чата: строки 3..22
 const hints = (): string => vt.lines().slice(22, 27).join('\n'); // подсказки: 23..27
 
 await wait(3000); // старт: баннер, подсказка выбора проекта, промпт — без всякого ввода
 dump('сразу после запуска (без проекта)');
-writeFileSync('C:/tmp/dt-startup-1.txt', vt.lines().join('\n'), 'utf8');
+saveDump('dt-startup-1.txt', vt.lines().join('\n'));
 check('старт: промпт внизу', (vt.lines()[27] ?? '').includes('Ты >'), JSON.stringify(vt.lines()[27]));
 check('старт: без проекта — метка в промпте', (vt.lines()[27] ?? '').includes('без проекта'), JSON.stringify(vt.lines()[27]));
 check('старт: статичные подсказки', hints().includes('/help — операции'), hints());
@@ -156,7 +161,7 @@ await write('\x1b[<64;10;5M');
 await write('\x1b[<64;10;5M');
 await wait(400);
 dump('после двух оборотов колеса вверх');
-writeFileSync('C:/tmp/dt-startup-3.txt', vt.lines().join('\n'), 'utf8');
+saveDump('dt-startup-3.txt', vt.lines().join('\n'));
 check('колесо: панель изменилась', pane() !== paneBefore, '');
 check('колесо: индикатор «выше ещё на 6»', hints().includes('выше ещё на 6'), hints());
 check('колесо: хвост ушёл из вида', !pane().includes('Продолжаю разговор'), pane().slice(-200));
@@ -243,7 +248,7 @@ check('ввод: esc снял, ctrl+u стёр', !rawSince().includes('\x1b[7m')
 await write('@');
 await wait(600);
 dump('после «@»');
-writeFileSync('C:/tmp/dt-startup-2.txt', vt.lines().join('\n'), 'utf8');
+saveDump('dt-startup-2.txt', vt.lines().join('\n'));
 check('после @: всплывашка открылась', vt.lines().slice(18, 27).join('\n').includes('@Глеб'), '');
 check('после @: ввод на месте', (vt.lines()[27] ?? '').includes('Ты > @'), JSON.stringify(vt.lines()[27]));
 

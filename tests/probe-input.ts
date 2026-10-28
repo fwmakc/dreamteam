@@ -6,6 +6,8 @@
  */
 import { createRequire } from 'node:module';
 import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const req = createRequire(import.meta.url);
 let pty: { spawn: (...args: unknown[]) => any };
@@ -59,7 +61,9 @@ console.log('=== Ребёнок получил: ===');
 for (const line of out.split('\n')) {
   if (line.startsWith('GOT:')) console.log(' ', line.slice(4));
 }
-writeFileSync('C:/tmp/dt-input-raw.txt', out, 'utf8');
+const dump = join(tmpdir(), 'dt-input-raw.txt');
+writeFileSync(dump, out, 'utf8');
+console.log(`Дамп: ${dump}`);
 // работа сделана — выходим сами: pty-ребёнок живёт до своего таймаута
 // и в headless-окружении может не выйти, удерживая наш процесс
 process.exit(0);
