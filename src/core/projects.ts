@@ -121,7 +121,7 @@ export function sanitizeProjectId(raw: string): string {
   return cleaned || 'project';
 }
 
-/** Рабочая папка не может лежать в доме: файловые тула добрались бы до ключей моделей. */
+/** Рабочая папка не может лежать в доме: файловые тулы добрались бы до ключей моделей. */
 export function checkWorkspacePath(raw: string): string {
   const abs = resolve(raw);
   const home = resolve(DT_HOME);

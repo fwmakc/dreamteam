@@ -190,7 +190,7 @@ export function managerStateInput(ctx: ManagerContext): string {
       return (
         `- ${a.id} — ${a.name}${a.description ? ` (${a.description})` : ''}, модель: ${a.model?.id ?? 'основная'}` +
         (a.temperature != null ? `, temp ${a.temperature}` : '') +
-        (tools.length > 0 ? `; тула: ${tools.join(', ')}` : '; тула нет')
+        (tools.length > 0 ? `; тулы: ${tools.join(', ')}` : '; тулов нет')
       );
     })
     .join('\n');

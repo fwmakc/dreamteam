@@ -596,7 +596,7 @@ export const OPERATIONS: OpSpec[] = [
   // команда
   {
     name: 'agents.list', implicit: true, title: 'состав команды',
-    help: 'кто в команде (id, имя, роль), у кого какие тула, кто в чате',
+    help: 'кто в команде (id, имя, роль), у кого какие тулы, кто в чате',
     run: async (engine) => agentsText(engine.app),
   },
   {
@@ -689,7 +689,7 @@ export const OPERATIONS: OpSpec[] = [
     name: 'agent.tools',
     args: [{ name: 'id агента', required: true, hint: 'agents' }],
     title: 'тулы агента',
-    help: 'какие тула включены и с какими настройками',
+    help: 'какие тулы включены и с какими настройками',
     run: async (_engine, rest) => {
       const id = (rest[0] ?? '').trim().toLowerCase();
       if (!id) return [t('Синтаксис: /agent tools <id> (список — /agents)')];
@@ -702,7 +702,7 @@ export const OPERATIONS: OpSpec[] = [
       if (!agent) return [tf('Нет агента с id «{id}» — см. /agents', { id })];
       const tools = agentToolIds(agent);
       if (tools.length === 0) return [tf('{name}: тулов и так нет — /agent tool add {id} <тул>', { name: agent.name, id })];
-      return ['', tf('{name} ({id}), тула:', { name: agent.name, id }), ...tools.map((tl) => `• ${tl}`), ''];
+      return ['', tf('{name} ({id}), тулы:', { name: agent.name, id }), ...tools.map((tl) => `• ${tl}`), ''];
     },
   },
   {
@@ -754,7 +754,7 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'тул…|all', required: true },
     ],
     title: 'выключить тул',
-    help: 'убрать карточку тула из агента; можно несколько; all — все тула',
+    help: 'убрать карточку тула из агента; можно несколько; all — все тулы',
     run: async (_engine, rest) => {
       const [who, ...req] = rest;
       if (!who || req.length === 0) return [t('Синтаксис: /agent tool delete <id агента> <тул…|all>')];

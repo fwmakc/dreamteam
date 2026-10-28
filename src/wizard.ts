@@ -5,7 +5,7 @@
  * Нет ни одной → мастер в обычном терминале (до TUI): тип адаптера, параметры,
  * ключ (ввод не отображается) — карточка сохраняется в models/<id>.json,
  * settings.model получает id, manager.json — ту же модель. Остальное добирается
- * само: settings.json с дефолтами, полки команды (агенты, тула, адаптеры, языки).
+ * само: settings.json с дефолтами, полки команды (агенты, тулы, адаптеры, языки).
  *
  * Не молча: каждый созданный файл — заметка, которую печатает вызывающий.
  * Битый конфиг мастером не лечится: чтение конфигов позже уронит приложение
@@ -226,7 +226,7 @@ function readScaffold(rel: string): Record<string, unknown> {
   }
 }
 
-/** Дом: модели (wizard, если нет ни одной), настройки и КОМАНДА (агенты, менеджер, тула). */
+/** Дом: модели (wizard, если нет ни одной), настройки и КОМАНДА (агенты, менеджер, тулы). */
 export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promise<string[]> {
   const modelsDir = join(homeDir, 'models');
   const settingsFile = join(homeDir, 'settings.json');

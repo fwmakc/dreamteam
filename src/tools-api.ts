@@ -66,7 +66,7 @@ export interface ToolRunContext extends ToolCheckContext {
 }
 
 /**
- * Прикладные подпапки проекта — фиксированные имена, на которые тула могут
+ * Прикладные подпапки проекта — фиксированные имена, на которые тулы могут
  * опираться: «inbox/…» — файлы от человека (скрепка в GUI), «mail/…» —
  * вложения писем, «images/…» — нарисованные картинки. Живут в папке проекта
  * в доме; рабочая папка остаётся только файлами работы.
@@ -96,7 +96,7 @@ export type ToolConfig = Record<string, unknown>;
 
 export type ToolFactory = (config: ToolConfig) => Tool;
 
-/** Встроенные тула: их имена нельзя занимать файлами в tools/ */
+/** Встроенные тулы: их имена нельзя занимать файлами в tools/ */
 export const BUILTIN_TOOL_IDS = ['files', 'shell', 'git', 'arch', 'ssh', 'look', 'image', 'docs', 'ocr', 'web', 'mail', 'telegram', 'max'] as const;
 
 /** id тула: имя файла в tools/ или встроенный — маска в src/ids.ts. */
@@ -298,7 +298,7 @@ export const SENSITIVE = /(^|[\\/])(\.env|\.netrc|\.git-credentials|id_rsa|id_ed
 export function protectedPath(rel: string): string | null {
   const norm = rel.replaceAll('\\', '/');
   if (norm === '.dreamteam' || norm.startsWith('.dreamteam/')) {
-    return `«${rel}» — служебная папка .dreamteam (конфиги и тула приложения), тулам не доступна`;
+    return `«${rel}» — служебная папка .dreamteam (конфиги и тулы приложения), тулам не доступна`;
   }
   return null;
 }
@@ -449,7 +449,7 @@ export function maskDeny(masks: string[] | undefined, relPath: string): string |
   return hit ? `файл «${relPath}» под маской «${hit}»` : null;
 }
 
-// ─── Встроенные тула: мосты и строгая карточка ──────────────────────────────
+// ─── Встроенные тулы: мосты и строгая карточка ──────────────────────────────
 
 /** Всё, что встроенному тулу нужно на run: конвейер собирает это перед раундом. */
 export interface BuiltinDeps {

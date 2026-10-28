@@ -195,7 +195,7 @@ export function resolveHost(ref: string, cfg: ToolsConfig): HostTarget | { error
  * код-блоки (```json, ```ts) не принимались за вызовы тулов.
  */
 export function parseActions(text: string, extraTools: readonly string[] = []): Action[] {
-  // виды блоков: встроенные имена + кастомные тула; сортировка по длине, чтобы
+  // виды блоков: встроенные имена + кастомные тулы; сортировка по длине, чтобы
   // «```runner» не съелся более коротким «```run» из альтернации. Экранируем:
   // в id тула разрешена точка («pdf.export») — в регулярке она не должна
   // превращаться в «любой символ»

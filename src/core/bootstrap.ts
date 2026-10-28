@@ -87,7 +87,7 @@ export async function bootstrapApp(): Promise<{ app: App; ui: SettingsConfig }> 
   const { models, images } = loadModels(MODELS_DIR);
   // менеджер переговорки: обязательный конфиг, неизвестная модель — падение до старта оболочки
   const mgr = loadManagerConfig(MANAGER_FILE, models.keys());
-  // тула: fail-fast — кривой файл в tools/ или карточка в agents.json видны до старта оболочки
+  // тулы: fail-fast — кривой файл в tools/ или карточка в agents.json видны до старта оболочки
   // (дальше они перечитываются каждый раунд уже с мягкой обработкой)
   await loadUserTools(TOOLS_DIR);
   const app: App = {

@@ -203,7 +203,7 @@ function openAgentSettings(a: AgentInfo): void {
     }
     if (Object.keys(model).length > 0) fields.model = model;
     if (Object.keys(fields).length > 0) rpcReport(rpc('agent.update', { id: a.id, fields }));
-    // новые тула выдаём по одному (отзыв — /agent tool delete или словом менеджеру)
+    // новые тулы выдаём по одному (отзыв — /agent tool delete или словом менеджеру)
     const have = new Set(a.tools ?? []);
     for (const tool of (v.tools ?? '').split(',').map((t) => t.trim()).filter(Boolean)) {
       if (have.has(tool.toLowerCase())) continue;
@@ -690,7 +690,7 @@ function argItems(before: string, d: CompletionData): HintItem[] | null {
   return argHintItems(op, argPos, d);
 }
 
-/** Значения аргумента по машиночитаемой подсказке манифеста (id, тула, shared). */
+/** Значения аргумента по машиночитаемой подсказке манифеста (id, тулы, shared). */
 function argHintItems(op: OpHint, argPos: number, d: CompletionData): HintItem[] | null {
   const hints = op.hints ?? [];
   const hint = hints[Math.min(argPos, Math.max(hints.length - 1, 0))] ?? '';
@@ -706,7 +706,7 @@ function argHintItems(op: OpHint, argPos: number, d: CompletionData): HintItem[]
   if (hint === 'models') {
     return d.modelIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
   }
-  // память: «кого|shared» из имени аргумента; тула — тоже из имени
+  // память: «кого|shared» из имени аргумента; тулы — тоже из имени
   const args = (op.args ?? '').split(' ');
   const argName = args[Math.min(argPos, args.length - 1)] ?? '';
   if (argName.includes('shared')) {

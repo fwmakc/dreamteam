@@ -7,7 +7,16 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
-## [Unreleased]
+## [0.0.11] — 2026-10-27
+
+### Fixed
+
+- Russian strings decline the word «тул» (tool) correctly: the nominative
+  plural is «тулы» everywhere «тула» stood wrongly («тулы не собраны»,
+  «какие тулы включены», «все тулы», «встроенные тулы», «Свои тулы»…), the
+  absent-tools line is «тулов нет», and a Latin "e" inside «в туле» is gone.
+  The matching keys in the en/zh dictionaries are updated in lockstep, so the
+  lines keep translating; the README (ru) follows the same declension.
 
 ### Added
 
