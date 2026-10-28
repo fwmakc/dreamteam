@@ -3,8 +3,8 @@
  * «снимок → проектирование → выполнение/проверка/чистка»):
  *  1. СНИМОК: что менеджер видит в момент решения — system = MANAGER_PROMPT,
  *     пользовательская часть = состояние переговорки (ростер с тула­ми и
- *     провайдерами, состав чата, разговоры с id, проекты, команды,
- *     окно истории, просьба).
+ *     провайдерами, реестр тулов дома, версия приложения, состав чата,
+ *     разговоры с id, проекты, команды, окно истории, просьба).
  *  2. ПРОЕКТИРОВАНИЕ: промт объявляет все 15 операций и JSON-протокол
  *     {say, actions}; сценарии с заготовленными ответами скриптового LLM.
  *  3. ВЫПОЛНЕНИЕ: каждый op через настоящий managerTurn на герметичных слоях —
@@ -41,6 +41,7 @@ process.chdir(base); // рабочая папка инструментов — �
 // src-модули — строго после подмены слоёв: paths.ts вычисляет пути в момент
 // загрузки, а manager.ts теперь транзитно тянет paths.js (через mail.js)
 const { MANAGER_PROMPT, MANAGER_ID } = await import('../src/manager.js');
+const { BUILTIN_TOOL_DESCS, BUILTIN_TOOL_IDS } = await import('../src/tools-api.js');
 
 mkdirSync(join(home, 'models'), { recursive: true });
 writeFileSync(join(home, 'models', 'mock.json'), JSON.stringify({ provider: 'mock' }, null, 2) + '\n');
@@ -49,6 +50,12 @@ writeFileSync(join(home, 'models', 'claude.json'), JSON.stringify({ provider: 'm
 writeFileSync(
   join(home, 'settings.json'),
   JSON.stringify({ width: 100, language: 'english', model: { id: 'mock' } }, null, 2) + '\n',
+);
+// свой тул на полке дома — должен попасть в реестр тулов для менеджера
+mkdirSync(join(home, 'tools'), { recursive: true });
+writeFileSync(
+  join(home, 'tools', 'xlsx.ts'),
+  "export default () => ({ desc: 'делает xlsx из csv', check: () => 'allow' as const, run: async () => 'готово' });\n",
 );
 
 const { bootstrapApp } = await import('../src/core/bootstrap.js');
@@ -131,6 +138,23 @@ function lastManagerMessage(): string {
   check('снимок: операции манифеста со справкой', req.user?.includes('/session open <id>') ?? false, req.user);
   check('снимок: история — сама просьба уже в ней', (req.user?.includes('Последние сообщения') && req.user?.includes('@менеджер докладывай')) ?? false, req.user);
   check('снимок: просьба дословно', req.user?.includes('Просьба руководителя: «@менеджер докладывай»') ?? false, req.user);
+  const pkgVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
+  check('снимок: версия приложения в состоянии', req.user?.includes(`Приложение: dreamteam ${pkgVersion}`) ?? false, req.user?.slice(0, 120));
+  check(
+    'снимок: реестр тулов — встроенные с описаниями',
+    (req.user?.includes('Тулы дома') && req.user?.includes('- files — запись файлов в рабочую папку')) ?? false,
+    req.user?.slice(0, 240),
+  );
+  check('снимок: свой тул из tools/ — в реестре с desc', req.user?.includes('- xlsx — делает xlsx из csv (свой, из tools/)') ?? false, req.user);
+}
+
+// ── промпт и реестр не разъезжаются: список встроенных — производный ──────────
+{
+  const ids = (BUILTIN_TOOL_IDS as readonly string[]).join(', ');
+  check('промт: весь список встроенных тулов из реестра', MANAGER_PROMPT.includes(`Встроенные: ${ids}`), ids);
+  const descKeys = Object.keys(BUILTIN_TOOL_DESCS).sort().join(',');
+  const idKeys = [...(BUILTIN_TOOL_IDS as readonly string[])].sort().join(',');
+  check('описания реестра ровно для встроенных', descKeys === idKeys, descKeys);
 }
 
 {
@@ -151,9 +175,9 @@ function lastManagerMessage(): string {
 
   await askManager('Принято к сведению.', 'что видишь?');
   const req = requests.at(-1)!;
-  check('снимок: ростер — id, роль, провайдер, temp, тула',
-    req.user?.includes('- katya — Катя, модель: claude, temp 0.3; тула: files, look') ?? false, req.user);
-  check('снимок: агент без тула — пометка', req.user?.includes('- gleb — Глеб, модель: основная; тула нет') ?? false, req.user);
+  check('снимок: ростер — id, роль, провайдер, temp, тулы',
+    req.user?.includes('- katya — Катя, модель: claude, temp 0.3; тулы: files, look') ?? false, req.user);
+  check('снимок: агент без тула — пометка', req.user?.includes('- gleb — Глеб, модель: основная; тулов нет') ?? false, req.user);
   check('снимок: состав чата — только позванные', req.user?.includes('В этом чате: katya') ?? false, req.user);
   check('снимок: проект — серверы',
     req.user?.includes('- project: серверы prod, staging') ?? false, req.user);

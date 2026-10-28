@@ -138,7 +138,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('псевдо-агент: id/имя/роль/эмодзи/цвет',
     agent.id === 'manager' && agent.name === cfg.name && agent.role === 'менеджер переговорки' &&
     agent.emoji === cfg.emoji && agent.color === cfg.color);
-  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 2550 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
+  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 2700 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
 }
 
 // --- parseManagerReply ---
@@ -215,7 +215,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     operations: [{ cmd: '/session new', help: 'новый разговор' }, { cmd: '/session open', args: '<id>', help: 'открыть разговор' }],
   });
   check('стейт: ростер с провайдером и temp', input.includes('katya — Катя, модель: claude, temp 0.3'), input);
-  check('стейт: тула агента в ростере', input.includes('тула: files, look') && input.includes('тула нет'), input);
+  check('стейт: тулы агента в ростере', input.includes('тулы: files, look') && input.includes('тулов нет'), input);
   check('стейт: состав чата', input.includes('В этом чате: katya'));
   check('стейт: список разговоров с id и текущим', input.includes('- s1 — Текущий — 4 сообщ. (текущий)') && input.includes('- s2 — Прошлый — 9 сообщ.'), input);
   check('стейт: проект с серверами', input.includes('- shop: серверы prod, staging'), input);

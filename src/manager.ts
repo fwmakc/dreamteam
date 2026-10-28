@@ -16,7 +16,7 @@ import type {
 import { loadTeam, MENTION_TRIGGERS } from './agents.js';
 import { readAccount, type MailAccount } from './mail.js';
 import { isAgentId, isRecordId, isToolId } from './ids.js';
-import { agentToolIds, BUILTIN_TOOL_IDS, normalizeAgentTools } from './tools-api.js';
+import { agentToolIds, BUILTIN_TOOL_DESCS, BUILTIN_TOOL_IDS, normalizeAgentTools } from './tools-api.js';
 import { t, tf } from './i18n.js';
 
 export const MANAGER_ID = 'manager';
@@ -140,6 +140,9 @@ export function managerMentioned(text: string, cfg: ManagerConfig): boolean {
   return false;
 }
 
+/** Список встроенных тулов для промпта — производный от реестра (tools-api), не ручная копия. */
+const BUILTIN_TOOL_LIST = (BUILTIN_TOOL_IDS as readonly string[]).join(', ');
+
 /** Короткий промпт менеджера (маркер «менеджер переговорки» в начале — по нему mock-провайдер узнаёт его) */
 export const MANAGER_PROMPT =
   'Ты — менеджер переговорки: модератор беседы и единственный, кто меняет состав команды, ' +
@@ -152,7 +155,9 @@ export const MANAGER_PROMPT =
   '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","temperature":0.3,"name":"...","emoji":"...","color":"..."}}\n' +
   '- {"op":"chat.add","who":"id"} / {"op":"chat.remove","who":"id"} — позвать или вывести из текущего чата\n' +
   '- {"op":"session.list"} — показать разговоры; {"op":"session.open","id":"20261027-143052"} — открыть по id; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","id":"20261027-143052"} — удалить по id (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (имя — по краткому содержанию)\n' +
-  '- {"op":"tool.grant","agent":"id_участника","tool":"files","card":{"allow":["git *"]}} — включить тул агенту или обновить его карточку; card можно опустить (настройки по умолчанию). Встроенные: files, shell, git, arch, ssh, look, image; свои — имя файла из tools/ (включить можно только существующий, код тулов пишет человек)\n' +
+  '- {"op":"tool.grant","agent":"id_участника","tool":"files","card":{"allow":["git *"]}} — включить тул агенту или обновить его карточку; card можно опустить (настройки по умолчанию). Встроенные: ' +
+  BUILTIN_TOOL_LIST +
+  '; свои — имя файла из tools/ (включить можно только существующий, код тулов пишет человек). Какие тулы есть и что умеют — блок «Тулы дома» в состоянии\n' +
    '- {"op":"project.host.add","name":"prod","host":"203.0.113.10","user":"deploy","port":22,"dir":"/srv/app"} — сервер в текущий проект (password лучше не передавать в переписке — пусть человек впишет сам)\n' +
    '- {"op":"project.open","path":"путь или имя"} — сменить проект: рабочая папка и разговоры\n' +
   '- {"op":"mail.add","name":"ящик","user":"робот@corp.ru","password":"пароль-приложения","imap":"imap.corp.ru","smtp":"smtp.corp.ru","smtpPort":587} — ящик в mails.json (tlsNoVerify — опционально)\n' +
@@ -180,6 +185,10 @@ export interface ManagerContext {
   knownProjects?: { name: string; path: string; current?: boolean }[];
   /** Операции руководителя — из манифеста (operations.ts), как в /help */
   operations?: { cmd: string; args?: string; help: string }[];
+  /** Тулы дома: встроенные и свои из tools/ — id и короткое описание (что умеет) */
+  houseTools?: { id: string; builtin: boolean; desc: string }[];
+  /** Версия приложения (из package.json); пусто — строки в состоянии не будет */
+  appVersion?: string;
 }
 
 /** Пользовательская часть запроса: состояние переговорки + история + просьба */
@@ -211,11 +220,15 @@ export function managerStateInput(ctx: ManagerContext): string {
     .map((p) => `- ${p.name} — ${p.path}${p.current ? ' (текущий)' : ''}`)
     .join('\n');
   const ops = (ctx.operations ?? []).map((c) => `${c.cmd}${c.args ? ` ${c.args}` : ''} — ${c.help}`).join('\n');
+  const house = (ctx.houseTools ?? [])
+    .map((tl) => `- ${tl.id} — ${tl.desc}${tl.builtin ? '' : ' (свой, из tools/)'}`)
+    .join('\n');
   const history = ctx.history.length
     ? `\nПоследние сообщения:\n${ctx.history.map((m) => `${m.authorName}: ${m.text}`).join('\n')}\n`
     : '';
   return (
-    `Текущее состояние.\nКоманда:\n${roster}\nВ этом чате: ${inChat}\n` +
+    `Текущее состояние.${ctx.appVersion ? `\nПриложение: dreamteam ${ctx.appVersion}` : ''}\nКоманда:\n${roster}\nВ этом чате: ${inChat}\n` +
+    (house ? `Тулы дома (id — что умеет; включить агенту можно только существующий):\n${house}\n` : '') +
     `Разговоры (id — для session.open/session.delete):\n${sessions || '- нет'}\n` +
     (projects ? `Проекты (реестр серверов для ssh):\n${projects}\n` : '') +
     (known ? `Известные проекты (для project.open):\n${known}\n` : '') +

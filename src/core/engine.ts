@@ -32,6 +32,8 @@ import {
 import {
   agentToolConfig,
   agentToolIds,
+  BUILTIN_TOOL_DESCS,
+  BUILTIN_TOOL_IDS,
   type Tool,
   type ToolCheckContext,
   type ToolFactory,
@@ -184,6 +186,40 @@ export function chatTeam(session: Session, fullTeam: Agent[]): Agent[] {
 function findAgentById(fullTeam: Agent[], id: string): Agent | undefined {
   const norm = id.trim().toLowerCase();
   return fullTeam.find((a) => a.id === norm);
+}
+
+let appVersionCache: string | undefined;
+/** Версия приложения (package.json корня пакета); прочитать не удалось — пустая строка. */
+function appVersion(): string {
+  if (appVersionCache === undefined) {
+    try {
+      const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version?: string };
+      appVersionCache = typeof pkg.version === 'string' ? pkg.version : '';
+    } catch {
+      appVersionCache = '';
+    }
+  }
+  return appVersionCache;
+}
+
+/** Реестр тулов дома для контекста менеджера: встроенные с описаниями из tools-api + свои из tools/ (desc — экземпляра). */
+function houseToolsRegistry(userTools: Map<string, ToolFactory>): { id: string; builtin: boolean; desc: string }[] {
+  const list = (BUILTIN_TOOL_IDS as readonly string[]).map((id) => ({
+    id,
+    builtin: true,
+    desc: (BUILTIN_TOOL_DESCS as Readonly<Record<string, string>>)[id] ?? '',
+  }));
+  for (const [id, make] of userTools) {
+    let desc = `формат тела — в файле tools/${id}.ts`;
+    try {
+      const d = (make({}) as Partial<Tool>).desc;
+      if (typeof d === 'string' && d.trim()) desc = d.trim();
+    } catch {
+      // фабрика требует карточку — менеджеру хватает имени и файла
+    }
+    list.push({ id, builtin: false, desc });
+  }
+  return list;
 }
 
 /**
@@ -804,6 +840,8 @@ export class Engine {
                 current: Boolean(PROJECT_DIR) && basename(PROJECT_DIR) === p.id,
               })),
               operations: operationHints(),
+              houseTools: houseToolsRegistry(this.userTools),
+              appVersion: appVersion() || undefined,
             }),
           },
         ],

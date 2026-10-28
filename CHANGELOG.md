@@ -24,6 +24,14 @@ compatibility is promised across earlier versions.
   model reference. The full agent card travels on demand: rpc `agent.get`
   (and the matching `/agent get` operation) return it; `agent.update` now
   also accepts `workspace`.
+- **The manager sees the house tool registry and the app version.** The
+  manager's state now carries a «Тулы дома» block — built-ins and the custom
+  `tools/*.ts` shelf, each with a short description — and a «Приложение:
+  dreamteam …» line. «Кто может собрать xlsx из csv?» is answerable from the
+  registry, and a tool grant follows without asking the human for the exact
+  file name. The built-in list in the manager prompt is derived from the
+  registry (`BUILTIN_TOOL_DESCS`), so the two can no longer drift — they had:
+  the prompt named 7 of the 13 built-ins.
 
 ### Fixed
 
