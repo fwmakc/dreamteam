@@ -28,10 +28,8 @@ jobs:
       - run: npm run probe
 
   # ConPTY-based e2e probes: need node-pty (native build), Windows only.
-  # continue-on-error: kept until the whole job proves green on runners (#3)
   e2e:
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
