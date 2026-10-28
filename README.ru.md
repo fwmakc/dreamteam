@@ -301,9 +301,13 @@ probe`) на боевой API не ходят — они бесплатны и �
 | `agent.update <id> поле=знач…` | `/agent update yurist role=сметана model.temperature=0.4` | править: name= role= emoji= color= description= prompt= temperature= и вложенные model.id= model.temperature= |
 | `agent.delete <id…>` | `/agent delete yurist, keks` | удалить участников: список через запятую или пробел |
 | `agent.tools <id>` | `/agent tools yurist` | какие тулы включены и с какими настройками |
-| `agent.tool add <id> <тул…>` | `/agent tool add yurist files shell` | включить тулы (можно несколько): files, shell, ssh, look, image или свой из tools/ |
+| `agent.tool add <id> <тул…>` | `/agent tool add yurist files shell` | включить тулы (можно несколько): встроенные (полный список — `/tools`) или свой из tools/ |
 | `agent.tool update <id> <тул> поле=знач…` | `/agent tool update gleb git repo=C:/dev/shop` | настроить карточку тула в agents.json |
 | `agent.tool delete <id> <тул…\|all>` | `/agent tool delete yurist files shell` | выключить тулы: можно несколько; `all` — все |
+| `tools.list` | `/tools`, `/tools calc` | тулы дома: встроенные и свои из tools/ — что умеет и у кого включён; с тулом — его карточка |
+| `tool.new <id>` | `/tool new calc` | новый свой тул: шаблон tools/calc.ts (отвечает hello world) и карточка с description; код правится руками |
+| `tool.update <тул> поле=знач…` | `/tool update calc description=ведёт расчёты` | карточка дома tools/<тул>.json: поле=значение… |
+| `tool.delete <тул…\|all>` | `/tool delete calc, temp` | удалить свой тул: файл и карточку; включённым агентам тул выключается; встроенные не удаляются |
 | `models.list` | `/models` | модели и их статус |
 | `model.new <id> поле=знач…` | `/model new glm provider=openai-compatible model=glm-4.6 baseUrl=… apiKey=…` | новая карточка (provider обязателен) |
 | `model.update <id> поле=знач…` | `/model update glm model=glm-4.6` | править карточку: provider, model, baseUrl, apiKey, maxTokens, temperature… |
@@ -832,8 +836,8 @@ export default (config: ToolConfig): Tool => ({
 `inbox/`, `mail/`, `images/`; без открытого проекта `projectFile` бросает
 ошибку), `ctx.run` —
 запуск команды через полный конвейер (с вашим `y/n`), `ctx.http` — HTTP-запрос,
-`ctx.confirm` — живой вопрос человеку. Имена встроенных тулов (`files`,
-`shell`, `ssh`, `look`, `image`) занять нельзя. Ответственность за код
+`ctx.confirm` — живой вопрос человеку. Имена встроенных тулов занять нельзя —
+полный список со статусами покажет `/tools`. Ответственность за код
 скачанного тула — на вас, как и за любой npm-пакет: он исполняется с правами
 вашего пользователя. (Путь импорта `dreamteam/src/tools-api.js` — для
 глобальной установки из npm; при работе в клоне репозитория —
@@ -1020,7 +1024,7 @@ MAX — dev.max.ru). Бот заводится командами
 
 ```json
 "tools": { "look": null, "image": null },
-"vision": "qwen2-vl-2b",
+"vision": "qwen3-vl-2b",
 "image": "bk-sdm"
 ```
 
@@ -1058,7 +1062,7 @@ API) и `mock-images` (тестовый, работает без docker).
 
 **Свои модели в docker.** Папка `docker/` самодостаточна: скопируйте её на
 любую машину и поднимите модели по именам — `docker compose --profile
-qwen2-vl-2b --profile bk-sdm up -d` (самая лёгкая пара, ~3 ГБ RAM каждая,
+qwen3-vl-2b --profile bk-sdm up -d` (самая лёгкая пара, ~3 ГБ RAM каждая,
 совсем без GPU), на машинах побогаче — `sd-turbo`, а на GPU — `qwen3-vl-8b`,
 `flux-dev`, `photomaker` (контроль лиц) и другие. Контейнеры всегда
 запускаются вручную — приложение только обращается к ним по HTTP и ничего
@@ -1195,7 +1199,7 @@ qwen2-vl-2b --profile bk-sdm up -d` (самая лёгкая пара, ~3 ГБ R
 | «позови …» / «выведи …» | состав текущего чата (как `/session agent add` и `/session agent delete`) |
 | «покажи разговоры», «открой разговор 20261027-143052», «новый разговор …», «удали …» | управление разговорами (как `/sessions`, `/session open`, `/session new`, `/session delete`) |
 | «переименуй разговор в …», «придумай имя этому разговору» | переименование (как `/session update title=…`); для придумывания менеджер использует краткое содержание или начало разговора |
-| «включи … тул …» / «дай права …» | тул участнику: включить или обновить карточку (`shell`, `ssh`, свой тул из `tools/`…) |
+| «включи … тул …» / «дай права …» / «убери тул …» | тул участнику: включить, обновить карточку (`shell`, `ssh`, свой тул из `tools/`…) или выключить |
 | «добавь сервер …» | серверы проекта (поле "hosts" в project.json): новый сервер в текущем проекте |
 | «добавь ящик …», «убери ящик …» | ящики (поле "mails" в project.json; как `/project mail add` и `/project mail delete`) |
 | «добавь телеграм-бота …», «убери бота …» | токен бота (поле "messengers" в project.json; как `/project messenger add` и `/project messenger delete`) |
@@ -1289,8 +1293,8 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
   «проект:хост» и права через проекты, математика зон экрана, живой стрим
   на несколько строк, выделение мышью и Shift+клавишами, прокрутка
   (`probe-editor`: клавиши, курсор, история, ввод), менеджер переговорки
-  (`probe-manager`: валидация конфига, парсер ответов, новые действия
-  `tool.grant`/`project.host.add` с откатом, стейт) и сквозной
+  (`probe-manager`: валидация конфига, парсер ответов, действия
+  `agent.tool.add`/`project.host.add` с откатом, стейт) и сквозной
   конвейер менеджера как шлюза конфигурации (`probe-manager-flow`: снимок
   состояния для LLM, JSON-протокол, все операции до файлов с откатами,
   отчёты ✓/✗ в истории, реплика остаётся в старом разговоре при смене),

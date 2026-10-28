@@ -319,9 +319,13 @@ There are no aliases or short forms: one name — one operation.
 | `agent.update <id> field=value…` | `/agent update yurist role=sourcream model.temperature=0.4` | edit: name= role= emoji= color= description= prompt= temperature= and the nested model.id= model.temperature= |
 | `agent.delete <id…>` | `/agent delete yurist, keks` | delete members: a comma- or space-separated list |
 | `agent.tools <id>` | `/agent tools yurist` | which tools are enabled and with what settings |
-| `agent.tool add <id> <tool…>` | `/agent tool add yurist files shell` | enable tools (several at once): files, shell, ssh, look, image or a custom one from tools/ |
+| `agent.tool add <id> <tool…>` | `/agent tool add yurist files shell` | enable tools (several at once): built-ins (the full list — `/tools`) or a custom one from tools/ |
 | `agent.tool update <id> <tool> field=value…` | `/agent tool update gleb git repo=C:/dev/shop` | configure the tool card in agents.json |
 | `agent.tool delete <id> <tool…\|all>` | `/agent tool delete yurist files shell` | disable tools: several at once; `all` — all of them |
+| `tools.list` | `/tools`, `/tools calc` | the house's tools: built-ins and own ones from tools/ — what each does and who has it enabled; with a tool — its card |
+| `tool.new <id>` | `/tool new calc` | a new own tool: a tools/calc.ts template (answers hello world) and a card with description; edit the code by hand |
+| `tool.update <tool> field=value…` | `/tool update calc description=does the math` | the house card tools/<tool>.json: field=value… |
+| `tool.delete <tool…\|all>` | `/tool delete calc, temp` | delete an own tool: the file and the card; the tool is disabled for the agents that had it; built-ins can't be deleted |
 | `models.list` | `/models` | the models and their status |
 | `model.new <id> field=value…` | `/model new glm provider=openai-compatible model=glm-4.6 baseUrl=… apiKey=…` | a new card (provider is required) |
 | `model.update <id> field=value…` | `/model update glm model=glm-4.6` | edit a card: provider, model, baseUrl, apiKey, maxTokens, temperature… |
@@ -864,8 +868,9 @@ checked against their folder (`projectFile` throws with no open project) for
 reading and writing the project's payloads (`inbox/`, `mail/`, `images/`), and
 `ctx.run` — running a command through the full pipeline
 (with your `y/n`), `ctx.http` — an HTTP request, `ctx.confirm` — a live question
-to the human. The built-in tool names (`files`, `shell`, `ssh`, `look`, `image`)
-cannot be taken. Responsibility for downloaded tool code is yours, as with any
+to the human. The built-in tool names cannot be taken — the full list with
+statuses is one `/tools` away. Responsibility for downloaded tool code is
+yours, as with any
 npm package: it runs with your user's rights. (The
 `dreamteam/src/tools-api.js` import path is for a global install from npm; when
 working in a clone of the repository — the relative
@@ -1052,7 +1057,7 @@ model (the `vision` field) and draws with an image model (the `image` field):
 
 ```json
 "tools": { "look": null, "image": null },
-"vision": "qwen2-vl-2b",
+"vision": "qwen3-vl-2b",
 "image": "bk-sdm"
 ```
 
@@ -1091,7 +1096,7 @@ docker).
 
 **Your own models in docker.** The `docker/` folder is self-sufficient: copy it
 to any machine and bring the models up by name — `docker compose --profile
-qwen2-vl-2b --profile bk-sdm up -d` (the lightest pair, ~3 GB RAM each, no GPU at
+qwen3-vl-2b --profile bk-sdm up -d` (the lightest pair, ~3 GB RAM each, no GPU at
 all), on richer machines — `sd-turbo`, and on GPU — `qwen3-vl-8b`, `flux-dev`,
 `photomaker` (face control) and others. The containers are always started by
 hand — the app only talks to them over HTTP and never starts anything itself.
@@ -1235,7 +1240,7 @@ Through it — and only through it — the app changes the configuration:
 | "bring in …" / "send out …" | the current chat roster (like `/session agent add` and `/session agent delete`) |
 | "show the sessions", "open session 20261027-143052", "new session …", "delete …" | session management (like `/sessions`, `/session open`, `/session new`, `/session delete`) |
 | "rename the session to …", "come up with a name for this conversation" | renaming (like `/session update title=…`); for inventing names the manager uses the short summary or the beginning of the conversation |
-| "enable … tool …" / "grant permissions …" | a tool for a member: enable or update the card (`shell`, `ssh`, a custom tool from `tools/`…) |
+| "enable … tool …" / "grant permissions …" / "remove the tool …" | a tool for a member: enable, update the card (`shell`, `ssh`, a custom tool from `tools/`…) or disable |
 | "add the server …" | the project's servers (the "hosts" field of project.json): a new server in the current project |
 | "add a mailbox …", "remove the mailbox …" | the mailboxes (the "mails" field of project.json; like `/project mail add` and `/project mail delete`) |
 | "add a telegram bot …", "remove the bot …" | a bot token (the "messengers" field of project.json; like `/project messenger add` and `/project messenger delete`) |
@@ -1333,8 +1338,8 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   ssh addressing and permissions through projects, screen zone math, live
   multi-line streaming, mouse and Shift+key selection, scrollback
   (`probe-editor`: keys, cursor, history, input), the war-room manager
-  (`probe-manager`: config validation, answer parsing, new actions
-  `tool.grant`/`project.host.add` with rollback, state) and the
+  (`probe-manager`: config validation, answer parsing, the actions
+  `agent.tool.add`/`project.host.add` with rollback, state) and the
   end-to-end manager pipeline as the configuration gateway (`probe-manager-flow`:
   the state snapshot for the LLM, the JSON protocol, all operations down to
   files with rollbacks, ✓/✗ reports in the history, a remark staying in the old

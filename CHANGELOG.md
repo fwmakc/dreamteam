@@ -9,9 +9,53 @@ compatibility is promised across earlier versions.
 
 ## [Unreleased]
 
+### Breaking
+
+- **The manager's tool action is renamed and split.** The single undocumented
+  `tool.grant` action is gone from the manager protocol; it is replaced by the
+  trio `agent.tool.add` / `agent.tool.update` / `agent.tool.delete` — the same
+  operations the text commands and the GUI rpc use, so the manager can now
+  also **disable** a tool (and reconfigure its card), not only grant it. The
+  known manager operations grew from 16 to 18; the human commands were not
+  renamed. Old `tool.grant` actions in saved manager histories are simply
+  rejected by the new protocol — no shims, as in 0.0.9.
+
 ### Added
 
-- **The «Edit» forms are generated from the card schemas.** A new core
+- **House tools: the `/tools` group next to `/agent tool …`.** `/tools` lists
+  every tool of the house — the built-ins and the own ones from `tools/`,
+  each with its description and who has it enabled; `/tools <tool>` shows the
+  tool's card. A custom tool gets a house card `tools/<id>.json` with a
+  reserved `description` field — what the tool is for, shown by `/tools` and
+  read by the manager. New operations: `tools.list` (implicit), `tool.new <id>`
+  (a hello-world template `tools/<id>.ts` plus the card), `tool.update <tool>
+  field=value…` (the card), `tool.delete <tool…|all>` (file + card; enabled
+  agents lose the tool; built-ins cannot be deleted). Built-in ids are now a
+  single source (`BUILTIN_TOOL_IDS`): `files, shell, git, arch, ssh, look,
+  image, docs, ocr, web, mail, telegram, max`.
+- **The first-run wizard speaks keyboard and reuses existing models.** Every
+  choice is a list navigated with ↑/↓, PgUp/PgDn, Home/End and Enter (a real
+  terminal; without one — the same list as numbers or text). The model step
+  first offers the cards already in `models/` (id — provider · model · baseUrl),
+  with «create a new model» as a separate last item — a new card is no longer
+  forced on an existing setup.
+- **GUI comfort:** thin themed scrollbars everywhere; the input textarea grows
+  with its content up to 160 px and only then scrolls; the sidebar width is
+  draggable by its edge (280–640 px, remembered in localStorage); user
+  messages align right; Escape closes the sidebar context menu.
+- **A grammar guard in `check-i18n`.** Every `/xxx` token inside a dictionary
+  key must be a known operation group from the manifest (or one of the special
+  commands and whitelisted non-commands); an unknown one fails the check hard.
+  The dead keys of the pre-0.0.9 grammar this uncovered (`/team …`, `/messenger
+  …`, «при следующем /new.» and friends) are removed from en/zh.
+- **The models: a lighter CPU vision pair.** New `qwen3-vl-2b` (vision, CPU,
+  port 8000, ~3 GB RAM; ollama: 1.9 GB) joins `qwen3-vl-8b` (vision, vLLM,
+  port moved to 8001, ~20 GB VRAM; ollama: 6.2 GB) in `docker/compose.yaml`;
+  the retired `qwen2-vl-2b`, `qwen2.5-vl-7b` and `qwen3-vl-4b` profiles and
+  scaffold cards are removed. The creative trio keeps pointing at the lightest
+  CPU pair out of the factory.
+- (previous work, kept) **The «Edit» forms are generated from the card
+  schemas.** A new core
   module `card-schema.ts` declares, per home card (agent, model, session,
   project), the editable fields with their kinds — string, text, number,
   enum, password — and paths (`model.temperature` for the nested ones); the

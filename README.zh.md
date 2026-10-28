@@ -210,9 +210,13 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `agent.update <id> field=value…` | `/agent update lawyer role=法律 model.temperature=0.4` | 编辑：name= role= emoji= color= description= prompt= temperature= 及嵌套的 model.id= model.temperature= |
 | `agent.delete <id…>` | `/agent delete lawyer, keks` | 删除成员：逗号或空格分隔的列表 |
 | `agent.tools <id>` | `/agent tools lawyer` | 启用了哪些工具、什么设置 |
-| `agent.tool add <id> <tool…>` | `/agent tool add lawyer files shell` | 启用工具（可多个）：files、shell、ssh、look、image 或 tools/ 里自定义的 |
+| `agent.tool add <id> <tool…>` | `/agent tool add lawyer files shell` | 启用工具（可多个）：内置的（完整列表 — `/tools`）或 tools/ 里自定义的 |
 | `agent.tool update <id> <tool> field=value…` | `/agent tool update gleb git repo=C:/dev/shop` | 设置 agents.json 里的工具卡片 |
 | `agent.tool delete <id> <tool…\|all>` | `/agent tool delete lawyer files shell` | 停用工具：可以多个；`all` —— 全部 |
+| `tools.list` | `/tools`、`/tools calc` | 家里的工具：内置的和 tools/ 里的自定义 —— 各自能做什么、给谁开了；带工具名 —— 它的卡片 |
+| `tool.new <id>` | `/tool new calc` | 新的自定义工具：tools/calc.ts 模板（回答 hello world）和带 description 的卡片；代码自己改 |
+| `tool.update <tool> field=value…` | `/tool update calc description=会算账` | 家里的卡片 tools/<tool>.json：field=value… |
+| `tool.delete <tool…\|all>` | `/tool delete calc, temp` | 删除自定义工具：文件和卡片；已启用的智能体会被停用该工具；内置的删不掉 |
 | `models.list` | `/models` | 模型及其状态 |
 | `model.new <id> field=value…` | `/model new glm provider=openai-compatible model=glm-4.6 baseUrl=… apiKey=…` | 新卡片（provider 必填） |
 | `model.update <id> field=value…` | `/model update glm model=glm-4.6` | 编辑卡片：provider、model、baseUrl、apiKey、maxTokens、temperature… |
@@ -477,7 +481,7 @@ export default (config: ToolConfig): Tool => ({
 });
 ```
 
-契约：`desc` — 给智能体速查表的字符串；`check(body)` — **唯一的校验点**，返回 `'allow' | 'ask' | 'deny'`，拒绝可以带理由 —— `{ deny: 'reason' }` 会进入“⚙ tools”报告，智能体会改写请求而不是盲目乱试；`run(body, ctx)` — 动作。`ctx` 里工具能看到动作的工作文件夹和项目：`ctx.projectHome` — 家目录里的项目文件夹（或 `null`），`ctx.workspaceFile(rel)` 与 `ctx.projectFile(rel)` — 经过围栏校验的绝对路径（项目的附属内容 `inbox/`、`mail/`、`images/`；未打开项目时 `projectFile` 抛错），`ctx.run` — 走完整管道跑命令（带你的 `y/n`），`ctx.http` — HTTP 请求，`ctx.confirm` — 对人的实时提问。内置工具名（`files`、`shell`、`ssh`、`look`、`image`）不可占用。下载的工具代码责任自负，与任何 npm 包一样：它以你的用户权限运行。（`dreamteam/src/tools-api.js` 导入路径用于 npm 全局安装；在仓库克隆里工作时用相对路径 `'../src/tools-api.js'`。）
+契约：`desc` — 给智能体速查表的字符串；`check(body)` — **唯一的校验点**，返回 `'allow' | 'ask' | 'deny'`，拒绝可以带理由 —— `{ deny: 'reason' }` 会进入“⚙ tools”报告，智能体会改写请求而不是盲目乱试；`run(body, ctx)` — 动作。`ctx` 里工具能看到动作的工作文件夹和项目：`ctx.projectHome` — 家目录里的项目文件夹（或 `null`），`ctx.workspaceFile(rel)` 与 `ctx.projectFile(rel)` — 经过围栏校验的绝对路径（项目的附属内容 `inbox/`、`mail/`、`images/`；未打开项目时 `projectFile` 抛错），`ctx.run` — 走完整管道跑命令（带你的 `y/n`），`ctx.http` — HTTP 请求，`ctx.confirm` — 对人的实时提问。内置工具名不可占用 —— 完整列表和状态一条 `/tools` 就能看到。下载的工具代码责任自负，与任何 npm 包一样：它以你的用户权限运行。（`dreamteam/src/tools-api.js` 导入路径用于 npm 全局安装；在仓库克隆里工作时用相对路径 `'../src/tools-api.js'`。）
 
 **现成工具：git**（随包附带）。`git` 块正文或块行带子命令（`git shop:log --oneline`）；仓库 — 动作的工作文件夹（智能体的子文件夹）或卡片 `repo` 固定的那个。
 
@@ -564,7 +568,7 @@ mock 模式下带工具的智能体会演示：写出 `demo-agent.txt` 并运行
 
 ```json
 "tools": { "look": null, "image": null },
-"vision": "qwen2-vl-2b",
+"vision": "qwen3-vl-2b",
 "image": "bk-sdm"
 ```
 
@@ -584,7 +588,7 @@ refs: images/poster-2.png
 
 **眼睛和双手独立配置。** 画师用云端视觉（GLM-4.6V），排版师用本地（docker 里的 Qwen-VL）；改一行 `models/` 即换生成器，人设不动。模型卡片加 `"vision": true` 即“能看”（`openai-compatible` 和 `anthropic-compatible` 适配器可传图片；`mock` — 用自己的方式“看”，用于演示）。图像模型 — `openai-images` 适配器（docker 里的我们的门面或云端 API）和 `mock-images`（测试用，无需 docker）。
 
-**docker 里自己的模型。** `docker/` 文件夹自给自足：拷到任何机器，按名字拉起模型 — `docker compose --profile qwen2-vl-2b --profile bk-sdm up -d`（最轻的一对，各约 3 GB 内存，完全不需要 GPU），更宽裕的机器 — `sd-turbo`，有 GPU — `qwen3-vl-8b`、`flux-dev`、`photomaker`（人脸控制）等。容器总是手动启动 — 应用只通过 HTTP 与它们通信，自己从不启动任何东西。创作三人组（Marta、Nika、Pasha）出厂即指向 CPU 模型，所以手动启动轻量一对后循环立刻就绪，无需改配置；只有容器住在另一台电脑上时才需要改 `models/` 里的机器地址。细节与模型表 — `docker/README.md`。
+**docker 里自己的模型。** `docker/` 文件夹自给自足：拷到任何机器，按名字拉起模型 — `docker compose --profile qwen3-vl-2b --profile bk-sdm up -d`（最轻的一对，各约 3 GB 内存，完全不需要 GPU），更宽裕的机器 — `sd-turbo`，有 GPU — `qwen3-vl-8b`、`flux-dev`、`photomaker`（人脸控制）等。容器总是手动启动 — 应用只通过 HTTP 与它们通信，自己从不启动任何东西。创作三人组（Marta、Nika、Pasha）出厂即指向 CPU 模型，所以手动启动轻量一对后循环立刻就绪，无需改配置；只有容器住在另一台电脑上时才需要改 `models/` 里的机器地址。细节与模型表 — `docker/README.md`。
 
 **草图协议。** 创作成员的人设固化了规则：新任务 → 便宜的低分辨率草图若干变体 → 展示给你并询问 → 以选中的变体为参考修改 → 批准后才出高分辨率成品。选择权永远在你：智能体不得悄悄废掉一个方向。
 
@@ -674,7 +678,7 @@ You > @manager add the router server — admin@192.168.1.1
 | “叫进来 …” / “请出去 …” | 当前聊天名单（同 `/session agent add` 和 `/session agent delete`） |
 | “显示会话”、“打开会话 20261027-143052”、“新会话 …”、“删除 …” | 会话管理（同 `/sessions`、`/session open`、`/session new`、`/session delete`） |
 | “把会话重命名为 …”、“给这场谈话起个名字” | 重命名（同 `/session update title=…`）；起名时经理用简短摘要或谈话开头 |
-| “开启 … 工具 …” / “给 … 权限 …” | 成员的工具：启用或更新卡片（`shell`、`ssh`、`tools/` 里的自定义工具…） |
+| “开启 … 工具 …” / “给 … 权限 …” / “把工具拿掉 …” | 成员的工具：启用、更新卡片（`shell`、`ssh`、`tools/` 里的自定义工具…）或停用 |
 | “添加服务器 …” | 项目服务器（project.json 的 "hosts" 字段）：在当前项目添加新服务器 |
 | “添加邮箱 …”、“移除邮箱 …” | 邮箱（project.json 的 "mails" 字段；同 `/project mail add` 和 `/project mail delete`） |
 | “添加 telegram 机器人 …”、“移除机器人 …” | 机器人令牌（project.json 的 "messengers" 字段；同 `/project messenger add` 和 `/project messenger delete`） |
@@ -730,7 +734,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 
 项目由 `tests/` 里的探针检查 — 不用测试框架，每个文件直接运行并对每项检查打印 `ok`/`FAIL`。所有探针都是密封的：真实数据不被触碰，家目录重定向到临时文件夹（`DT_HOME`）。
 
-- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `tool.grant`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部 11 种操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。
+- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `agent.tool.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。
 - `npm run probe:e2e` — Windows 真实伪终端（ConPTY）下的同样区域：真正到达应用的东西（`probe-input`）与经迷你 VT 仿真器的渲染屏幕（`probe-startup`：无项目启动、打开带旧谈话的项目、面板中的历史、滚轮/PgUp/鼠标/选择）。它自行安装并移除 node-pty。
 - `npm run probe:tui` — 伪终端里完整跑一遍应用：无项目启动 → `/project new` → 礼宾经理问候、`team.add`、`chat.add`、带工具的一轮、`/agents`、退出 — 全在 mock 服务商和临时文件夹上进行。`probe:scenario-tui` —— 同一场景，每步之后还校验磁盘上的文件（会话、agents/、导出归档）。
 - `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui-dist/ 静态资源、快照中的无项目启动、WS 礼宾场景（`project.open` → 问候、发言、经对话的 team.add）、rpc（`project.open`、`sessions.list`、`session.agent.add/delete`、`settings.update`（带模型校验）、`session.new` 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。
