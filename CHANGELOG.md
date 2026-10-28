@@ -7,9 +7,9 @@ semver while pre-1.0 (breaking changes may land in minors).
 
 ### Fixed
 
-- e2e probes dump their screens to the OS temp dir instead of a hardcoded
-  `C:\tmp` — the CI e2e job no longer trips over a missing folder (the job
-  stays `continue-on-error` until it proves green on runners).
+- e2e probes dump their raw output to the OS temp dir instead of hardcoded
+  `C:\tmp`/`/tmp` paths — the CI e2e job no longer trips over a missing folder
+  (the job stays `continue-on-error` until it proves green on runners).
 
 ## [0.0.10] — 2026-10-27
 

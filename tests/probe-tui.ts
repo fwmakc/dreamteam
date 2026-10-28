@@ -203,7 +203,9 @@ const code = await Promise.race([
 ]);
 check('tui: процесс завершился сам', code === 0, String(code));
 if (code === null) term.kill();
-writeFileSync('/tmp/dt-tui-raw.txt', out, 'utf8');
+const dump = join(tmpdir(), 'dt-tui-raw.txt');
+writeFileSync(dump, out, 'utf8');
+console.log(`Дамп: ${dump}`);
 // team.add менеджера писал карточку в agents/ дома (команда — вещь машины)
 check('tui: «Тест» записан в агенты дома', existsSync(join(home, 'agents', 'test_probe.json')));
 check('tui: разговор сохранился в проекте дома', readdirSync(join(home, 'projects', 'dev', 'sessions')).length === 1);
