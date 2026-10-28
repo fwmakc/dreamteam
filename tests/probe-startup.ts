@@ -138,10 +138,12 @@ const saveDump = (name: string, text: string): void => {
 const pane = (): string => vt.lines().slice(2, 22).join('\n'); // панель чата: строки 3..22
 const hints = (): string => vt.lines().slice(22, 27).join('\n'); // подсказки: 23..27
 
-await wait(3000); // старт: баннер, подсказка выбора проекта, промпт — без всякого ввода
+// старт: баннер, подсказка выбора проекта, промпт — без всякого ввода;
+// на холодном раннере TUI рисуется дольше трёх секунд — дожидаемся промпта
+const started = await waitPane('промпт после старта', () => (vt.lines()[27] ?? '').includes('Ты >'), 90_000);
 dump('сразу после запуска (без проекта)');
 saveDump('dt-startup-1.txt', vt.lines().join('\n'));
-check('старт: промпт внизу', (vt.lines()[27] ?? '').includes('Ты >'), JSON.stringify(vt.lines()[27]));
+check('старт: промпт внизу', started, JSON.stringify(vt.lines()[27]));
 check('старт: без проекта — метка в промпте', (vt.lines()[27] ?? '').includes('без проекта'), JSON.stringify(vt.lines()[27]));
 check('старт: статичные подсказки', hints().includes('/help — операции'), hints());
 check('старт: подсказка выбора проекта в панели', pane().includes('Проект не выбран'), pane().slice(0, 400));
