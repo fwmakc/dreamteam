@@ -3,13 +3,19 @@
  *
  *   read <файл>            — текст документа: pdf (текстовый слой), docx, odt;
  *                            xlsx/ods/csv — все листы как CSV;
+ *   md <файл>              — документ как markdown: заголовки, начертания,
+ *                            списки, цитаты, таблицы (docx/odt/pdf/xlsx/ods/csv);
  *   tables <файл>          — только таблицы: xlsx/ods/csv или таблицы из docx;
- *   write <файл>           — создать из тела: docx (абзацы), xlsx (markdown/TSV/CSV-таблица),
- *                            pdf (текст), csv (как есть); odt/ods — через мост soffice;
- *   append <файл>          — дописать абзацы тела в конец docx (пункт договора —
- *                            остальное содержимое не перестраивается);
- *   convert <цель> <файл>  — перекодировать через мост soffice: doc→docx, xls→xlsx,
- *                            любой→pdf, docx→odt…
+ *   write <файл>           — создать из тела; тело — markdown (заголовки #,
+ *                            **жирный**, *курсив*, списки, цитаты >, код-блоки,
+ *                            таблицы | a | b |), литеральный * экранируется \*;
+ *                            docx/pdf — нативно, odt/ods — мост soffice;
+ *                            xlsx: таблицы → листы, «# имя» — имя листа;
+ *   append <файл>          — дописать markdown-блоки тела в конец docx
+ *                            (заголовки, начертания, код, списки, таблицы);
+ *   convert <цель> <файл>  — перекодировать через мост soffice: doc→docx,
+ *                            xls→xlsx, любой→pdf, docx→odt…; docx→pdf без моста —
+ *                            нативный фолбэк через markdown (вёрстка проще).
  *
  * Все пути — рабочая папка или прикладные подпапки проекта (inbox, mail,
  * images; resolveToolPath), как у files. Мост soffice —
@@ -20,20 +26,24 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
-  appendDocx,
+  appendDocxMd,
+  docxToMd,
+  odtToMd,
+  sheetsToMd,
+  writeDocxMd,
+  writeOdfMd,
+  writePdfMd,
+  writeXlsxMd,
+} from '../../documents-md.js';
+import {
   convertViaSoffice,
   docKind,
   docxTables,
   docxText,
   odsSheets,
   odtText,
-  parseTableText,
   pdfText,
   rowsToCsv,
-  writeDocx,
-  writeOdfViaSoffice,
-  writePdf,
-  writeXlsx,
   xlsxSheets,
   type DocSheet,
 } from '../../documents.js';
@@ -52,8 +62,8 @@ function parseHead(body: string): { sub: string; rest: string[]; text: string } 
 }
 
 function syntax(): string {
-  return 'подкоманды: read <файл> · tables <файл> · write <файл> (тело — текст/таблица) · ' +
-    'append <файл> (тело — абзацы для docx) · convert <цель> <файл> — имя файла с пробелами берите в кавычки';
+  return 'подкоманды: read <файл> · md <файл> · tables <файл> · write <файл> (тело — markdown/таблица) · ' +
+    'append <файл> (тело — markdown для docx) · convert <цель> <файл> — имя файла с пробелами берите в кавычки';
 }
 
 /** Путь в рабочей папке или прикладных подпапках проекта (inbox, mail, images); наружу — отказ. */
@@ -82,8 +92,9 @@ export default (config: ToolConfig): Tool => {
 
   return {
     desc:
-      'Документы: ```docs read договор.pdf · tables таблица.xlsx · write отчёт.docx (тело — текст) · ' +
-      'append договор.docx (тело — дописываемые абзацы) · convert pdf файл.doc. ' +
+      'Документы: ```docs read договор.pdf · md договор.docx (как markdown) · tables таблица.xlsx · ' +
+      'write отчёт.docx (тело — markdown: # заголовки, **жирный**, списки, таблицы) · ' +
+      'append договор.docx (тело — дописываемые markdown-блоки) · convert pdf файл.doc. ' +
       'Имя файла с пробелами — в кавычках: read "иск по квартире.docx". ' +
       'pdf/docx/xlsx/csv/odt/ods — нативно; .doc/.xls и создание odt/ods — нужен мост soffice (docker/soffice).',
     check: () => 'allow',
@@ -92,6 +103,8 @@ export default (config: ToolConfig): Tool => {
       switch (sub) {
         case 'read':
           return readAny(localPath(ctx.cwd, rest[0] ?? ''));
+        case 'md':
+          return mdAny(localPath(ctx.cwd, rest[0] ?? ''));
         case 'tables':
           return tablesAny(localPath(ctx.cwd, rest[0] ?? ''));
         case 'write':
@@ -99,14 +112,25 @@ export default (config: ToolConfig): Tool => {
         case 'append': {
           const abs = localPath(ctx.cwd, rest[0] ?? '');
           if (docKind(abs) !== 'docx') throw new Error('append работает только с docx — другой формат сперва «convert docx <файл>»');
-          appendDocx(abs, text.split(/\r?\n/).filter((l) => l.trim()));
-          return `✓ дописано абзацев: ${text.split(/\r?\n/).filter((l) => l.trim()).length} в ${rest[0]}`;
+          const n = appendDocxMd(abs, text);
+          return `✓ дописано строк: ${n} в ${rest[0]}`;
         }
         case 'convert': {
           const target = (rest[0] ?? '').replace(/^\./, '').toLowerCase();
           const abs = localPath(ctx.cwd, rest[1] ?? '');
-          const out = await convertViaSoffice(soffice, abs, target);
-          return `✓ ${rest[1]} → ${out.split(/[\\/]/).pop()}`;
+          try {
+            const out = await convertViaSoffice(soffice, abs, target);
+            return `✓ ${rest[1]} → ${out.split(/[\\/]/).pop()}`;
+          } catch (e) {
+            if (target === 'pdf' && docKind(abs) === 'docx' && String((e as Error).message).includes('мост soffice')) {
+              const out = abs.replace(/\.docx$/i, '') + '.pdf';
+              const { md, notes } = await docxToMd(abs);
+              await writePdfMd(out, md, font);
+              return `✓ ${rest[1]} → ${out.split(/[\\/]/).pop()} (мост soffice недоступен — нативный фолбэк docx→md→pdf, ` +
+                `вёрстка проще полного форматирования${notes.length ? `; ${notes.join('; ')}` : ''})`;
+            }
+            throw e;
+          }
         }
         default:
           throw new Error(syntax());
@@ -129,6 +153,27 @@ function readAny(abs: string): string | Promise<string> {
   }
 }
 
+/** Документ как markdown: заголовки/начертания/списки/таблицы; pdf — только текст слоя. */
+async function mdAny(abs: string): Promise<string> {
+  const tail = (notes: string[]): string => (notes.length ? `\n\n---\n${notes.map((n) => `- примечание: ${n}`).join('\n')}` : '');
+  switch (docKind(abs)) {
+    case 'docx': {
+      const { md, notes } = await docxToMd(abs);
+      return md + tail(notes);
+    }
+    case 'odt': {
+      const { md, notes } = odtToMd(abs);
+      return md + tail(notes);
+    }
+    case 'xlsx': return sheetsToMd(await xlsxSheets(abs));
+    case 'ods': return sheetsToMd(odsSheets(abs));
+    case 'pdf': return pdfText(abs);
+    case 'csv': return readFileSync(abs, 'utf8').trim();
+    case 'legacy': throw new Error(LEGACY_HINT);
+    default: throw new Error('в markdown отдаю pdf, docx, xlsx, csv/tsv, odt, ods (и .doc/.xls через convert)');
+  }
+}
+
 /** Только таблицы. */
 function tablesAny(abs: string): string | Promise<string> {
   switch (docKind(abs)) {
@@ -142,35 +187,36 @@ function tablesAny(abs: string): string | Promise<string> {
   }
 }
 
-/** Создание файла из тела: расширение решает писателя. */
+/** Создание файла из тела (тело — markdown): расширение решает писателя.
+ * Пометки писателей (пропущенные картинки, имена листов) — в отчёте. */
 async function writeAny(abs: string, text: string, soffice: string, font?: string): Promise<string> {
   if (!text.trim()) throw new Error('тело блока пустое — нечего писать (текст после первой строки заголовка)');
-  const paragraphs = text.split(/\r?\n/);
+  const body = text.replace(/^\r?\n/, '');
+  let notes: string[] = [];
   switch (docKind(abs)) {
     case 'docx':
-      await writeDocx(abs, paragraphs);
+      notes = await writeDocxMd(abs, body);
       break;
-    case 'xlsx': {
-      const rows = parseTableText(text);
-      await writeXlsx(abs, [{ name: 'Данные', rows }]);
+    case 'xlsx':
+      notes = await writeXlsxMd(abs, body);
       break;
-    }
     case 'pdf':
-      await writePdf(abs, text, font);
+      notes = await writePdfMd(abs, body, font);
       break;
     case 'csv':
-      writeFileSync(abs, text.replace(/^\r?\n/, '') + '\n', 'utf8');
+      writeFileSync(abs, body + '\n', 'utf8');
       break;
     case 'odt':
-      await writeOdfViaSoffice(soffice, abs, 'odt', paragraphs, []);
+      notes = await writeOdfMd(soffice, abs, 'odt', body);
       break;
     case 'ods':
-      await writeOdfViaSoffice(soffice, abs, 'ods', [], [{ name: 'Данные', rows: parseTableText(text) }]);
+      notes = await writeOdfMd(soffice, abs, 'ods', body);
       break;
     case 'legacy':
       throw new Error(`в legacy-форматы (.doc/.xls) не пишем — пишите .docx/.xlsx или «convert» из них; ${LEGACY_HINT}`);
     default:
       throw new Error('для write нужно расширение: .docx, .xlsx, .pdf, .csv, .odt, .ods');
   }
-  return `✓ записан ${abs.split(/[\\/]/).pop()} (${Buffer.byteLength(readFileSync(abs))} байт)`;
+  const tail = notes.length ? `\n  ${notes.join('\n  ')}` : '';
+  return `✓ записан ${abs.split(/[\\/]/).pop()} (${Buffer.byteLength(readFileSync(abs))} байт)${tail}`;
 }

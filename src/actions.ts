@@ -848,13 +848,18 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
   if (ids.includes('docs')) {
     lines.push(
       '```docs read файл.pdf',
+      '```docs md договор.docx',
       '```docs tables таблица.xlsx',
       '```docs write отчёт.docx',
-      '<текст документа: абзацы построчно или markdown/TSV/CSV-таблица для xlsx/ods>',
+      '# Заголовок',
+      'Абзац с **жирным**, *курсивом* и `кодом`; списки -, 1.; таблицы | a | b |.',
       '```',
-      'docs читает (read, tables) и пишет (write) pdf/docx/xlsx/csv/odt/ods: обычный путь — рабочая папка, ' +
-        'префиксы inbox/, mail/, images/ — прикладные папки проекта в доме; ' +
-        'append дописывает абзацы в конец существующего docx; convert pdf файл.doc перекодирует формат.',
+      'docs читает (read — текст, md — документ как markdown, tables — таблицы) и пишет (write — тело это markdown: ' +
+        'заголовки #, начертания, списки, цитаты >, код-блоки, таблицы; \\* — литеральная звёздочка): ' +
+        'pdf/docx/xlsx/csv — нативно, odt/ods — мост soffice. ' +
+        'Обычный путь — рабочая папка, префиксы inbox/, mail/, images/ — прикладные папки проекта в доме; ' +
+        'append дописывает markdown-блоки в конец docx; convert pdf файл.doc перекодирует формат ' +
+        '(docx→pdf без моста — нативный фолбэк через markdown).',
     );
   }
   if (ids.includes('ocr')) {

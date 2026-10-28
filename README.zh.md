@@ -509,13 +509,14 @@ mock 模式下带工具的智能体会演示：写出 `demo-agent.txt` 并运行
 "tools": { "files": {}, "docs": {}, "ocr": {}, "web": {}, "mail": {}, "max": {} }
 ```
 
-**docs — 文档：读与写。** `docs` 块：
+**docs — 文档：读与写。** `docs` 块；`write`/`append` 的正文是 markdown：标题 `#`–`######`、**粗体**、*斜体*、`~~删除线~~`、`代码`、[链接](https://…)、可嵌套的 `-`/`1.` 列表、引用 `>`、代码块、带分隔行和对齐的表格 `| a | b |`、分隔线 `---`；想输出字面星号用 `\*`，段落内的换行就是换行：
 
-- `read file` — 文档文本：pdf、docx、xlsx（工作表 → markdown 表格）、csv、txt/html/odt/ods/rtf；
-- `tables file [csv] [sheet]` — xlsx/csv 表格：回答是 markdown 或 csv 行，`sheet` — 工作表名或编号；
-- `write file.xlsx` — 块正文：带表头和分隔行的 markdown 表格 `| a | b |` — 保存为真正的 xlsx；`.md`/`.csv`/`.html`/`.json` — 按扩展名；
-- `append file.docx` — 把段落（块正文）追加到已有文档末尾；
-- `convert pdf file.doc` — 格式转码。原生路径：docx↔pdf/html/txt、xlsx↔csv/html、csv↔xlsx。其余（`.doc`、`.xls`、`.rtf`、`.odt`…）— 走 LibreOffice 桥：`cd docker && docker compose --profile soffice up -d --build`（端口 8200），工具卡片里设 `"soffice": "http://127.0.0.1:8200"`。
+- `read file` — 文档文本：pdf（文本层）、docx、odt；xlsx/ods/csv — 工作表转 CSV；
+- `md file` — 文档转为 markdown：标题、字型、列表、引用、表格；pdf 只有文本层，xlsx 单元格字型不返回（诚实的极限会出现在回答的备注里）；
+- `tables file` — 只要表格：xlsx/ods/csv 或 docx 里的表格；
+- `write file` — 从正文创建：docx — 带真实样式（Word 打开如常），pdf — 带排版（标题、两端对齐、列表、带竖线的引用、底纹代码块、等宽表格块）；xlsx — 正文的表格变成工作表，表格前的 `# 名称` 就是工作表名，表头加粗，非表格块被跳过（报告会列出）；csv — 原样；odt/ods — 走 soffice 桥；
+- `append file.docx` — 把正文的 markdown 块追加到已有文档末尾（标题、字型、代码、列表、表格），其余内容不动；
+- `convert pdf file.doc` — 走 LibreOffice 桥转码：`cd docker && docker compose --profile soffice up -d --build`（端口 8200），工具卡片里设 `"soffice": "http://127.0.0.1:8200"`。没有桥时 docx→pdf 也能原生完成 — 经 markdown 的兜底（排版比完整格式简单，报告会提示）。pdf 的西里尔字体用卡片 `"font"`（regular 必需；bold/italic/mono 在旁边查找，找不到就用 regular）。
 
 **ocr — 从扫描件提取文字和表格。** `ocr` 块（tesseract，rus+eng）：
 
@@ -793,7 +794,9 @@ dreamteam/
 │   ├── manager.ts            # 会议室经理：配置、提示词、动作（团队/聊天/会话/工具/项目）
 │   ├── agents.ts             # agents/ 加载
 │   ├── actions.ts            # 智能体动作块、项目、结构性权限、执行
-│   ├── docs.ts               # 文档栈：pdf/docx/xlsx — 读与写 + LibreOffice 桥
+│   ├── documents.ts           # 文档引擎：pdf/docx/xlsx/odt/ods — 读取、pdf 字体、soffice 桥
+│   ├── documents-md.ts        # 富写作与导出：md ⇄ docx/xlsx/pdf/odt、追加、convert 兜底
+│   ├── md.ts                  # markdown：parseMd（块/行内/表格/列表）+ htmlToMd
 │   ├── ocr.ts                # 识别：tesseract、pdf 页、按坐标的表格
 │   ├── web.ts                # 读网站：白名单、文章阅读器、链接
 │   ├── mail.ts               # 邮件：imapflow/mailparser/nodemailer、显式邮箱

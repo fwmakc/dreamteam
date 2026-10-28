@@ -11,6 +11,58 @@ compatibility is promised across earlier versions.
 
 ### Added
 
+- **Markdown as the rich interchange of the docs tool.** The `write` and
+  `append` bodies are now interpreted as markdown — headings `#`–`######`,
+  bold/italic/strike, inline code and links, nested lists, quotes, code
+  fences, tables with alignment, a `---` rule (a literal asterisk is `\*`; a
+  line break inside a paragraph is a line break). The new `docs md <file>`
+  subcommand returns a document as markdown: docx (mammoth → html → md) and
+  odt keep headings, emphasis, lists and tables; xlsx/ods sheets become
+  `# name` + a table each (symmetric with building them back); pdf yields its
+  text layer. Honest limits (skipped images, skipped non-table blocks) come
+  back in the answer's notes. Contracts 0.0.10 are untouched — the tool's
+  input semantics are not part of the declared contracts (see Changed).
+- **A single rich pdf renderer.** All pdf paths go through one layout:
+  heading scale with spacing, justified paragraphs with leading, manual
+  nested lists, italic quotes with a gray bar, code on gray plates, tables as
+  aligned mono columns with a header rule. Fonts: bold/italic/bold-italic/mono
+  are looked up next to the configured regular (arial/calibri/DejaVu
+  variants; a missing style falls back to regular).
+- **Native docx→pdf fallback**: `convert pdf файл.docx` without the soffice
+  bridge no longer refuses — it goes docx → markdown → the pdf renderer and
+  says so in the report (the bridge, when up, still produces the full
+  formatting).
+
+### Changed
+
+- **`docs write`/`append` semantics**: the body is always markdown now
+  (before: plain lines — docx paragraphs, an xlsx markdown/TSV/CSV table).
+  Plain text still lands as plain paragraphs; `*` must be escaped as `\*`.
+  The xlsx builder keeps its fallback: a body without md tables is parsed as
+  one markdown/TSV/CSV table as before. Declared here because scripts may
+  rely on the old literal reading; the 0.0.10 contracts (operations, home
+  formats, serve protocol) are unaffected.
+- The `append` report counts lines (`✓ дописано строк: N`), matching the
+  visual lines of the markdown blocks.
+
+### Fixed
+
+- Writing odt/ods through the soffice bridge: the produced file stayed in the
+  OS temp dir and the write would fail with ENOENT — the file is now copied
+  next to the source (the path was never exercised while the bridge was
+  absent; the refusal path was).
+- The stale README docs sections no longer promise txt/html/rtf reads and
+  `.md`/`.html`/`.json` writes that the tool never did.
+
+### Removed
+
+- The superseded single-style writers `writeDocx`, `writePdf`, `writeXlsx`,
+  `appendDocx` and `writeOdfViaSoffice` from `documents.ts` — the markdown
+  renderers in `documents-md.ts` cover them (the odf one also carried the
+  temp-dir bug fixed above).
+
+### Added
+
 - **The API and the contracts are stable as of 0.0.10** and will be supported:
   the operations (slash commands and the same-named rpc methods), the home
   file formats and the serve protocol; breaking changes are reserved for

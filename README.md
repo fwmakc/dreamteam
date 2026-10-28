@@ -927,21 +927,34 @@ them go through regular action blocks and your `y/n`:
 "tools": { "files": {}, "docs": {}, "ocr": {}, "web": {}, "mail": {}, "max": {} }
 ```
 
-**docs — documents: reading and writing.** The `docs` block:
+**docs — documents: reading and writing.** The `docs` block; the `write`/`append`
+body is markdown: headings `#`–`######`, **bold**, *italic*, `~~strike~~`,
+`code`, [links](https://…), nested `-`/`1.` lists, quotes `>`, code fences,
+tables `| a | b |` with a separator and alignment, a `---` rule; a literal
+asterisk is `\*`, a line break inside a paragraph is a line break:
 
-- `read file` — the document's text: pdf, docx, xlsx (sheets → markdown tables),
-  csv, txt/html/odt/ods/rtf;
-- `tables file [csv] [sheet]` — xlsx/csv tables: the answer is markdown or csv
-  rows, `sheet` — the sheet's name or number;
-- `write file.xlsx` — the block body: a markdown table `| a | b |` with a header
-  and a separator — saved as a real xlsx; `.md`/`.csv`/`.html`/`.json` — by
-  extension;
-- `append file.docx` — append paragraphs (the block body) to the end of an
-  existing one;
-- `convert pdf file.doc` — format transcoding. Native paths: docx↔pdf/html/txt,
-  xlsx↔csv/html, csv↔xlsx. The rest (`.doc`, `.xls`, `.rtf`, `.odt`…) — through
-  the LibreOffice bridge: `cd docker && docker compose --profile soffice up -d
-  --build` (port 8200), in the tool card — `"soffice": "http://127.0.0.1:8200"`.
+- `read file` — the document's text: pdf (the text layer), docx, odt; xlsx/ods/csv
+  — sheets as CSV;
+- `md file` — the document as markdown: headings, emphasis, lists, quotes,
+  tables; pdf — the text layer only, xlsx cell styles are not returned (honest
+  limits arrive in the answer's notes);
+- `tables file` — only the tables: xlsx/ods/csv or the tables of a docx;
+- `write file` — create from the body: docx — with real styles (Word opens it
+  as usual), pdf — with layout (headings, justification, lists, quotes with a
+  bar, code on a plate, tables as a mono block); xlsx — the body's tables
+  become sheets, a `# name` before a table names the sheet, the header row is
+  bold, non-table blocks are skipped (the report lists them); csv — as is;
+  odt/ods — through the soffice bridge;
+- `append file.docx` — append the body's markdown blocks to the end of an
+  existing one (headings, emphasis, code, lists, tables) — the rest of the
+  content is untouched;
+- `convert pdf file.doc` — transcoding through the LibreOffice bridge:
+  `cd docker && docker compose --profile soffice up -d --build` (port 8200),
+  in the tool card — `"soffice": "http://127.0.0.1:8200"`. Without the bridge
+  docx→pdf works natively — a fallback through markdown (simpler layout than
+  full formatting; the report warns). A Cyrillic-capable pdf font — the card's
+  `"font"` (regular required; bold/italic/mono are looked up next to it,
+  falling back to regular).
 
 **ocr — text and tables from scans.** The `ocr` block (tesseract, rus+eng):
 
@@ -1430,7 +1443,9 @@ dreamteam/
 │   ├── manager.ts            # the war-room manager: config, prompt, actions (team/chat/session/tool/project)
 │   ├── agents.ts             # loading agents/
 │   ├── actions.ts            # agents' action blocks, projects, structural permissions, execution
-│   ├── docs.ts               # the document stack: pdf/docx/xlsx — reading and writing + the LibreOffice bridge
+│   ├── documents.ts           # the document engine: pdf/docx/xlsx/odt/ods — reading, pdf fonts, the soffice bridge
+│   ├── documents-md.ts        # rich writers and export: md ⇄ docx/xlsx/pdf/odt, append, the convert fallback
+│   ├── md.ts                  # markdown: parseMd (blocks/inline/tables/lists) + htmlToMd
 │   ├── ocr.ts                # recognition: tesseract, pdf pages, tables by coordinates
 │   ├── web.ts                # reading sites: whitelist, article reader, links
 │   ├── mail.ts               # mail: imapflow/mailparser/nodemailer, explicit mailboxes

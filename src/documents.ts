@@ -3,23 +3,19 @@
  * без внешних программ:
  *   чтение  — pdf: текстовый слой (pdfjs-dist); docx: mammoth (сырой текст);
  *             xlsx: read-excel-file; odt/ods: zip + разбор content.xml (adm-zip);
- *   запись  — docx: пакет docx; xlsx: write-excel-file; pdf: pdfkit (кириллица —
- *             системный TTF-шрифт, см. карточку тула "font");
- *   дописать абзацы в существующий docx — прямая правка word/document.xml
- *             (остальное содержимое и форматирование не трогаются).
+ *   запись  — богатые писатели из documents-md.ts: docx (пакет docx), xlsx
+ *             (write-excel-file), pdf (pdfkit, кириллица — системный TTF-шрифт,
+ *             см. карточку тула "font");
+ *   дописать markdown-блоки в существующий docx — прямая правка
+ *             word/document.xml (остальное содержимое не трогается).
  * Всё, что Node нативно не умеет (бинарные .doc/.xls, создание ODF), — через
  * мост soffice: HTTP-сервис docker/soffice (обёртка над `soffice --convert-to`).
  */
-import { readFileSync, writeFileSync, createWriteStream, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import AdmZip from 'adm-zip';
 import mammoth from 'mammoth';
 import readXlsxFile from 'read-excel-file/node';
-import writeXlsxFile from 'write-excel-file/node';
-import { Document, Packer, Paragraph, TextRun } from 'docx';
-import PDFDocument from 'pdfkit';
 
 /** Лист таблицы: имя и строки одинаковой ширины (пустые ячейки — ''). */
 export interface DocSheet {
@@ -217,75 +213,50 @@ function contentXml(file: string): string {
   return entry.getData().toString('utf8');
 }
 
-// ─── Запись ────────────────────────────────────────────────────────────────
+export { contentXml, decodeEntities };
 
-/** docx из абзацев (каждая строка тела — абзац). */
-export async function writeDocx(file: string, paragraphs: string[]): Promise<void> {
-  const doc = new Document({
-    sections: [{ children: paragraphs.map((t) => new Paragraph({ children: [new TextRun(t)] })) }],
-  });
-  writeFileSync(file, await Packer.toBuffer(doc));
-}
+// ─── Запись ────────────────────────────────────────────────────────────────
 
 export function xmlEscape(s: string): string {
   return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 }
 
-/**
- * Дописать абзацы в конец существующего docx: правка word/document.xml прямо
- * в архиве — перед завершающим sectPr (он обязан быть последним элементом body),
- * поэтому существующий текст и форматирование не затрагиваются.
- */
-export function appendDocx(file: string, paragraphs: string[]): void {
-  if (paragraphs.length === 0) throw new Error('тело блока пустое — нечего дописывать');
-  const zip = new AdmZip(file);
-  const entry = zip.getEntry('word/document.xml');
-  if (!entry) throw new Error('это не docx: в архиве нет word/document.xml');
-  const xml = entry.getData().toString('utf8');
-  const bodyEnd = xml.lastIndexOf('</w:body>');
-  if (bodyEnd === -1) throw new Error('битый docx: нет закрывающего </w:body>');
-  const sect = xml.lastIndexOf('<w:sectPr');
-  const at = sect !== -1 && sect < bodyEnd ? sect : bodyEnd;
-  const frag = paragraphs
-    .map((t) => `<w:p><w:r><w:t xml:space="preserve">${xmlEscape(t)}</w:t></w:r></w:p>`)
-    .join('');
-  zip.updateFile(entry, Buffer.from(xml.slice(0, at) + frag + xml.slice(at), 'utf8'));
-  zip.writeZip(file);
+/** Стили шрифта pdf-рендера: путь к TTF на каждый; чего в системе нет — заменяется regular. */
+export type PdfFontStyle = 'regular' | 'bold' | 'italic' | 'boldItalic' | 'mono';
+
+const FONT_FILES: Record<PdfFontStyle, string[]> = {
+  regular: ['arial.ttf', 'calibri.ttf', 'DejaVuSans.ttf'],
+  bold: ['arialbd.ttf', 'calibrib.ttf', 'DejaVuSans-Bold.ttf'],
+  italic: ['ariali.ttf', 'calibrii.ttf', 'DejaVuSans-Oblique.ttf'],
+  boldItalic: ['arialbi.ttf', 'calibribi.ttf', 'DejaVuSans-BoldOblique.ttf'],
+  mono: ['consola.ttf', 'cour.ttf', 'DejaVuSansMono.ttf'],
+};
+
+function fontCandidates(style: PdfFontStyle): string[] {
+  return FONT_FILES[style].flatMap((f) => [
+    `C:/Windows/Fonts/${f}`,
+    `/usr/share/fonts/truetype/dejavu/${f}`,
+    `/usr/share/fonts/TTF/${f}`,
+  ]);
 }
 
-/** xlsx из листов (write-excel-file; все ячейки — строки). */
-export async function writeXlsx(file: string, sheets: DocSheet[]): Promise<void> {
-  // node-экспорт возвращает конвейер — файл на диск пишется через .toFile()
-  await writeXlsxFile(sheets.map((s) => ({ sheet: s.name.slice(0, 31), data: s.rows }))).toFile(file);
+/** Пять начертаний для pdf-рендера: карточка "font" задаёт regular, остальные ищутся рядом по именам. */
+export function pdfFontPaths(configured?: string): Record<PdfFontStyle, string> {
+  const resolve = (style: PdfFontStyle): string | null => fontCandidates(style).find((f) => existsSync(f)) ?? null;
+  const regular = (configured && existsSync(configured) ? configured : null) ?? resolve('regular');
+  if (!regular) {
+    throw new Error(
+      `не найден TTF-шрифт с кириллицей (${fontCandidates('regular').join(', ')}) — встроенные шрифты pdf кириллицу не умеют; ` +
+      'укажите путь в карточке тула docs: "font": "C:/Windows/Fonts/arial.ttf"',
+    );
+  }
+  const pick = (style: PdfFontStyle): string => resolve(style) ?? regular;
+  return { regular, bold: pick('bold'), italic: pick('italic'), boldItalic: pick('boldItalic'), mono: pick('mono') };
 }
 
 /** Шрифт с кириллицей для pdf: карточка "font", иначе системные кандидаты. */
 export function pdfFontPath(configured?: string): string {
-  const candidates = configured ? [configured] : [
-    'C:/Windows/Fonts/arial.ttf',
-    'C:/Windows/Fonts/calibri.ttf',
-    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-    '/usr/share/fonts/TTF/DejaVuSans.ttf',
-  ];
-  for (const f of candidates) if (existsSync(f)) return f;
-  throw new Error(
-    `не найден TTF-шрифт с кириллицей (${candidates.join(', ')}) — встроенные шрифты pdf кириллицу не умеют; ` +
-    'укажите путь в карточке тула docs: "font": "C:/Windows/Fonts/arial.ttf"',
-  );
-}
-
-/** pdf из текста (pdfkit; абзацы — непустые строки, автоперенос и страницы сами). */
-export async function writePdf(file: string, text: string, font?: string): Promise<void> {
-  const doc = new PDFDocument({ size: 'A4', margin: 56, info: { Title: basename(file) } });
-  const out = createWriteStream(file);
-  doc.pipe(out);
-  doc.font(pdfFontPath(font));
-  for (const line of text.split(/\r?\n/)) doc.text(line, { lineBreak: line === '' });
-  doc.end();
-  await new Promise<void>((resolve, reject) => {
-    out.on('finish', resolve);
-    out.on('error', reject);
-  });
+  return pdfFontPaths(configured).regular;
 }
 
 /**
@@ -318,23 +289,4 @@ export async function convertViaSoffice(baseUrl: string, file: string, target: s
   if (buf.length === 0) throw new Error('мост soffice вернул пустой файл');
   writeFileSync(outPath, buf);
   return outPath;
-}
-
-/** Создание ODF из тела: сначала нативный docx/xlsx во временном файле, затем мост. */
-export async function writeOdfViaSoffice(
-  baseUrl: string,
-  outPath: string,
-  kind: 'odt' | 'ods',
-  paragraphs: string[],
-  sheets: DocSheet[],
-): Promise<string> {
-  const tmp = join(tmpdir(), `dt-docs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  const native = kind === 'odt' ? `${tmp}.docx` : `${tmp}.xlsx`;
-  if (kind === 'odt') await writeDocx(native, paragraphs);
-  else await writeXlsx(native, sheets);
-  try {
-    return await convertViaSoffice(baseUrl, native, kind);
-  } finally {
-    try { unlinkSync(native); } catch { /* осядем во временной папке — не страшно */ }
-  }
 }

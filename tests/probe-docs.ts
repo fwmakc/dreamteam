@@ -3,12 +3,20 @@
  *   write xlsx (markdown-таблица) → read/tables: ячейки на месте;
  *   чужой xlsx (zip+xml руками): sharedStrings, inlineStr, кэш формулы,
  *         булев, дата по стилю — то, что Excel пишет за нас;
- *   write docx (абзацы) → read; append → новый абзац добавлен, старые целы;
+ *   write docx из markdown (# заголовок) → read; append с markdown-блоками → XML;
+ *   md: юнит-проверки parseMd (цитаты, код-блоки, линия, экранирование,
+ *         вложенные списки, таблицы с \| и выравниванием, картинки в notes);
+ *   md → docx богатый: XML (заголовки, начертания, код, гиперссылка, нумерация)
+ *         + золотой круг md → docx → md — структура блоков совпадает;
+ *   экранирование \* и \. — литеральные звёздочка и точка;
+ *   md → xlsx: листы из «# имя», жирная шапка; roundtrip xlsx → md → xlsx;
+ *   md → pdf (заголовки/списки/цитата/код-блок/таблица) → read;
  *   таблица в docx (собрана пакетом docx) → tables: CSV совпадает;
  *   write pdf → pdfText: кириллица читается обратно;
  *   odt/ods — фикстуры-архивы с content.xml → текст и таблицы;
  *   csv — как есть; пути наружу рабочей папки — отказ;
- *   мост soffice недоступен — внятный отказ с подсказкой (не падение).
+ *   мост soffice недоступен — внятный отказ с подсказкой (не падение);
+ *   convert docx→pdf без моста — нативный фолбэк через markdown.
  * Запуск: npx tsx tests/probe-docs.ts
  */
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -43,23 +51,23 @@ const run = (body: string): Promise<string> => tool.run(body, makeCtx(cwd));
   check('xlsx: read отдаёт те же таблицы', full.includes('разработчик'), full.slice(0, 120));
 }
 
-// ─── docx: абзацы → read; append сохраняет старое ───────────────────────────
+// ─── docx: markdown → write → read; append с markdown-блоками ───────────────
 {
-  await run('write договор.docx\nДоговор поставки\n\n1. Предмет договора\nПоставка кофе, 10 кг.');
+  await run('write договор.docx\n# Договор поставки\n\nРаздел 1. Предмет договора\nПоставка кофе, 10 кг.');
   const text = await run('read договор.docx');
   check('docx: read — абзацы на месте', text.includes('Договор поставки') && text.includes('Поставка кофе, 10 кг.'), text);
   check('docx: read — пустые строки схлопнуты', !text.includes('\n\n\n'), JSON.stringify(text.slice(0, 80)));
 
   const report = await run('append договор.docx\n3.5. Риски и ответственность сторон\n3.6. Порядок споров');
-  check('docx: append — отчёт', report.includes('2') && report.includes('договор.docx'), report);
+  check('docx: append — отчёт со счётчиком строк', report.includes('2') && report.includes('договор.docx'), report);
   const after = await run('read договор.docx');
   check('docx: append — новое присутствует', after.includes('3.5. Риски и ответственность сторон') && after.includes('3.6. Порядок споров'), after.slice(-160));
-  check('docx: append — старое не тронуто', after.includes('Договор поставки') && after.includes('1. Предмет договора'), after.slice(0, 120));
-  const zip = new AdmZip(join(cwd, 'договор.docx'));
-  check('docx: append — xml валиден, спецсимволы экранированы', (() => {
-    const xml = zip.getEntry('word/document.xml')!.getData().toString('utf8');
-    return xml.includes('<w:sectPr') === false || xml.lastIndexOf('<w:p>') < xml.lastIndexOf('<w:sectPr');
-  })());
+  check('docx: append — старое не тронуто', after.includes('Договор поставки') && after.includes('Раздел 1. Предмет договора'), after.slice(0, 120));
+  const zip0 = new AdmZip(join(cwd, 'договор.docx'));
+  const xml0 = zip0.getEntry('word/document.xml')!.getData().toString('utf8');
+  check('docx: write — заголовок стилем Heading1', xml0.includes('w:val="Heading1"'), xml0.slice(0, 300));
+  check('docx: append — «3.5.» сохранено буквально', xml0.includes('3.5. Риски'), xml0.slice(-300));
+  check('docx: append — вставка перед sectPr', !xml0.includes('<w:sectPr') || xml0.lastIndexOf('<w:p>') < xml0.lastIndexOf('<w:sectPr'));
 }
 
 // ─── docx с настоящей таблицей → tables ─────────────────────────────────────
@@ -84,6 +92,148 @@ const run = (body: string): Promise<string> => tool.run(body, makeCtx(cwd));
   check('docx: tables из таблицы', csv.includes('ФИО,Серия') && csv.includes('Иванов И.И.,9900'), csv);
   const plain = await run('read реестр.docx');
   check('docx: read — текст вокруг таблицы', plain.includes('Реестр паспортов') && plain.includes('Иванов И.И.'), plain.slice(0, 120));
+}
+
+// ─── md: юнит-проверки парсера ──────────────────────────────────────────────
+{
+  const { parseMd } = await import('../src/md.js');
+  const q = parseMd('> Раз строки\n> ещё строка\n>\n> второй').blocks[0];
+  check(
+    'md: цитата — строки подряд, пустая > — разрыв',
+    q.kind === 'quote' && q.paragraphs.length === 3 && (q.paragraphs[0][0]?.text ?? '') === 'Раз строки' && (q.paragraphs[2][0]?.text ?? '') === 'второй',
+    JSON.stringify(q),
+  );
+  const fence = parseMd('```\nкод <>&\n```').blocks[0];
+  check('md: код-блок целиком, без разбора тегов', fence.kind === 'code' && fence.text === 'код <>&', JSON.stringify(fence));
+  const kinds = parseMd('текст\n\n---\n\nещё').blocks.map((b) => b.kind);
+  check('md: --- — линия', kinds.includes('hr'), JSON.stringify(kinds));
+  const esc = parseMd('\\*не жирный\\* и 1\\. не список').blocks[0];
+  const escLines = esc.kind === 'p' ? esc.lines : [];
+  check(
+    'md: экранирование \\* и \\.',
+    esc.kind === 'p' && escLines[0].length === 1 && escLines[0][0].text === '*не жирный* и 1. не список',
+    JSON.stringify(escLines),
+  );
+  const nest = parseMd('- верх\n  - низ\n1. раз\n2. два').blocks;
+  check(
+    'md: вложенность списков и исходный маркер',
+    nest[0].kind === 'ul' && !!nest[0].items[0].sub && nest[1].kind === 'ol' && nest[1].items[1].marker === '2.',
+    JSON.stringify(nest),
+  );
+  const tbl = parseMd('| a \\| б | в |\n| :--- | ---: |\n| 1 | 2 |').blocks[0];
+  check(
+    'md: таблица — \\| в ячейке, выравнивание из разделителя',
+    tbl.kind === 'table' && tbl.aligns[0] === 'left' && tbl.aligns[1] === 'right' && tbl.header[0][0].text === 'a | б',
+    JSON.stringify(tbl),
+  );
+  const img = parseMd('![подпись](фото.png)').notes.join(' | ');
+  check('md: картинка — в notes, не в блоках', img.includes('подпись') && img.includes('фото.png'), img);
+}
+
+// ─── md → docx богатый: XML-проверки + золотой круг md → docx → md ──────────
+{
+  const golden = [
+    '# Заголовок первый',
+    '',
+    'Абзац с **жирным**, *курсивом*, ***обоими*** и `инлайн-кодом`.',
+    '',
+    '## Заголовок второй',
+    '',
+    '- пункт первый',
+    '- пункт второй',
+    '  - вложенный пункт',
+    '',
+    '1. шаг раз',
+    '2. шаг два',
+    '',
+    'Ссылка: [сайт](https://example.com) в тексте.',
+    '',
+    '| **Имя** | **Роль** |',
+    '| --- | --- |',
+    '| Катя | дизайнер |',
+  ].join('\n');
+  const report = await run(`write богатый.docx\n${golden}`);
+  check('md→docx: write — отчёт', report.includes('богатый.docx'), report);
+  const zip = new AdmZip(join(cwd, 'богатый.docx'));
+  const xml = zip.getEntry('word/document.xml')!.getData().toString('utf8');
+  check('md→docx: заголовки Heading1/Heading2', xml.includes('w:val="Heading1"') && xml.includes('w:val="Heading2"'));
+  check('md→docx: жирный и курсив', xml.includes('<w:b/>') && xml.includes('<w:i/>'));
+  check('md→docx: инлайн-код — Consolas и стиль Code', xml.includes('Consolas') && xml.includes('w:val="Code"'));
+  check('md→docx: гиперссылка в тексте', xml.includes('<w:hyperlink'));
+  check('md→docx: списки — numPr', xml.includes('<w:numPr>'));
+  const rels = zip.getEntry('word/_rels/document.xml.rels')?.getData().toString('utf8') ?? '';
+  check('md→docx: адрес ссылки в rels', rels.includes('https://example.com'));
+  const back = await run('md богатый.docx');
+  const { parseMd } = await import('../src/md.js');
+  const strip = (md: string): string => JSON.stringify(parseMd(md).blocks, (k, v) => (k === 'marker' ? undefined : v));
+  check('md→docx→md: золотой круг — структура совпала', strip(golden) === strip(back), `A=${strip(golden).slice(0, 250)}\nB=${strip(back).slice(0, 250)}`);
+}
+
+// ─── экранирование и код-блок: \* литеральный, плашка у fenced-кода ─────────
+{
+  await run('write экранирование.docx\n\\*не жирный\\* и 1\\. не список');
+  const xml = new AdmZip(join(cwd, 'экранирование.docx')).getEntry('word/document.xml')!.getData().toString('utf8');
+  check('md→docx: \\* без w:b, звёздочка литеральная', !xml.includes('<w:b/>') && xml.includes('*не жирный* и 1. не список'));
+  const text = await run('read экранирование.docx');
+  check('md→docx: экранированный текст читается', text.includes('*не жирный* и 1. не список'), text);
+  await run('write код-блок.docx\n```\nкод <>&\n```');
+  const xmlc = new AdmZip(join(cwd, 'код-блок.docx')).getEntry('word/document.xml')!.getData().toString('utf8');
+  check('md→docx: код-блок — плашка F2F2F2 и Consolas', xmlc.includes('F2F2F2') && xmlc.includes('Consolas'));
+  const codetext = await run('read код-блок.docx');
+  check('md→docx: код-блок читается', codetext.includes('код <>&'), codetext);
+}
+
+// ─── md → xlsx: листы из «# имя», жирная шапка; roundtrip xlsx → md → xlsx ──
+{
+  const md = ['# Смета', '', '| Пункт | Цена |', '| --- | --- |', '| Кофе | 1200 |', '', '# Итоги', '', '| Показатель | Значение |', '| --- | --- |', '| Всего | 1200 |'].join('\n');
+  const report = await run(`write смета-богатая.xlsx\n${md}`);
+  check('md→xlsx: write — отчёт с именами листов', report.includes('Смета') && report.includes('Итоги'), report);
+  const csv = await run('tables смета-богатая.xlsx');
+  check('md→xlsx: два листа с именами', csv.includes('# лист: Смета') && csv.includes('# лист: Итоги'), csv.slice(0, 200));
+  check('md→xlsx: ячейки на месте', csv.includes('Кофе,1200') && csv.includes('Всего,1200'), csv);
+  const styles = new AdmZip(join(cwd, 'смета-богатая.xlsx')).getEntry('xl/styles.xml')?.getData().toString('utf8') ?? '';
+  check('md→xlsx: жирная шапка в стилях', styles.includes('<b/>'), styles.slice(0, 200));
+  const back = await run('md смета-богатая.xlsx');
+  check('xlsx→md: «# имя» и md-таблицы', back.startsWith('# Смета') && back.includes('| Пункт | Цена |') && back.includes('| --- | --- |'), back.slice(0, 200));
+  await run(`write смета-снова.xlsx\n${back}`);
+  const csv2 = await run('tables смета-снова.xlsx');
+  check('xlsx→md→xlsx: roundtrip — таблицы совпали', csv2 === csv, `1: ${csv.slice(0, 120)}\n2: ${csv2.slice(0, 120)}`);
+}
+
+// ─── md → pdf: богатый рендер (заголовки, списки, цитата, код, таблица) ─────
+{
+  const md = [
+    '# Формат документа',
+    '',
+    'Абзац с **жирным** и *курсивом*, намеренно длинный, чтобы было видно',
+    'перенос строк и интерлиньяж рендера.',
+    '',
+    '- пункт первый',
+    '- пункт второй',
+    '',
+    '1. нумерованный шаг',
+    '',
+    '> Цитата с курсивом',
+    '',
+    '```',
+    'код-блок с пробелами',
+    '```',
+    '',
+    '| Колонка А | Колонка Б |',
+    '| --- | --- |',
+    '| один | два |',
+    '',
+    '---',
+  ].join('\n');
+  const report = await run(`write формат-проба.pdf\n${md}`);
+  check('md→pdf: write — отчёт', report.includes('формат-проба.pdf'), report);
+  const text = await run('read формат-проба.pdf');
+  check(
+    'md→pdf: заголовок, список, цитата, таблица — в текстовом слое',
+    text.includes('Формат документа') && text.includes('пункт первый') && text.includes('нумерованный шаг') &&
+      text.includes('Цитата с курсивом') && text.includes('Колонка А') && text.includes('один'),
+    text.slice(0, 300),
+  );
 }
 
 // ─── pdf: кириллица туда-обратно ────────────────────────────────────────────
@@ -210,6 +360,11 @@ const run = (body: string): Promise<string> => tool.run(body, makeCtx(cwd));
   } catch (e) {
     check('convert несуществующего — отказ', (e as Error).message.includes('нет'), (e as Error).message.slice(0, 120));
   }
+  // docx→pdf без моста — нативный фолбэк: docx → md → наш pdf-рендер
+  const fb = await tool.run('convert pdf договор.docx', makeCtx(cwd));
+  check('convert docx→pdf без моста — фолбэк в отчёте', fb.includes('фолбэк') && fb.includes('договор.pdf'), fb);
+  const pdftext = await run('read договор.pdf');
+  check('фолбэк pdf: текст и заголовок на месте', pdftext.includes('Договор поставки') && pdftext.includes('Поставка кофе'), pdftext.slice(0, 200));
 }
 
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
