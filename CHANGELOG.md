@@ -23,6 +23,29 @@ compatibility is promised across earlier versions.
   `C:\tmp`/`/tmp` paths; with the whole e2e job green on runners, its
   `continue-on-error` scaffold is dropped — e2e is a hard gate again.
 
+### Changed
+
+- **xlsx engine replaced**: reading — `read-excel-file`, writing —
+  `write-excel-file` (instead of the frozen `exceljs` with its deprecated
+  transitive tree). Readings are pinned by a new golden-master probe on real
+  documents (`npm run probe:data`); honest contract changes: a merged cell's
+  value lives only in its master cell (exceljs multiplied it across the whole
+  merge span), and trailing never-filled columns are dropped — row width is
+  the content width, not the sheet's styled width.
+- **html parsing in the `web` tool**: `cheerio` replaced by `jsdom`, which was
+  already in the dependency tree for `@mozilla/readability` (kills the
+  `whatwg-encoding` deprecation chain). Behavior is unchanged.
+- **Node.js ≥ 22** (24 LTS recommended and used in CI); `@types/node` ^24.
+- Dependencies refreshed (`docx` 9.15 and others); the install tree shrinks
+  from 358 to 227 packages with zero vulnerabilities.
+
+### Removed
+
+- `exceljs` and `cheerio` — together they pulled all seven deprecated
+  transitive packages (`glob`, `inflight`, `rimraf`, `fstream`,
+  `lodash.isequal`, `whatwg-encoding`, `uuid@8`); a global install is now
+  warning-free.
+
 ## [0.0.10] — 2026-10-27
 
 ### Added

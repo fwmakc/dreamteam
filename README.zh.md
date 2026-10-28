@@ -18,7 +18,7 @@
 
 ## 快速开始
 
-需要 Node.js ≥ 18.17。
+需要 Node.js ≥ 22（推荐 24 LTS）。
 
 ```bash
 npm install -g dreamteam   # 或者：git clone + npm install + npm run build:gui + npm link
@@ -733,6 +733,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 - `npm run probe:e2e` — Windows 真实伪终端（ConPTY）下的同样区域：真正到达应用的东西（`probe-input`）与经迷你 VT 仿真器的渲染屏幕（`probe-startup`：无项目启动、打开带旧谈话的项目、面板中的历史、滚轮/PgUp/鼠标/选择）。它自行安装并移除 node-pty。
 - `npm run probe:tui` — 伪终端里完整跑一遍应用：无项目启动 → `/project new` → 礼宾经理问候、`team.add`、`chat.add`、带工具的一轮、`/agents`、退出 — 全在 mock 服务商和临时文件夹上进行。`probe:scenario-tui` —— 同一场景，每步之后还校验磁盘上的文件（会话、agents/、导出归档）。
 - `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui-dist/ 静态资源、快照中的无项目启动、WS 礼宾场景（`project.open` → 问候、发言、经对话的 team.add）、rpc（`project.open`、`sessions.list`、`session.agent.add/delete`、`settings.update`（带模型校验）、`session.new` 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。
+- `npm run probe:data` — 在 `data/`（已被 `.gitignore` 忽略，不在仓库里）的真实文件上检查文档引擎的本地探针：xlsx 黄金基准（合并单元格、表头、数字）与 docx/pdf 文本锚点。没有该文件夹即跳过（退出码 0），因此不进入密封的 `npm run probe`。
 
 `npm run typecheck` — 类型检查（src 与 tests）。
 

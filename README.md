@@ -36,7 +36,7 @@ add|delete <id…|all>`, or asking the manager to "bring Elena in").
 
 ## Quick start
 
-You need Node.js ≥ 18.17.
+You need Node.js ≥ 22 (24 LTS recommended).
 
 ```bash
 npm install -g dreamteam   # or: git clone + npm install + npm run build:gui + npm link
@@ -1364,6 +1364,11 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   `session.agent.add/delete`, `settings.update` with model validation,
   `session.new` with fresh states after them), live confirm/choose
   questions — a client answer, a timeout refusal and a refusal with no clients.
+- `npm run probe:data` — a local probe of the documents engine against real
+  files in `data/` (the folder is `.gitignore`d, not part of the repo): the
+  xlsx golden master (merged cells, header rows, numbers) and docx/pdf text
+  anchors. Without the folder it skips with exit code 0, so it is not part of
+  the hermetic `npm run probe`.
 
 `npm run typecheck` — type checking (src and tests).
 

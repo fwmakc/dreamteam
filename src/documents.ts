@@ -2,8 +2,8 @@
  * Документы: чтение и запись pdf / docx / xlsx / csv / odt / ods — чистый Node,
  * без внешних программ:
  *   чтение  — pdf: текстовый слой (pdfjs-dist); docx: mammoth (сырой текст);
- *             xlsx: exceljs; odt/ods: zip + разбор content.xml (adm-zip);
- *   запись  — docx: пакет docx; xlsx: exceljs; pdf: pdfkit (кириллица —
+ *             xlsx: read-excel-file; odt/ods: zip + разбор content.xml (adm-zip);
+ *   запись  — docx: пакет docx; xlsx: write-excel-file; pdf: pdfkit (кириллица —
  *             системный TTF-шрифт, см. карточку тула "font");
  *   дописать абзацы в существующий docx — прямая правка word/document.xml
  *             (остальное содержимое и форматирование не трогаются).
@@ -16,7 +16,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import AdmZip from 'adm-zip';
 import mammoth from 'mammoth';
-import ExcelJS from 'exceljs';
+import readXlsxFile from 'read-excel-file/node';
+import writeXlsxFile from 'write-excel-file/node';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
 import PDFDocument from 'pdfkit';
 
@@ -144,38 +145,26 @@ export async function pdfText(file: string): Promise<string> {
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/** Листы xlsx → текстовые строки (exceljs; формулы — вычисленные значения). */
+/**
+ * Листы xlsx → текстовые строки (read-excel-file; у формул — кэшированное
+ * значение, rich text — конкатенация; у объединённых ячеек значение стоит
+ * в мастер-ячейке, покрытые пусты — как в самом файле).
+ */
 export async function xlsxSheets(file: string): Promise<DocSheet[]> {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(file);
-  const sheets: DocSheet[] = [];
-  for (const ws of wb.worksheets) {
-    const rows: string[][] = [];
-    ws.eachRow({ includeEmpty: true }, (row) => {
-      const cells: string[] = [];
-      row.eachCell({ includeEmpty: true }, (cell, col) => {
-        cells[col - 1] = cellText(cell);
-      });
-      rows.push(cells.map((c) => c ?? ''));
-    });
-    sheets.push({ name: ws.name, rows: rows.map(padRow(rows)) });
-  }
-  return sheets;
+  const sheets = await readXlsxFile(readFileSync(file));
+  return sheets.map(({ sheet, data }) => {
+    const rows = data.map((row) => row.map(cellText));
+    return { name: sheet, rows: rows.map(padRow(rows)) };
+  });
 }
 
-function cellText(cell: ExcelJS.Cell): string {
-  const v = cell.value;
+function cellText(v: unknown): string {
   if (v === null || v === undefined) return '';
-  if (typeof v === 'object') {
-    if ('richText' in v) return v.richText.map((r) => r.text).join('');
-    if ('result' in v) return String(v.result ?? '');
-    if ('text' in v) return String(v.text ?? '');
-    if (v instanceof Date) return v.toISOString().slice(0, 10);
-  }
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
   return String(v);
 }
 
-/** Ширина строки — по самой длинной в листе (exceljs возвращает строки рвано). */
+/** Ширина строки — по самой длинной в листе (читатели возвращают строки рвано). */
 function padRow(rows: string[][]): (r: string[]) => string[] {
   const width = Math.max(1, ...rows.map((r) => r.length));
   return (r) => Array.from({ length: width }, (_, i) => r[i] ?? '');
@@ -264,14 +253,10 @@ export function appendDocx(file: string, paragraphs: string[]): void {
   zip.writeZip(file);
 }
 
-/** xlsx из листов. */
+/** xlsx из листов (write-excel-file; все ячейки — строки). */
 export async function writeXlsx(file: string, sheets: DocSheet[]): Promise<void> {
-  const wb = new ExcelJS.Workbook();
-  for (const s of sheets) {
-    const ws = wb.addWorksheet(s.name.slice(0, 31));
-    ws.addRow(s.rows);
-  }
-  await wb.xlsx.writeFile(file);
+  // node-экспорт возвращает конвейер — файл на диск пишется через .toFile()
+  await writeXlsxFile(sheets.map((s) => ({ sheet: s.name.slice(0, 31), data: s.rows }))).toFile(file);
 }
 
 /** Шрифт с кириллицей для pdf: карточка "font", иначе системные кандидаты. */

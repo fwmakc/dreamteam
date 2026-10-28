@@ -4,7 +4,7 @@
  * сервер, то и разбираем.
  *
  *   read  — статья текстом: @mozilla/readability (статьи) или блоки через
- *           cheerio (страницы без «тела статьи»: заголовок + абзацы/списки);
+ *           jsdom (страницы без «тела статьи»: заголовок + абзацы/списки);
  *   links — абсолютные ссылки страницы (для навигации по разделам);
  *
  * Домены сверяются по суффиксу: "wikipedia.org" покрывает и ru.wikipedia.org.
@@ -12,7 +12,6 @@
  * поэтому подменой редиректом из списка не выбраться. Локальные адреса
  * (localhost, 127.0.0.1) разрешены, только если сами попали в список.
  */
-import { load } from 'cheerio';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
 
@@ -64,16 +63,15 @@ export async function fetchPage(url: URL, checkUrl: (u: URL) => void): Promise<{
 
 /** HTML → текст: заголовки, абзацы, пункты списков, цитаты, ячейки таблиц. */
 function htmlToText(html: string): string {
-  const $ = load(html);
-  $('script, style, nav, header, footer, aside, form, noscript').remove();
+  const doc = new JSDOM(html).window.document;
+  doc.querySelectorAll('script, style, nav, header, footer, aside, form, noscript').forEach((el) => el.remove());
   const parts: string[] = [];
-  $('h1, h2, h3, h4, h5, h6, p, li, blockquote, pre, td, th, figcaption, dt, dd').each((_, el) => {
+  doc.querySelectorAll('h1, h2, h3, h4, h5, h6, p, li, blockquote, pre, td, th, figcaption, dt, dd').forEach((el) => {
     // li и td внутри уже вынутых блоков дублировали бы текст — берём только листовые
-    const $el = $(el);
-    if ($el.find('p, li, blockquote, pre, td, h1, h2, h3, h4, h5, h6').length > 0) return;
-    const text = $el.text().replace(/\s+/g, ' ').trim();
+    if (el.querySelector('p, li, blockquote, pre, td, h1, h2, h3, h4, h5, h6')) return;
+    const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
     if (!text) return;
-    const tag = (el as { tagName?: string }).tagName?.toLowerCase() ?? '';
+    const tag = el.tagName.toLowerCase();
     if (/^h[1-6]$/.test(tag)) parts.push(`\n${text}\n`);
     else if (tag === 'li') parts.push(`- ${text}`);
     else parts.push(text);
@@ -81,9 +79,11 @@ function htmlToText(html: string): string {
   return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/** Статья текстом: сначала readability, без статьи — cheerio-блоки. */
+/** Статья текстом: сначала readability, без статьи — jsdom-блоки. */
 export function extractArticle(html: string, baseUrl: string): string {
   const dom = new JSDOM(html, { url: baseUrl });
+  // readability при разборе правит документ — заголовок снимаем до него
+  const fallbackTitle = dom.window.document.querySelector('title')?.textContent?.trim() ?? '';
   const article = new Readability(dom.window.document).parse();
   if (article?.textContent?.trim()) {
     const title = article.title ? `${article.title}\n\n` : '';
@@ -91,8 +91,9 @@ export function extractArticle(html: string, baseUrl: string): string {
   }
   const text = htmlToText(html);
   if (!text) throw new Error('страница без читаемого текста (возможно, она рисуется JavaScript-ом — тул web JS не исполняет)');
-  const title = load(html)('title').first().text().trim();
-  const head = title ? `${title}\n\n(страница без явной статьи — текст целиком)\n` : '(страница без явной статьи — текст целиком)\n';
+  const head = fallbackTitle
+    ? `${fallbackTitle}\n\n(страница без явной статьи — текст целиком)\n`
+    : '(страница без явной статьи — текст целиком)\n';
   return (head + text).slice(0, MAX_TEXT);
 }
 
@@ -104,12 +105,12 @@ export interface LinkRef {
 }
 
 export function extractLinks(html: string, baseUrl: string): LinkRef[] {
-  const $ = load(html);
+  const doc = new JSDOM(html).window.document;
   const base = new URL(baseUrl);
   const seen = new Set<string>();
   const out: LinkRef[] = [];
-  for (const el of $('a[href]').toArray()) {
-    const href = $(el).attr('href') ?? '';
+  for (const el of doc.querySelectorAll('a[href]')) {
+    const href = el.getAttribute('href') ?? '';
     let abs: URL;
     try {
       abs = new URL(href, base);
@@ -127,7 +128,7 @@ export function extractLinks(html: string, baseUrl: string): LinkRef[] {
     } catch {
       /* кривые проценты — отдаём как есть */
     }
-    const text = $(el).text().replace(/\s+/g, ' ').trim().slice(0, 80);
+    const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
     out.push({ url: shown, text });
     if (out.length >= MAX_LINKS) break;
   }

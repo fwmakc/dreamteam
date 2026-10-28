@@ -30,7 +30,7 @@
 
 ## Быстрый старт
 
-Нужен Node.js ≥ 18.17.
+Нужен Node.js ≥ 22 (рекомендуется 24 LTS).
 
 ```bash
 npm install -g dreamteam   # или: git clone + npm install + npm run build:gui + npm link
@@ -1321,6 +1321,11 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
   `settings.update` с валидацией модели, `session.new` со свежими state после
   них), живые вопросы confirm/choose
   — ответ клиента, отказ по таймауту и отказ при отсутствии клиентов.
+- `npm run probe:data` — локальная проба движка документов на настоящих файлах
+  из `data/` (папка в `.gitignore`, в репозиторий не входит): золотой мастер
+  xlsx-чтения (объединённые ячейки, шапки, числа) и текстовые якоря docx/pdf.
+  Без папки — пропуск с нулевым кодом выхода, поэтому в герметичный
+  `npm run probe` проба не входит.
 
 `npm run typecheck` — проверка типов (src и tests).
 
