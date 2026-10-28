@@ -532,6 +532,56 @@ const threw = async (line: string): Promise<string> => {
   const team = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
   check('agent tool add: свой тул записан агенту', Boolean((team.find((a) => a.id === 'test2')?.tools as { mytool?: unknown })?.mytool));
 
+  // ── тула дома: /tools (обзор и карточка), /tool new|update|delete ──────────
+  let lines: string[];
+  lines = await run(engine, '/tools');
+  check('/tools: встроенные в обзоре', lines.some((l) => l.startsWith('• files')) && lines.some((l) => l.startsWith('• shell')), lines.slice(0, 4).join('\n'));
+  check('/tools: свой тул с пометкой и держателем', lines.some((l) => l.startsWith('• mytool') && l.includes('Мой тул') && l.includes('test2')), lines.join('\n'));
+  lines = await run(engine, '/tools mytool');
+  check('/tools <тул>: файл и описание', lines.some((l) => l.includes('tools/mytool.ts')) && lines.some((l) => l.includes('Мой тул')), lines.join('\n'));
+  lines = await run(engine, '/tools неттакого');
+  check('/tools <нет>: перечисляет известные', lines[0]?.includes('неттакого') && lines[0]?.includes('files') === true, lines[0]);
+
+  const made = await run(engine, '/tool new probetool');
+  check('/tool new: отчёт ✓', made[0]?.startsWith('✓') === true && made[0]?.includes('probetool') === true, made.join('\n'));
+  check('/tool new: файл-шаблон на месте', existsSync(join(home, 'tools', 'probetool.ts')));
+  check('/tool new: карточка с description', existsSync(join(home, 'tools', 'probetool.json')));
+  const dup = await run(engine, '/tool new probetool');
+  check('/tool new: повтор — уже есть', dup[0]?.includes('уже есть') ?? false, dup[0]);
+  const taken = await run(engine, '/tool new files');
+  check('/tool new: имя встроенного — отказ', taken[0]?.includes('занято') ?? false, taken[0]);
+
+  const upd = await run(engine, '/tool update probetool description=пробный тул');
+  check('/tool update: карточка записана', upd[0]?.startsWith('✓') === true && upd[0]?.includes('description') === true, upd[0]);
+  const savedCard = JSON.parse(readFileSync(join(home, 'tools', 'probetool.json'), 'utf8')) as { description?: string };
+  check('/tool update: description в файле', savedCard.description === 'пробный тул', JSON.stringify(savedCard));
+  const upd2 = await run(engine, '/tool update files description=хак');
+  check('/tool update: встроенному — отказ', upd2[0]?.includes('встроенн') ?? false, upd2[0]);
+  const upd3 = await run(engine, '/tool update призрак x=1');
+  check('/tool update: без файла — отказ', upd3[0]?.includes('призрак') ?? false, upd3[0]);
+
+  lines = await run(engine, '/tools probetool');
+  check('/tools <тул> после update: карточка дома показана', lines.some((l) => l.includes('"description"')), lines.join('\n'));
+
+  const del = await run(engine, '/tool delete probetool');
+  check('/tool delete: отчёт ✓', del[0]?.startsWith('✓') === true && del[0]?.includes('probetool') === true, del.join('\n'));
+  check('/tool delete: файл и карточка убраны', !existsSync(join(home, 'tools', 'probetool.ts')) && !existsSync(join(home, 'tools', 'probetool.json')));
+  const delBuiltin = await run(engine, '/tool delete files');
+  check('/tool delete: встроенный — отказ', delBuiltin[0]?.startsWith('✗') ?? false, delBuiltin[0]);
+  const delGhost = await run(engine, '/tool delete призрак');
+  check('/tool delete: несуществующий — ✗', delGhost[0]?.startsWith('✗') === true && delGhost[0]?.includes('призрак') === true, delGhost[0]);
+
+  // mytool включён у test2 — удаление тула выключает его агенту
+  const delMy = await run(engine, '/tool delete mytool');
+  check('/tool delete: включённый — ✓ и выключен агенту', delMy[0]?.startsWith('✓') === true && delMy[0]?.includes('test2') === true, delMy.join('\n'));
+  const teamAfter = (await import('../src/agents.js')).loadTeam(join(home, 'agents'));
+  check('/tool delete: карточка у агента снята', !((teamAfter.find((a) => a.id === 'test2')?.tools ?? {}) as { mytool?: unknown }).mytool);
+  writeFileSync( // mytool возвращается — далее по файлу он у test2 включён
+    join(home, 'tools', 'mytool.ts'),
+    'export default () => ({ desc: "Мой тул", check: () => "allow" as const, async run() { return "ок"; } });\n',
+  );
+  await run(engine, '/agent tool add test2 mytool');
+
   const mystery = await threw('/agent update test2 foo=bar');
   check('agent update: только неизвестные поля — ошибка helper', mystery.includes('не понятно, что менять'));
 

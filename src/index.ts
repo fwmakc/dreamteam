@@ -839,7 +839,7 @@ async function main(): Promise<void> {
   printBanner(app);
   printDim(
     tf('  Вы — {name}{role}', { name: app.profile.name, role: app.profile.role ? ` (${app.profile.role})` : '' }) + '. ' +
-    t('Представиться команде: /profile set Имя; роль; о себе'),
+    t('Представиться команде: /profile update name=Имя role=роль about=о себе'),
   );
   // Проект человек выбирает сам: без аргументов стартуем без него и показываем
   // путь; с аргументами проект уже открыт (выше), но его заметки в экранном

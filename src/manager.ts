@@ -155,9 +155,9 @@ export const MANAGER_PROMPT =
   '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","temperature":0.3,"name":"...","emoji":"...","color":"..."}}\n' +
   '- {"op":"chat.add","who":"id"} / {"op":"chat.remove","who":"id"} — позвать или вывести из текущего чата\n' +
   '- {"op":"session.list"} — показать разговоры; {"op":"session.open","id":"20261027-143052"} — открыть по id; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","id":"20261027-143052"} — удалить по id (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (имя — по краткому содержанию)\n' +
-  '- {"op":"tool.grant","agent":"id_участника","tool":"files","card":{"allow":["git *"]}} — включить тул агенту или обновить его карточку; card можно опустить (настройки по умолчанию). Встроенные: ' +
+  '- {"op":"agent.tool.add","agent":"id","tool":"files","card":{"allow":["git *"]}} — включить тул агенту; card можно опустить; {"op":"agent.tool.update",…} — обновить карточку; {"op":"agent.tool.delete","agent":"id","tool":"files"} — выключить. Встроенные: ' +
   BUILTIN_TOOL_LIST +
-  '; свои — имя файла из tools/ (включить можно только существующий, код тулов пишет человек). Какие тулы есть и что умеют — блок «Тулы дома» в состоянии\n' +
+  '; свои — файл из tools/ (включать можно только существующий, код тулов пишет человек); какие есть — блок «Тулы дома»\n' +
    '- {"op":"project.host.add","name":"prod","host":"203.0.113.10","user":"deploy","port":22,"dir":"/srv/app"} — сервер в текущий проект (password лучше не передавать в переписке — пусть человек впишет сам)\n' +
    '- {"op":"project.open","path":"путь или имя"} — сменить проект: рабочая папка и разговоры\n' +
   '- {"op":"mail.add","name":"ящик","user":"робот@corp.ru","password":"пароль-приложения","imap":"imap.corp.ru","smtp":"smtp.corp.ru","smtpPort":587} — ящик в mails.json (tlsNoVerify — опционально)\n' +
@@ -250,7 +250,9 @@ const MANAGER_OPS = new Set([
   'session.new',
   'session.delete',
   'session.rename',
-  'tool.grant',
+  'agent.tool.add',
+  'agent.tool.update',
+  'agent.tool.delete',
   'project.host.add',
   'project.open',
   'mail.add',
@@ -277,8 +279,14 @@ function isManagerAction(a: unknown): a is ManagerAction {
       return typeof o.id === 'string' && !!o.id.trim();
     case 'session.rename':
       return typeof o.title === 'string' && !!o.title.trim();
-    case 'tool.grant':
-      return typeof o.agent === 'string' && typeof o.tool === 'string';
+    case 'agent.tool.add':
+    case 'agent.tool.delete':
+      return typeof o.agent === 'string' && typeof o.tool === 'string' && !!o.agent.trim() && !!o.tool.trim();
+    case 'agent.tool.update':
+      return (
+        typeof o.agent === 'string' && typeof o.tool === 'string' && !!o.agent.trim() && !!o.tool.trim() &&
+        !!o.card && typeof o.card === 'object' && !Array.isArray(o.card)
+      );
     case 'project.host.add':
       return typeof o.name === 'string' && typeof o.host === 'string';
     case 'project.open':
@@ -475,7 +483,7 @@ export function updateTeamAgent(dir: string, id: string, fields: ManagerUpdateFi
   return tf('✓ {name}: {changes}', { name: String(card.name ?? fid), changes: changes.join(', ') });
 }
 
-// ─── tool.grant: тулы участников (agents.json); файлы в tools/ менеджер не пишет ──
+// ─── тула участников: agent.tool.add|update|delete (agents.json); файлы в tools/ менеджер не пишет ──
 
 /**
  * Включает тул агенту или обновляет его карточку. Белый список: id по правилам

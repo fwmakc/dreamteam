@@ -9,7 +9,7 @@
  * сам валидирует свою карточку (строгие поля + правила команд). Кривая карточка
  * роняет сборку тулов с внятной ошибкой, а не молча не работает.
  */
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ToolsConfig, ToolContext } from './actions.js';
@@ -109,9 +109,46 @@ export async function loadUserTools(toolsDir: string): Promise<Map<string, ToolF
 }
 
 /**
+ * Карточки тулов дома: tools/<id>.json рядом с кодом. Зарезервированное поле
+ * description — описание для /tools и менеджера (остальные поля — конфиг для
+ * make()). Карточка без кода не живёт: читаются только id, у которых есть
+ * <id>.ts|.js. Битый JSON — падение с именем файла (как у loadUserTools):
+ * молча игнорировать карточку — значит подсовывать тулу не те настройки.
+ */
+export function loadHouseCards(toolsDir: string): Map<string, ToolConfig> {
+  const map = new Map<string, ToolConfig>();
+  let names: string[];
+  try {
+    names = readdirSync(toolsDir).filter((f) => f.endsWith('.json'));
+  } catch {
+    return map;
+  }
+  for (const name of names) {
+    const id = name.replace(/\.json$/, '');
+    if ((BUILTIN_TOOL_IDS as readonly string[]).includes(id)) continue; // встроенным карточек дома не бывает
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(join(toolsDir, name), 'utf8'));
+    } catch (e) {
+      throw new Error(`tools/${name} — кривой JSON: ${e instanceof Error ? e.message : e}`);
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error(`tools/${name} — ожидается объект-карточка {"description": "…", …настройки}`);
+    }
+    const card = raw as Record<string, unknown>;
+    if (card.description !== undefined && (typeof card.description !== 'string' || !card.description.trim())) {
+      throw new Error(`tools/${name} — description: непустая строка (что умеет тул)`);
+    }
+    map.set(id, card);
+  }
+  return map;
+}
+
+/**
  * Экземпляры тулов агента: встроенные — фабрика + карточка из agents.json,
- * кастомные — фабрика из tools/<id>.ts + карточка. Карточка без тула — ошибка:
- * включённого, но не существующего инструмента быть не должно.
+ * кастомные — фабрика из tools/<id>.ts + карточка агента поверх карточки дома
+ * (tools/<id>.json). Карточка без тула — ошибка: включённого, но не
+ * существующего инструмента быть не должно.
  */
 export function buildToolset(
   agent: Agent,
@@ -119,6 +156,7 @@ export function buildToolset(
   tctx: ToolContext,
   signal: AbortSignal | undefined,
   userTools: Map<string, ToolFactory>,
+  houseCards: Map<string, ToolConfig> = new Map(),
 ): Map<string, Tool> {
   const set = new Map<string, Tool>();
   const makeBuiltin = (id: string): BuiltinFactory | undefined => BUILTIN_FACTORIES[id];
@@ -138,10 +176,13 @@ export function buildToolset(
     const userFactory = userTools.get(id);
     if (!userFactory) {
       throw new Error(
-        `тул «${id}» (агент «${agent.id}») не найден: встроенные — ${BUILTIN_TOOL_IDS.join(', ')}, свои положите в tools/${id}.ts`,
+        `тула «${id}» (агент «${agent.id}») нет: встроенные — ${BUILTIN_TOOL_IDS.join(', ')}, свои положите в tools/${id}.ts`,
       );
     }
-    set.set(id, validateInstance(id, `tools/${id}.ts`, userFactory(config)));
+    // карточка дома — база (общие настройки и description), карточка агента — поверх
+    const house = houseCards.get(id);
+    const merged = house ? { ...house, ...config } : config;
+    set.set(id, validateInstance(id, `tools/${id}.ts`, userFactory(merged)));
   }
   return set;
 }

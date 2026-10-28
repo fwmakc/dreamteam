@@ -14,6 +14,7 @@ import {
   parseManagerReply,
   removeMailAccount,
   removeMessengerBot,
+  revokeTool,
   updateTeamAgent,
 } from '../manager.js';
 import {
@@ -36,10 +37,11 @@ import {
   BUILTIN_TOOL_IDS,
   type Tool,
   type ToolCheckContext,
+  type ToolConfig,
   type ToolFactory,
   type ToolRunContext,
 } from '../tools-api.js';
-import { buildToolset, loadUserTools } from '../tools-registry.js';
+import { buildToolset, loadHouseCards, loadUserTools } from '../tools-registry.js';
 import { operationHints, runOperationText } from './operations.js';
 import { basename, join, resolve } from 'node:path';
 // все пути приложения — только в paths.ts (PROJECT_DIR и др. — живые привязки)
@@ -202,14 +204,22 @@ function appVersion(): string {
   return appVersionCache;
 }
 
-/** Реестр тулов дома для контекста менеджера: встроенные с описаниями из tools-api + свои из tools/ (desc — экземпляра). */
-function houseToolsRegistry(userTools: Map<string, ToolFactory>): { id: string; builtin: boolean; desc: string }[] {
+/** Реестр тулов дома для контекста менеджера: описания — карточка дома, иначе сам тул; встроенные — BUILTIN_TOOL_DESCS. */
+function houseToolsRegistry(
+  userTools: Map<string, ToolFactory>,
+  houseCards: Map<string, ToolConfig>,
+): { id: string; builtin: boolean; desc: string }[] {
   const list = (BUILTIN_TOOL_IDS as readonly string[]).map((id) => ({
     id,
     builtin: true,
     desc: (BUILTIN_TOOL_DESCS as Readonly<Record<string, string>>)[id] ?? '',
   }));
   for (const [id, make] of userTools) {
+    const stated = houseCards.get(id)?.description;
+    if (typeof stated === 'string' && stated.trim()) {
+      list.push({ id, builtin: false, desc: stated.trim() });
+      continue;
+    }
     let desc = `формат тела — в файле tools/${id}.ts`;
     try {
       const d = (make({}) as Partial<Tool>).desc;
@@ -227,8 +237,9 @@ function houseToolsRegistry(userTools: Map<string, ToolFactory>): { id: string; 
  * человек, проходит через Presenter — ядро ничего не печатает само.
  */
 export class Engine {
-  /** Пользовательские тулы (tools/*.ts), перечитываются раз в раунд. */
+  /** Пользовательские тулы (tools/*.ts) и карточки дома (tools/*.json) — перечитываются раз в раунд. */
   private userTools = new Map<string, ToolFactory>();
+  private userToolCards = new Map<string, ToolConfig>();
 
   /** Очередь фоновых вливаний: закрывают чаты подряд — merges не перетирают друг друга. */
   private flushChain: Promise<void> = Promise.resolve();
@@ -348,10 +359,17 @@ export class Engine {
   async refreshUserTools(): Promise<void> {
     try {
       this.userTools = await loadUserTools(TOOLS_DIR);
+      this.userToolCards = loadHouseCards(TOOLS_DIR);
     } catch (err) {
       this.userTools = new Map();
+      this.userToolCards = new Map();
       this.presenter.error(`тулы: ${err instanceof Error ? err.message : err}`);
     }
+  }
+
+  /** Тулы дома: id, встроенный ли, описание (карточка дома → сам тул). */
+  houseTools(): { id: string; builtin: boolean; desc: string }[] {
+    return houseToolsRegistry(this.userTools, this.userToolCards);
   }
 
   /** Полная команда из agents.json (свежая, не кэш). */
@@ -435,9 +453,10 @@ export class Engine {
         const factory = this.userTools.get(id);
         if (factory) {
           try {
-            custom.set(id, factory(agentToolConfig(agent, id)));
+            const house = this.userToolCards.get(id);
+            custom.set(id, factory({ ...(house ?? {}), ...agentToolConfig(agent, id) }));
           } catch {
-            // невалидная карточка — подсказка для этого тула будет общей
+            // кривая карточка — подсказка по этому тулу будет общей
           }
         }
       }
@@ -692,7 +711,7 @@ export class Engine {
     const mentionedAll = findMentions(text, fullTeam);
     for (const a of mentionedAll) {
       if (!team.some((t) => t.id === a.id)) {
-        this.presenter.notice(tf('  ⚠ {name} не в этом чате — позвать: /add {name}', { name: a.name }));
+        this.presenter.notice(tf('  ⚠ {name} не в этом чате — позвать: /session agent add {name}', { name: a.name }));
       }
     }
     try {
@@ -840,7 +859,7 @@ export class Engine {
                 current: Boolean(PROJECT_DIR) && basename(PROJECT_DIR) === p.id,
               })),
               operations: operationHints(),
-              houseTools: houseToolsRegistry(this.userTools),
+              houseTools: this.houseTools(),
               appVersion: appVersion() || undefined,
             }),
           },
@@ -930,8 +949,12 @@ export class Engine {
       }
       case 'session.rename':
         return this.renameSession(String(action.title ?? ''));
-      case 'tool.grant':
+      case 'agent.tool.add':
         return grantTool(AGENTS_DIR, action.agent, action.tool, action.card, TOOLS_DIR);
+      case 'agent.tool.update':
+        return grantTool(AGENTS_DIR, action.agent, action.tool, action.card ?? {}, TOOLS_DIR);
+      case 'agent.tool.delete':
+        return revokeTool(AGENTS_DIR, action.agent, action.tool);
       case 'project.host.add':
         return addProjectHosts(PROJECT_FILE, { [String(action.name ?? 'main')]: action });
       case 'project.open': {
@@ -1408,7 +1431,7 @@ export class Engine {
 
   /** Карточки → экземпляры Tool для агента (пересобирается на каждый раунд). */
   private toolsetFor(agent: Agent, cfg: ToolsConfig, signal: AbortSignal): Map<string, Tool> {
-    return buildToolset(agent, cfg, this.toolContext(), signal, this.userTools);
+    return buildToolset(agent, cfg, this.toolContext(), signal, this.userTools, this.userToolCards);
   }
 
   /** Мосты к хосту для тулов: рабочая папка, полный конвейер shell, http и живой вопрос. */
@@ -1712,7 +1735,7 @@ export class Engine {
       && session.messages.length - session.digestAtCount < 10);
     if (fresh && session.digestInLog) return; // с прошлой выгрузки ничего нового
     if (opts.onlyIfFreshDigest && !fresh) {
-      this.presenter.notice(t('  Итоги этого разговора вольются в общую память позже — при следующем /new.'));
+      this.presenter.notice(t('  Итоги этого разговора вольются в общую память позже — при следующем /session new.'));
       return;
     }
 

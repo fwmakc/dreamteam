@@ -181,11 +181,11 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 }
 {
   const r = parseManagerReply(
-    '{"say":"включаю","actions":[{"op":"tool.grant","agent":"gleb","tool":"shell"},{"op":"project.host.add","name":"staging","host":"stg.example.com","port":2222},{"op":"project.host.add"}]}',
+    '{"say":"включаю","actions":[{"op":"agent.tool.add","agent":"gleb","tool":"shell"},{"op":"project.host.add","name":"staging","host":"stg.example.com","port":2222},{"op":"project.host.add"}]}',
   );
   check('парсер: действия прочитаны, host.add без name отсеян',
     r.actions.length === 2 &&
-    r.actions[0].op === 'tool.grant' &&
+    r.actions[0].op === 'agent.tool.add' &&
     (r.actions[1] as { name: string }).name === 'staging' &&
     (r.actions[1] as { host: string }).host === 'stg.example.com',
     JSON.stringify(r.actions));
@@ -297,7 +297,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('team.update: чужая модель — отказ, файл цел', threw.includes('неизвестная модель «основной»') && agentsSnapshot() === before2, threw);
 }
 
-// --- tool.grant: включение тула и карточки, свои тула — только существующие ---
+// --- grantTool: включение тула и карточки, свои тула — только существующие ---
 {
   writeFileSync(join(agentsDir, 'gleb.json'), JSON.stringify({ name: 'Глеб', emoji: '💾', color: 'green', prompt: 'Ты — Глеб.' }, null, 2) + '\n');
   const toolsDir = join(dir, 'tools');
@@ -305,35 +305,35 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   writeFileSync(join(toolsDir, 'reporter.ts'), 'export const make = () => ({ desc: "d", check: () => "allow" as const, run: async () => "ok" });\n');
 
   const report = grantTool(agentsDir, 'gleb', 'files', { deny: ['rm -rf *'] });
-  check('tool.grant: отчёт о включении', report.includes('Глеб') && report.includes('files'), report);
+  check('grantTool: отчёт о включении', report.includes('Глеб') && report.includes('files'), report);
   const gleb = loadTeam(agentsDir).find((a) => a.id === 'gleb');
-  check('tool.grant: карточка записана', JSON.stringify(gleb?.tools?.files) === '{"deny":["rm -rf *"]}', JSON.stringify(gleb?.tools));
+  check('grantTool: карточка записана', JSON.stringify(gleb?.tools?.files) === '{"deny":["rm -rf *"]}', JSON.stringify(gleb?.tools));
 
   const report2 = grantTool(agentsDir, 'gleb', 'reporter', undefined, toolsDir);
   const gleb2 = loadTeam(agentsDir).find((a) => a.id === 'gleb');
-  check('tool.grant: свой тул по файлу в tools/', report2.includes('reporter') && JSON.stringify(gleb2?.tools?.reporter) === '{}', report2);
+  check('grantTool: свой тул по файлу в tools/', report2.includes('reporter') && JSON.stringify(gleb2?.tools?.reporter) === '{}', report2);
 
   const report3 = grantTool(agentsDir, 'gleb', 'reporter', { workdir: 'sub' }, toolsDir);
-  check('tool.grant: повтор — обновление карточки', report3.includes('обновил'), report3);
+  check('grantTool: повтор — обновление карточки', report3.includes('обновил'), report3);
 
   const before = agentsSnapshot();
   let threw = '';
   try { grantTool(agentsDir, 'gleb', 'ghost_tool', {}, toolsDir); } catch (e) { threw = (e as Error).message; }
-  check('tool.grant: своего тула нет — отказ', threw.includes('ghost_tool') && threw.includes('не существует'), threw);
+  check('grantTool: своего тула нет — отказ', threw.includes('ghost_tool') && threw.includes('не существует'), threw);
   threw = '';
   try { grantTool(agentsDir, 'gleb', 'reporter', {}, join(dir, 'пусто')); } catch (e) { threw = (e as Error).message; }
-  check('tool.grant: без папки tools свой тул не включить', threw.includes('reporter'), threw);
+  check('grantTool: без папки tools свой тул не включить', threw.includes('reporter'), threw);
   threw = '';
   try { grantTool(agentsDir, 'gleb', 'Кривой id'); } catch (e) { threw = (e as Error).message; }
-  check('tool.grant: кривой id — отказ', threw.includes('Кривой id'), threw);
+  check('grantTool: кривой id — отказ', threw.includes('Кривой id'), threw);
   threw = '';
   try { grantTool(agentsDir, 'gleb', 'shell', ['массив']); } catch (e) { threw = (e as Error).message; }
-  check('tool.grant: массив вместо карточки — отказ', threw.includes('объект'), threw);
+  check('grantTool: массив вместо карточки — отказ', threw.includes('объект'), threw);
   threw = '';
   try { grantTool(agentsDir, 'никого', 'files'); } catch (e) { threw = (e as Error).message; }
-  check('tool.grant: чужой агент — отказ', threw.includes('никого'), threw);
-  check('tool.grant: неудачные правки файл не меняли', agentsSnapshot() === before);
-  check('tool.grant: loadTeam по-прежнему валиден', loadTeam(agentsDir).length > 0);
+  check('grantTool: чужой агент — отказ', threw.includes('никого'), threw);
+  check('grantTool: неудачные правки файл не меняли', agentsSnapshot() === before);
+  check('grantTool: loadTeam по-прежнему валиден', loadTeam(agentsDir).length > 0);
 }
 
 // --- project.json: серверы проекта (поле "hosts") с откатом ---

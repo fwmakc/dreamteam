@@ -21,8 +21,9 @@
  * своими JSON-действиями: валидация и tmp+rename-откат общие. Ошибки летят
  * вызывающему (терминал покажет, сервер ушлёт error/rpc_error).
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { isToolId } from '../ids.js';
 import { loadTeam } from '../agents.js';
 import {
   addMailRecord,
@@ -47,7 +48,7 @@ import {
 } from '../manager.js';
 import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from '../providers/registry.js';
 import { resolveEndpoints } from '../mail.js';
-import { agentToolIds } from '../tools-api.js';
+import { agentToolIds, BUILTIN_TOOL_IDS } from '../tools-api.js';
 import { t, tf, applyLocale } from '../i18n.js';
 import { AGENTS_DIR, DT_HOME, MANAGER_FILE, MODELS_DIR, PROJECTS_DIR, PROJECT_DIR, PROJECT_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
 import { listProjects } from './projects.js';
@@ -324,6 +325,27 @@ function sessionAgentChange(engine: Engine, rest: string[], verb: 'add' | 'delet
   }
   // событие чата ядро уже записало в хронику репликой менеджера — заметкой не дублируем
   return notes;
+}
+
+/** Шаблон нового тула: честный hello world; описание берёт из карточки дома (config.description). */
+function toolTemplate(id: string): string {
+  return [
+    '/**',
+    ` * Тул «${id}» — шаблон: на любое тело отвечает hello world.`,
+    ' * Замените desc и run на своё; check() решает: allow — молча, ask — спросить человека, deny — отказ.',
+    ' * Файл перечитывается перед каждым раундом — правки подхватываются без перезапуска.',
+    ' * config — карточка тула (карточка дома + карточка агента поверх): description читается здесь,',
+    ' * остальные поля — ваши собственные настройки.',
+    ' */',
+    'export default (config: Record<string, unknown> = {}) => ({',
+    "  desc: typeof config.description === 'string' && config.description.trim()",
+    '    ? config.description.trim()',
+    "    : 'отвечает hello world',",
+    "  check: () => 'allow' as const,",
+    "  run: async () => 'hello world',",
+    '});',
+    '',
+  ].join('\n');
 }
 
 /**
@@ -725,7 +747,7 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'тул…', required: true },
     ],
     title: 'включить тул',
-    help: 'встроенные files/shell/ssh/look/image или свой из tools/; можно несколько',
+    help: 'встроенные ' + BUILTIN_TOOL_IDS.join(', ') + ' или свой из tools/; можно несколько',
     run: async (_engine, rest) => {
       const [who, ...req] = rest;
       const tools = req.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean);
@@ -791,6 +813,189 @@ export const OPERATIONS: OpSpec[] = [
           lines.push(`✗ ${err instanceof Error ? err.message : err}`);
         }
       }
+      return lines;
+    },
+  },
+
+  // ── тула дома: полка tools/ и обзор ────────────────────────────────────────
+  {
+    name: 'tools.list',
+    implicit: true,
+    args: [{ name: 'тул', required: false }],
+    title: 'тулы дома',
+    help: 'встроенные и свои из tools/: что умеет и у кого включён; <тул> — карточка тула',
+    run: async (engine, rest) => {
+      await engine.refreshUserTools(); // полку могли править руками — показываем, что лежит сейчас
+      const house = engine.houseTools();
+      const holdersOf = (tid: string): string => {
+        try {
+          return engine
+            .team()
+            .filter((a) => agentToolIds(a).includes(tid))
+            .map((a) => a.id)
+            .join(', ');
+        } catch {
+          return '';
+        }
+      };
+      const id = (rest[0] ?? '').trim().toLowerCase();
+      if (!id) {
+        const builtin = house.filter((tl) => tl.builtin).length;
+        const lines = [tf('Тулы дома: {n} встроенных + {m} своих (tools/):', { n: builtin, m: house.length - builtin })];
+        for (const tl of house) {
+          const holders = holdersOf(tl.id);
+          lines.push(
+            `• ${tl.id} — ${tl.desc}${tl.builtin ? '' : t(' — свой')}` +
+              (holders ? tf(' — у: {who}', { who: holders }) : t(' — ни у кого')),
+          );
+        }
+        lines.push('');
+        lines.push(
+          t('Свой тул — /tool new <id>; описание — /tool update <тул> description=…; карточка тула — /tools <тул>; включить агенту — /agent tool add <id агента> <тул>'),
+        );
+        return lines;
+      }
+      const tl = house.find((x) => x.id === id);
+      if (!tl) return [tf('Тула «{id}» нет — есть: {known}', { id, known: house.map((x) => x.id).join(', ') })];
+      const holders = holdersOf(tl.id);
+      const lines = [
+        tf('{id} — {kind}', { id: tl.id, kind: tl.builtin ? t('встроенный тул') : tf('свой тул (tools/{id}.ts)', { id: tl.id }) }),
+        `  ${tl.desc}`,
+      ];
+      if (tl.builtin) {
+        lines.push(
+          t('  карточек дома у встроенных нет — код и описание живут в приложении; настройки агенту: /agent tool update <id агента> <тул> поле=значение…'),
+        );
+      } else {
+        const cardFile = join(TOOLS_DIR, `${tl.id}.json`);
+        if (existsSync(cardFile)) {
+          try {
+            lines.push(tf('  карточка дома (tools/{id}.json): {card}', { id: tl.id, card: JSON.stringify(JSON.parse(readFileSync(cardFile, 'utf8'))) }));
+          } catch (err) {
+            lines.push(tf('  tools/{id}.json — кривой JSON: {msg} — тул не соберётся, поправьте файл', { id: tl.id, msg: String(err instanceof Error ? err.message : err) }));
+          }
+        } else {
+          lines.push(t('  карточки дома нет — тул описан в своём коде; добавить описание: /tool update <тул> description=…'));
+        }
+      }
+      lines.push(holders ? tf('  включён у: {who}', { who: holders }) : t('  ни у кого не включён — включить: /agent tool add <id агента> <тул>'));
+      return lines;
+    },
+  },
+  {
+    name: 'tool.new',
+    args: [{ name: 'id тула', required: true }],
+    title: 'новый свой тул',
+    help: 'шаблон tools/<id>.ts (отвечает hello world) + карточка; код дальше правится руками',
+    run: async (engine, rest) => {
+      const id = (rest[0] ?? '').trim().toLowerCase();
+      if (!id || !isToolId(id)) return [t('Синтаксис: /tool new <id> — id тула: строчные буквы/цифры/./-/_ от 2 символов')];
+      if ((BUILTIN_TOOL_IDS as readonly string[]).includes(id)) {
+        return [tf('«{id}» — имя занято встроенным тулом, придумайте другое', { id })];
+      }
+      const tsFile = join(TOOLS_DIR, `${id}.ts`);
+      if (existsSync(tsFile)) return [tf('tools/{id}.ts уже есть — что умеет, покажет /tools {id}', { id })];
+      mkdirSync(TOOLS_DIR, { recursive: true });
+      writeFileSync(tsFile, toolTemplate(id), 'utf8');
+      const cardFile = join(TOOLS_DIR, `${id}.json`);
+      if (!existsSync(cardFile)) {
+        writeFileSync(cardFile, `${JSON.stringify({ description: t('шаблон: на любое тело отвечает hello world') }, null, 2)}\n`, 'utf8');
+      }
+      await engine.refreshUserTools();
+      return [
+        tf('✓ Тул «{id}» завёл: tools/{id}.ts — шаблон hello world, рядом карточка tools/{id}.json', { id }),
+        tf('Код правьте в файле; описание — /tool update {id} description=…; включить агенту — /agent tool add <id агента> {id}', { id }),
+      ];
+    },
+  },
+  {
+    name: 'tool.update',
+    args: [
+      { name: 'тул', required: true },
+      { name: 'поле=значение…', required: true },
+    ],
+    title: 'настроить тул',
+    help: 'карточка дома tools/<тул>.json: поле=значение…; description — что умеет (для /tools и менеджера)',
+    run: async (engine, rest) => {
+      const [id, ...pairs] = rest;
+      const tid = (id ?? '').trim().toLowerCase();
+      if (!tid || pairs.length === 0) return [t('Синтаксис: /tool update <тул> поле=значение… (например description=ведёт расчёты)')];
+      if ((BUILTIN_TOOL_IDS as readonly string[]).includes(tid)) {
+        return [tf('«{id}» — встроенный: код и описание живут в приложении; настройки агенту — /agent tool update <id агента> {id} …', { id: tid })];
+      }
+      if (!existsSync(join(TOOLS_DIR, `${tid}.ts`))) {
+        return [tf('Тула «{id}» нет (нет файла tools/{id}.ts) — завести: /tool new {id}', { id: tid })];
+      }
+      const cardFile = join(TOOLS_DIR, `${tid}.json`);
+      const card: Record<string, unknown> = {};
+      if (existsSync(cardFile)) {
+        try {
+          const parsed: unknown = JSON.parse(readFileSync(cardFile, 'utf8'));
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) Object.assign(card, parsed);
+        } catch (err) {
+          return [tf('tools/{id}.json — кривой JSON, поправьте файл: {msg}', { id: tid, msg: String(err instanceof Error ? err.message : err) })];
+        }
+      }
+      const patch = parseFields(pairs);
+      if (Array.isArray(patch)) return patch;
+      Object.assign(card, patch);
+      mkdirSync(TOOLS_DIR, { recursive: true });
+      writeFileSync(cardFile, `${JSON.stringify(card, null, 2)}\n`, 'utf8');
+      await engine.refreshUserTools();
+      return [tf('✓ Карточку тула «{id}» записал: tools/{id}.json ({fields})', { id: tid, fields: Object.keys(patch).join(', ') })];
+    },
+  },
+  {
+    name: 'tool.delete',
+    args: [{ name: 'тул…|all', required: true }],
+    title: 'удалить свой тул',
+    help: 'файл tools/<тул>.ts и карточка дома; включённым агентам тул выключается; встроенные не удаляются; all — все свои',
+    run: async (engine, rest) => {
+      const asked = rest.flatMap((s) => s.split(',')).map((s) => s.trim().toLowerCase()).filter(Boolean);
+      if (asked.length === 0) return [t('Синтаксис: /tool delete <тул…|all> — встроенные не удаляются')];
+      await engine.refreshUserTools(); // «all» — это то, что на полке прямо сейчас
+      const own = engine.houseTools().filter((tl) => !tl.builtin).map((tl) => tl.id);
+      const targets = asked.length === 1 && asked[0] === 'all' ? own : asked;
+      if (targets.length === 0) return [t('Своих тулов и так нет — завести: /tool new <id>')];
+      let teamAgents: Agent[] = [];
+      try {
+        teamAgents = engine.team();
+      } catch {
+        // команда не читается — тула выключить некому, файлы всё равно удаляем
+      }
+      const lines: string[] = [];
+      for (const tid of targets) {
+        if ((BUILTIN_TOOL_IDS as readonly string[]).includes(tid)) {
+          lines.push(tf('✗ «{id}» — встроенный тул, его не удалить (агенту выключается: /agent tool delete <id агента> {id})', { id: tid }));
+          continue;
+        }
+        const tsFile = join(TOOLS_DIR, `${tid}.ts`);
+        if (!existsSync(tsFile)) {
+          lines.push(tf('✗ Тула «{id}» нет — нет файла tools/{id}.ts', { id: tid }));
+          continue;
+        }
+        try {
+          rmSync(tsFile);
+        } catch (err) {
+          lines.push(tf('✗ tools/{id}.ts не удаляется: {msg}', { id: tid, msg: String(err instanceof Error ? err.message : err) }));
+          continue;
+        }
+        const cardFile = join(TOOLS_DIR, `${tid}.json`);
+        if (existsSync(cardFile)) rmSync(cardFile);
+        let tail = '';
+        for (const a of teamAgents) {
+          if (!agentToolIds(a).includes(tid)) continue;
+          try {
+            revokeTool(AGENTS_DIR, a.id, tid);
+            tail = tail ? `${tail}, ${a.id}` : tf(' (был включён у: {who}', { who: a.id });
+          } catch {
+            // карточка агента уже не ссылается на этот тул
+          }
+        }
+        if (tail) tail += ')';
+        lines.push(tf('✓ Тул «{id}» удалил: tools/{id}.ts и карточку дома{tail}', { id: tid, tail }));
+      }
+      await engine.refreshUserTools();
       return lines;
     },
   },
@@ -1488,6 +1693,13 @@ const byName = new Map(OPERATIONS.map((o) => [o.name, o]));
 
 export function findOperation(name: string): OpSpec | undefined {
   return byName.get(name);
+}
+
+/** Программный вызов операции по имени с позиционными аргументами (rpc, скрипты). */
+export async function runOperationArgs(engine: Engine, name: string, args: string[]): Promise<string[]> {
+  const op = byName.get(name);
+  if (!op) throw new Error(`нет операции «${name}»`);
+  return runOp(engine, op, args);
 }
 
 /** Гейты «без проекта»/«без разговора»: операции отвечают подсказкой вместо падения. */

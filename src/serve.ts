@@ -41,7 +41,7 @@ import { basename } from 'node:path';
 import { Engine, chatTeam, type App } from './core/engine.js';
 import { cliProjectArgs, parseCliProject } from './cli-project.js';
 import { bootstrapApp } from './core/bootstrap.js';
-import { operationHints, stamp, profileLabel } from './core/operations.js';
+import { operationHints, runOperationArgs, stamp, profileLabel } from './core/operations.js';
 import { CARD_SCHEMAS } from './card-schema.js';
 import {
   applyHomeImport,
@@ -731,6 +731,19 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         const report = revokeTool(AGENTS_DIR, String(args.agent ?? ''), String(args.tool ?? ''));
         broadcastState();
         return { text: report };
+      }
+      case 'tool.new':
+      case 'tool.update':
+      case 'tool.delete': {
+        // те же операции, что и команды: головной аргумент + поля поле=значение
+        const raw = args.tool ?? args.id;
+        const argv = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v ?? '')).filter(Boolean);
+        if (method === 'tool.update') {
+          for (const [k, v] of Object.entries((args.fields ?? {}) as Record<string, unknown>)) argv.push(`${k}=${String(v)}`);
+        }
+        const lines = await runOperationArgs(engine, method, argv);
+        broadcastState();
+        return { text: lines.join('\n') };
       }
       case 'agent.get': {
         const id = String(args.id ?? '').trim().toLowerCase();

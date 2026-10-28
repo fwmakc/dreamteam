@@ -235,8 +235,12 @@ export type ManagerAction =
   | { op: 'session.delete'; id: string }
   /** Переименовать текущий разговор (имя придумывает менеджер или руководитель) */
   | { op: 'session.rename'; title: string }
-  /** Включить тул агенту / обновить его карточку (tools в agents.json) */
-  | { op: 'tool.grant'; agent: string; tool: string; card?: unknown }
+  /** Включить тул агенту — карточка опциональна (настройки по умолчанию) */
+  | { op: 'agent.tool.add'; agent: string; tool: string; card?: unknown }
+  /** Обновить карточку тула агента (объект настроек) */
+  | { op: 'agent.tool.update'; agent: string; tool: string; card: unknown }
+  /** Выключить тул агенту (карточка удаляется из agents.json) */
+  | { op: 'agent.tool.delete'; agent: string; tool: string }
   | { op: 'project.host.add'; project?: string; name: string } & ManagerHostSpec
   /** Сменить проект: путь к папке или имя из реестра (/project open) */
   | { op: 'project.open'; path: string }

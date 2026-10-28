@@ -194,7 +194,7 @@ function lastManagerMessage(): string {
   for (const op of [
     'team.add', 'team.update', 'chat.add', 'chat.remove',
     'session.list', 'session.open', 'session.new', 'session.delete',
-    'tool.grant', 'project.host.add',
+    'agent.tool.add', 'agent.tool.update', 'agent.tool.delete', 'project.host.add',
     'mail.add', 'mail.remove', 'messenger.add', 'messenger.remove',
   ]) {
     check(`проектирование: промт объявляет ${op}`, MANAGER_PROMPT.includes(op));
@@ -314,18 +314,32 @@ function lastManagerMessage(): string {
   check('session.delete: отказ — в истории менеджера', lastManagerMessage().includes('нельзя') && lastManagerMessage().includes('Не выйдет.'), lastManagerMessage().slice(-160));
 }
 
-// tool.grant: первый ✓, второй ✗ — раунд продолжается после неудачи
+// agent.tool.add: первый ✓, второй ✗ — раунд продолжается после неудачи; delete — выключает
 {
   await askManager(
-    'Включаю.\n{"say":"Включаю Паше files.","actions":[{"op":"tool.grant","agent":"pasha","tool":"files"},{"op":"tool.grant","agent":"pasha","tool":"ghost_tool"}]}',
+    'Включаю.\n{"say":"Включаю Паше files.","actions":[{"op":"agent.tool.add","agent":"pasha","tool":"files"},{"op":"agent.tool.add","agent":"pasha","tool":"ghost_tool"}]}',
     'включи Паше files',
   );
   const team = (await import('../src/agents.js')).loadTeam(agentsDir);
   const pasha = team.find((a) => a.id === 'pasha');
-  check('tool.grant: files включён', Boolean(pasha?.tools?.files), JSON.stringify(pasha?.tools));
-  check('tool.grant: призрака нет', !pasha?.tools?.ghost_tool, JSON.stringify(pasha?.tools));
+  check('agent.tool.add: files включён', Boolean(pasha?.tools?.files), JSON.stringify(pasha?.tools));
+  check('agent.tool.add: призрака нет', !pasha?.tools?.ghost_tool, JSON.stringify(pasha?.tools));
   const msg = lastManagerMessage();
-  check('tool.grant: ✓ и ✗ в одной реплике', msg.includes('✓') && msg.includes('✗') && msg.includes('не существует'), msg.slice(-200));
+  check('agent.tool.add: ✓ и ✗ в одной реплике', msg.includes('✓') && msg.includes('✗') && msg.includes('не существует'), msg.slice(-200));
+
+  await askManager(
+    'Выключаю.\n{"say":"Выключаю Паше files.","actions":[{"op":"agent.tool.delete","agent":"pasha","tool":"files"}]}',
+    'выключи Паше files',
+  );
+  const after = (await import('../src/agents.js')).loadTeam(agentsDir).find((a) => a.id === 'pasha');
+  check('agent.tool.delete: files выключен', !after?.tools?.files, JSON.stringify(after?.tools));
+
+  await askManager(
+    'Обновляю.\n{"say":"Ограничиваю Паше git.","actions":[{"op":"agent.tool.update","agent":"pasha","tool":"git","card":{"allow":["git *"]}}]}',
+    'ограничь Паше git',
+  );
+  const upd = (await import('../src/agents.js')).loadTeam(agentsDir).find((a) => a.id === 'pasha');
+  check('agent.tool.update: карточка записана', JSON.stringify(upd?.tools?.git) === '{"allow":["git *"]}', JSON.stringify(upd?.tools));
 }
 
 // project.host.add + дубликат: серверы текущего проекта
