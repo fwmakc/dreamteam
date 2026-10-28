@@ -1525,7 +1525,7 @@ export interface OpHint {
 }
 
 export function operationHints(): OpHint[] {
-  return OPERATIONS.map((op) => {
+  const ops = OPERATIONS.map((op) => {
     const cmd = operationCommand(op);
     const args = operationArgs(op);
     return {
@@ -1535,6 +1535,17 @@ export function operationHints(): OpHint[] {
       help: t(op.title),
     };
   });
+  return [...ops, ...extraHints()];
+}
+
+/** Принимаются вводом вне реестра (runOperationText) — подсказки для них живут здесь же. */
+export function extraHints(): OpHint[] {
+  return [
+    { cmd: '/help', help: t('список операций и приёмы ввода') },
+    { cmd: '/exit', help: t('выход; в веб-оболочке просто закройте страницу') },
+    { cmd: '/quit', help: t('то же, что /exit') },
+    { cmd: '/q', help: t('то же, что /exit') },
+  ];
 }
 
 /**

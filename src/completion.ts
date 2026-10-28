@@ -1,5 +1,5 @@
 import pc from 'picocolors';
-import { OPERATIONS, findOperation, operationCommand, operationArgs, type OpSpec } from './core/operations.js';
+import { OPERATIONS, extraHints, findOperation, operationCommand, operationArgs, type OpHint, type OpSpec } from './core/operations.js';
 import { t, tf } from './i18n.js';
 
 // канонический список операций живёт в ядре (src/core/operations.ts) — отсюда
@@ -49,11 +49,13 @@ function tabInsert(options: string[], fragment: string, skipExactPlusSpace = fal
   return norm(prefix).length > nf.length ? [prefix] : [];
 }
 
-/** Кандидаты первого слова: полные канонические команды операций. */
+/** Кандидаты первого слова: канонические команды операций и особые вне реестра. */
 function commandOptions(fragment: string): string[] {
   const want = ('/' + fragment).toLowerCase();
   return tabInsert(
-    OPERATIONS.map((o) => operationCommand(o) + ' ').filter((o) => o.toLowerCase().startsWith(want)),
+    [...OPERATIONS.map((o) => operationCommand(o) + ' '), ...extraHints().map((h) => h.cmd + ' ')].filter((o) =>
+      o.toLowerCase().startsWith(want),
+    ),
     want,
     true,
   );
@@ -220,23 +222,33 @@ function usageRow(op: OpSpec): string {
   return `  ${operationCommand(op)}${args ? ' ' + pc.dim(args) : ''}  ${pc.dim('— ' + t(op.help))}`;
 }
 
+/** Строка особой команды вне реестра — тем же форматом, что usageRow. */
+function usageExtra(h: OpHint): string {
+  return `  ${h.cmd}  ${pc.dim('— ' + h.help)}`;
+}
+
 function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | null {
   if (!line.startsWith('/')) return null;
   const body = line.slice(1);
   const parts = body.trim().split(/\s+/).filter(Boolean);
   const trailing = /\s$/.test(body);
 
-  // первая лексема: показываем подходящие операции целиком
+  // первая лексема: показываем подходящие операции целиком (+ особые вне реестра)
   if (parts.length === 1 && !trailing) {
     const prefix = body.toLowerCase();
     const matches = OPERATIONS.filter((o) => operationCommand(o).slice(1).startsWith(prefix));
-    if (matches.length === 0) return [pc.dim(t('  нет такой команды — см. /help'))];
+    const extra = extraHints().filter((h) => h.cmd.slice(1).startsWith(prefix));
+    if (matches.length === 0 && extra.length === 0) return [pc.dim(t('  нет такой команды — см. /help'))];
     const rows = matches.slice(0, PANEL_MAX).map(usageRow);
+    rows.push(...extra.map(usageExtra));
     if (matches.length > PANEL_MAX) rows.push(pc.dim(tf('  … ещё {n} — уточните ввод', { n: matches.length - PANEL_MAX })));
     return rows;
   }
 
   const group = (parts[0] ?? '').toLowerCase();
+  // особая команда вне реестра (/help, /exit…) — одна строка её использования
+  const extraCmd = extraHints().find((h) => h.cmd.slice(1) === group);
+  if (extraCmd) return [usageExtra(extraCmd)];
   const groupExists = OPERATIONS.some((o) => o.name.startsWith(group + '.'));
   if (!groupExists) return [pc.dim(t('  нет такой группы — см. /help'))];
   const verbs = verbsOf(group);

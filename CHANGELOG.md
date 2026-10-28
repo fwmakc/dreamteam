@@ -7,6 +7,16 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
+## [Unreleased]
+
+### Fixed
+
+- The commands the engine accepts outside the registry — `/help`, `/exit`,
+  `/quit`, `/q` — were missing from the completion hints of both the terminal
+  and the GUI (typing `/q` even answered «нет такой команды — см. /help»).
+  They now come from the same core list as the registry operations, so the
+  terminal panel, Tab completion and the GUI command hints all show them.
+
 ## [0.0.11] — 2026-10-27
 
 ### Fixed

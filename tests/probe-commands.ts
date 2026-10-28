@@ -85,8 +85,15 @@ const threw = async (line: string): Promise<string> => {
   check('help: перечислены все операции манифеста', OPERATIONS.every((c) => lines.some((l) => l.includes(operationCommand(c)))));
   check('help: подсказки @упоминаний', lines.some((l) => l.includes('@менеджер')));
   check('манифест: у операций нет нижних подчёркиваний', OPERATIONS.every((o) => !o.name.includes('_')));
-  const { operationHints } = await import('../src/core/operations.js');
-  check('подсказки: по одной на операцию', operationHints().length === OPERATIONS.length);
+  const { operationHints, extraHints } = await import('../src/core/operations.js');
+  check('подсказки: по одной на операцию + особые вне реестра', operationHints().length === OPERATIONS.length + extraHints().length);
+  check('подсказки: /help, /exit, /quit, /q на месте', extraHints().every((h) => operationHints().some((x) => x.cmd === h.cmd)));
+  const { hintRowsFor } = await import('../src/completion.js');
+  const hctx = { sessions: () => [], agentIds: () => [], chatAgents: () => [], modelIds: () => [], managerName: () => '' };
+  check(
+    'панель: /q и /exit подсказываются',
+    (hintRowsFor('/q', hctx) ?? []).join('').includes('/q') && (hintRowsFor('/exit', hctx) ?? []).join('').includes('/exit'),
+  );
 }
 
 // ── разговоры: new/update/history/open/close/delete/export ──────────────────
