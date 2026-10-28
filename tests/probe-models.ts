@@ -64,7 +64,7 @@ const noKey = cloudIds.filter(
 check('облачные карточки несут поле apiKey (пусть пустое)', noKey.length === 0, noKey.join(', '));
 
 // --- 3. флаг vision доходит до статуса модели --------------------------------
-const visionIds = ['glm-vision', 'qwen2-vl-2b', 'qwen2.5-vl-7b', 'qwen3-vl-4b', 'qwen3-vl-8b'];
+const visionIds = ['glm-vision', 'qwen3-vl-2b', 'qwen3-vl-8b'];
 for (const id of visionIds) {
   check(`vision-флаг у «${id}»`, models.get(id)?.vision === true, String(models.get(id)?.vision));
 }

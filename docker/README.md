@@ -7,7 +7,7 @@
 локалке) и поднимите нужные модели — каждый профиль назван именем модели:
 
 ```
-docker compose --profile qwen2-vl-2b --profile sd-turbo up -d
+docker compose --profile qwen3-vl-2b --profile sd-turbo up -d
 ```
 
 Первый старт скачивает модели с Hugging Face в named volume — запаситесь
@@ -23,10 +23,8 @@ curl http://localhost:8200/health      # документы (soffice): {"service
 
 | Профиль = модель | Что умеет | Порт | Железо |
 | --- | --- | --- | --- |
-| `qwen2-vl-2b` | зрение, CPU | 8000 | без GPU, ~3 ГБ RAM |
-| `qwen3-vl-4b` | зрение посвежее, CPU | 8003 | без GPU, ~5 ГБ RAM |
-| `qwen2.5-vl-7b` | зрение, GPU (vLLM) | 8001 | ~16 ГБ VRAM |
-| `qwen3-vl-8b` | зрение, новее и точнее (vLLM) | 8002 | ~20 ГБ VRAM |
+| `qwen3-vl-2b` | зрение, CPU | 8000 | без GPU, ~3 ГБ RAM (ollama: 1.9 ГБ) |
+| `qwen3-vl-8b` | зрение, новее и точнее (vLLM) | 8001 | ~20 ГБ VRAM (ollama: 6.2 ГБ) |
 | `sd-turbo` | генерация, CPU | 8100 | без GPU, ~6 ГБ RAM |
 | `bk-sdm` | лёгкая генерация с LCM (4–8 шагов), черновое качество, CPU | 8105 | без GPU, ~3 ГБ RAM |
 | `flux-schnell` | быстрая генерация, Apache-2.0 | 8101 | ~16 ГБ VRAM |
@@ -35,7 +33,7 @@ curl http://localhost:8200/health      # документы (soffice): {"service
 | `qwen-image-edit` | перерисовка по нескольким референсам | 8104 | ~40 ГБ VRAM |
 | `soffice` | конвертация документов для тула `docs` (чтение doc/xls/ppt, запись odt/ods, всё → pdf) | 8200 | без GPU, ~1 ГБ RAM |
 
-CPU-связка для совсем слабой машины — `qwen2-vl-2b` + `bk-sdm`, суммарно
+CPU-связка для совсем слабой машины — `qwen3-vl-2b` + `bk-sdm`, суммарно
 ~6 ГБ RAM: весь цикл «сгенерировал → сохранил → посмотрел глазами»
 проверяется целиком. Смысл `bk-sdm` — память, а не красота: его UNet втрое
 меньше sd-turbo (пайплайн влезает в ~4 ГБ ОЗУ), а LCM-адаптер сокращает
@@ -58,7 +56,7 @@ ControlNet). Агент передаёт 1–3 фото человека как 
 контейнеры на другой машине:
 
 ```json
-{ "provider": "openai-compatible", "baseUrl": "http://192.168.1.50:8002/v1", "model": "Qwen3-VL-8B-Instruct", "vision": true }
+{ "provider": "openai-compatible", "baseUrl": "http://192.168.1.50:8001/v1", "model": "Qwen3-VL-8B-Instruct", "vision": true }
 ```
 
 ```json
@@ -121,4 +119,4 @@ doc/xls/ppt. Зачем: Node-пакеты тула `docs` читают docx/xls
 - CPU-генерация честно медленная: один вариант sd-turbo 512×512 — от десятков
   секунд до пары минут в зависимости от процессора; bk-sdm с LCM — того же
   порядка (UNet втрое меньше, но шагов больше четырёх), без LCM — вдвое-втрое
-  дольше. CPU-зрение (2B/4B в Q4) отвечает за секунды.
+  дольше. CPU-зрение (2B в Q4) отвечает за секунды.

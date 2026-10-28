@@ -1,6 +1,6 @@
 {
   "provider": "openai-compatible",
-  "baseUrl": "http://localhost:8002/v1",
+  "baseUrl": "http://localhost:8001/v1",
   "model": "Qwen3-VL-8B-Instruct",
   "vision": true
 }
