@@ -7,7 +7,7 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
-## [Unreleased]
+## [0.0.12] — 2026-10-29
 
 ### Breaking
 
