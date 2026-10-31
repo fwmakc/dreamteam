@@ -14,6 +14,8 @@
  *  7. удалить агента и сессию → agents/ и sessions/ обратно
  *  8. импорт                  → сессия вернулась «как новая», юрист влит по id
  *  9. снова удалить           → песочница в исходном состоянии
+ * 10. вложения               → POST /api/upload льёт файл в inbox побайтно,
+ *                              file_ref копирует файл с сервера по пути
  *
  * Удаление агента здесь идёт rpc-методом (так делает кнопка ✕ в GUI); в TUI
  * этой команды нет — там путь через менеджера (LLM), см. probe-tui-scenario.
@@ -254,6 +256,31 @@ try {
     readSessions().length === 1 && !loadTeam(agentsDir).some((a: any) => a.id === 'yurist') &&
     readSessions()[0].id !== restored.id,
     String(r9.result?.text ?? ''));
+
+  // ── 10. вложения: POST /api/upload и file_ref ────────────────────────────
+  // 📎 браузера: тело запроса льётся потоком в inbox, минуя лимит ws-сообщения
+  const payload = Buffer.alloc(100_000, 0xab);
+  const up = await fetch(`http://127.0.0.1:${handle.port}/api/upload?name=${encodeURIComponent('probe-upload.bin')}`, {
+    method: 'POST',
+    body: payload,
+  });
+  const upJson = await up.json() as { ok?: boolean; size?: number; error?: string };
+  check('10: POST /api/upload — 200, размер совпал',
+    up.ok && upJson.ok === true && upJson.size === payload.length, JSON.stringify(upJson));
+  const uploaded = join(home, 'projects', 'proj', 'inbox', 'probe-upload.bin');
+  check('10: файл в inbox побайтно тот', existsSync(uploaded) && payload.equals(readFileSync(uploaded)));
+  // /api/file отдаёт потоком: скачанное совпадает с загруженным
+  const down = await fetch(`http://127.0.0.1:${handle.port}/api/file?path=${encodeURIComponent('probe-upload.bin')}`);
+  check('10: /api/file — 200 и побайтно тот', down.ok && Buffer.from(await down.arrayBuffer()).equals(payload),
+    `status=${down.status}`);
+
+  // 🔗: файл, уже лежащий на сервере, копируется в inbox по пути (defer — без раунда)
+  const elsewhere = join(base, 'elsewhere.bin');
+  writeFileSync(elsewhere, 'настоящий файл с диска');
+  client.send({ type: 'file_ref', name: 'probe-ref.bin', path: elsewhere, defer: true });
+  await waitDisk(() => existsSync(join(home, 'projects', 'proj', 'inbox', 'probe-ref.bin')), 'file_ref скопировал файл в inbox');
+  check('10: file_ref — содержимое совпало',
+    readFileSync(join(home, 'projects', 'proj', 'inbox', 'probe-ref.bin'), 'utf8') === 'настоящий файл с диска');
 } finally {
   client.close();
   await handle.close();

@@ -392,7 +392,7 @@ their sub-verbs too: after `/session agent ` the panel offers `add` and `delete`
 and `/session agent add` shows its syntax and the ids.
 
 The same for mentions: type `@` in the middle of a message — a popup with the
-members of the current chat and `@session` opens above the input line (each with
+members of the current chat and `@session` opens below the input line (each with
 their role). Typing filters the list, **up/down arrows** move the selection
 (wrapping around), **Enter** or **Tab** insert the selected name, **Esc** closes
 the popup leaving the typed `@fragment` as is. Case doesn't matter, and neither
@@ -416,14 +416,17 @@ The current roster is visible in `/agents` and `/session agents`. Digests of a c
 conversation are merged into the team's shared memory in the background, without
 waiting.
 
-**Multiline messages.** A line break inside a message: `\` + Enter (works in any
-terminal) or **Ctrl+Enter** / **Alt+Enter**. While the input continues, the prompt
-turns into `… `; an empty line is a paragraph break; a regular **Enter** sends the
-message, a **double Enter** or `.` finishes the input as is. `\\` at the end of a
-line is a literal backslash. A multiline paste from the clipboard (Ctrl+V in
-Windows Terminal, Shift+Ins, right click) is also glued into one message instead of
-sending the first line; if the paste ended with a newline, press Enter once more
-after it.
+**Multiline messages.** In the full-screen mode a line break inside the message
+is **Ctrl+Enter** or **Alt+Enter**; a multiline clipboard paste (Ctrl+V in
+Windows Terminal, Shift+Ins, right click) keeps the line breaks. All lines are
+visible at once — up to `maxInputRows` lines above the cursor (8 by default,
+configurable); **↑/↓** walk the input lines, and at the first/last one they
+step over to the message history and the draft. A regular **Enter** sends the
+whole message with all its breaks; if the paste ended with a newline, press
+Enter once more after it. The linear mode (`"screen": false`) keeps the old
+stepwise input: `\` + Enter continues the message — the prompt turns into
+`… `, an empty line is a paragraph break, a **double Enter** or `.` finishes
+the input as is, `\\` is a literal backslash.
 
 **Interruption.** While the team is answering (the moderator is thinking or the
 agents are typing) you can stop the round with **Esc** or **Ctrl+C** — the request
@@ -463,6 +466,8 @@ in the browser.
 - a tool's "allow?" question is shown as ✓/✗ buttons; with no answer for 5 minutes
   it counts as a refusal — a round never hangs forever;
 - "⏹ Abort" stops the round, like Esc in the terminal.
+- the input field grows as you type up to `maxInputRows` lines (the setting is
+  shared with the terminal), scrolling inside beyond that.
 
 **Access from outside.** If the server is exposed (`HOST` is not 127.0.0.1), the
 protection is a token: the `TOKEN` variable in `~/.dreamteam/.env`. The wizard
@@ -510,7 +515,8 @@ screen and the agents' tool limits.
   "margin": 2,
   "screen": true,
   "runTimeoutMs": 180000,
-  "maxOutputChars": 4000
+  "maxOutputChars": 4000,
+  "maxInputRows": 8
 }
 ```
 
@@ -536,8 +542,8 @@ screen and the agents' tool limits.
   the width is clamped to it.
 - `margin` — screen edge margins, an integer from 0 to 10 (2 by default): the
   content is written with an indent on the left and right, the chat panel starts
-  below the indent on top, and the input is separated by two empty lines at the
-  bottom.
+  below the indent on top, the hint lines hug the bottom edge, and the gap
+  between the input and the hints is two empty lines.
 - `screen` — full-screen mode (`true` by default). `false` brings back the old
   "linear" readline interface — for pipes and exotic terminals, for example (a
   non-TTY launch turns it on automatically anyway).
@@ -545,6 +551,9 @@ screen and the agents' tool limits.
   by default); a hung process is interrupted together with its children.
 - `maxOutputChars` — how many characters a command's output is trimmed to (4000 by
   default).
+- `maxInputRows` — how many input lines are visible at once, an integer from 1 to
+  20 (8 by default). Shared by the TUI (the visible input window sticks to the
+  cursor) and the web shell (the textarea grows up to this limit).
 
 **How the full screen works** (the terminal's alternative buffer — after quitting,
 your terminal looks like it did before the launch):
@@ -555,19 +564,32 @@ your terminal looks like it did before the launch):
 │  chat panel (scrollback)     │  ← history and answer streaming
 │                              │
 ├──────────────────────────────┤
-│  5 hint lines                │  ← commands, the @ popup, status/spinner
-├──────────────────────────────┤
+│  (two empty lines)           │  ← the gap between the chat and the input
 │  You > input                 │  ← the input field, grows upward when wrapping
 │                              │
-│  (two empty lines)           │  ← the indent from the bottom edge
+│  (two empty lines)           │  ← the gap between the input and the status bar
+├──────────────────────────────┤
+│  [session title]             │  ← status bar: the current session («[no project]»)
+│  @name — to a member · Esc…  │  ← keys; with / and @ — the list and the popup
+│  status/spinner              │  ← "Yana is typing…", y/n, the history counter
 └──────────────────────────────┘
 ```
 
-The chat scrolls inside its panel — hints, input and status always stay in place
-no matter what happens. Lines wrap at words, not characters; a word longer than
+On launch a short banner is printed: a frame with the name, a
+"version · home · project" line, the mode (`TUI`; `Server` for `dreamteam serve`)
+and the web shell address (`dreamteam serve → http://127.0.0.1:8080`), plus the
+tail `/project — projects · /session — sessions`. The roster is `/agents`,
+the models are `/models`. An agent's reply is printed with its header on a
+separate line and the text starting on the next one; replies are separated by
+one empty line.
+
+The chat scrolls inside its panel — the status bar and the input always stay in
+place no matter what happens. Lines wrap at words, not characters; a word longer than
 a line is cut by characters. The same rule in the input field: input wraps at
-words, the cursor moves across lines (↑/↓ are taken by history, movement is
-←/→/Home/End). Resizing the terminal rebuilds the zones on the fly.
+words, up to `maxInputRows` lines are visible (the window sticks to the
+cursor), the cursor moves across lines — ↑/↓ within the input, at the edges
+they step to the message history. Resizing the terminal rebuilds the zones on
+the fly.
 
 **Scrollback.** On launch the panel immediately shows the tail of the previous
 conversation — in the members' signature colors; to look further back, scroll with
@@ -597,26 +619,28 @@ the start/end of the line under the cursor). If there is no selection in either
 place, Ctrl+C works as before — it interrupts the round/quits.
 
 **An answer being streamed** is not cut to a single line: an agent's unfinished
-stream wraps and occupies the bottom lines of the panel (from five up to the full
-panel height — whichever is shorter), pressed against the input field. While the
+stream wraps and occupies the bottom lines of the panel (from one line up to the
+full panel height — whichever is shorter), pressed against the input field. While the
 stream runs, selection works over those "live" lines too — both with the mouse and
 with Shift+arrows on empty input; once the answer is finished and moves into the
 history, the selection is dropped (the lines stay in place, but as regular history
 now). When you are scrolled up through the history, the live stream is not shown —
 it finishes "off screen" and appears when the view returns to the fresh messages.
 
-**Hint lines** (5 of them above the input): the command list while typing `/`,
-the `@mentions` popup (it can grow taller still, over the chat), and the bottom
-line is the status: the "Yana is typing…" spinner, an agent's action confirmation
-question (`y/n`), and, when the history is scrolled up, the "↑ history: N more
-pages above" counter.
+**The status bar** (3 lines below the input): the current session title
+(truncated to 24 characters; "no project" when there is none), the keys line —
+`@name or !name — to a member · Esc — abort the round · /exit — quit · /help — commands`
+(while typing `/` it becomes the command list, with `@` — the mentions popup,
+which can grow over the status bar), and the bottom line is the status: the
+"Yana is typing…" spinner, an agent's action confirmation question (`y/n`), and,
+when the history is scrolled up, the "↑ history: N more pages above" counter.
 
-**Input editor keys:** ↑/↓ — message history (the draft is kept), Ctrl+U — erase
-the line, Ctrl+W or Alt+Backspace — erase a word, ←/→/Home/End — cursor,
-Ctrl+←/→ — by words, Delete — delete the character after the cursor, Ctrl+D on an
-empty line — quit. Pasting from the clipboard glues line breaks into spaces (a
-multiline paste is not sent in parts). The cursor doesn't cut emoji or other
-composite characters in half.
+**Input editor keys:** ↑/↓ — across the input lines, at the edges — message
+history (the draft is kept), Ctrl+U — erase the line, Ctrl+W or Alt+Backspace —
+erase a word, ←/→/Home/End — cursor, Ctrl+←/→ — by words, Delete — delete the
+character after the cursor, Ctrl+D on an empty line — quit. Pasting from the
+clipboard keeps line breaks (a multiline paste is not sent in parts). The cursor
+doesn't cut emoji or other composite characters in half.
 
 ## Tools: agents write files and run commands
 

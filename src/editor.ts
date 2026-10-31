@@ -112,7 +112,8 @@ function seqName(seq: string): string | null {
   }
 }
 
-/** Видимые строки ввода: [{текст, индекс первого символа в буфере}] */
+/** Видимые строки ввода: [{текст, индекс первого символа в буферe}];
+ *  \n в буфере — жёсткий разрыв строки */
 export function wrapPlain(
   text: string,
   width: number,
@@ -132,9 +133,17 @@ export function wrapPlain(
   };
   let i = 0;
   while (i < chars.length) {
+    if (chars[i] === '\n') {
+      push();
+      start = i + 1;
+      limit = width;
+      i++;
+      continue;
+    }
     const isSpace = chars[i] === ' ';
     let j = i;
-    while (j < chars.length && (chars[j] === ' ') === isSpace) j++;
+    // \n не входит в токен: это граница строки, её увидит проверка наверху цикла
+    while (j < chars.length && chars[j] !== '\n' && (chars[j] === ' ') === isSpace) j++;
     const tok = chars.slice(i, j).join('');
     const tokW = widths.slice(i, j).reduce((a, b) => a + b, 0);
     if (isSpace) {
@@ -181,17 +190,18 @@ export function wrapPlain(
     }
     i = j;
   }
-  if (line || out.length === 0) push();
+  if (line || out.length === 0 || chars[chars.length - 1] === '\n') push();
   return out;
 }
 
 /**
  * Редактор строки ввода для управляемого экрана: сырой ввод без readline.
- * Кодпоинты (не режет эмодзи), история (↑/↓), Ctrl+U — очистить, Ctrl+W —
+ * Кодпоинты (не режет эмодзи), многострочный ввод (Ctrl+Enter / Alt+Enter —
+ * перенос внутри буфера, паста сохраняет переносы), видимых строк — не больше
+ * maxRows: окно прокручивается за курсором. ↑/↓ ходят по строкам ввода,
+ * на краю (первая/последняя) — история сообщений. Ctrl+U — очистить, Ctrl+W —
  * удалить слово, Ctrl+←/→ — по словам (Ctrl+Shift+←/→ — выделение по словам),
- * Home/End/Delete, мягкий перенос Ctrl+Enter (LF) и Alt+Enter,
- * вставка из буфера (bracketed paste) — переносы становятся пробелами.
- * Отрисовка целиком живёт в Screen: зоны не мешают друг другу.
+ * Home/End/Delete. Отрисовка целиком живёт в Screen: зоны не мешают друг другу.
  */
 export class Editor {
   private buffer = '';
@@ -213,6 +223,8 @@ export class Editor {
     private hooks: EditorHooks,
     private screen: Screen,
     private stdin: NodeJS.ReadStream,
+    /** Максимум видимых строк ввода: дальше окно прокручивается за курсором */
+    private maxRows = 8,
   ) {
     this.dataHandler = (chunk) => this.onData(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
   }
@@ -306,12 +318,12 @@ export class Editor {
       if (this.pasting) {
         const end = s.indexOf('\x1b[201~');
         if (end === -1) {
-          this.insert(s.replace(/\r\n?|\n/g, ' '));
+          this.insert(s.replace(/\r\n?/g, '\n'));
           dirty = true;
           s = '';
           break;
         }
-        this.insert(s.slice(0, end).replace(/\r\n?|\n/g, ' '));
+        this.insert(s.slice(0, end).replace(/\r\n?/g, '\n'));
         dirty = true;
         s = s.slice(end + 6);
         this.pasting = false;
@@ -322,9 +334,10 @@ export class Editor {
         s = s.slice(6);
         continue;
       }
-      // Alt+Enter — мягкий перенос (readline считал бы это обычным Enter)
+      // Alt+Enter — перенос строки внутри ввода; перехват здесь, потому что
+      // декодер ниже разбил бы \x1b\r на Esc и обычный Enter
       if (s.startsWith('\x1b\r') || s.startsWith('\x1b\n')) {
-        this.submit(true);
+        this.insert('\n');
         dirty = true;
         s = s.slice(2);
         continue;
@@ -435,11 +448,31 @@ export class Editor {
       }
       switch (name) {
         case 'up':
-          this.histPrev();
+        case 'down': {
+          // по строкам ввода (мягкий перенос и \n); на краю — история сообщений
+          if (this.selA !== null) {
+            this.selA = null;
+            return;
+          }
+          const segs = this.visLines();
+          const idx = this.cursorRow(segs);
+          if (name === 'up') {
+            if (idx === 0) {
+              this.histPrev();
+              return;
+            }
+            const col = this.cursor - segs[idx].start;
+            this.cursor = segs[idx - 1].start + Math.min(col, segs[idx - 1].text.length);
+          } else {
+            if (idx === segs.length - 1) {
+              this.histNext();
+              return;
+            }
+            const col = this.cursor - segs[idx].start;
+            this.cursor = segs[idx + 1].start + Math.min(col, segs[idx + 1].text.length);
+          }
           return;
-        case 'down':
-          this.histNext();
-          return;
+        }
         case 'left':
           // выделение есть — схлопнуть к его началу, без движения
           if (this.selA !== null) {
@@ -527,7 +560,7 @@ export class Editor {
       return;
     }
     if (seq === '\n' || seq === '\x1b\r' || seq === '\x1b\n') {
-      this.submit(true); // Ctrl+Enter (LF) или Alt+Enter
+      this.insert('\n'); // Ctrl+Enter / Alt+Enter — перенос строки внутри ввода
       return;
     }
     if (seq === '\x7f' || seq === '\x08') {
@@ -667,16 +700,9 @@ export class Editor {
     } else if (dir === 'right') {
       if (this.cursor < this.buffer.length) this.cursor = nextCp(this.buffer, this.cursor);
     } else {
-      // up/down: та же видимая колонка на строке выше/ниже (мягкий перенос)
-      const firstW = Math.max(8, this.screen.inner - this.promptW);
-      const segs = wrapPlain(this.buffer, this.screen.inner, firstW);
-      let idx = segs.length - 1;
-      for (let i = 0; i < segs.length; i++) {
-        if (this.cursor <= segs[i].start + segs[i].text.length) {
-          idx = i;
-          break;
-        }
-      }
+      // up/down: та же видимая колонка на строке выше/ниже (мягкий перенос и \n)
+      const segs = this.visLines();
+      const idx = this.cursorRow(segs);
       const j = dir === 'up' ? Math.max(0, idx - 1) : Math.min(segs.length - 1, idx + 1);
       const col = this.cursor - segs[idx].start;
       this.cursor = segs[j].start + Math.min(col, segs[j].text.length);
@@ -684,31 +710,41 @@ export class Editor {
     if (this.selA === this.cursor) this.selA = null; // схлопнулось
   }
 
+  /** Видимые строки буфера: первая уже на ширину промпта */
+  private visLines(): { text: string; start: number }[] {
+    return wrapPlain(this.buffer, this.screen.inner, Math.max(8, this.screen.inner - this.promptW));
+  }
+
+  /** Индекс видимой строки, на которой стоит курсор */
+  private cursorRow(segs: { text: string; start: number }[]): number {
+    for (let i = 0; i < segs.length; i++) {
+      if (this.cursor <= segs[i].start + segs[i].text.length) return i;
+    }
+    return segs.length - 1;
+  }
+
   private render(): void {
-    const firstW = Math.max(8, this.screen.inner - this.promptW);
-    const segs = wrapPlain(this.buffer, this.screen.inner, firstW);
+    const segs = this.visLines();
     const sel = this.selBounds();
-    const lines = segs.map((s, i) => {
+    const cur = this.cursorRow(segs);
+    // окно из maxRows строк: курсор всегда виден, при движении вниз оно
+    // прижимается к нему, при движении вверх — к началу буфера
+    const max = Math.max(1, this.maxRows);
+    const from = segs.length > max ? Math.min(Math.max(0, cur - max + 1), segs.length - max) : 0;
+    const to = Math.min(from + max, segs.length);
+    const lines: string[] = [];
+    for (let i = from; i < to; i++) {
+      const s = segs[i];
       let text = s.text;
       if (sel) {
-        const from = Math.max(sel[0] - s.start, 0);
-        const to = Math.min(sel[1] - s.start, s.text.length);
-        if (from < to) {
-          text = text.slice(0, from) + '\x1b[7m' + text.slice(from, to) + '\x1b[27m' + text.slice(to);
+        const fromC = Math.max(sel[0] - s.start, 0);
+        const toC = Math.min(sel[1] - s.start, s.text.length);
+        if (fromC < toC) {
+          text = text.slice(0, fromC) + '\x1b[7m' + text.slice(fromC, toC) + '\x1b[27m' + text.slice(toC);
         }
       }
-      return (i === 0 ? this.prompt : '') + text;
-    });
-    let row = segs.length - 1;
-    let col = 0;
-    for (let i = 0; i < segs.length; i++) {
-      const seg = segs[i];
-      if (this.cursor <= seg.start + seg.text.length || i === segs.length - 1) {
-        row = i;
-        col = (i === 0 ? this.promptW : 0) + (this.cursor - seg.start);
-        break;
-      }
+      lines.push((i === 0 ? this.prompt : '') + text);
     }
-    this.screen.setInput(lines, row, col);
+    this.screen.setInput(lines, cur - from, (cur === 0 ? this.promptW : 0) + (this.cursor - segs[cur].start));
   }
 }

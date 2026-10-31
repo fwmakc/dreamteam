@@ -1,7 +1,10 @@
-/** Строк зоны подсказок между чатом и вводом */
-export const HINT_ROWS = 5;
-/** Пустых строк ниже поля ввода */
+/** Строк статус-бара в самом низу экрана: название разговора, строка клавиш,
+ *  нижняя — строка статуса/спиннера */
+export const HINT_ROWS = 3;
+/** Пустых строк-зазор между полем ввода и зоной подсказок */
 export const BOTTOM_PAD = 2;
+/** Пустых строк-зазор между панелью чата и полем ввода */
+export const TOP_PAD = 2;
 /** Хвост истории чата в памяти экрана (строк) */
 const CHAT_CAP = 4000;
 
@@ -161,11 +164,12 @@ export function wrapAnsi(text: string, width: number): string[] {
 /**
  * Управляемый экран в альтернативном буфере терминала. Снизу вверх:
  *   [чат: панель со scroll-region — вывод прокручивается внутри неё]
- *   [HINT_ROWS строк подсказок; нижняя — строка статуса/спиннера]
+ *   [TOP_PAD пустых строк-зазор]
  *   [поле ввода: 1+ строк, редактор]
- *   [BOTTOM_PAD пустых строк]
- * Всплывашка @упоминаний рисуется поверх зоны подсказок (и при нужде —
- * над ней, поверх чата; при закрытии эти строки перерисовываются из состояния).
+ *   [BOTTOM_PAD пустых строк-зазор]
+ *   [HINT_ROWS строк подсказок; нижняя — строка статуса/спиннера]
+ * Всплывашка @упоминаний рисуется под полем ввода, поверх зазора и зоны
+ * подсказок (при закрытии эти строки перерисовываются из состояния).
  */
 export class Screen {
   readonly width: number;
@@ -557,16 +561,17 @@ export class Screen {
     this.placeCursor();
   }
 
-  /** Всплывашка над полем ввода; null — закрыть и перерисовать закрытое */
+  /** Всплывашка под полем ввода (поверх зоны подсказок); null — закрыть и перерисовать закрытое */
   setOverlay(rows: string[] | null): void {
     const old = this.overlayLines;
     this.overlayLines = [];
     if (old.length > 0) this.repaintRows(this.overlayTop, this.overlayTop + old.length - 1);
     if (rows && rows.length > 0) {
-      const fit = Math.max(0, this.inputTop - 1 - this.margin);
+      const top = this.inputTop + this.inputLines.length;
+      const fit = Math.max(0, this.height - top + 1);
       const shown = rows.length > fit ? rows.slice(rows.length - fit) : rows;
       this.overlayLines = shown;
-      this.overlayTop = this.inputTop - shown.length;
+      this.overlayTop = top;
       for (let i = 0; i < shown.length; i++) {
         this.pos(this.overlayTop + i, 1 + this.margin);
         this.w('\x1b[2K' + clipAnsi(shown[i], this.inner));
@@ -594,9 +599,9 @@ export class Screen {
     let hintsRows = HINT_ROWS;
     if (inputRows + hintsRows + pad + this.margin + 1 > h) hintsRows = Math.max(0, h - this.margin - inputRows - pad - 1);
     if (inputRows + hintsRows + pad + this.margin + 1 > h) pad = Math.max(0, h - this.margin - inputRows - hintsRows - 1);
-    const inputTop0 = Math.max(this.margin, h - pad - inputRows);
-    const hintsTop0 = Math.max(this.margin, inputTop0 - hintsRows);
-    const chatBot0 = Math.max(this.margin, hintsTop0 - 1);
+    const hintsTop0 = Math.max(this.margin, h - hintsRows);
+    const inputTop0 = Math.max(this.margin, hintsTop0 - pad - inputRows);
+    const chatBot0 = Math.max(this.margin, inputTop0 - 1 - TOP_PAD);
     this.hintsRows = hintsRows;
     this.hintsTop = hintsTop0 + 1;
     this.inputTop = inputTop0 + 1;

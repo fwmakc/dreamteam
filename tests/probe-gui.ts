@@ -159,6 +159,14 @@ function checkForms(file: string, src: string): void {
 }
 checkForms('gui-src/App.vue', appSrc);
 
+// --- 4c. вложения: 📎 через /api/upload, 🔗 через file_ref; старый base64-
+// канал 'file' из оболочки убран (сервер его ещё понимает — совместимость) ---
+check('оболочка: вложения через uploadFile + file_ref, ws-канала file больше нет',
+  wsSrc.includes('/api/upload') && /uploadFile\(/.test(appSrc) && /type: 'file_ref'/.test(appSrc) &&
+  !appSrc.includes("send({ type: 'file',") && !wsSrc.includes("send({ type: 'file',"));
+check('сервер: POST /api/upload и case file_ref на месте',
+  serveSrc.includes('/api/upload') && caseLabels(serveSrc).has('file_ref'));
+
 // --- 5. собранная оболочка ---
 const distIndex = join(root, 'gui-dist', 'index.html');
 check('gui-dist/index.html собран', existsSync(distIndex));

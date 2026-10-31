@@ -22,8 +22,11 @@ export const roundActive = ref(false);
 export const snapshot = reactive<Partial<StateSnapshot>>({});
 /** Реплики чата: история сессии + оптимистичные + закрытые стримы. Чистится каждым state. */
 export const messages = reactive<ChatMessage[]>([]);
-/** Журнал ядра: уведомления и отчёты — переживает очередной state. */
-export const feed = reactive<{ kind: 'notice' | 'error'; text: string }[]>([]);
+/** Журнал ядра: уведомления и отчёты — служебными блоками внутри чата, в
+ *  хронологическом порядке (как в TUI). Переживает очередной state, чистится
+ *  при смене разговора. */
+export interface FeedItem { ts: number; kind: 'notice' | 'error'; text: string }
+export const feed = reactive<FeedItem[]>([]);
 /** Открытая реплика стрима (между turn_header и turn_end). */
 export const streaming = reactive({
   open: false, id: '', name: '', role: '', emoji: '🤖', color: '', text: '',
@@ -65,7 +68,18 @@ export function rpc<T = { text: string }>(method: string, args?: Record<string, 
 }
 
 export function addFeed(kind: 'notice' | 'error', text: string): void {
-  feed.push({ kind, text });
+  feed.push({ ts: Date.now(), kind, text });
+  if (feed.length > 400) feed.splice(0, feed.length - 400); // скроллбэк не резиновый
+}
+
+/** При смене разговора журнал пуст: заметки относятся к прежней переписке. */
+let feedSessionId = '';
+function noteSession(id: string | undefined): void {
+  const sid = id ?? '';
+  if (sid !== feedSessionId) {
+    feed.splice(0, feed.length);
+    feedSessionId = sid;
+  }
 }
 
 function resolveRpc(id: string, result: unknown): void {
@@ -189,11 +203,13 @@ function dispatchEvent(type: string, msg: Record<string, unknown>): void {
       Object.assign(snapshot, st);
       roundActive.value = false;
       hidePrompts();
+      noteSession(st?.session?.id);
       rebuildMessages(st?.session?.messages);
       break;
     }
     case 'session_opened': {
       snapshot.session = msg.session as StateSnapshot['session'];
+      noteSession((msg.session as StateSnapshot['session'])?.id);
       rebuildMessages((msg.session as StateSnapshot['session'])?.messages);
       break;
     }
@@ -316,19 +332,32 @@ export function answerChoose(index: number | null): void {
   chooseDialog.show = false;
 }
 
-/** Чтение файла как base64 чанками (для импорта и вложений). */
+/** Чтение файла как base64 (для импорта). */
 export function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('не удалось прочитать файл'));
     reader.onload = () => {
-      const bytes = new Uint8Array(reader.result as ArrayBuffer);
-      let b64 = '';
-      for (let i = 0; i < bytes.length; i += 0x8000) {
-        b64 += btoa(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
-      }
-      resolve(b64);
+      // кодирует весь файл сам; чанковый btoa тут ломался: чанк 0x8000
+      // не кратен 3, «=» в середине строки обрезал декодирование на
+      // сервере до первых 32 КиБ
+      const r = String(reader.result);
+      resolve(r.slice(r.indexOf(',') + 1));
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsDataURL(file);
   });
+}
+
+/** Загрузка файла в inbox напрямую по POST /api/upload — тело льётся
+ *  потоком, лимит ws-сообщения не при делах. */
+export async function uploadFile(file: File): Promise<void> {
+  const token = localStorage.getItem('dt-token') ?? '';
+  const res = await fetch(
+    `/api/upload?name=${encodeURIComponent(file.name)}&token=${encodeURIComponent(token)}`,
+    { method: 'POST', body: file },
+  );
+  if (!res.ok) {
+    const j = await res.json().catch(() => null) as { error?: string } | null;
+    throw new Error(j?.error ?? `${res.status}`);
+  }
 }

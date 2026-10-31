@@ -23,6 +23,9 @@ export interface SettingsConfig {
   maxTurns: number;
   /** Отступы по краям экрана в колонках/строках (0–10) */
   margin: number;
+  /** Максимум видимых строк поля ввода (1–20): дальше ввод прокручивается
+   *  внутри окна; одинаково ограничивает терминал и веб-оболочку */
+  maxInputRows: number;
   /** false — прежний readline-интерфейс без альтернативного экрана */
   screen: boolean;
   /** Таймаут команды (```run / ```ssh), мс */
@@ -50,6 +53,13 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   const margin = raw.margin;
   if (margin !== undefined && (typeof margin !== 'number' || !Number.isInteger(margin) || margin < 0 || margin > 10)) {
     throw new Error(`${file}: поле "margin" — целое число от 0 до 10`);
+  }
+  const maxInputRows = raw.maxInputRows;
+  if (
+    maxInputRows !== undefined &&
+    (typeof maxInputRows !== 'number' || !Number.isInteger(maxInputRows) || maxInputRows < 1 || maxInputRows > 20)
+  ) {
+    throw new Error(`${file}: поле "maxInputRows" — целое число от 1 до 20`);
   }
   const screen = raw.screen;
   if (screen !== undefined && typeof screen !== 'boolean') {
@@ -95,6 +105,7 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
     autoMessage: typeof autoMessage === 'string' ? autoMessage.trim() : 'Решите вопрос на своё усмотрение.',
     maxTurns: typeof maxTurns === 'number' ? maxTurns : 3,
     margin: typeof margin === 'number' ? margin : 2,
+    maxInputRows: typeof maxInputRows === 'number' ? maxInputRows : 8,
     screen: screen !== false,
     runTimeoutMs: typeof runTimeoutMs === 'number' ? runTimeoutMs : 180000,
     maxOutputChars: typeof maxOutputChars === 'number' ? maxOutputChars : 4000,

@@ -1,8 +1,8 @@
 /**
  * Временный зонд старта: запускает приложение в псевдо-TTY и прогоняет
  * весь вывод через мини-эмулятор VT — проверяется ОТРИСОВАННЫЙ экран,
- * а не поток байт. Приложение стартует БЕЗ проекта (метка «[без проекта]»,
- * подсказка выбора в панели) — проект выбирает человек: /project open dev
+ * а не поток байт. Приложение стартует БЕЗ проекта (метка «[без проекта]»
+ * в статус-баре) — проект выбирает человек: /project open dev
  * открывает проект с прошлым разговором, дальше вся отрисовка истории —
  * колесо, PgUp/PgDn, Ctrl+PgUp/Dn, мышь, выделение, Ctrl+C, Esc, «@».
  * Запуск: npm run probe:e2e (нужен node-pty: npm i --no-save node-pty).
@@ -47,8 +47,8 @@ j('manager.json', { model: { id: 'mock' }, name: 'Менеджер', emoji: '�
 mkdirSync(join(home, 'agents'), { recursive: true });
 j('agents/gleb_cyber.json', { id: 'gleb_cyber', name: 'Глеб', emoji: '🧠', color: 'cyan', role: 'Главный по архитектуре и коду', prompt: 'Ты Глеб.', model: 'mock' });
 j('agents/katya_uiux.json', { id: 'katya_uiux', name: 'Катя', emoji: '🎨', color: 'magenta', role: 'Арт-директор и UI/UX', prompt: 'Ты Катя.', model: 'mock' });
-// прошлый разговор с историей: хвост в панели, «Продолжаю разговор», @Глеб в попапе.
-// Сообщений много: панель должна иметь запас выше вьюпорта для PgUp («выше ещё на 26»).
+  // прошлый разговор с историей: хвост в панели, «Продолжаю разговор», @Глеб в попапе.
+  // Сообщений много: панель должна иметь запас выше вьюпорта для PgUp (индикатор растёт).
 {
   // реестр проектов = сами папки в доме: регистрирует project.json
   mkdirSync(join(home, 'projects', 'dev', 'sessions'), { recursive: true });
@@ -136,17 +136,17 @@ const saveDump = (name: string, text: string): void => {
   console.log(`  дамп: ${p}`);
 };
 const pane = (): string => vt.lines().slice(2, 22).join('\n'); // панель чата: строки 3..22
-const hints = (): string => vt.lines().slice(22, 27).join('\n'); // подсказки: 23..27
+const hints = (): string => vt.lines().slice(27, 30).join('\n'); // статус-бар: 28..30
 
-// старт: баннер, подсказка выбора проекта, промпт — без всякого ввода;
+// старт: баннер, статус-бар с меткой «[без проекта]», промпт — без всякого ввода;
 // на холодном раннере TUI рисуется дольше трёх секунд — дожидаемся промпта
-const started = await waitPane('промпт после старта', () => (vt.lines()[27] ?? '').includes('Ты >'), 90_000);
+const started = await waitPane('промпт после старта', () => (vt.lines()[24] ?? '').includes('Ты >'), 90_000);
 dump('сразу после запуска (без проекта)');
 saveDump('dt-startup-1.txt', vt.lines().join('\n'));
-check('старт: промпт внизу', started, JSON.stringify(vt.lines()[27]));
-check('старт: без проекта — метка в промпте', (vt.lines()[27] ?? '').includes('без проекта'), JSON.stringify(vt.lines()[27]));
-check('старт: статичные подсказки', hints().includes('/help — операции'), hints());
-check('старт: подсказка выбора проекта в панели', pane().includes('Проект не выбран'), pane().slice(0, 400));
+check('старт: промпт внизу', started, JSON.stringify(vt.lines()[24]));
+check('старт: баннер — режим TUI и адрес веб-оболочки', raw.includes('режим: TUI') && raw.includes('dreamteam serve → http://127.0.0.1:8080'), '');
+check('старт: без проекта — метка в статус-баре', hints().includes('[без проекта]'), hints());
+check('старт: статичные подсказки', hints().includes('/help — команды'), hints());
 
 // проект выбирает человек: открываем зарегистрированный проект с прошлым разговором
 await write('/project open dev\r');
@@ -154,7 +154,7 @@ check(
   'открытие: история в панели',
   await waitPane('хвост истории', () => pane().includes('Продолжаю разговор'), 15000),
 );
-check('открытие: проект открыт — разговор в промпте', (vt.lines()[27] ?? '').includes('Прошлый разговор'), JSON.stringify(vt.lines()[27]));
+check('открытие: проект открыт — разговор в статус-баре', hints().includes('[Прошлый разговор]'), hints());
 check('открытие: хвост истории с метками времени', /\d{2}:\d{2}:\d{2}/.test(pane()), pane().slice(-300));
 const paneBefore = pane();
 
@@ -167,12 +167,14 @@ saveDump('dt-startup-3.txt', vt.lines().join('\n'));
 check('колесо: панель изменилась', pane() !== paneBefore, '');
 check('колесо: индикатор «выше ещё на 6»', hints().includes('выше ещё на 6'), hints());
 check('колесо: хвост ушёл из вида', !pane().includes('Продолжаю разговор'), pane().slice(-200));
-check('колесо: ввод на месте', (vt.lines()[27] ?? '').includes('Ты >'), JSON.stringify(vt.lines()[27]));
+check('колесо: ввод на месте', (vt.lines()[24] ?? '').includes('Ты >'), JSON.stringify(vt.lines()[24]));
 
-// PgUp — страница вверх, PgDn — обратно к свежим
+// PgUp — страница вверх (на высоту панели), PgDn — обратно к свежим
+const indBefore = Number(/выше ещё на (\d+)/.exec(hints())?.[1] ?? 0);
 await write('\x1b[5~');
 await wait(400);
-check('PgUp: индикатор «на 26»', hints().includes('выше ещё на 26'), hints());
+const indAfter = Number(/выше ещё на (\d+)/.exec(hints())?.[1] ?? 0);
+check('PgUp: страница вверх — индикатор вырос', indAfter > indBefore, `${indBefore} → ${indAfter}`);
 await write('\x1b[6~');
 await write('\x1b[6~');
 await wait(400);
@@ -187,7 +189,7 @@ check('Ctrl+PgUp: индикатор прокрутки', hints().includes('вы
 await write('\x1b[6;5~');
 await wait(400);
 check('Ctrl+PgDn: снова хвост', pane().includes('Продолжаю разговор') && !hints().includes('история'), hints());
-check('Ctrl+PgDn: ввод на месте', (vt.lines()[27] ?? '').includes('Ты >'), JSON.stringify(vt.lines()[27]));
+check('Ctrl+PgDn: ввод на месте', (vt.lines()[24] ?? '').includes('Ты >'), JSON.stringify(vt.lines()[24]));
 
 // --- выделение мышью: нажать-протянуть (SGR-события проходят ConPTY насквозь) ---
 let rawMark = 0;
@@ -213,7 +215,7 @@ rawMark = raw.length;
 await write('\x03');
 await wait(700);
 check('ctrl+c: скопировал выделение', hints().includes('Скопировано'), hints());
-check('ctrl+c: приложение живо', (vt.lines()[27] ?? '').includes('Ты >'), JSON.stringify(vt.lines()[27]));
+check('ctrl+c: приложение живо', (vt.lines()[24] ?? '').includes('Ты >'), JSON.stringify(vt.lines()[24]));
 
 // Esc снимает выделение: перерисовка панели уже без реверса
 // (Ctrl+C при копировании выделение снял — создаём заново Shift+End)
@@ -240,19 +242,19 @@ rawMark = raw.length;
 await write('\x03'); // Ctrl+C — копия выделения ввода
 await wait(700);
 check('ввод: ctrl+c скопировал', hints().includes('Скопировано'), hints());
-check('ввод: текст на месте', (vt.lines()[27] ?? '').includes('тест'), JSON.stringify(vt.lines()[27]));
+check('ввод: текст на месте', (vt.lines()[24] ?? '').includes('тест'), JSON.stringify(vt.lines()[24]));
 rawMark = raw.length;
 await write('\x1b'); // Esc — снять выделение ввода (одиночный Esc ждёт 80 мс)
 await write('\x15'); // Ctrl+U — стереть ввод перед дальнейшими проверками
 await wait(500);
-check('ввод: esc снял, ctrl+u стёр', !rawSince().includes('\x1b[7m') && !(vt.lines()[27] ?? '').includes('тест'), JSON.stringify(vt.lines()[27]));
+check('ввод: esc снял, ctrl+u стёр', !rawSince().includes('\x1b[7m') && !(vt.lines()[24] ?? '').includes('тест'), JSON.stringify(vt.lines()[24]));
 
 await write('@');
 await wait(600);
 dump('после «@»');
 saveDump('dt-startup-2.txt', vt.lines().join('\n'));
-check('после @: всплывашка открылась', vt.lines().slice(18, 27).join('\n').includes('@Глеб'), '');
-check('после @: ввод на месте', (vt.lines()[27] ?? '').includes('Ты > @'), JSON.stringify(vt.lines()[27]));
+check('после @: всплывашка открылась', vt.lines().slice(24, 30).join('\n').includes('@Глеб'), '');
+check('после @: ввод на месте', (vt.lines()[24] ?? '').includes('Ты > @'), JSON.stringify(vt.lines()[24]));
 
 await write('\x1b'); // Esc закрывает всплывашку
 await write('\x15'); // Ctrl+U — стереть @

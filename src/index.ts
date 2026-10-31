@@ -30,16 +30,30 @@ let rl: ReturnType<typeof createInterface> | null = null;
 let screen: Screen | null = null;
 let editor: Editor | null = null;
 
-/** Подсказки на пустом вводе: постоянная шпаргалка вместо пустой зоны (функция — читается после выбора языка) */
+/** Текущий разговор — для названия в статус-баре (обновляет главный цикл). */
+let currentSession: Session | null = null;
+
+/** Название разговора для статус-бара: усечение до 24 симв., как было в промпте. */
+const sessionLabel = (): string => {
+  if (!currentSession) return t('без проекта');
+  const title = currentSession.title;
+  return title.length > 24 ? title.slice(0, 24) + '…' : title;
+};
+
+/** Статус-бар на пустом вводе: название разговора и строка клавиш (функция —
+ *  читается после выбора языка) */
 const staticHints = (): string[] => [
-  pc.dim(t('  /help — операции · /session new — новый разговор · /sessions — список разговоров')),
-  pc.dim(t('  @имя или !имя — участнику · Esc — прервать раунд · /exit — выход')),
+  pc.dim(`  [${sessionLabel()}]`),
+  pc.dim(t('  @имя или !имя — участнику · Esc — прервать раунд · /exit — выход · /help — команды')),
 ];
 
 /** Веб-оболочка — отдельный запуск; адрес из тех же PORT/HOST, что читает serve
  *  (лениво: .env дома грузится уже после импорта модуля). */
 const serveHint = (): string =>
-  pc.dim(`  веб-оболочка: dreamteam serve → http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`);
+  pc.dim(tf('  Веб-оболочка: dreamteam serve → http://{host}:{port}', {
+    host: process.env.HOST || '127.0.0.1',
+    port: process.env.PORT || '8080',
+  }));
 
 /** Таймер «Скопировано» в строке статуса, чтобы не висел вечно */
 let statusTimer: NodeJS.Timeout | null = null;
@@ -308,7 +322,9 @@ class CliPresenter implements Presenter {
   }
 
   turnHeader(agent: SpeakerRef): void {
-    out('\n' + agentHeader(agent as Agent));
+    // заголовок — отдельной строкой, текст реплики начинается со следующей;
+    // пустую строку перед следующей репликой даёт \n в начале её заголовка
+    out('\n' + agentHeader(agent as Agent) + '\n');
   }
 
   busy(label: string): { stop(): void } {
@@ -338,12 +354,12 @@ class CliPresenter implements Presenter {
   }
 
   turnEnd(full: string): void {
-    if (full.trim()) out('\n\n');
+    if (full.trim()) out('\n');
   }
 
   say(text: string): void {
     out(text);
-    out('\n\n');
+    out('\n');
   }
 
   toolLines(results: string[]): void {
@@ -400,6 +416,7 @@ class CliPresenter implements Presenter {
   }
 
   sessionOpened(session: Session): void {
+    currentSession = session;
     replaySession(session);
   }
 }
@@ -439,7 +456,8 @@ function messageRows(m: ChatMessage, team: Agent[]): string[] {
   return rows;
 }
 
-function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔══════════════════════════════════════════════╗')));
+function printBanner(app: App): void {
+  console.log(pc.bold(pc.cyan('\n  ╔══════════════════════════════════════════════╗')));
   console.log(pc.bold(pc.cyan(`  ║   🎬  DREAM TEAM — ${t('совещание начинается')}     ║`)));
   console.log(pc.bold(pc.cyan('  ╚══════════════════════════════════════════════╝')));
   console.log(
@@ -451,43 +469,8 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
       }),
     ),
   );
-
-  try {
-    const team = loadTeam(AGENTS_DIR);
-    console.log(pc.dim(`\n  ${t('Команда:')}`));
-    if (team.length === 0) {
-      console.log(pc.dim(t('  (пока пусто — новый разговор начнётся один на один с менеджером)')));
-    }
-    for (const agent of team) console.log(rosterLine(agent));
-  } catch (err) {
-    printError(`проблема с agents.json в доме: ${err instanceof Error ? err.message : err}`);
-  }
-
-  const mgrAgent = managerAsAgent(app.mgr);
-  console.log(pc.dim(t('\n  Менеджер переговорки (обращение: @менеджер):')));
-  console.log(rosterLine(mgrAgent) + pc.dim(` [${t('модель:')} ${app.mgr.model.id}]`));
-
-  console.log(pc.dim(`\n  ${t('Модели:')}`));
-  for (const [pid, status] of app.models) {
-    const mark = pid === app.settings.model?.id ? pc.cyan(' ★') : '';
-    const mgr = pid === app.mgr.model.id ? pc.yellow(` 🛎 ${t('менеджер')}`) : '';
-    const state = status.ok
-      ? pc.green(t('✓ готов'))
-      : pc.yellow(`✗ ${status.note ?? t('не настроен')}`);
-    const vision = status.vision ? pc.magenta(` ◉ ${t('зрение')}`) : '';
-    console.log(
-      `  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${vision}${mark}${mgr}`,
-    );
-  }
-  if (app.images.size > 0) {
-    console.log(pc.dim(`  ${t('Картинки:')}`));
-    for (const [pid, status] of app.images) {
-      const state = status.ok
-        ? pc.green(t('✓ готов'))
-        : pc.yellow(`✗ ${status.note ?? t('не настроен')}`);
-      console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}`);
-    }
-  }
+  console.log(pc.dim(t('  режим: TUI (запуск в режиме сервера: dreamteam serve)')));
+  console.log(serveHint());
 
   if (app.models.get(app.settings.model?.id ?? '')?.provider.kind === 'mock') {
     console.log(
@@ -495,7 +478,7 @@ function printBanner(app: App): void {  console.log(pc.bold(pc.cyan('\n  ╔═�
     );
   }
 
-  printDim(t('\n  /help — команды · @имя или !имя — участнику · @session — приложить разговор · Esc — прервать · /exit — выход'));
+  printDim(t('\n  /project — проект · /session — разговор'));
 }
 
 function printHelp(): void {
@@ -517,13 +500,14 @@ function printHelp(): void {
       ...rows,
       '',
       t('  Esc или Ctrl+C во время ответа команды — прервать (частичные ответы сохранятся).'),
-      t('  Перенос строки в сообщении: \\ + Enter или Ctrl+Enter; пустая строка — разрыв абзаца;'),
-      t('  двойной Enter или «.» — закончить ввод. Вставка многострочного текста тоже работает.'),
+      t('  Перенос строки в полноэкранном режиме: Ctrl+Enter или Alt+Enter; в линейном — \\ + Enter.'),
+      t('  Enter отправляет сообщение целиком; вставка многострочного текста сохраняет переносы.'),
       t('  В сообщении можно адресовать участников: @марина, @viktor и т.д.'),
       t('  «!» — полный синоним «@» (Shift+1 на любой раскладке): !марина, !менеджер, !session.'),
       t('  @менеджер — конфигурация переговорки: состав команды и чата, разговоры.'),
       t('  @session — приложить конспект другого разговора (@session 2 — сразу номер).'),
       t('  Начните ввод с «/» — под строкой появятся подсказки (фильтруются при наборе), Tab — дополнить.'),
+      serveHint(),
       '',
     ].join('\n'),
   );
@@ -776,8 +760,8 @@ async function main(): Promise<void> {
           if (rows) screen?.setOverlay(rows);
           else {
             screen?.setOverlay(null);
-            // без контекстных подсказок (пустой ввод) — постоянная шпаргалка
-            screen?.setHints(hintRowsFor(buf, ctx) ?? [...staticHints(), serveHint()]);
+            // без контекстных подсказок (пустой ввод) — статус-бар
+            screen?.setHints(hintRowsFor(buf, ctx) ?? staticHints());
           }
         },
         onScroll: (dir, lines) => {
@@ -818,6 +802,7 @@ async function main(): Promise<void> {
       },
       screen,
       process.stdin,
+      ui.maxInputRows,
     );
     // весь вывод приложения — в панель чата экрана
     setOutputSink((t) => {
@@ -837,18 +822,6 @@ async function main(): Promise<void> {
   }
 
   printBanner(app);
-  printDim(
-    tf('  Вы — {name}{role}', { name: app.profile.name, role: app.profile.role ? ` (${app.profile.role})` : '' }) + '. ' +
-    t('Представиться команде: /profile update name=Имя role=роль about=о себе'),
-  );
-  // Проект человек выбирает сам: без аргументов стартуем без него и показываем
-  // путь; с аргументами проект уже открыт (выше), но его заметки в экранном
-  // режиме до альтернативного буфера не видны — дублируем строку у баннера.
-  if (PROJECT_DIR) {
-    if (screen) printDim(`  ${t('Проект:')} ${basename(PROJECT_DIR)}${WORKSPACE ? ` · ${WORKSPACE}` : ''}`);
-  } else if (!app.session) {
-    printDim(t('  Проект не выбран — /project new <имя> [папка] создаст, /project open <имя|путь> откроет, /project — список.'));
-  }
   // Прошлый разговор сразу в панель: внизу виден хвост, вся старая история —
   // колесом/PgUp. В линейном режиме не нужно — там прокручивает сам терминал.
   if (screen && app.session && app.session.messages.length > 0) {
@@ -875,18 +848,14 @@ async function main(): Promise<void> {
 
   // Цветной промпт передаём самому readline: иначе при перерисовке строки
   // (например, при стирании текста) он подставит свой дефолтный белый '> '.
-  // Название текущего разговора видно прямо в промпте; без проекта — метка.
-  const promptFor = (session: Session | null): string => {
-    if (!session) return pc.dim(t('  [без проекта] ')) + pc.cyan(t('Ты > '));
-    const title = session.title.length > 24 ? session.title.slice(0, 24) + '…' : session.title;
-    return pc.dim(`[${title}] `) + pc.cyan(t('Ты > '));
-  };
+  // Название текущего разговора — не здесь, а в статус-баре подсказок.
+  const promptFor = (): string => pc.cyan(t('Ты > '));
 
   if (!editor) {
     rl = createInterface({
       input: process.stdin,
       output: process.stdout,
-      prompt: promptFor(app.session),
+      prompt: promptFor(),
       completer: makeCompleter(completionCtx()),
     });
 
@@ -911,7 +880,7 @@ async function main(): Promise<void> {
     process.stdin.on('keypress', (_str: string, key?: { name?: string }) => {
       if (!awaitingInput || key?.name === 'return' || key?.name === 'enter') return;
       const line = rl?.line ?? '';
-      const rows = mentionPicker.update(line, rl?.cursor ?? 0, completionCtx()) ?? hintRowsFor(line, completionCtx());
+      const rows = mentionPicker.update(line, rl?.cursor ?? 0, completionCtx()) ?? hintRowsFor(line, completionCtx()) ?? staticHints();
       hintPanel.render(rows);
     });
     rl.on('SIGINT', () => {
@@ -983,9 +952,11 @@ async function main(): Promise<void> {
   while (true) {
     if (stdinLines.closed && stdinLines.queue.length === 0) break;
     if (editor) {
-      editor.setPrompt(promptFor(app.session));
+      currentSession = app.session;
+      editor.setPrompt(promptFor());
     } else if (rl) {
-      rl.setPrompt(promptFor(app.session));
+      currentSession = app.session;
+      rl.setPrompt(promptFor());
       if (!stdinLines.closed) {
         process.stdout.write('\n');
         try {

@@ -7,7 +7,8 @@ import type {
 import {
   addFeed, answerChoose, answerConfirm, authError, authNeeded, authed, busyCount, busyLabel,
   colorOf, confirmDialog, conn, connectWs, chooseDialog, fileToBase64, feed, logout, messages,
-  norm, rpc, roundActive, send, snapshot, streaming, submitToken, logoutVisible,
+  norm, rpc, roundActive, send, snapshot, streaming, submitToken, logoutVisible, uploadFile,
+  type FeedItem,
 } from './stores/ws';
 
 // ── проекции снапшота ────────────────────────────────────────────────────────
@@ -40,14 +41,17 @@ watchEffect(() => {
   if (def) document.title = `Dream Team — ${def.id}`;
 });
 
-// ── текст реплики: ```блоки``` → pre, [файл.ext] → ссылка на скачивание ──────
+// ── текст реплики: ```блоки``` → pre, [файл.ext] → ссылка на файл ────────────
 const esc = (s: string): string => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string
 ));
 function fileLinks(escaped: string): string {
   return escaped.replace(/\[([^\[\]]+\.[A-Za-z0-9]{2,8})\]/g, (_m, name: string) => {
     const href = `/api/file?path=${encodeURIComponent(name)}`;
-    return `<a class="file-link" href="${href}" download>[${name}]</a>`;
+    // клик — открыть в новой вкладке (тип отдаёт сервер), Ctrl+клик — скачать,
+    // ПКМ — своё меню «Открыть/Сохранить» (onChatContext)
+    const title = esc(tr('Клик — открыть · Ctrl+клик — сохранить'));
+    return `<a class="file-link" href="${href}" target="_blank" rel="noopener" title="${title}">[${name}]</a>`;
   });
 }
 function formatText(text: string): string {
@@ -70,6 +74,20 @@ function colorByAuthor(m: ChatMessage): string {
   const a = team.value.find((x) => x.id === m.authorId);
   return colorOf(a?.color);
 }
+
+/** Лента чата: реплики и служебные блоки ядра (notice/error), слитые по времени —
+ *  заметка встаёт между репликами, в правильном хронологическом порядке. */
+type ChatItem = { key: string; ts: number } & (
+  | { kind: 'msg'; msg: ChatMessage }
+  | { kind: 'notice'; notice: FeedItem }
+);
+const chatFlow = computed<ChatItem[]>(() => {
+  const items: ChatItem[] = [
+    ...messages.map((m, i): ChatItem => ({ key: `m${i}`, ts: m.ts, kind: 'msg', msg: m })),
+    ...feed.map((n, i): ChatItem => ({ key: `n${i}`, ts: n.ts, kind: 'notice', notice: n })),
+  ];
+  return items.sort((a, b) => a.ts - b.ts); // сортировка стабильна: при равном ts реплики раньше
+});
 const fmtDate = (ts: number): string => {
   const tag = { ru: 'ru-RU', en: 'en-US', zh: 'zh-CN' }[snapshot.ui?.id ?? 'ru'] ?? 'ru-RU';
   return new Date(ts).toLocaleString(tag);
@@ -84,6 +102,12 @@ function scrollDown(): void {
 watch(
   () => [messages.length, feed.length, streaming.text, streaming.open, confirmDialog.show],
   () => nextTick(scrollDown),
+);
+
+// пришёл новый лимит строк ввода (state/settings) — пересчитать высоту поля
+watch(
+  () => snapshot.settings?.maxInputRows,
+  () => nextTick(autosize),
 );
 
 // ── контекстное меню (правая кнопка) и подтверждение удаления ────────────────
@@ -109,6 +133,33 @@ watch(
 );
 function onCtxKey(e: KeyboardEvent): void {
   if (e.key === 'Escape') closeCtx();
+}
+
+// ── файлы в чате: клик — открыть (по умолчанию, новая вкладка),
+// Ctrl+клик — скачать, ПКМ — своё меню «Открыть/Сохранить» ────────────────────
+function downloadFile(href: string): void {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = ''; // тот же origin — браузер скачает, а не откроет
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+function onChatClick(e: MouseEvent): void {
+  const a = (e.target as HTMLElement).closest('a.file-link');
+  if (!a || !(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  downloadFile(a.getAttribute('href') ?? '');
+}
+function onChatContext(e: MouseEvent): void {
+  const a = (e.target as HTMLElement).closest('a.file-link');
+  if (!a) return;
+  e.preventDefault();
+  const href = a.getAttribute('href') ?? '';
+  openCtx(e, [
+    { label: tr('Открыть'), fn: () => window.open(href, '_blank', 'noopener') },
+    { label: tr('Сохранить'), fn: () => downloadFile(href) },
+  ]);
 }
 
 // ── ширина сайдбара: тянуть за правую границу, запоминать в localStorage ─────
@@ -354,9 +405,10 @@ function openSettingsForm(): void {
     { key: 'autoMessage', label: tr('Автоответ в автономном режиме'), value: st.autoMessage ?? '' },
     { key: 'ui', label: tr('Язык интерфейса (ru / en / zh / свой из ~/.dreamteam/lang)'), value: snapshot.ui?.id ?? '' },
     { key: 'width', label: tr('Ширина экрана (40–500)'), value: st.width != null ? String(st.width) : '' },
+    { key: 'maxInputRows', label: tr('Максимум строк поля ввода (1–20)'), value: st.maxInputRows != null ? String(st.maxInputRows) : '' },
   ], (v) => {
     const patch: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' ? Number(val) : val;
+    for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' || k === 'maxInputRows' ? Number(val) : val;
     rpc('settings.update', { patch })
       .then(() => addFeed('notice', `· ${tr('настройки сохранены')}`))
       .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
@@ -585,24 +637,51 @@ function exportSession(): void {
   if (currentSessionId.value && !roundActive.value) send({ type: 'export_session', id: currentSessionId.value });
 }
 
-// ── вложение ─────────────────────────────────────────────────────────────────
+// ── вложение: чипы над вводом, уходят вместе со следующим сообщением ─────────
+// 📎 сразу льёт файл в inbox по POST /api/upload (потоком, размер не ограничен),
+// 🔗 прикрепляет файл, уже лежащий на сервере, по пути — без передачи
+interface StagedFile { name: string; size?: number; path?: string }
+const stagedFiles = ref<StagedFile[]>([]);
 const attachFileEl = ref<HTMLInputElement | null>(null);
 function pickAttach(): void {
   attachFileEl.value?.click();
 }
 async function onAttachFile(e: Event): Promise<void> {
   const inp = e.target as HTMLInputElement;
-  const f = inp.files?.[0];
-  if (!f || roundActive.value) { inp.value = ''; return; }
-  try {
-    const b64 = await fileToBase64(f);
-    roundActive.value = true;
-    send({ type: 'file', name: f.name, dataB64: b64, text: tr('посмотрите файл {file}', { file: f.name }) });
-    addFeed('notice', `· 📎 ${f.name} (${f.size} ${tr('Б')}) — ${tr('отправлен команде')}`);
-  } catch (err) {
-    addFeed('error', `✗ ${(err as Error).message}`);
-  }
+  const files = [...(inp.files ?? [])];
   inp.value = '';
+  for (const f of files) {
+    try {
+      await uploadFile(f);
+      stagedFiles.value.push({ name: f.name, size: f.size });
+      addFeed('notice', `· 📎 ${f.name} (${f.size} ${tr('Б')}) — ${tr('прикреплён к сообщению')}`);
+    } catch (err) {
+      addFeed('error', `✗ ${f.name}: ${(err as Error).message}`);
+    }
+  }
+}
+const refVisible = ref(false);
+const refInput = ref('');
+const refEl = ref<HTMLInputElement | null>(null);
+function pickRef(): void {
+  refVisible.value = true;
+  nextTick(() => refEl.value?.focus());
+}
+function stageRef(): void {
+  const p = refInput.value.trim();
+  refVisible.value = false;
+  refInput.value = '';
+  if (!p) return;
+  const name = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
+  stagedFiles.value.push({ name, path: p });
+  addFeed('notice', `· 🔗 ${p} — ${tr('прикреплён к сообщению')}`);
+}
+function cancelRef(): void {
+  refVisible.value = false;
+  refInput.value = '';
+}
+function removeStaged(i: number): void {
+  stagedFiles.value.splice(i, 1);
 }
 
 // ── авто-режим и статус ──────────────────────────────────────────────────────
@@ -628,24 +707,40 @@ function autosize(): void {
   const el = inputEl.value;
   if (!el) return;
   el.style.height = 'auto';
-  const max = 160;
+  // лимит строк из настроек дома (maxInputRows): строки × высота строки + рамка/паддинг
+  const rows = Math.max(1, snapshot.settings?.maxInputRows ?? 8);
+  const cs = getComputedStyle(el);
+  const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4 || 22;
+  const frame =
+    parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) +
+    parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+  const max = Math.round(rows * lineH + frame);
+  el.style.maxHeight = `${max}px`;
   el.style.height = `${Math.min(el.scrollHeight, max)}px`;
   // под лимитом скролла не место: округление scrollHeight даёт лишний пиксель
   el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
 }
 function sendUserMessage(): void {
   const text = draft.value.trim();
-  if (!text || roundActive.value || !authed.value) return;
+  if ((!text && stagedFiles.value.length === 0) || roundActive.value || !authed.value) return;
   draft.value = '';
   autosize();
   hideHints();
   roundActive.value = true;
+  // 🔗-файлы сервер копирует в inbox сам (без передачи); загруженные через 📎
+  // уже там — осталось послать текст с метками [имя]
+  const names = stagedFiles.value.map((f) => `[${f.name}]`).join(' ');
+  for (const f of stagedFiles.value) {
+    if (f.path) send({ type: 'file_ref', name: f.name, path: f.path, defer: true });
+  }
+  stagedFiles.value = [];
   if (text.startsWith('/')) {
     // команда: исполняет ядро, отчёты придут notice-событиями в журнал
     send({ type: 'command', text });
   } else {
-    messages.push({ authorId: 'user', authorName: profile.value?.name ?? tr('Вы'), text, ts: Date.now() });
-    send({ type: 'user_message', text });
+    const full = names ? `${names} ${text}`.trim() : text;
+    messages.push({ authorId: 'user', authorName: profile.value?.name ?? tr('Вы'), text: full, ts: Date.now() });
+    send({ type: 'user_message', text: full });
   }
 }
 
@@ -1081,25 +1176,26 @@ onMounted(connectWs);
 
     <!-- ── чат ────────────────────────────────────────────────────────────── -->
     <section id="chatwrap">
-      <div id="chat" ref="chatEl">
+      <div id="chat" ref="chatEl" @click="onChatClick" @contextmenu="onChatContext">
         <div id="msgs">
-          <template v-for="(m, i) in messages" :key="i">
-            <div v-if="m.authorId === 'user'" class="msg user">
-              <div class="head">👤 {{ m.authorName }}</div>
+          <template v-for="it in chatFlow" :key="it.key">
+            <div v-if="it.kind === 'notice'" class="sysline" :class="it.notice.kind">{{ it.notice.text }}</div>
+            <div v-else-if="it.msg.authorId === 'user'" class="msg user">
+              <div class="head">👤 {{ it.msg.authorName }}</div>
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
-              <div class="txt" v-html="formatText(m.text)"></div>
+              <div class="txt" v-html="formatText(it.msg.text)"></div>
             </div>
-            <div v-else-if="m.authorId === 'tool'" class="toolblock">{{ m.text }}</div>
-            <div v-else-if="m.authorId === 'session-ref'" class="attachment">
-              <b>📎 {{ m.authorName }}</b>
-              <div class="digest">{{ m.text }}</div>
+            <div v-else-if="it.msg.authorId === 'tool'" class="toolblock">{{ it.msg.text }}</div>
+            <div v-else-if="it.msg.authorId === 'session-ref'" class="attachment">
+              <b>📎 {{ it.msg.authorName }}</b>
+              <div class="digest">{{ it.msg.text }}</div>
             </div>
             <div v-else class="msg">
-              <div class="head" :style="{ color: colorByAuthor(m) }">
-                {{ m.authorName }} <span v-if="m.authorRole" class="role">{{ m.authorRole }}</span>
+              <div class="head" :style="{ color: colorByAuthor(it.msg) }">
+                {{ it.msg.authorName }} <span v-if="it.msg.authorRole" class="role">{{ it.msg.authorRole }}</span>
               </div>
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
-              <div class="txt" v-html="formatText(m.text)"></div>
+              <div class="txt" v-html="formatText(it.msg.text)"></div>
             </div>
           </template>
           <div v-if="streaming.open" class="msg">
@@ -1109,9 +1205,6 @@ onMounted(connectWs);
             </div>
             <div class="txt">{{ streaming.text }}</div>
           </div>
-        </div>
-        <div id="feed">
-          <div v-for="(n, i) in feed" :key="i" :class="n.kind">{{ n.text }}</div>
         </div>
       </div>
 
@@ -1168,9 +1261,26 @@ onMounted(connectWs);
         </div>
       </div>
 
+      <div v-if="stagedFiles.length" id="staged">
+        <span v-for="(f, i) in stagedFiles" :key="`${f.name}:${i}`" class="chip" :title="f.path">
+          📎 {{ f.path ?? `${f.name} (${f.size} ${tr('Б')})` }}
+          <button :title="tr('убрать')" @click="removeStaged(i)">✕</button>
+        </span>
+      </div>
+      <div v-if="refVisible" id="refrow">
+        <input
+          ref="refEl"
+          v-model="refInput"
+          :placeholder="tr('путь на сервере, например /srv/data/report.pdf')"
+          @keydown.enter.prevent="stageRef"
+          @keydown.esc.prevent="cancelRef"
+          @blur="stageRef"
+        >
+      </div>
       <div id="inputrow">
-        <button id="btn-attach" :title="tr('Прикрепить файл (положится в inbox проекта)')" @click="pickAttach">📎</button>
-        <input ref="attachFileEl" type="file" class="hidden" @change="onAttachFile">
+        <button id="btn-attach" :title="tr('Прикрепить файл (загрузится в inbox проекта)')" @click="pickAttach">📎</button>
+        <button id="btn-ref" :title="tr('Прикрепить по пути на сервере (файл не передаётся через браузер)')" @click="pickRef">🔗</button>
+        <input ref="attachFileEl" type="file" multiple class="hidden" @change="onAttachFile">
         <textarea
           id="input"
           ref="inputEl"

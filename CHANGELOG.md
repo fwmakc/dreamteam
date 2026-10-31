@@ -7,6 +7,93 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
+## [0.0.13] — 2026-10-31
+
+### Added
+
+- **Big files: streaming upload and attach-by-path.** Files picked with 📎 now
+  go to the project inbox over a streaming `POST /api/upload` — the size is
+  bounded by the disk, not by the WebSocket message limit (the old base64-over-
+  WS path topped out around 70 MiB). A 🔗 button stages a file that is already
+  on the server by its path (absolute, or relative to the project working
+  folder): `serve` copies it into the inbox without any transfer through the
+  browser — the way to hand over a huge file when the app runs on a server and
+  the GUI is just a web frontend. `/api/file` streams its responses instead of
+  reading the whole file into memory.
+
+- **`maxInputRows` — the visible height of the input field, shared by both
+  shells.** An integer from 1 to 20 (8 by default) in `settings.json`; also
+  editable in the web GUI settings form. In the TUI it is the window of visible
+  input lines stuck to the cursor; in the web shell the textarea grows up to
+  the same limit instead of the hard-coded 160 px.
+
+### Changed
+
+- **Core notices render inside the chat flow in the web GUI** — as dim
+  service blocks between the replies, in chronological order, the way the TUI
+  prints them into its chat panel (they used to collect in a detached journal
+  block below the message list). Errors are inline too, in red. The journal
+  clears when another session is opened and is capped at the last 400 entries.
+
+- **Multiline input in the full-screen TUI.** **Ctrl+Enter** / **Alt+Enter**
+  insert a line break inside the input field instead of the stepwise `… `
+  continuation, and multiline pastes keep line breaks instead of gluing them
+  into spaces; **Enter** sends the whole message with all its breaks. The
+  cursor walks the input lines — **↑/↓** move within the typed text and step
+  over to the message history / the draft at the edges. The stepwise
+  `\` + Enter / `…` flow remains in the linear readline mode
+  (`"screen": false`).
+
+- **Full-screen layout: the input field sits right under the chat panel, the
+  status bar moved to the bottom edge.** The status bar is three lines —
+  `[session title]` (truncated to 24 characters, `[no project]` when there is
+  none), the keys line (`@name or !name — to a member · Esc — abort the round ·
+  /exit — quit · /help — commands`) and the status line (the spinner, `y/n`,
+  the scroll counter). Two empty lines sit between the chat panel and the
+  input, and two more between the input and the status bar. The command and
+  `@mentions` popup opens below the input line, over the gap and the status
+  bar — it no longer covers chat history.
+
+- **The input prompt is just `Ты > `** — the `[session title]` prefix moved to
+  the status bar (see above).
+
+- **An agent's reply is printed with its header on a separate line** and the
+  text starting on the next one; between replies there is exactly one empty
+  line (previously the header and the text shared a line).
+
+- **The launch banner is short.** A frame with the name, a
+  "version · home · project" line, the mode (`TUI`; `Server` for
+  `dreamteam serve`) with the web shell address
+  (`dreamteam serve → http://127.0.0.1:8080` — also shown by `/help`), and the
+  tail `/project — проект · /session — разговор`. The team and model listings
+  are gone from the banner — see `/agents` and `/models`; the `serve` startup
+  output gained a `режим: Server` line.
+
+### Fixed
+
+- **📎 in the web GUI no longer sends a message right away.** Picked files
+  stack as chips above the input field (several at once, removable) and go out
+  together with the next message: the server puts them into the project inbox
+  without starting a round, the text of the message gets `[name]` prefixes,
+  and `/api/file` also serves attachments from the inbox — the links in the
+  sent message open.
+
+- **Attachments and imports larger than 32 KiB no longer arrive truncated.**
+  The GUI read files into base64 in 0x8000-byte chunks — a chunk is not a
+  multiple of 3, so every chunk's base64 ended with `=` padding, and the
+  server's decoder stopped at the first one: any file over 32 KiB landed in
+  the project inbox (and in home/project/session imports) cut to exactly
+  32768 bytes. Encoding is now done by the browser in one `readAsDataURL`
+  call — files of any size arrive whole.
+
+- **A file link in a chat message opens the file; saving is a separate
+  action.** `/api/file` now sends a real content type for things the browser
+  can display (images, PDF, text) with `content-disposition: inline` — a
+  click opens the file in a new tab instead of popping the save dialog
+  (unknown types still download). Ctrl+click (⌘+click) saves a displayed
+  file, and right-click on a link opens the shell's own menu with
+  «Open»/«Save» — the in-app browser does not show a native menu of its own.
+
 ## [0.0.12] — 2026-10-29
 
 ### Breaking

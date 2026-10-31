@@ -1,7 +1,8 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, extname, join, normalize } from 'node:path';
+import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, extname, isAbsolute, join, normalize, resolve } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
@@ -58,7 +59,7 @@ import {
 import { loadSchedule, saveSchedule, type ScheduleTask } from './core/schedule.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, ModelRef, Session } from './types.js';
-import { localeId, localeDict, applyLocale } from './i18n.js';
+import { localeId, localeDict, applyLocale, t } from './i18n.js';
 
 /**
  * Локальный API поверх ядра: `dreamteam serve` поднимает HTTP+WS на
@@ -407,26 +408,68 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     presenter.broadcast({ type: 'schedule', tasks: loadSchedule(DT_HOME) });
   };
 
-  const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (url.pathname === '/health') {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true }));
       return;
     }
+    if (url.pathname === '/api/upload' && req.method === 'POST') {
+      // файл от руководителя минуя WebSocket: тело запроса льём в inbox
+      // потоком — размер ограничен только диском, не лимитом ws-сообщения
+      const deny = (code: number, error: string): void => {
+        res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error }));
+      };
+      if (!PROJECT_DIR) return deny(404, 'нет открытого проекта — некуда класть файл');
+      if (authToken && !tokenMatches(url.searchParams.get('token') ?? '')) return deny(401, 'нет доступа');
+      const name = basename(url.searchParams.get('name') ?? 'file').replace(/[\/\\]/g, '_') || 'file';
+      const inbox = join(PROJECT_DIR, 'inbox');
+      mkdirSync(inbox, { recursive: true });
+      const target = join(inbox, name);
+      try {
+        await pipeline(req, createWriteStream(target));
+      } catch (err) {
+        return deny(500, `не удалось записать файл: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, name, size: statSync(target).size }));
+      return;
+    }
     if (url.pathname === '/api/file') {
       const rel = url.searchParams.get('path') ?? '';
-      const abs = WORKSPACE ? safePath(WORKSPACE, rel) : null;
-      if (!abs || !existsSync(abs) || !statSync(abs).isFile()) {
+      // рабочая папка проекта, а для файлов из сообщений (📎) — и inbox в доме
+      const abs =
+        [WORKSPACE ? safePath(WORKSPACE, rel) : null, PROJECT_DIR ? safePath(join(PROJECT_DIR, 'inbox'), rel) : null]
+          .find((p) => p && existsSync(p) && statSync(p).isFile()) ?? null;
+      if (!abs) {
         res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
         res.end('файл не найден');
         return;
       }
-      res.writeHead(200, {
-        'content-type': 'application/octet-stream',
-        'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(rel.split('/').at(-1) ?? 'file')}`,
-      });
-      res.end(readFileSync(abs));
+      // что браузер умеет показать сам — отдаём inline с настоящим типом
+      // (клик по ссылке в чате открывает файл); остальное — скачивание.
+      // html/svg намеренно не в списке: тот же origin, что и у GUI.
+      const name = rel.split('/').at(-1) ?? 'file';
+      const ext = name.split('.').at(-1)?.toLowerCase() ?? '';
+      const inline: Record<string, string> = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+        webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon',
+        pdf: 'application/pdf',
+        txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8',
+        log: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8',
+        json: 'application/json; charset=utf-8',
+      };
+      const type = inline[ext];
+      res.writeHead(200, type
+        ? { 'content-type': type, 'content-disposition': 'inline' }
+        : {
+            'content-type': 'application/octet-stream',
+            'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+          });
+      // потоком: размер файла не должен отражаться на памяти сервера
+      pipeline(createReadStream(abs), res).catch(() => res.destroy());
       return;
     }
     serveStatic(url.pathname, res);
@@ -595,13 +638,35 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return;
       }
       case 'file': {
-        // файл от руководителя: кладём в inbox проекта (в доме) и шлём сообщение с меткой
+        // файл от руководителя: кладём в inbox проекта (в доме). defer=true —
+        // только положить (GUI пришлёт его вместе со следующим сообщением),
+        // иначе сразу раунд с сообщением-меткой
         if (!PROJECT_DIR) throw new Error('нет открытого проекта — некуда класть файл');
         const name = String(msg.name ?? 'file').replace(/[\/]/g, '_');
         const data = Buffer.from(String(msg.dataB64 ?? ''), 'base64');
         const inbox = join(PROJECT_DIR, 'inbox');
         mkdirSync(inbox, { recursive: true });
         writeFileSync(join(inbox, name), data);
+        if (msg.defer === true) return;
+        const text = `[${name}] ${String(msg.text ?? '').trim()}`.trim();
+        void runRound((signal) => engine.handleMessage(text, signal));
+        return;
+      }
+      case 'file_ref': {
+        // файл, уже лежащий на сервере: копируем в inbox без передачи через
+        // браузер. defer=true — только положить (GUI пришлёт его вместе со
+        // следующим сообщением), иначе сразу раунд с сообщением-меткой
+        if (!PROJECT_DIR) throw new Error('нет открытого проекта — некуда класть файл');
+        const raw = String(msg.path ?? '').trim();
+        if (!raw) throw new Error('укажите путь к файлу');
+        const abs = resolve(WORKSPACE && !isAbsolute(raw) ? join(WORKSPACE, raw) : raw);
+        if (!existsSync(abs) || !statSync(abs).isFile()) throw new Error(`файл не найден: ${raw}`);
+        const name = String(msg.name || basename(abs)).replace(/[\/]/g, '_');
+        const inbox = join(PROJECT_DIR, 'inbox');
+        mkdirSync(inbox, { recursive: true });
+        const target = join(inbox, name);
+        if (resolve(target) !== resolve(abs)) copyFileSync(abs, target);
+        if (msg.defer === true) return;
         const text = `[${name}] ${String(msg.text ?? '').trim()}`.trim();
         void runRound((signal) => engine.handleMessage(text, signal));
         return;
@@ -1073,7 +1138,8 @@ if (process.env.DT_SERVE === '1' || entry.endsWith('/src/serve.ts')) {
         : authToken
           ? 'ОТКРЫТО В СЕТЬ — доступ по токену'
           : 'ОТКРЫТО В СЕТЬ — авторизации нет';
-      console.log(pc.dim(`\n  API поднято: ${base} (WS — /ws) · dreamteam v${APP_VERSION} · ${net} · Ctrl+C — останов`));
+      console.log(pc.dim(t('\n  режим: Server')));
+      console.log(pc.dim(`  API поднято: ${base} (WS — /ws) · dreamteam v${APP_VERSION} · ${net} · Ctrl+C — останов`));
       if (authToken) console.log(pc.dim(`  открыть с токеном: ${base}/?token=${authToken}`));
       if (openFlag) openBrowser(authToken ? `${base}/?token=${authToken}` : `${base}/`);
     })

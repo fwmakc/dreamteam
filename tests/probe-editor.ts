@@ -1,6 +1,7 @@
 /**
  * Проверка Editor: декодирование клавиш, курсор по кодпоинтам, история,
- * мягкий перенос, вставка, выделение Shift+стрелками/Home/End.
+ * многострочный ввод (Ctrl+Enter — перенос, ↑/↓ по строкам, история на краях),
+ * окно видимых строк (maxRows), вставка, выделение Shift+стрелками/Home/End.
  * Запуск: npm run probe
  */
 import { PassThrough } from 'node:stream';
@@ -16,7 +17,7 @@ function check(name: string, cond: boolean, detail?: string): void {
   }
 }
 
-function makeEditor(intercept: EditorHooks['interceptKey'] = () => null) {
+function makeEditor(intercept: EditorHooks['interceptKey'] = () => null, maxRows?: number) {
   const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
   (stdin as unknown as { isTTY: boolean }).isTTY = true;
   (stdin as unknown as { setRawMode: (m: boolean) => void }).setRawMode = () => {};
@@ -39,6 +40,7 @@ function makeEditor(intercept: EditorHooks['interceptKey'] = () => null) {
     mouse: [],
     select: [],
   };
+  const scr = new Screen(pt as unknown as NodeJS.WriteStream, 40);
   const ed = new Editor(
     {
       interceptKey: intercept,
@@ -50,15 +52,16 @@ function makeEditor(intercept: EditorHooks['interceptKey'] = () => null) {
       onCtrlC: () => (events.ctrlC = true),
       onEof: () => (events.eof = true),
     },
-    new Screen(pt as unknown as NodeJS.WriteStream, 40),
+    scr,
     stdin,
+    maxRows,
   );
   ed.start();
   const feed = async (s: string): Promise<void> => {
     stdin.write(s);
     await new Promise<void>((r) => setImmediate(r));
   };
-  return { ed, feed, events, stdin, cleanup: () => ed.stop() };
+  return { ed, scr, feed, events, stdin, cleanup: () => ed.stop() };
 }
 
 const sleep = (): Promise<void> => new Promise<void>((r) => setImmediate(r));
@@ -136,27 +139,63 @@ const sleep = (): Promise<void> => new Promise<void>((r) => setImmediate(r));
   cleanup();
 }
 
-// --- мягкий перенос Alt+Enter и Ctrl+Enter (LF) ---
+// --- перенос строки Ctrl+Enter / Alt+Enter: многострочный буфер ---
 {
-  const { feed, events, cleanup } = makeEditor();
-  await feed('строка');
-  await feed('\x1b\r'); // Alt+Enter
-  await feed('два');
-  await feed('\n'); // Ctrl+Enter
-  await feed('три');
+  const { ed, feed, events, cleanup } = makeEditor();
+  await feed('line1');
+  await feed('\x1b\r'); // Alt+Enter — перенос
+  await feed('line2');
+  check('multi: Alt+Enter вставил перенос', ed.text === 'line1\nline2', JSON.stringify(ed.text));
+  await feed('\n'); // Ctrl+Enter — перенос
+  await feed('line3');
+  check('multi: Ctrl+Enter вставил перенос', ed.text === 'line1\nline2\nline3', JSON.stringify(ed.text));
   await feed('\r');
-  const subs = events.submit ?? [];
-  check('soft: Alt+Enter', subs[0]?.[0] === 'строка' && subs[0]?.[1] === true, JSON.stringify(subs));
-  check('soft: Ctrl+Enter', subs[1]?.[0] === 'два' && subs[1]?.[1] === true, JSON.stringify(subs));
-  check('soft: финал обычный', subs[2]?.[0] === 'три' && subs[2]?.[1] === false, JSON.stringify(subs));
+  check('multi: Enter отправил всё целиком', events.submit?.[0]?.[0] === 'line1\nline2\nline3' && events.submit?.[0]?.[1] === false, JSON.stringify(events.submit));
+  check('multi: отправка одна', (events.submit?.length ?? 0) === 1, JSON.stringify(events.submit));
   cleanup();
 }
 
-// --- вставка из буфера: переносы становятся пробелами ---
+// --- ↑/↓ в многострочном вводе: по строкам, на краю — история ---
+{
+  const { ed, feed, events, cleanup } = makeEditor();
+  await feed('q1\r');
+  await feed('q2\r');
+  await feed('aa\nbb'); // две строки, курсор в конце (позиция 5)
+  const cur = (): number => events.edits[events.edits.length - 1]?.[1] ?? -1;
+  check('мультистрока: буфер с переносом', ed.text === 'aa\nbb', JSON.stringify(ed.text));
+  await feed('\x1b[A'); // ↑ со второй строки — на первую, колонка сохранена
+  check('мультистрока: ↑ — на строку выше', cur() === 2 && ed.text === 'aa\nbb', JSON.stringify({ t: ed.text, c: cur() }));
+  await feed('\x1b[B'); // ↓ — на строку ниже
+  check('мультистрока: ↓ — на строку ниже', cur() === 5, String(cur()));
+  await feed('\x1b[A'); // ↑ на первую строку
+  await feed('\x1b[A'); // ↑ на первой строке — история «q2»
+  check('мультистрока: ↑ на первой строке — история', ed.text === 'q2' && cur() === 2, JSON.stringify({ t: ed.text, c: cur() }));
+  await feed('\x1b[B'); // ↓ — к черновику
+  check('мультистрока: ↓ вернул черновик', ed.text === 'aa\nbb' && cur() === 5, JSON.stringify({ t: ed.text, c: cur() }));
+  await feed('\x1b[A'); // ↑ со второй на первую
+  await feed('\x1b[A'); // ↑ с первой — «q2»
+  await feed('\x1b[A'); // ↑ ещё — «q1»
+  check('мультистрока: ↑↑ — глубже в историю', ed.text === 'q1', JSON.stringify(ed.text));
+  cleanup();
+}
+
+// --- окно видимых строк (maxRows): прижато к курсору ---
+{
+  const { scr, feed, cleanup } = makeEditor(() => null, 3);
+  await feed('l1\nl2\nl3\nl4\nl5'); // 5 строк при лимите 3
+  const st = scr as unknown as { inputLines: string[]; inputCur: { row: number } };
+  check('окно: видимых строк не больше лимита', st.inputLines.length === 3, JSON.stringify(st.inputLines));
+  check('окно: прижато к курсору — хвост', st.inputLines[2] === 'l5' && st.inputCur.row === 2, JSON.stringify(st.inputLines));
+  await feed('\x1b[A\x1b[A\x1b[A'); // ↑ до второй строки
+  check('окно: ↑ к началу — голова буфера', st.inputLines[0] === 'l1' && st.inputCur.row === 1, JSON.stringify(st.inputLines));
+  cleanup();
+}
+
+// --- вставка из буфера: переносы сохраняются в буфере ---
 {
   const { ed, feed, events, cleanup } = makeEditor();
   await feed('\x1b[200~первая\nвторая\r\nтретья\x1b[201~');
-  check('paste: без переводов строк', ed.text === 'первая вторая третья', JSON.stringify(ed.text));
+  check('paste: многострочная вставка в буфере', ed.text === 'первая\nвторая\nтретья', JSON.stringify(ed.text));
   check('paste: Enter после вставки не отправил', (events.submit?.length ?? 0) === 0);
   cleanup();
 }

@@ -110,7 +110,7 @@ export interface StateSnapshot {
   /** проекты дома — клик = переключение (rpc project.open) */
   knownProjects?: ProjectRecordInfo[];
   auto: { mode: boolean; left: number };
-  settings: { width: number; language: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string };
+  settings: { width: number; language: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string; maxInputRows: number };
   completion: { operations: OpHint[] };
   /** схемы карточек: формы «Изменить» (агент/модель/разговор/проект) рендерятся из них */
   schemas?: Record<string, CardSchema>;
@@ -168,5 +168,5 @@ export type WsMessage =
   | { type: 'import_settings'; dataB64: string }
   | { type: 'import_project'; dataB64: string; id?: string }
   | { type: 'import_session'; dataB64: string }
-  | { type: 'file'; name: string; dataB64: string; text?: string }
+  | { type: 'file_ref'; name: string; path: string; text?: string; defer?: boolean }
   | { type: 'rpc'; id: string; method: string; args?: Record<string, unknown> };
