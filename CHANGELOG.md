@@ -9,6 +9,73 @@ compatibility is promised across earlier versions.
 
 ## [Unreleased]
 
+### Added
+
+- **Probe coverage is measured, then grown to match.** `c8` joined the
+  devDependencies as a pure measurer — `npm run probe:cover` runs the whole
+  probe chain under it (a statements/branches report in the terminal plus
+  lcov for tooling; `coverage/` is gitignored). The suite sits around 91%
+  statements over `src`; the uncovered remainder is the honest part — live
+  network transports (IMAP/SMTP, SSH, the anthropic/openai-compatible HTTP
+  paths kept for the live scenarios) and terminal drawing (covered by the
+  e2e gates). To feed the meter, the machinery got new hermetic probes:
+  `probe-ids` (identifier masks at their boundaries), `probe-sse` (the SSE
+  toolkit — chunks, CRLF, `[DONE]`, broken data — and `checkKeySpec`),
+  `probe-schedule` (the schedule file's load/save/validation, the serve
+  ticker's due-task selection — extracted into a pure `dueTasks` — and the
+  `/schedule` operations on a live engine, `enabled: false` not executing),
+  `probe-memory` (word budgets, reflection triggers, chat-log rotation, the
+  LLM merges against a stub provider), `probe-images` (the mock painter,
+  the openai-images transport against a local HTTP stub — references flip
+  it to `/images/edits`, `url` answers are downloaded — plus
+  `parseImageParams` and the `image` tool run through its dependency
+  pipeline), `probe-gigachat` (the full transport — OAuth cycle, chat
+  request headers and body, response parsing — on a local HTTPS server
+  with its own certificate via `caCertPath`). `probe-web` was rewritten
+  onto a local HTTP server with fixtures for `hostAllowed`, manual
+  redirects and article/link extraction — the test job no longer touches
+  the internet at all.
+- **Existing probes grew the halves that were missing.** `probe-api` now
+  drives the GUI's rpc surface end to end on a live server: agent/tool/
+  model/project operations, project hosts, mailboxes and messenger bots
+  (with the state-snapshot contracts), the four export levels and every
+  import through the live confirm flow (approvals, cancellations, bogus
+  archives), the file/file_ref inbox channels, upload without an open
+  project, and TOKEN auth with a project from the launch arguments
+  (`DT_PROJECT_ARGS`). `probe-frugal` characterizes the LLM moderator's
+  JSON plan (ordering, dedupe, unknown agents skipped, focused-context
+  trimming, prompt assembly, `maxTurns` capacity, garbage and empty-plan
+  fallbacks, abort). `probe-shortcut` covers the linux/mac branches by
+  substituting `process.platform` (`.desktop` in the menu and on the
+  desktop, `.command` launchers) and `openBrowser` with an injected spawn.
+  Smaller fill-ins: the tools cheatsheet (`actionsHint` on a full toolset)
+  in `probe-tools`, the @-mention picker (triggers `@`/`!`, filtering,
+  Esc-dismissal, scrollbar, insertion) in `probe-commands`, the pure mail
+  helpers (`mailConfigHint`, `saveAttachments`) in `probe-mail`, the
+  cli-project parser in `probe-bin` and the ui helpers in `probe-screen`.
+- **CI checks what the repo ships.** The five probes that had fallen out
+  of the `npm run probe` chain (`api`, `schemas`, `data`, `toolloop`,
+  `frugal`) are back in; `probe-memory` is wired in too (it was written
+  but never ran anywhere); `check-readme` and `i18n-diff` run as CI steps.
+
+### Fixed
+
+- `card-schema`: secret fields (`apiKey`, `clientSecret`) are typed
+  `password` again and a provider without a contract gets the universal
+  fallback set — both promises predate the provider contracts and were
+  lost in the 0.0.14 rework, so the GUI showed key fields as plain text.
+- i18n: eight dictionary keys that had drifted away are translated again
+  (main CI had been red since 0.0.13); the checker's non-command whitelist
+  now understands API paths.
+- `probe-startup` (e2e): screen zones are computed from the real
+  status-bar height (`HINT_ROWS`/`BOTTOM_PAD`/`TOP_PAD`) instead of
+  hardcoded line numbers — the 0.0.14 status bar grew a row and silently
+  shifted every zone, breaking the e2e job.
+- Memory: whitespace-only ties between chat messages no longer leak into
+  the team memory block.
+- `ui.ts` setters accept `null` to reset a segment (the probes needed the
+  honest way to clear one).
+
 ## [0.0.14] — 2026-11-01
 
 ### Added

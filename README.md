@@ -1462,7 +1462,19 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   parsing, no network),
   `probe-messengers` (telegram and max against local mock servers of both APIs);
   the UI language system — `probe-i18n` (built-in en/zh, external lang/, live
-  switching).
+  switching). Newer probes cover the inner machinery the same way:
+  `probe-ids` (identifier masks at their edges), `probe-sse` (the SSE
+  toolkit and key validation), `probe-schedule` (the schedule file, the
+  serve ticker and the `/schedule` operations on a live engine),
+  `probe-memory` (word budgets, reflection, log rotation, LLM merges on a
+  stub), `probe-images` (the mock painter, the openai-images transport on a
+  local stub, the tool run), `probe-gigachat` (the full transport on a
+  local HTTPS stub with its own certificate), `probe-frugal` (the LLM
+  moderator's plan), `probe-shortcut` (linux/mac branches via platform
+  substitution), `probe-tools`/`probe-commands`/`probe-mail`/`probe-api`
+  extras (the cheatsheet, the @-mention picker, mail helpers, the GUI rpc
+  surface with export/import). `probe-web` serves its fixture site from a
+  local http server — the chain never touches the internet.
 - `npm run probe:e2e` — the same zones under a real pseudo-TTY on Windows
   (ConPTY): what actually reaches the app (`probe-input`) and the rendered screen
   through a mini VT emulator (`probe-startup`: starting without a project,
@@ -1485,6 +1497,11 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   xlsx golden master (merged cells, header rows, numbers) and docx/pdf text
   anchors. Without the folder it skips with exit code 0, so it is not part of
   the hermetic `npm run probe`.
+- `npm run probe:cover` — the whole probe chain under `c8`: a
+  statements/branches report in the terminal plus lcov for tooling
+  (`coverage/` is gitignored). The suite sits around 91% statements over
+  `src`; the uncovered remainder is live-network transports and terminal
+  drawing, both covered by the live scenarios and the e2e gates.
 
 `npm run typecheck` — type checking (src and tests).
 
