@@ -1,6 +1,8 @@
 /**
  * Проба бережливости токенов: механизмы экономии на уровне приложения.
  *  - соло-пропуск модератора: planTurns с одним агентом не вызывает LLM;
+ *  - модератор-LLM: план по JSON (порядок, focus, дедуп), вместимость maxTurns,
+ *    запасной вариант на мусор и abort;
  *  - serviceModel: сервисная и основная модели резолвятся в разные провайдеры;
  *  - старение tool-выводов: старые ⚙-блоки сжимаются, свежие не трогаются;
  *  - focused-контекст: агент с focused mode видит чужие реплики как однострочники;
@@ -54,6 +56,88 @@ writeFileSync(join(home, 'settings.json'),
   const mira = { id: 'mira', name: 'Мира', emoji: '🎨', color: 'magenta', prompt: 'Ты — Мира.', role: 'тест' };
   const duo = await planTurns({ text: 'привет', mentioned: [], team: [kirk, mira], moderator: spy, maxTurns: 3, userName: 'Хозяин', history: [] });
   check('два агента: план вернулся', duo.turns.length > 0, JSON.stringify(duo.turns.map((t) => t.agent.id)));
+  // вопрос в mock-режиме добавляет критика (последний), если есть место
+  const third = { id: 'boris', name: 'Борис', emoji: '📊', color: 'yellow', prompt: 'Ты — Борис.', role: 'тест' };
+  const question = await planTurns({ text: 'как считаете, это надёжно?', mentioned: [], team: [kirk, mira, third], moderator: spy, maxTurns: 3, userName: 'Хозяин', history: [] });
+  check('mock-вопрос: критик добавлен последним', question.turns.length === 3 && question.turns[2].agent.id === 'boris', JSON.stringify(question.turns.map((t) => t.agent.id)));
+}
+
+// ── 1b. модератор-LLM: план через JSON ───────────────────────────────────────
+{
+  const { planTurns } = await import('../src/orchestrator.js');
+  const mk = (id: string, name: string, description?: string) =>
+    ({ id, name, emoji: '🧪', color: 'cyan', prompt: `Ты — ${name}.`, role: 'тест', ...(description ? { description } : {}) });
+  const team = [mk('kirk', 'Кир', 'инженер'), mk('mira', 'Мира'), mk('gleb', 'Глеб'), mk('yana', 'Яна')];
+  const requests: { system?: string; user: string }[] = [];
+  let reply = '';
+  const moderator: import('../src/types.js').LLMProvider = {
+    id: 'stub-moderator', kind: 'stub', model: 'stub-1',
+    async *stream(req) {
+      requests.push({ system: req.system, user: String(req.messages[0]?.content ?? '') });
+      if (req.signal?.aborted) throw new Error('прервано');
+      yield reply;
+    },
+  };
+  const history = Array.from({ length: 16 }, (_, i) => ({
+    authorId: i % 2 === 0 ? 'user' : 'kirk',
+    authorName: i % 2 === 0 ? 'Хозяин' : 'Кир',
+    text: `сообщение ${i}`,
+    ts: i,
+  }));
+  const base = { team, moderator, userName: 'Хозяин', history };
+
+  // упоминания приоритетнее модератора — LLM не зовётся
+  const mentionedBefore = requests.length;
+  const mentioned = await planTurns({ ...base, text: 'вопрос', mentioned: [team[1]!] });
+  check('упоминание: только упомянутый', mentioned.turns.length === 1 && mentioned.turns[0].agent.id === 'mira', JSON.stringify(mentioned.turns.map((t) => t.agent.id)));
+  check('упоминание: модератор не вызван', requests.length === mentionedBefore, String(requests.length));
+
+  // валидный JSON-план: порядок, focus, дедуп, неизвестные пропускаются
+  reply = `[{"id":"mira","focus":"дизайн интерфейса"},{"id":"gleb"},{"id":"kirk","focus":"  итог и риски  "},{"id":"mira","focus":"дубль"},{"id":"ghost","focus":"нет такого"}]`;
+  const plan = await planTurns({ ...base, text: 'обсудим макет', mentioned: [], maxTurns: 4 });
+  const ids = plan.turns.map((t) => t.agent.id);
+  check('план: порядок и дедуп, неизвестный пропущен', JSON.stringify(ids) === '["mira","gleb","kirk"]', JSON.stringify(ids));
+  check('план: focus первого', plan.turns[0].focus === 'дизайн интерфейса', plan.turns[0].focus);
+  check('план: без focus — undefined', plan.turns[1].focus === undefined, String(plan.turns[1].focus));
+  check('план: focus обрезан', plan.turns[2].focus === 'итог и риски', plan.turns[2].focus);
+
+  // сборка запроса: ростер, история (последние 12), вопрос
+  const req = requests[requests.length - 1]!;
+  check('запрос: системная строка модератора', (req.system ?? '').startsWith('Ты — модератор'), req.system?.slice(0, 40));
+  check('запрос: ростер с описанием', req.user.includes('- kirk — Кир, тест: инженер'), req.user.slice(0, 200));
+  check('запрос: ростер без описания', req.user.includes('- mira — Мира, тест'), req.user.slice(0, 200));
+  check('запрос: история — последние 12', req.user.includes('Хозяин: сообщение 4') && req.user.includes('Кир: сообщение 15'), req.user.slice(-300));
+  check('запрос: старое за лимитом не попало', req.user.includes('сообщение 0') === false, req.user.slice(0, 200));
+  check('запрос: вопрос с именем собеседника', req.user.includes('Новое сообщение от Хозяин:') && req.user.includes('«обсудим макет»'), req.user.slice(-200));
+
+  // вместимость: по умолчанию 3, maxTurns 0 — вся команда
+  reply = '[{"id":"kirk"},{"id":"mira"},{"id":"gleb"},{"id":"yana"}]';
+  const capped = await planTurns({ ...base, text: 'созвон', mentioned: [] });
+  check('вместимость: по умолчанию максимум 3', capped.turns.length === 3, String(capped.turns.length));
+  const all = await planTurns({ ...base, text: 'созвон', mentioned: [], maxTurns: 0 });
+  check('вместимость: maxTurns 0 — вся команда', all.turns.length === team.length, String(all.turns.length));
+  check('вместимость: в промпте — без ограничения', (requests[requests.length - 1]!.system ?? '').includes('от 1 до 99'), requests[requests.length - 1]!.system?.slice(0, 60));
+
+  // мусор вместо JSON → запасной вариант с пометкой
+  reply = 'Предлагаю спросить Миру, но в JSON писать не буду.';
+  const bad = await planTurns({ text: 'привет', mentioned: [], team, moderator, userName: 'Хозяин', history: [] });
+  check('мусор: отвечает первый агент', bad.turns.length === 1 && bad.turns[0].agent.id === 'kirk', JSON.stringify(bad.turns.map((t) => t.agent.id)));
+  check('мусор: пометка «модератор не смог»', (bad.note ?? '').includes('модератор не смог'), bad.note);
+  check('мусор: причина — нет JSON-массива', (bad.note ?? '').includes('нет JSON-массива'), bad.note);
+
+  // пустой массив → план не распознан; пустая история — без блока истории
+  reply = '[]';
+  const empty = await planTurns({ text: 'привет', mentioned: [], team, moderator, userName: 'Хозяин', history: [] });
+  check('пустой план: пометка', (empty.note ?? '').includes('пустой или нераспознанный план'), empty.note);
+  check('пустая история: без блока «Последние сообщения»', requests[requests.length - 1]!.user.includes('Последние сообщения') === false, requests[requests.length - 1]!.user.slice(0, 200));
+
+  // abort: план пуст, без запасного варианта и пометки
+  const ac = new AbortController();
+  ac.abort();
+  reply = '[{"id":"mira"}]';
+  const aborted = await planTurns({ text: 'привет', mentioned: [], team, moderator, userName: 'Хозяин', history: [], signal: ac.signal });
+  check('abort: план пуст', aborted.turns.length === 0, JSON.stringify(aborted.turns.map((t) => t.agent.id)));
+  check('abort: без пометки', aborted.note === undefined, aborted.note);
 }
 
 // ── 2. serviceModel резолвится в другой провайдер ────────────────────────────
