@@ -91,7 +91,7 @@ export function memoryBlock(
   if (mine?.towardUser) lines.push(`- Отношение к ${userName}: ${mine.towardUser}`);
   if (mine?.ties) {
     const parts = Object.entries(mine.ties)
-      .filter(([, v]) => v)
+      .filter(([, v]) => typeof v === 'string' && v.trim())
       .map(([id, v]) => `${byId.get(id) ?? id} — ${v}`);
     if (parts.length > 0) lines.push(`- Коллеги: ${parts.join('; ')}`);
   }
