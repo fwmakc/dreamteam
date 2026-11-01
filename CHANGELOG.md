@@ -9,6 +9,8 @@ compatibility is promised across earlier versions.
 
 ## [Unreleased]
 
+## [0.0.14] — 2026-11-01
+
 ### Added
 
 - **Plan quotas: an optional `quota()` in the provider contract, the
