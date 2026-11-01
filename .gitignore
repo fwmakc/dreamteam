@@ -10,3 +10,4 @@ workspace/
 gui-dist/
 *.tgz
 __pycache__/
+coverage/
