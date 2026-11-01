@@ -12,6 +12,7 @@
  */
 import type { Agent, Session } from './types.js';
 import type { ProjectConfig } from './core/projects.js';
+import type { ModelKeySpec } from './providers/types.js';
 import { contractOf } from './providers/registry.js';
 
 export interface FieldSpec {
@@ -92,6 +93,14 @@ export const CARD_SCHEMAS: Record<string, CardSchema> = {
 /** Секретные ключи карточки модели: в GUI уходят пустыми («пусто — не менять»). */
 const SECRET_KEYS = ['apiKey', 'clientSecret'] as const;
 
+/** Универсальный набор для провайдера без контракта (кастомный адаптер из providers/). */
+const UNIVERSAL_KEYS: Record<string, ModelKeySpec> = {
+  model: { type: 'string' },
+  baseUrl: { type: 'string' },
+  apiKey: { type: 'string' },
+  note: { type: 'string' },
+};
+
 /** Метки для ключей без desc в контракте провайдера. */
 const FALLBACK_LABELS: Record<string, string> = {
   model: 'Модель',
@@ -101,25 +110,30 @@ const FALLBACK_LABELS: Record<string, string> = {
   temperature: 'Температура (0–2)',
   authUrl: 'Адрес авторизации',
   clientSecret: 'Client secret',
+  note: 'Заметка',
 };
 
 /**
  * Схема формы модели из контракта провайдера: поля, типы, enum-варианты и
  * обязательность — ровно то, что потом примет валидация registry. Провайдер
  * без контракта (кастомный адаптер из providers/) — универсальный набор:
- * перечислить его ключи неоткуда.
+ * перечислить его ключи неоткуда. Секреты (SECRET_KEYS) — тип password:
+ * форма GUI рисует точками, а значение присылает только если ввели новое.
  */
 export function modelCardSchema(provider: string): CardSchema {
   const contract = contractOf(provider);
+  const keys: Record<string, ModelKeySpec> = contract?.keys ?? UNIVERSAL_KEYS;
   const fields: FieldSpec[] = [{ path: 'provider', type: 'string', label: 'Провайдер' }];
-  for (const [key, spec] of Object.entries(contract?.keys ?? {})) {
+  for (const [key, spec] of Object.entries(keys)) {
     const label = spec.desc ?? FALLBACK_LABELS[key] ?? key;
-    const placeholder = (SECRET_KEYS as readonly string[]).includes(key)
+    const secret = (SECRET_KEYS as readonly string[]).includes(key);
+    const placeholder = secret
       ? 'пусто — не менять'
       : spec.required
         ? 'обязательное поле'
         : undefined;
-    if (spec.type === 'boolean') fields.push({ path: key, type: 'boolean', label, placeholder, required: spec.required });
+    if (secret) fields.push({ path: key, type: 'password', label, placeholder, required: spec.required });
+    else if (spec.type === 'boolean') fields.push({ path: key, type: 'boolean', label, placeholder, required: spec.required });
     else if (spec.type === 'number') fields.push({ path: key, type: 'number', label, placeholder, required: spec.required });
     else if (spec.type === 'object') fields.push({ path: key, type: 'object', label, placeholder, required: spec.required });
     else if (spec.enum) fields.push({ path: key, type: 'enum', label, values: spec.enum, placeholder, required: spec.required });

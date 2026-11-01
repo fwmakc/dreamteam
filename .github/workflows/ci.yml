@@ -23,6 +23,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run typecheck:gui
       - run: node scripts/check-i18n.mjs
+      - run: node scripts/check-readme.mjs
+      - run: node scripts/i18n-diff.mjs
       - run: npm run build:gui
       # all probes are hermetic: temp DT_HOME/DT_PROJECT, mock provider, no keys
       - run: npm run probe

@@ -49,8 +49,10 @@ const { zh } = await import(pathToFileURL(join(root, 'src', 'locales', 'zh.ts'))
 const opsSrc = readFileSync(join(root, 'src', 'core', 'operations.ts'), 'utf8');
 // плюс не-команды: v1/n — пути и «Y/n» в примерах; api — хост в
 // https://api.openai.com/v1; cyan — список цветов в подписи поля; lang —
-// папка ~/.dreamteam/lang в подсказке визарда.
-const known = new Set(['help', 'exit', 'quit', 'q', 'v1', 'n', 'api', 'cyan', 'lang']);
+// папка ~/.dreamteam/lang в подсказке визарда; v4/paas/coding/anthropic —
+// пути в адресах API (z.ai, anthropic); srv/data/report — путь-пример
+// «/srv/data/report.pdf».
+const known = new Set(['help', 'exit', 'quit', 'q', 'v1', 'n', 'api', 'cyan', 'lang', 'v4', 'paas', 'coding', 'anthropic', 'srv', 'data', 'report']);
 for (const m of opsSrc.matchAll(/\bname: '([a-z][a-z0-9.]*)'/g)) known.add(m[1].split('.')[0]);
 const token = /\/([a-z][a-z0-9-]*)/g;
 

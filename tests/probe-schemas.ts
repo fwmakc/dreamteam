@@ -90,10 +90,10 @@ const PROVIDERS = ['openai-compatible', 'anthropic-compatible', 'zai-coding-plan
       if (f.placeholder && !(f.placeholder in en && f.placeholder in zh)) missing.push(`${provider}.${f.path}: подсказка`);
       const spec = contract.keys[f.path];
       if (!spec) continue;
-      const want = spec.type === 'number' ? 'number' : spec.type === 'boolean' ? 'boolean' : spec.type === 'object' ? 'object' : spec.enum ? 'enum' : 'string';
+      const secret = f.path === 'apiKey' || f.path === 'clientSecret';
+      const want = secret ? 'password' : spec.type === 'number' ? 'number' : spec.type === 'boolean' ? 'boolean' : spec.type === 'object' ? 'object' : spec.enum ? 'enum' : 'string';
       if (f.type !== want) missing.push(`${provider}.${f.path}: тип ${f.type}≠${want}`);
       if (spec.enum && JSON.stringify(f.values) !== JSON.stringify(spec.enum)) missing.push(`${provider}.${f.path}: enum`);
-      if ((f.path === 'apiKey' || f.path === 'clientSecret') && f.type !== 'password') missing.push(`${provider}.${f.path}: не password`);
     }
   }
   check('modelCardSchema: поля каждого провайдера = его контракт', missing.length === 0, missing.join('; '));
