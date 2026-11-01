@@ -6,12 +6,17 @@
  *    флаг --open), ярлык по правилам ОС — с подменёнными путями (герметично):
  *    win — .lnk через PowerShell, linux — .desktop в меню и на рабочем столе,
  *    darwin — Dream Team.command;
+ *  - ветки других ОС — той же пробой через подмену process.platform:
+ *    linux-десктоп и .command на mac проверяются на файлах без настоящей ОС;
+ *  - openBrowser — с подменённым spawn: detached + unref, план возвращается
+ *    даже когда спавн падает (нет браузера);
  *  - интеграция с мастером проверяется в probe-wizard (там ответ «n» —
  *    без ярлыка: пробы не трогают настоящий рабочий стол).
  *
  * Запуск: npm run probe:shortcut
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -80,6 +85,71 @@ const { createShortcut } = await import('../src/shortcut.js');
     const onDesktop = join(desktop, 'dreamteam.desktop');
     check('linux: копия .desktop на рабочем столе', existsSync(onDesktop), onDesktop);
   }
+}
+
+// --- ветки linux/mac: подмена process.platform (герметично) -------------------
+{
+  const realPlatform = process.platform;
+  const setPlatform = (p: string): void => {
+    Object.defineProperty(process, 'platform', { value: p, configurable: true });
+  };
+  try {
+    const fakeNode = join(root, 'fake-node');
+    const desktop2 = join(root, 'Desktop-other');
+    const apps2 = join(root, 'apps-other');
+    mkdirSync(desktop2, { recursive: true });
+    mkdirSync(apps2, { recursive: true });
+
+    setPlatform('linux');
+    const homeLinux = join(root, 'home-linux');
+    const notesLinux = await createShortcut(homeLinux, { desktopDir: desktop2, appsDir: apps2, nodePath: fakeNode });
+    const sh = join(homeLinux, 'bin', 'dreamteam-serve.sh');
+    const shBody = readFileSync(sh, 'utf8');
+    check('linux: сценарий .sh — шебанг и подменённый node', shBody.startsWith('#!/bin/sh') && shBody.includes(fakeNode), shBody);
+    const entry = join(apps2, 'dreamteam.desktop');
+    const entryBody = readFileSync(entry, 'utf8');
+    check('linux: .desktop в меню — Exec на сценарий', entryBody.includes(`Exec="${sh}"`) && entryBody.includes('Terminal=true'), entryBody);
+    const copy = join(desktop2, 'dreamteam.desktop');
+    check('linux: копия .desktop на рабочем столе', existsSync(copy) && readFileSync(copy, 'utf8').includes('Exec='), copy);
+    check('linux: две заметки', notesLinux.length === 2 && notesLinux.every((n) => n.includes('Dream Team')), notesLinux.join(' | '));
+
+    setPlatform('darwin');
+    const homeMac = join(root, 'home-mac');
+    const notesMac = await createShortcut(homeMac, { desktopDir: desktop2, nodePath: fakeNode });
+    const launcherSh = join(homeMac, 'bin', 'dreamteam-serve.sh');
+    const cmdFile = join(desktop2, 'Dream Team.command');
+    const cmdBody = readFileSync(cmdFile, 'utf8');
+    check('mac: .command запускает сценарий в доме', cmdBody === `#!/bin/sh\nexec "${launcherSh}"\n`, cmdBody);
+    check('mac: одна заметка', notesMac.length === 1 && notesMac[0].includes('Dream Team'), notesMac.join(' | '));
+    check('план darwin: open URL', browserOpenPlan('http://x:1/').cmd === 'open', JSON.stringify(browserOpenPlan('http://x:1/')));
+
+    setPlatform('linux');
+    check('план linux: xdg-open URL', browserOpenPlan('http://x:1/').cmd === 'xdg-open' && browserOpenPlan('http://x:1/').args[0] === 'http://x:1/', JSON.stringify(browserOpenPlan('http://x:1/')));
+  } finally {
+    setPlatform(realPlatform);
+  }
+}
+
+// --- openBrowser: спавн с подменой (без окна) ---------------------------------
+{
+  const { openBrowser } = await import('../src/open.js');
+  let calls = 0;
+  let unrefs = 0;
+  let lastOpts: unknown;
+  const spawnStub = ((cmd: string, args: string[], opts: unknown) => {
+    calls++;
+    lastOpts = { cmd, args, opts };
+    return { unref: () => { unrefs++; } };
+  }) as unknown as typeof spawn;
+  const plan = openBrowser('http://127.0.0.1:9999/', spawnStub);
+  const captured = lastOpts as { cmd: string; args: string[]; opts: { detached?: boolean; stdio?: unknown } };
+  check('openBrowser: план возвращён и дошёл до спавна', calls === 1 && captured.cmd === plan.cmd && JSON.stringify(captured.args) === JSON.stringify(plan.args), JSON.stringify(captured));
+  check('openBrowser: detached, stdio ignore', captured.opts.detached === true && captured.opts.stdio === 'ignore', JSON.stringify(captured.opts));
+  check('openBrowser: child отвязан (unref)', unrefs === 1, String(unrefs));
+
+  const boom = (() => { throw new Error('нет браузера'); }) as unknown as typeof spawn;
+  const plan2 = openBrowser('http://127.0.0.1:9999/', boom);
+  check('openBrowser: падение спавна проглочено, план возвращён', plan2.args.includes('http://127.0.0.1:9999/'), JSON.stringify(plan2));
 }
 
 // --- вход через bin: serve --open доходит до src/serve.ts (парсинг флага) ----
