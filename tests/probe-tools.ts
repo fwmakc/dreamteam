@@ -25,6 +25,7 @@ import {
   parseMasks,
   splitChain,
   type ToolConfig,
+  type Tool,
 } from '../src/tools-api.js';
 import { checkPermission, loadHostsRecord, parseActions, type ToolContext, type ToolsConfig } from '../src/actions.js';
 import { buildToolset, loadUserTools } from '../src/tools-registry.js';
@@ -620,6 +621,32 @@ const tctx: ToolContext = {
   check('resolveCard: пустая карточка → дефолт из default.json', Array.isArray(webCard.sites), JSON.stringify(webCard));
   const own: ToolConfig = { allow: ['dir'] };
   check('resolveCard: заданная карточка вместо дефолта', resolveCard('shell', own) === own);
+}
+
+// --- actionsHint: шпаргалка блоков по включённым тулам агента ---
+{
+  const { actionsHint } = await import('../src/actions.js');
+  const empty: Agent = { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p' };
+  check('шпаргалка: без тулов — null', actionsHint(empty, cfg) === null);
+
+  const hostsCfg: ToolsConfig = {
+    ...cfg,
+    projects: new Map([['shop', { hosts: new Map([['prod', { host: '203.0.113.10', user: 'deploy', dir: '/var/www/app' }]]) }]]),
+  };
+  const full: Agent = {
+    ...empty,
+    tools: { files: null, shell: {}, git: {}, ssh: {}, look: {}, image: {}, docs: {}, ocr: {}, web: {}, arch: {}, mail: {}, telegram: {}, max: {}, runner: {} },
+    projects: ['shop'],
+  };
+  const runner: Tool = { desc: 'Бегает длинные задачи.', check: () => 'allow', run: async () => 'ок' };
+  const hint = actionsHint(full, hostsCfg, new Map([['runner', runner]]));
+  check('шпаргалка: со тулами — длинная строка', typeof hint === 'string' && (hint?.length ?? 0) > 500, String(hint?.length));
+  const h = hint ?? '';
+  const marks = ['```file ', '```run', '```git status', '```ssh shop:prod', '```look ', '```image', '```docs read', '```ocr text', '```web read', '```arch pack', '```mail list', '```telegram list', '```max chats', '```runner'];
+  const missing = marks.filter((m) => !h.includes(m));
+  check('шпаргалка: блок каждого включённого тула', missing.length === 0, missing.join(' | '));
+  check('шпаргалка: префикс проекта в блоке file', h.includes('shop:относительный/путь/к/файлу.txt'));
+  check('шпаргалка: строка с правилами в хвосте', h.includes('Правила:'));
 }
 
 rmSync(dir, { recursive: true, force: true });

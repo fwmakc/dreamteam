@@ -11,7 +11,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ImageProvider, ImageRequest, ImageResult } from '../src/types.js';
+import type { Agent, ImageProvider, ImageRequest, ImageResult } from '../src/types.js';
 import type { ToolContext, ToolsConfig } from '../src/actions.js';
 
 let fails = 0;
@@ -227,6 +227,22 @@ async function startStub(): Promise<{ server: Server; port: number; captured: Ca
   };
   const genFail = await executeImageAction({ kind: 'image', params: { prompt: 'кот' } }, cfg, undefined, failProvider);
   check('действие: провайдер упал — ошибка наружу', !genFail.ok && genFail.output === 'бах', genFail.output);
+
+  // ── тул image: фабрика и run через конвейер deps (как его зовёт движок) ────
+  {
+    const { default: imageFactory } = await import('../src/tools/image/image.js');
+    const { makeCtx } = await import('./tool-ctx.js');
+    const artist: Agent = { id: 'hudozhnik', name: 'Художник', emoji: '🎨', color: 'magenta', prompt: 'рисуй', role: 'тест' };
+    const runCtx = makeCtx(root, root);
+    const tool = imageFactory({}, { cfg, agent: artist, tctx });
+    check('тул: check всегда allow — пишет только в images/', tool.check('') === 'allow', String(tool.check('')));
+    const drawn = await tool.run('prompt: закат над морем\nn: 1', runCtx);
+    check('тул: run рисует через deps', drawn.includes('сгенерировано 1'), drawn);
+    const noDeps = await imageFactory({}).run('prompt: кот', runCtx).catch((e: Error) => e.message);
+    check('тул: без конвейера — внутренняя ошибка', noDeps.includes('без конвейера'), noDeps);
+    const blocked = await imageFactory({}, { cfg, agent: artist, tctx: noImage }).run('prompt: кот', runCtx).catch((e: Error) => e.message);
+    check('тул: нет image-модели — throw с причиной', blocked.includes('не назначена'), blocked);
+  }
 }
 
 rmSync(root, { recursive: true, force: true });

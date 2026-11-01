@@ -138,6 +138,28 @@ const errOf = async (body: string): Promise<string> => {
   check('порт smtp 587 → без implicit TLS', corp.smtp.port === 587 && !corp.smtp.secure && corp.imap.secure, JSON.stringify(corp));
 }
 
+// ─── чистые хелперы src/mail.ts: подсказка конфига и сохранение вложений ────
+{
+  const { mailConfigHint, saveAttachments } = await import('../src/mail.js');
+  const { readFileSync } = await import('node:fs');
+  const hint = JSON.parse(mailConfigHint()) as Record<string, Record<string, string>>;
+  check('подсказка конфига: ящики с imap и smtp', Boolean(hint['личное']?.imap) && Boolean(hint['работа']?.smtp) && Boolean(hint['личное']?.password), mailConfigHint().slice(0, 80));
+
+  const dir = join(cwd, 'вложения');
+  const atts = [
+    { filename: 'отчёт/2026:итог.xlsx', content: Buffer.from('данные'), size: 6 },
+    { filename: undefined, content: Buffer.from('икс'), size: 3 },
+    { filename: 'пустой.bin', content: undefined, size: 0 },
+  ] as unknown as import('mailparser').Attachment[];
+  const saved = saveAttachments(dir, atts);
+  check(
+    'вложения: опасные символы в имени заменены, байты на диске',
+    saved.length === 2 && saved[0]!.name === 'отчёт_2026_итог.xlsx' && readFileSync(saved[0]!.path, 'utf8') === 'данные',
+    JSON.stringify(saved.map((s) => s.name)),
+  );
+  check('вложения: без имени — «вложение-1», без content — пропущено', saved[1]!.name === 'вложение-1', JSON.stringify(saved.map((s) => s.name)));
+}
+
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exitCode = fails === 0 ? 0 : 1;
 const { rmTemp } = await import('./rm-tmp.js');

@@ -620,6 +620,82 @@ const threw = async (line: string): Promise<string> => {
   check('handleMessage: текст команды в историю не попал', !msgs.some((m) => m.authorId === 'user' && m.text.startsWith('/session')));
 }
 
+// ── MentionPicker: всплывашка @упоминаний — чистая логика панели ────────────
+{
+  const { MentionPicker } = await import('../src/completion.js');
+  const mctx = {
+    sessions: () => [],
+    agentIds: () => [],
+    chatAgents: () => [
+      { id: 'kirk', name: 'Кир', role: 'инженер' },
+      { id: 'mira', name: 'Мира', role: 'аналитик' },
+    ],
+    modelIds: () => [],
+    managerName: () => 'Босс',
+  };
+  const p = new MentionPicker();
+  check('всплывашка: до ввода закрыта, клавиши проходят мимо', p.active === false && p.rows().length === 0 && p.key('down') === null);
+
+  const rows = p.update('@', 1, mctx);
+  check('всплывашка: @ открывает, менеджер в списке', p.active === true && rows !== null && rows.join('').includes('Босс'), JSON.stringify(rows));
+  check('всплывашка: рамка ┌ сверху, └ снизу', (rows?.[0] ?? '').startsWith('┌') && (rows?.at(-1) ?? '').startsWith('└'));
+
+  p.key('down');
+  p.key('down');
+  const ins = p.key('enter');
+  check(
+    'всплывашка: enter вставляет выбранное с пробелом, курсор после',
+    ins !== null && ins !== 'handled' && ins.line === '@Мира ' && ins.cursor === '@Мира '.length,
+    JSON.stringify(ins),
+  );
+  check('всплывашка: после вставки панель закрыта', p.active === false);
+
+  check('всплывашка: регистр фрагмента не важен', p.update('@МИ', 3, mctx) !== null && p.active === true);
+  check('всплывашка: нет совпадений — панель закрыта', p.update('@xyz', 4, mctx) === null && p.active === false);
+
+  p.update('@ми', 3, mctx);
+  check('всплывашка: esc съедается и закрывает', p.key('escape') === 'handled' && p.active === false);
+  check('всплывашка: тот же фрагмент после esc не открывает', p.update('@ми', 3, mctx) === null);
+  check('всплывашка: другой фрагмент открывает снова', p.update('@ки', 3, mctx) !== null);
+
+  const bang = new MentionPicker();
+  bang.update('!ми', 3, mctx);
+  const bangIns = bang.key('enter');
+  check('всплывашка: триггер «!» вставляется как «!»', bangIns !== null && bangIns !== 'handled' && bangIns.line === '!Мира ', JSON.stringify(bangIns));
+
+  // длинный список — полоса прокрутки; длинное имя — обрезка с «…»
+  const many = {
+    ...mctx,
+    chatAgents: () => [
+      ...Array.from({ length: 10 }, (_, i) => ({ id: `a${i}`, name: `Агент-${i}`, role: 'р' })),
+      { id: 'dlinny', name: 'Д'.repeat(60), role: 'очень долгая роль — ' + 'х'.repeat(40) },
+    ],
+  };
+  const big = new MentionPicker();
+  const bigRows = big.update('@', 1, many) ?? [];
+  check(
+    'всплывашка: длинный список — 8 строк с полосой прокрутки',
+    bigRows.length === 10 && bigRows.join('').includes('▓') && bigRows.join('').includes('░'),
+    JSON.stringify(bigRows),
+  );
+  big.key('up'); // с первого — на последний пункт (служебный «session»)
+  const sessIns = big.key('enter');
+  check(
+    'всплывашка: вверх с первого зацикливает на последний',
+    sessIns !== null && sessIns !== 'handled' && sessIns.line === '@session ',
+    JSON.stringify(sessIns),
+  );
+
+  const trunc = new MentionPicker();
+  trunc.update('@д', 2, many); // фильтр «д» — только агент с длинным именем
+  const truncIns = trunc.key('enter');
+  check(
+    'всплывашка: в строку вставляется полное имя (обрезка «…» — только отрисовка)',
+    typeof truncIns === 'object' && truncIns !== null && truncIns.line === '@' + 'Д'.repeat(60) + ' ',
+    JSON.stringify(truncIns),
+  );
+}
+
 console.log(failed === 0 ? '\nВсе проверки прошли' : `\nFAIL: ${failed}`);
 process.on('exit', () => {
   try {
