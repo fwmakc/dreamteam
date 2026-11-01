@@ -59,7 +59,7 @@ import {
   sessionEntriesById,
   settingsEntries,
 } from './core/transfer.js';
-import { loadSchedule, saveSchedule, type ScheduleTask } from './core/schedule.js';
+import { dueTasks, loadSchedule, saveSchedule, type ScheduleTask } from './core/schedule.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, ModelRef, Session } from './types.js';
 import { localeId, localeDict, applyLocale, knownLanguages, t } from './i18n.js';
@@ -381,11 +381,7 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   // ── планировщик: раз в минуту проверяем расписание задач ──────
   const nextDue = new Map<string, number>();
   const scheduleTimer = setInterval(() => {
-    const now = Date.now();
-    for (const task of loadSchedule(DT_HOME).filter((t) => t.enabled)) {
-      const due = nextDue.get(task.id) ?? 0;
-      if (now < due) continue;
-      nextDue.set(task.id, now + task.intervalMinutes * 60_000);
+    for (const task of dueTasks(loadSchedule(DT_HOME), Date.now(), nextDue)) {
       void runRound((signal) => engine.handleMessage(task.message, signal));
     }
   }, 60_000);

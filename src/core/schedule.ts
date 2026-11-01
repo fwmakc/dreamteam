@@ -37,3 +37,17 @@ export function loadSchedule(projectDir: string): ScheduleTask[] {
 export function saveSchedule(projectDir: string, tasks: ScheduleTask[]): void {
   writeFileSync(scheduleFile(projectDir), JSON.stringify(tasks, null, 2) + '\n');
 }
+
+/** Что исполнять на этом тике: только enabled и подошедшие по сроку;
+ *  время следующего запуска пишется обратно в nextDue. Выключенные задачи
+ *  срок не двигают — включишь, и тикер сработает сразу. */
+export function dueTasks(tasks: ScheduleTask[], now: number, nextDue: Map<string, number>): ScheduleTask[] {
+  const due: ScheduleTask[] = [];
+  for (const task of tasks) {
+    if (!task.enabled) continue;
+    if (now < (nextDue.get(task.id) ?? 0)) continue;
+    nextDue.set(task.id, now + task.intervalMinutes * 60_000);
+    due.push(task);
+  }
+  return due;
+}

@@ -63,7 +63,7 @@ export function quotaBar(quota: ProviderQuota): string {
  */
 let outputSink: ((text: string) => void) | null = null;
 
-export function setOutputSink(fn: (text: string) => void): void {
+export function setOutputSink(fn: ((text: string) => void) | null): void {
   outputSink = fn;
 }
 
@@ -85,7 +85,7 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 /** Куда рисовать спиннер в управляемом экране (строка статуса); null — как раньше */
 let spinnerRenderer: ((text: string | null) => void) | null = null;
 
-export function setSpinnerRenderer(fn: (text: string | null) => void): void {
+export function setSpinnerRenderer(fn: ((text: string | null) => void) | null): void {
   spinnerRenderer = fn;
 }
 

@@ -2,15 +2,20 @@
  * Проверка экрана: wrapAnsi/wrapPlain/loadSettings и математика зон
  * Screen на фейковом потоке (без реального терминала): перенос живого
  * стрима на несколько нижних строк, выделение мышью и Shift+клавишами,
- * прокрутка, margin, всплывашка. Запуск: npm run probe
+ * прокрутка, margin, всплывашка. Отдельная секция — чистые хелперы вывода
+ * (src/ui.ts): colorFn/agentHeader/rosterLine/fmtK/ctxBar/quotaBar, спиннер
+ * и слив вывода (setOutputSink/setSpinnerRenderer). Запуск: npm run probe
  */
 import { PassThrough } from 'node:stream';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { wrapAnsi, visibleWidth, Screen } from '../src/screen.js';
+import pc from 'picocolors';
+import { wrapAnsi, visibleWidth, stripAnsi, Screen } from '../src/screen.js';
 import { loadSettings } from '../src/settings.js';
 import { wrapPlain } from '../src/editor.js';
+import { agentHeader, colorFn, ctxBar, fmtK, printDim, printError, quotaBar, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from '../src/ui.js';
+import type { Agent, ProviderQuota } from '../src/types.js';
 
 let fails = 0;
 function check(name: string, cond: boolean, detail?: string): void {
@@ -376,6 +381,64 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   (scr as unknown as { relayout(): void }).relayout();
   check('scroll: resize поджал viewOffset до 0', st.viewOffset === 0, String(st.viewOffset));
   scr.stop();
+}
+
+// --- ui: чистые хелперы вывода (цвета отключаются вне TTY — сверяем с picocolors) ---
+{
+  const gleb: Agent = { id: 'gleb_cyber', name: 'Глеб', emoji: '🧠', color: 'cyan', role: 'архитектор', prompt: '' };
+  check('ui: colorFn известного цвета = picocolors', colorFn('cyan')('x') === pc.cyan('x'));
+  check('ui: colorFn в верхнем регистре — тоже', colorFn('RED')('x') === pc.red('x'));
+  check('ui: colorFn неизвестного — без цвета', colorFn('кривой')('x') === 'x' && colorFn()('x') === 'x');
+
+  check('ui: agentHeader — «[эмодзи имя]»', stripAnsi(agentHeader(gleb)) === '[🧠 Глеб]', stripAnsi(agentHeader(gleb)));
+  check('ui: agentHeader окрашен цветом агента', agentHeader(gleb) === colorFn('cyan')('[🧠 Глеб]'));
+
+  check(
+    'ui: rosterLine — имя, роль, описание',
+    stripAnsi(rosterLine({ ...gleb, description: 'делает каркас' })) === '  🧠 Глеб — архитектор: делает каркас',
+    stripAnsi(rosterLine({ ...gleb, description: 'делает каркас' })),
+  );
+  check('ui: rosterLine без описания — без двоеточия', stripAnsi(rosterLine({ ...gleb, description: undefined })) === '  🧠 Глеб — архитектор');
+
+  check('ui: fmtK — до тысячи как есть', fmtK(0) === '0' && fmtK(999) === '999');
+  check('ui: fmtK — тысячи округляются', fmtK(1000) === '1k' && fmtK(1049) === '1k' && fmtK(127400) === '127k');
+
+  check('ui: ctxBar — пустой контекст', stripAnsi(ctxBar(0, 128000)) === '[░░░░░░░░░░] 0% · 0 / 128k', stripAnsi(ctxBar(0, 128000)));
+  check('ui: ctxBar — 27%: 3 блока и «34k»', stripAnsi(ctxBar(34000, 128000)) === '[███░░░░░░░] 27% · 34k / 128k', stripAnsi(ctxBar(34000, 128000)));
+  check('ui: ctxBar — 100%: полный, счётчик не зажимается', stripAnsi(ctxBar(999999, 128000)) === '[██████████] 100% · 1000k / 128k', stripAnsi(ctxBar(999999, 128000)));
+  check('ui: ctxBar цвета по порогу', ctxBar(10, 100) === pc.green('[█░░░░░░░░░] 10% · 10 / 100') && ctxBar(75, 100) === pc.yellow('[████████░░] 75% · 75 / 100') && ctxBar(90, 100) === pc.red('[█████████░] 90% · 90 / 100'));
+
+  const q: ProviderQuota = { windows: [{ key: '5h', kind: 'tokens', usedPercent: 27 }, { key: 'week', kind: 'tokens', usedPercent: 41 }], fetchedAt: 0 };
+  check('ui: quotaBar — остаток, метки окон', stripAnsi(quotaBar(q)) === 'Q 5ч 73% · нед 59%', stripAnsi(quotaBar(q)));
+  check(
+    'ui: quotaBar — зелёный/жёлтый/красный по худшему окну',
+    quotaBar(q) === pc.green('Q 5ч 73% · нед 59%')
+      && quotaBar({ windows: [{ key: '5h', kind: 'tokens', usedPercent: 60 }], fetchedAt: 0 }) === pc.yellow('Q 5ч 40%')
+      && quotaBar({ windows: [{ key: '5h', kind: 'tokens', usedPercent: 81 }], fetchedAt: 0 }) === pc.red('Q 5ч 19%'),
+  );
+  check('ui: quotaBar — неизвестное окно проходит как есть', stripAnsi(quotaBar({ windows: [{ key: 'mcp', kind: 'calls', usedPercent: 5 }], fetchedAt: 0 })) === 'Q mcp 95%');
+
+  // слив вывода: sink перехватывает printDim/printError и нетту-спиннер
+  const sink: string[] = [];
+  setOutputSink((s) => sink.push(s));
+  printDim('тихо');
+  printError('бум');
+  check('ui: sink получил dim и ошибку', stripAnsi(sink.join('')).includes('тихо\n') && stripAnsi(sink.join('')).includes('✗ бум'), JSON.stringify(sink.map((s) => stripAnsi(s))));
+
+  const spinner: string[] = [];
+  setSpinnerRenderer((s) => spinner.push(s ?? ''));
+  const sp = new Spinner('работаю');
+  sp.start();
+  check('ui: спиннер в рендерер — кадр с текстом', spinner.length >= 1 && stripAnsi(spinner[0]).includes('работаю'), JSON.stringify(spinner.map(stripAnsi)));
+  sp.stop();
+  check('ui: спиннер stop — сброс рендерера', spinner[spinner.length - 1] === '');
+  setSpinnerRenderer(null);
+  setOutputSink(null);
+  const piped: string[] = [];
+  setOutputSink((s) => piped.push(s));
+  new Spinner('в трубу').start(); // без TTY — одна строка, без анимации
+  check('ui: спиннер без TTY — одна строка в слив', piped.length === 1 && stripAnsi(piped[0]).includes('в трубу'), JSON.stringify(piped.map(stripAnsi)));
+  setOutputSink(null);
 }
 
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);

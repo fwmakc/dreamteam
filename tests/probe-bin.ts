@@ -1,14 +1,18 @@
 /**
  * Проба бинаря: -v/--version и -h/--help отвечают без загрузки приложения
  * (дом не создаётся и не трогается), кривая форма проекта — fail-fast с кодом 1.
- * e2e: `dreamteam <путь>` (TUI) и `dreamteam serve <путь>` открывают проект
- * незнакомой папки — регистрируют его в доме. Запуск: npm run probe:bin
+ * Юнит-блок cli-project.ts: looksLikePath, parseCliProject (формы none/open/
+ * error) и cliProjectArgs — разбор DT_PROJECT_ARGS из env (JSON-массив строк,
+ * не-строки отсеиваются, битый JSON — пусто). e2e: `dreamteam <путь>` (TUI)
+ * и `dreamteam serve <путь>` открывают проект незнакомой папки — регистрируют
+ * его в доме. Запуск: npm run probe:bin
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cliProjectArgs, looksLikePath, parseCliProject } from '../src/cli-project.js';
 import { rmTemp } from './rm-tmp.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -54,6 +58,37 @@ const twoPaths = run(['.', 'лишний']);
 check('два пути — отказ «лишний аргумент»', twoPaths.status === 1 && twoPaths.stderr.includes('Лишний аргумент'), `status=${twoPaths.status} stderr=${JSON.stringify(twoPaths.stderr)}`);
 
 check('отказы и флаги не создали дом', existsSync(home) && readdirSync(home).length === 0, readdirSync(home).join(', '));
+
+// --- юнит: разбор argv с проектом (cli-project.ts) ═══════════════════════════
+{
+  const paths = ['.', '..', 'a/b', 'a\\b', '/abs', 'C:\\dev'];
+  const notPaths = ['name', '', 'open', 'serve'];
+  check(
+    'cli: looksLikePath — точки, разделители, абсолютные',
+    paths.every((p) => looksLikePath(p)) && notPaths.every((p) => !looksLikePath(p)),
+  );
+
+  check('cli: без аргументов — none', parseCliProject([]).kind === 'none');
+  check('cli: один --open отфильтрован — none', parseCliProject(['--open']).kind === 'none');
+  check('cli: --open перед путём отфильтрован', JSON.stringify(parseCliProject(['--open', '.'])) === JSON.stringify({ kind: 'open', target: '.' }));
+  check('cli: точка — open', parseCliProject(['.']).kind === 'open' && (parseCliProject(['.']) as { target?: string }).target === '.');
+  check('cli: голое имя — ошибка с подсказкой /project open', parseCliProject(['serv']).kind === 'error' && (parseCliProject(['serv']) as { message: string }).message.includes('/project open serv'));
+  check('cli: два аргумента — лишний', parseCliProject(['.', 'x']).kind === 'error' && (parseCliProject(['.', 'x']) as { message: string }).message.includes('x'));
+
+  const saved = process.env.DT_PROJECT_ARGS;
+  const withArgs = (v: string | undefined): string[] => {
+    if (v === undefined) delete process.env.DT_PROJECT_ARGS;
+    else process.env.DT_PROJECT_ARGS = v;
+    return cliProjectArgs();
+  };
+  check('cli: без env — пусто', withArgs(undefined).length === 0);
+  check('cli: JSON-массив строк читается', JSON.stringify(withArgs('[".","--open"]')) === '[".","--open"]');
+  check('cli: не-строки отсеиваются', JSON.stringify(withArgs('["a",5,null]')) === '["a"]');
+  check('cli: битый JSON — пусто', withArgs('{oops').length === 0);
+  check('cli: не-массив — пусто', withArgs('"a"').length === 0);
+  if (saved === undefined) delete process.env.DT_PROJECT_ARGS;
+  else process.env.DT_PROJECT_ARGS = saved;
+}
 
 /** Преднастроенный дом: mock-модель + русский интерфейс (мастер не стартует). */
 const makeMockHome = (base: string): string => {
