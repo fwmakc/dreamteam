@@ -4,6 +4,14 @@
  *  - WS: первичный state, раунд через mock-провайдера (менеджер: team.add,
  *    chat.add, статус), rpc (sessions.list, session.new с приветствием,
  *    session.agent.add/delete, settings.update, session.delete, неизвестный метод);
+ *  - rpc-операции GUI: агент и его тула, свои тула, модель, переименование
+ *    проекта, серверы/почта/боты проекта, авто-режим, fs.dirs, session.update/
+ *    close, schedule.toggle мимо, manager.update; снимок проекта с хостами,
+ *    ящиками (пароль — только флагом) и ботами;
+ *  - экспорт четырёх уровней и импорт с живым подтверждением (отмена и
+ *    применение), отказы на чужих архивах;
+ *  - http: /api/upload без открытого проекта — 404; сервер с TOKEN —
+ *    авторизация первым сообщением, проект из аргументов запуска;
  *  - ServerPresenter: вопрос без клиентов — сразу отказ, ответ клиента —
  *    подтверждение, выбор разговора, таймаут-отказ.
  *
@@ -610,13 +618,302 @@ const client = await makeClient(handle.port);
     await client.waitState(sBad + 1);
   }
 
+  // --- RPC-ОПЕРАЦИИ: формы GUI ходят тем же rpc-ом — агент и его тула,
+  // свои тула, модель, проект, серверы/почта/боты, авто-режим; экспорт и
+  // импорт с живым подтверждением; прикреплённые файлы к сообщению ---
+  {
+    let rpcSeq = 0;
+    const rpc = async (method: string, args?: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      const rid = `q${rpcSeq++}`;
+      client.send({ type: 'rpc', id: rid, method, ...(args ? { args } : {}) });
+      const m = await client.next((mm) => (mm.type === 'rpc_result' || mm.type === 'rpc_error') && mm.id === rid);
+      if (m.type === 'rpc_error') throw new Error(`rpc ${method}: ${String(m.error)}`);
+      return (m.result ?? {}) as Record<string, unknown>;
+    };
+    const rpcErr = async (method: string, args?: Record<string, unknown>): Promise<string> => {
+      const rid = `q${rpcSeq++}`;
+      client.send({ type: 'rpc', id: rid, method, ...(args ? { args } : {}) });
+      const m = await client.next((mm) => (mm.type === 'rpc_result' || mm.type === 'rpc_error') && mm.id === rid);
+      return m.type === 'rpc_error' ? String(m.error) : '';
+    };
+    const takeZip = async (type: string, args?: Record<string, unknown>, errMark?: string): Promise<{ name: string; dataB64: string; error?: string }> => {
+      client.send({ type, ...(args ?? {}) });
+      const m = await client.next((mm) => mm.type === 'export_data' || (errMark !== undefined && mm.type === 'error' && String(mm.text).includes(errMark)));
+      return m.type === 'export_data'
+        ? { name: String(m.name), dataB64: String(m.dataB64) }
+        : { name: '', dataB64: '', error: String((m as { text?: unknown }).text ?? m.error ?? '') };
+    };
+    // подтверждение с живым клиентом: вопрос → ответ → заметка с отчётом
+    const importFlow = async (type: string, dataB64: string, approved: boolean, reportMark: string): Promise<string> => {
+      client.send({ type, dataB64 });
+      const ask = await client.next((m) => m.type === 'confirm');
+      client.send({ type: 'confirm_response', id: ask.id, approved });
+      const n = await client.next((m) => m.type === 'notice' && String(m.text).includes(approved ? reportMark : 'Импорт отменён'));
+      return String(n.text);
+    };
+
+    // прикрепления: имена из inbox уходят в раунд вместе с текстом
+    const sAtt = client.stateCount();
+    client.send({ type: 'user_message', text: 'что в этих файлах?', attachments: ['заметка.txt', '', '  '] });
+    await client.waitState(sAtt + 1);
+    const stAtt = await rpc('state');
+    check(
+      'rpc: user_message с attachments — сообщение в разговоре',
+      ((stAtt.session as { messages: { authorId: string; text: string }[] }).messages ?? []).some((mm) => mm.authorId === 'user' && mm.text.includes('что в этих файлах?')),
+      JSON.stringify(stAtt.session).slice(0, 150),
+    );
+
+    // fs.dirs — браузер путей для форм проекта
+    const dirs = (await rpc('fs.dirs', { path: base })) as { path: string; dirs: { name: string }[] };
+    check('rpc: fs.dirs — подпапки каталога', dirs.path === base && dirs.dirs.some((d) => d.name === 'home') && dirs.dirs.some((d) => d.name === 'proj'), JSON.stringify(dirs.dirs));
+    const noDir = await rpcErr('fs.dirs', { path: join(base, 'нет-такой') });
+    check('rpc: fs.dirs мимо — честная ошибка', noDir.includes('нет'), noDir);
+
+    // session.update: переименование разговора
+    await rpc('session.update', { title: 'Пробное имя' });
+    const lstU = await rpc('sessions.list');
+    check('rpc: session.update — имя в списке', (lstU.sessions as { title: string }[]).some((s) => s.title === 'Пробное имя'), JSON.stringify((lstU.sessions as { title: string }[]).map((s) => s.title)));
+
+    // агент: карточка, тула, правка полей
+    const got = await rpc('agent.get', { id: 'test_probe' });
+    check('rpc: agent.get — карточка агента', JSON.stringify(got).includes('test_probe'), JSON.stringify(got).slice(0, 150));
+    const tools0 = await rpc('agent.tools', { id: 'test_probe' });
+    check('rpc: agent.tools — базовые тула', (tools0.tools as string[]).includes('files') && (tools0.tools as string[]).includes('shell'), JSON.stringify(tools0.tools));
+    const noAgent = await rpcErr('agent.get', { id: 'нет-такого' });
+    check('rpc: agent.get мимо — честная ошибка', noAgent.includes('нет агента'), noAgent);
+
+    await rpc('agent.update', { id: 'test_probe', fields: { role: 'инженер-проб' } });
+    const card = JSON.parse(readFileSync(join(home, 'agents', 'test_probe.json'), 'utf8')) as { role?: string };
+    check('rpc: agent.update — роль в карточке', card.role === 'инженер-проб', card.role);
+
+    await rpc('agent.tool.add', { agent: 'test_probe', tool: 'docs' });
+    const tools1 = await rpc('agent.tools', { id: 'test_probe' });
+    check('rpc: agent.tool.add — docs включён', (tools1.tools as string[]).includes('docs'), JSON.stringify(tools1.tools));
+    await rpc('agent.tool.update', { agent: 'test_probe', tool: 'docs', fields: { description: 'читать документы' } });
+    const docsCard = JSON.parse(readFileSync(join(home, 'agents', 'test_probe.json'), 'utf8')) as { tools?: Record<string, { description?: string }> };
+    check('rpc: agent.tool.update — карточка тула правится', docsCard.tools?.docs?.description === 'читать документы', JSON.stringify(docsCard.tools));
+    await rpc('agent.tool.delete', { agent: 'test_probe', tool: 'docs' });
+    const tools2 = await rpc('agent.tools', { id: 'test_probe' });
+    check('rpc: agent.tool.delete — docs выключен', (tools2.tools as string[]).includes('docs') === false, JSON.stringify(tools2.tools));
+
+    // свои тула: new → update → delete
+    const tn = await rpc('tool.new', { tool: ['dt_probe_tool'] });
+    check('rpc: tool.new — свой тул создан', String(tn.text).includes('dt_probe_tool'), String(tn.text));
+    const tu = await rpc('tool.update', { tool: 'dt_probe_tool', fields: { description: 'пробный тул' } });
+    check('rpc: tool.update — карточка переписана', String(tu.text).includes('dt_probe_tool') && String(tu.text).includes('description'), String(tu.text));
+    const td = await rpc('tool.delete', { id: 'dt_probe_tool' });
+    check('rpc: tool.delete — удалён', String(td.text).length > 0, String(td.text));
+
+    // авто-режим
+    const on = await rpc('auto.on', { n: 2 });
+    const stOn = await rpc('state');
+    check('rpc: auto.on — режим в снимке', on.ok === true && (stOn.auto as { mode: boolean }).mode === true, JSON.stringify(stOn.auto));
+    await rpc('auto.off');
+    const stOff = await rpc('state');
+    check('rpc: auto.off — выключен', (stOff.auto as { mode: boolean }).mode === false, JSON.stringify(stOff.auto));
+
+    // модель: создать и удалить; дефолтную не отдаём
+    const mn = await rpc('model.new', { id: 'mock2', config: { provider: 'mock' } });
+    check('rpc: model.new — карточка создана', String(mn.text).includes('mock2'), String(mn.text));
+    const stM = await rpc('state');
+    check('rpc: model.new — модель в снимке', (stM.models as { id: string }[]).some((m) => m.id === 'mock2'), JSON.stringify((stM.models as { id: string }[]).map((m) => m.id)));
+    const md = await rpc('model.delete', { id: 'mock2' });
+    check('rpc: model.delete — удалена', String(md.text).includes('mock2'), String(md.text));
+    const delDef = await rpcErr('model.delete', { id: 'mock' });
+    check('rpc: model.delete дефолтной — отказ', delDef.length > 0, delDef);
+
+    // проект: переименование текущего
+    const ren = await rpc('project.update', { name: 'probe-main' });
+    check('rpc: project.update — переименован', String(ren.text).includes('probe-main'), String(ren.text));
+    const stR = await rpc('state');
+    check('rpc: project.update — имя в снимке', (stR.project as { name?: string }).name === 'probe-main', JSON.stringify(stR.project));
+
+    // серверы проекта: полная запись, пустая, правка, удаление
+    const ha = await rpc('project.host.add', { id: 'rpc-host', host: 'example.org', user: 'u', password: 'p', dir: '/srv', port: 22 });
+    check('rpc: project.host.add — полный', String(ha.text).includes('rpc-host'), String(ha.text));
+    const he = await rpc('project.host.add', { id: 'rpc-empty' });
+    check('rpc: project.host.add — пустая запись', String(he.text).includes('rpc-empty'), String(he.text));
+    const hu = await rpc('project.host.update', { id: 'rpc-host', user: 'u2', port: 2222 });
+    check('rpc: project.host.update — правка', String(hu.text).includes('2222'), String(hu.text));
+    const hd = await rpc('project.host.delete', { id: 'rpc-empty' });
+    check('rpc: project.host.delete — удалён', String(hd.text).length > 0, String(hd.text));
+    const noHost = await rpcErr('project.host.update', { id: 'нет-хоста', user: 'x' });
+    check('rpc: project.host.update мимо — честная ошибка', noHost.length > 0, noHost);
+
+    // почта: готовый ящик и пустая запись, правка, удаление
+    const ma = await rpc('project.mail.add', { id: 'box1', user: 'a@b.c', password: 'pw', imap: 'imap.example.org', smtp: 'smtp.example.org', port: 993, smtpPort: 465, tlsNoVerify: true });
+    check('rpc: project.mail.add — готовый ящик', String(ma.text).includes('box1'), String(ma.text));
+    const mr = await rpc('project.mail.add', { id: 'box2' });
+    check('rpc: project.mail.add — пустая запись', String(mr.text).includes('box2'), String(mr.text));
+    const mu = await rpc('project.mail.update', { id: 'box2', fields: { user: 'd@e.f' } });
+    check('rpc: project.mail.update — правка', String(mu.text).length > 0, String(mu.text));
+    const mdl = await rpc('project.mail.delete', { id: 'box2' });
+    check('rpc: project.mail.delete — удалён', String(mdl.text).length > 0, String(mdl.text));
+
+    // боты мессенджеров: с токеном и пустая, правка, удаление (ключи — telegram/max)
+    const mb = await rpc('project.messenger.add', { key: 'telegram', token: '1:AAA' });
+    check('rpc: project.messenger.add — с токеном', String(mb.text).includes('telegram'), String(mb.text));
+    const me = await rpc('project.messenger.add', { key: 'max' });
+    check('rpc: project.messenger.add — пустая запись', String(me.text).includes('max'), String(me.text));
+    await rpc('project.messenger.update', { key: 'max', token: '2:BBB' });
+    const mdel = await rpc('project.messenger.delete', { key: 'max' });
+    check('rpc: project.messenger.delete — удалён', String(mdel.text).length > 0, String(mdel.text));
+
+    // снимок проекта — контракт GUI: секреты только флагом «задан»
+    const stP = await rpc('state');
+    const prj = (stP.projects as {
+      id: string;
+      hosts: { name: string; port?: number; user?: string; hasPassword: boolean }[];
+      mails: { id: string; hasPassword: boolean; port?: number; tlsNoVerify: boolean }[];
+      messengers: { key: string; hasToken: boolean }[];
+    }[])[0];
+    check('rpc: снимок проекта — хост с портом и флагом пароля', prj.hosts.some((h) => h.name === 'rpc-host' && h.port === 2222 && h.user === 'u2' && h.hasPassword), JSON.stringify(prj.hosts));
+    check('rpc: снимок проекта — ящик с портом и флагом', prj.mails.some((b) => b.id === 'box1' && b.hasPassword && b.port === 993 && b.tlsNoVerify), JSON.stringify(prj.mails));
+    check('rpc: снимок проекта — бот с флагом токена', prj.messengers.some((b) => b.key === 'telegram' && b.hasToken), JSON.stringify(prj.messengers));
+
+    // агент: создать и удалить rpc-ом
+    const an = await rpc('agent.new', { id: 'rpc_guy', name: 'Рпц', role: 'гость' });
+    check('rpc: agent.new — карточка создана', String(an.text).includes('rpc_guy'), String(an.text));
+    const ad = await rpc('agent.delete', { id: 'rpc_guy' });
+    check('rpc: agent.delete — карточка удалена', String(ad.text).includes('rpc_guy'), String(ad.text));
+
+    // model.get: маскированная карточка со схемой формы
+    const mg = (await rpc('model.get', { id: 'mock' })) as { card?: { provider?: string; apiKey?: string }; schema?: unknown };
+    check('rpc: model.get — карточка со схемой', mg.card?.provider === 'mock' && mg.card?.apiKey === undefined && typeof mg.schema === 'object', JSON.stringify(mg.card));
+
+    // manager.show / settings.show — формы настроек
+    const ms = (await rpc('manager.show')) as { manager?: { name?: string } };
+    const ss = (await rpc('settings.show')) as { settings?: { ui?: string } };
+    check('rpc: manager.show/settings.show — формы', typeof ms.manager?.name === 'string' && ss.settings?.ui === 'ru', JSON.stringify(ms.manager) + ' ' + JSON.stringify(ss.settings));
+
+    // session.history: срез разговора; session.agents: состав чата и запас
+    const hist = (await rpc('session.history', { from: 1, to: 2 })) as { messages?: unknown[] };
+    check('rpc: session.history — срез сообщений', Array.isArray(hist.messages) && hist.messages.length > 0, JSON.stringify(hist).slice(0, 120));
+    const ags = (await rpc('session.agents')) as { inChat?: { id: string }[]; outside?: unknown[] };
+    check('rpc: session.agents — в чате и в запасе', (ags.inChat ?? []).some((a) => a.id === 'test_probe') && Array.isArray(ags.outside), JSON.stringify(ags).slice(0, 150));
+
+    // file: 📎-канал GUI — с defer файл просто кладётся в inbox, без — сразу раунд
+    client.send({ type: 'file', name: 'проба.txt', dataB64: Buffer.from('привет, файл!').toString('base64'), defer: true });
+    await wait(150);
+    check('rpc: file (defer) — файл в inbox без раунда', existsSync(join(home, 'projects', 'probe-main', 'inbox', 'проба.txt')));
+    const sFile = client.stateCount();
+    client.send({ type: 'file', name: 'проба2.txt', dataB64: Buffer.from('сразу в раунд').toString('base64'), text: 'глянь файл' });
+    await client.waitState(sFile + 1);
+
+    // file_ref: файл уже на сервере — копируется в inbox; мимо — честная ошибка
+    writeFileSync(join(proj, 'референс.txt'), 'уже на диске');
+    client.send({ type: 'file_ref', path: 'референс.txt', defer: true });
+    await wait(150);
+    check('rpc: file_ref — копия в inbox', existsSync(join(home, 'projects', 'probe-main', 'inbox', 'референс.txt')));
+    client.send({ type: 'file_ref', path: 'нет-такого.txt', defer: true });
+    const badRef = await client.next((m) => m.type === 'error' && String(m.text).includes('файл не найден'));
+    check('rpc: file_ref мимо — честная ошибка', Boolean(badRef));
+
+    // экспорт четырёх уровней — zip по проводу (это WS-типы, не rpc)
+    const homeZip = await takeZip('export_home');
+    check('rpc: export_home — zip-архив', homeZip.name.startsWith('home-') && homeZip.dataB64.startsWith('UEs'), homeZip.name);
+    const setZip = await takeZip('export_settings');
+    check('rpc: export_settings — zip-архив', setZip.name.startsWith('settings-') && setZip.dataB64.startsWith('UEs'), setZip.name);
+    const projZip = await takeZip('export_project', { id: 'probe-main' });
+    check('rpc: export_project по id — zip-архив', projZip.name.includes('probe-main') && projZip.dataB64.startsWith('UEs'), projZip.name);
+    const curZip = await takeZip('export_project');
+    check('rpc: export_project текущий — zip-архив', curZip.name.startsWith('project-') && curZip.dataB64.startsWith('UEs'), curZip.name);
+    const badExp = await takeZip('export_session', { id: 'нет-такого' }, 'не нашёл разговор');
+    check('rpc: export_session мимо — честная ошибка', (badExp.error ?? '').includes('не нашёл разговор'), badExp.error);
+    const sessId = ((await rpc('sessions.list')).sessions as { id: string }[])[0].id;
+    const sessZip = await takeZip('export_session', { id: sessId });
+    check('rpc: export_session — zip-архив', sessZip.name.startsWith('session-') && sessZip.dataB64.startsWith('UEs'), sessZip.name);
+
+    // импорт: отмена и применение с живым подтверждением
+    const canceled = await importFlow('import_home', homeZip.dataB64, false, '');
+    check('rpc: import_home отмена — «Импорт отменён»', canceled.includes('Импорт отменён'), canceled);
+    const doneHome = await importFlow('import_home', homeZip.dataB64, true, 'Импорт');
+    check('rpc: import_home — отчёт', doneHome.includes('Импорт'), doneHome);
+    const doneSet = await importFlow('import_settings', setZip.dataB64, true, 'Импорт');
+    check('rpc: import_settings — отчёт', doneSet.includes('Импорт'), doneSet);
+
+    // чужой архив — отказ до подтверждения
+    client.send({ type: 'import_project', dataB64: setZip.dataB64 });
+    const errP = await client.next((m) => m.type === 'error' && String(m.text).includes('project.json'));
+    check('rpc: import_project без project.json — отказ', Boolean(errP));
+    client.send({ type: 'import_session', dataB64: setZip.dataB64 });
+    const errS = await client.next((m) => m.type === 'error' && String(m.text).includes('session.json'));
+    check('rpc: import_session без session.json — отказ', Boolean(errS));
+
+    // импорт проекта копией под новым id → удаление копии rpc-ом
+    client.send({ type: 'import_project', id: 'proj-copy', dataB64: curZip.dataB64 });
+    const askP = await client.next((m) => m.type === 'confirm');
+    client.send({ type: 'confirm_response', id: askP.id, approved: true });
+    const nP = await client.next((m) => m.type === 'notice' && String(m.text).includes('proj-copy'));
+    check('rpc: import_project копией — создан', Boolean(nP));
+    const delCopy = await rpc('project.delete', { id: 'proj-copy' });
+    check('rpc: project.delete — копия удалена', existsSync(join(home, 'projects', 'proj-copy')) === false, String(delCopy.text));
+
+    // импорт разговора: session.json в архиве есть — вливается
+    client.send({ type: 'import_session', dataB64: sessZip.dataB64 });
+    const nS = await client.next((m) => m.type === 'notice' && String(m.text).includes('Импорт'));
+    check('rpc: import_session — разговор влит', Boolean(nS));
+
+    // session.open: переключение на другой разговор — всем свежий state
+    const curId = ((await rpc('state')).session as { id: string }).id;
+    const otherId = ((await rpc('sessions.list')).sessions as { id: string }[]).find((s) => s.id !== curId)?.id;
+    if (otherId) {
+      const so = await rpc('session.open', { id: otherId });
+      check('rpc: session.open — переключился', so.ok === true, JSON.stringify(so));
+    }
+
+    // отмена импорта настроек и проекта — те же ветки «Импорт отменён»
+    const cancelSet = await importFlow('import_settings', setZip.dataB64, false, '');
+    check('rpc: import_settings отмена', cancelSet.includes('Импорт отменён'), cancelSet);
+    client.send({ type: 'import_project', dataB64: curZip.dataB64 });
+    const askC = await client.next((m) => m.type === 'confirm');
+    client.send({ type: 'confirm_response', id: askC.id, approved: false });
+    const nC = await client.next((m) => m.type === 'notice' && String(m.text).includes('Импорт отменён'));
+    check('rpc: import_project отмена', Boolean(nC));
+
+    // края: schedule.toggle мимо, settings.update патчи, manager.update
+    const before = await rpc('schedule.list');
+    await rpc('schedule.toggle', { id: 'нет-такой' });
+    const after = await rpc('schedule.list');
+    check('rpc: schedule.toggle мимо — список не тронут', JSON.stringify(before.tasks) === JSON.stringify(after.tasks), '');
+    const uiSet = await rpc('settings.update', { patch: { ui: 'ru' } });
+    const modelSet = await rpc('settings.update', { patch: { model: { id: 'mock' } } });
+    check('rpc: settings.update ui+model — ок', uiSet.ok === true && modelSet.ok === true, JSON.stringify(uiSet));
+    const mgr = await rpc('manager.update', { fields: { temperature: 0.5 } });
+    check('rpc: manager.update — отчёт', String(mgr.text).length > 0, String(mgr.text));
+
+    // session.close: разговор закрыт, проект остаётся; session.new возвращает с приветствием
+    const sc = await rpc('session.close');
+    check('rpc: session.close — отчёт', String(sc.text).includes('Разговор закрыт'), String(sc.text));
+    const sRe = client.stateCount();
+    await rpc('session.new');
+    await client.waitState(sRe + 1);
+
+    // project.new: дом создаёт проект и здоровается; projects.list видит оба
+    const pn = await rpc('project.new', { id: 'rpc-proj' });
+    check('rpc: project.new — создан и открыт', String(pn.text).includes('rpc-proj'), String(pn.text));
+    const pl = (await rpc('projects.list')) as { known?: { name?: string }[]; current?: { id?: string } };
+    check(
+      'rpc: projects.list — известные и текущий',
+      (pl.known ?? []).some((p) => p.name === 'probe-main') && (pl.known ?? []).some((p) => p.name === 'rpc-proj') && pl.current?.id === 'rpc-proj',
+      JSON.stringify(pl).slice(0, 200),
+    );
+    // вернуться в переименованный проект, затем удалить новый целиком
+    await rpc('project.open', { id: 'probe-main' });
+    const pdel = await rpc('project.delete', { id: 'rpc-proj' });
+    check('rpc: project.delete — новый удалён целиком', existsSync(join(home, 'projects', 'rpc-proj')) === false, String(pdel.text));
+    const sFin = client.stateCount();
+    await rpc('session.new');
+    await client.waitState(sFin + 1);
+  }
+
   // --- ЮНИКОД И БОЛЬШИЕ СООБЩЕНИЯ ---
   {
     const big = 'ёёё 🎬🛎 — «кавычки» и <script>alert(1)</script> ' + 'х'.repeat(8000);
     const sent = '@менеджер ' + big; // менеджеру: раунд без демо-тулов и живых вопросов
     client.send({ type: 'user_message', text: sent });
     const stBig = await client.next(
-      (m) => m.type === 'state' && (m.state as { session: { messages: { text: string }[] } }).session.messages.some((x) => x.text.includes('ёёё')),
+      (m) => m.type === 'state' && (m.state as { session?: { messages?: { text: string }[] } | null }).session?.messages?.some((x) => x.text.includes('ёёё')) === true,
     );
     const saved = (stBig.state as { session: { messages: { text: string }[] } }).session.messages.find((x) => x.text.includes('ёёё'));
     check('ws: юникод, html и 8КБ — дошли без искажений', saved?.text === sent);
@@ -651,13 +948,28 @@ const client = await makeClient(handle.port);
     check('ws: папки нет — пусто и без ошибки', Boolean(none));
   }
 
+  // --- upload без открытого проекта: честный 404 ---
+  {
+    client.send({ type: 'rpc', id: 'pc1', method: 'project.close' });
+    const pc = await client.next((m) => m.type === 'rpc_result' && m.id === 'pc1');
+    check('rpc: project.close — проект закрыт', Boolean(pc.result));
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/upload`, { method: 'POST', body: 'данные' });
+    const j = (await res.json()) as { error?: string };
+    check('http: upload без проекта — 404 с внятной ошибкой', res.status === 404 && String(j.error ?? '').includes('нет открытого проекта'), JSON.stringify(j));
+  }
+
   client.close();
 }
 
-// --- AUTH: сервер с TOKEN требует авторизацию первым сообщением ---
+// --- AUTH: сервер с TOKEN требует авторизацию первым сообщением; проект из
+// аргументов запуска (dreamteam serve <папка> → DT_PROJECT_ARGS) открывается
+// до поднятия, и пустой разговор приветствуется менеджером ещё до клиентов ---
 {
+  mkdirSync(join(base, 'proj2'), { recursive: true });
   process.env.TOKEN = 'секрет-тест-123';
+  process.env.DT_PROJECT_ARGS = JSON.stringify([join(base, 'proj2')]);
   const secured = await startServe({ port: 0 });
+  delete process.env.DT_PROJECT_ARGS;
   const c1 = await makeClient(secured.port);
   const need = await c1.next((m) => m.type === 'auth_required');
   check('auth: сервер с TOKEN требует авторизацию', Boolean(need));
@@ -674,6 +986,11 @@ const client = await makeClient(handle.port);
   const ok = await c1.next((m) => m.type === 'auth_ok');
   const st = await c1.next((m) => m.type === 'state');
   check('auth: верный токен — пускает со state', Boolean(ok && st.state));
+  check(
+    'auth: проект из аргументов запуска открыт',
+    (st.state as { project?: { name?: string } }).project?.name === 'proj2',
+    JSON.stringify((st.state as { project?: unknown }).project ?? null),
+  );
 
   c1.close();
   await secured.close();
