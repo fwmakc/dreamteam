@@ -14,13 +14,15 @@ import { Editor } from './editor.js';
 import { Screen } from './screen.js';
 // дом и текущий проект — только в paths.ts (проект переключается на лету)
 import { AGENTS_DIR, APP_VERSION, DT_HOME, PROJECT_DIR, PROJECT_FILE, SETTINGS_FILE, WORKSPACE } from './paths.js';
-import { agentHeader, colorFn, printDim, printError, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
+import { agentHeader, colorFn, ctxBar, printDim, printError, quotaBar, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 // ядро: раунды, менеджер, инструменты, память — общение только через Presenter
 import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
+import { cachedQuota, fetchQuota } from './core/quota.js';
+import { loadSettings } from './settings.js';
 import { cliProjectArgs, parseCliProject } from './cli-project.js';
 import { bootstrapApp } from './core/bootstrap.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
-import type { Agent, ChatMessage, Session } from './types.js';
+import type { Agent, ChatMessage, LLMProvider, Session } from './types.js';
 import { fmtDate, fmtTime, t, tf } from './i18n.js';
 
 // доступен командам /exit: закрытие readline завершает приложение через 'close'
@@ -40,12 +42,67 @@ const sessionLabel = (): string => {
   return title.length > 24 ? title.slice(0, 24) + '…' : title;
 };
 
-/** Статус-бар на пустом вводе: название разговора и строка клавиш (функция —
- *  читается после выбора языка) */
+/** Порог сжатия для индикатора контекста: перечитывается при каждой
+ *  перерисовке статус-бара (после раунда/команды), чтобы /settings update
+ *  подхватывался без перезапуска. */
+let compressThreshold = 85;
+
+/** Индикатор контекста для статус-бара: `[++++------] 27% · 34k / 128k`.
+ *  Нет раундов или у модели не задано окно — пустая строка. */
+const ctxHintLine = (): string => {
+  const s = currentSession;
+  if (!s?.contextTokens || !s.contextModel) return '';
+  const win = appRef?.models.get(s.contextModel)?.config?.contextWindow;
+  if (typeof win !== 'number' || win <= 0) return '';
+  return '  ' + ctxBar(s.contextTokens, win, compressThreshold);
+};
+
+/** Провайдер дефолтной модели, если он умеет отдавать квоту (иначе null). */
+const quotaProvider = (): LLMProvider | null => {
+  const id = appRef?.settings.model?.id;
+  const status = id ? appRef?.models.get(id) : undefined;
+  if (!status?.ok || typeof status.provider.quota !== 'function') return null;
+  return status.provider;
+};
+
+/** Сегмент квот для статус-бара: `Q 5ч 73% · нед 59%` — лимиты тарифа
+ *  дефолтной модели. Только синхронный кеш; сеть гасит refreshQuota. */
+const quotaHintLine = (): string => {
+  const p = quotaProvider();
+  if (!p) return '';
+  const q = cachedQuota(p.id);
+  return q && q.windows.length > 0 ? '  ' + quotaBar(q) : '';
+};
+
+/** Фоновая подкачка квоты дефолтной модели: TTL внутри fetchQuota гасит
+ *  частоту, перерисовка — только если строка в статус-баре изменилась. */
+const refreshQuota = (): void => {
+  const p = quotaProvider();
+  if (!p) return;
+  const before = quotaHintLine();
+  void fetchQuota(p).then((q) => {
+    if (q && quotaHintLine() !== before) screen?.setHints(staticHints());
+  });
+};
+
+/** Статус-бар на пустом вводе: название разговора, строка клавиш и индикатор
+ *  контекста с сегментом квот (функция — читается после выбора языка) */
 const staticHints = (): string[] => [
   pc.dim(`  [${sessionLabel()}]`),
   pc.dim(t('  @имя или !имя — участнику · Esc — прервать раунд · /exit — выход · /help — команды')),
+  ctxHintLine() + quotaHintLine(),
 ];
+
+/** Перечитать порог сжатия и перерисовать статус-бар (главный цикл). */
+const refreshHints = (): void => {
+  try {
+    compressThreshold = loadSettings(SETTINGS_FILE, 0).compressThreshold;
+  } catch {
+    // settings.json валиден (проверен на старте) — оставляем прежний порог
+  }
+  screen?.setHints(staticHints());
+  refreshQuota();
+};
 
 /** Веб-оболочка — отдельный запуск; адрес из тех же PORT/HOST, что читает serve
  *  (лениво: .env дома грузится уже после импорта модуля). */
@@ -951,11 +1008,13 @@ async function main(): Promise<void> {
 
   while (true) {
     if (stdinLines.closed && stdinLines.queue.length === 0) break;
+    // разговор мог смениться за раунд: статус-бар перечитывает порог сжатия
+    // и рисует индикатор контекста по свежим данным
+    currentSession = app.session;
+    refreshHints();
     if (editor) {
-      currentSession = app.session;
       editor.setPrompt(promptFor());
     } else if (rl) {
-      currentSession = app.session;
       rl.setPrompt(promptFor());
       if (!stdinLines.closed) {
         process.stdout.write('\n');

@@ -3,10 +3,11 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isModelId } from '../ids.js';
 import type { ImageProvider, LLMProvider, ModelRef } from '../types.js';
-import type { AdapterContract, ImageAdapterFactory, ProviderConfig, ProviderFactory } from './types.js';
+import type { AdapterContract, ImageAdapterFactory, ModelKeySpec, ProviderConfig, ProviderFactory } from './types.js';
 import { checkKeySpec } from './types.js';
 import { openAiCompatibleFactory, contract as openAiCompatibleContract } from './openai-compatible.js';
 import { anthropicFactory, contract as anthropicContract } from './anthropic.js';
+import { zaiCodingPlanFactory, contract as zaiCodingPlanContract } from './zai-coding-plan.js';
 import { gigachatFactory, contract as gigachatContract } from './gigachat.js';
 import { mockFactory, unconfiguredProvider, contract as mockContract } from './mock.js';
 import { openAiImagesFactory, contract as openAiImagesContract } from './openai-images.js';
@@ -27,6 +28,7 @@ import { tf } from '../i18n.js';
 const adapters: Record<string, ProviderFactory> = {
   'openai-compatible': openAiCompatibleFactory,
   'anthropic-compatible': anthropicFactory,
+  'zai-coding-plan': zaiCodingPlanFactory,
   gigachat: gigachatFactory,
   mock: mockFactory,
 };
@@ -34,6 +36,7 @@ const adapters: Record<string, ProviderFactory> = {
 const contracts: Record<string, AdapterContract> = {
   'openai-compatible': openAiCompatibleContract,
   'anthropic-compatible': anthropicContract,
+  'zai-coding-plan': zaiCodingPlanContract,
   gigachat: gigachatContract,
   mock: mockContract,
 };
@@ -63,7 +66,8 @@ function adapterIds(): string[] {
   return [...Object.keys(adapters), ...userAdapters.keys()];
 }
 
-function contractOf(provider: string): AdapterContract | undefined {
+/** Контракт карточки по имени провайдера — источник полей формы GUI и валидации. */
+export function contractOf(provider: string): AdapterContract | undefined {
   return contracts[provider] ?? imageContracts[provider];
 }
 
@@ -118,6 +122,20 @@ export interface ImageProviderStatus {
   note?: string;
 }
 
+/**
+ * Строковые "true"/"false" и числовые строки приводит к типу из контракта:
+ * команды /model new|update и действия менеджера приходят строками
+ * (поле=значение / свободный JSON от модели). По контракту, а не всем подряд —
+ * числовой apiKey остаётся строкой. Не строка и незнакомые значения — как есть,
+ * их дальше отфутболит checkKeySpec.
+ */
+function coerceSpec(spec: ModelKeySpec, value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  if (spec.type === 'boolean' && (value === 'true' || value === 'false')) return value === 'true';
+  if (spec.type === 'number' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
+  return value;
+}
+
 /** Карточку модели валидирует контракт её провайдера: ключи, типы, обязательное. */
 function validateCard(file: string, raw: unknown): { config: ProviderConfig; image: boolean } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -140,7 +158,9 @@ function validateCard(file: string, raw: unknown): { config: ProviderConfig; ima
           `${file}: неизвестный параметр "${k}" — провайдер «${provider}» разрешает: ${Object.keys(contract.keys).join(', ')}`,
         );
       }
-      const err = checkKeySpec(k, spec, v);
+      const coerced = coerceSpec(spec, v);
+      if (coerced !== v) cfg[k] = coerced; // в файл пишется уже типизированное значение
+      const err = checkKeySpec(k, spec, coerced);
       if (err) throw new Error(`${file}: ${err}`);
     }
     for (const [k, spec] of Object.entries(contract.keys)) {
@@ -309,7 +329,7 @@ export function updateModelConfig(dir: string, id: string, fields: Record<string
   const path = modelPath(dir, mid);
   if (!existsSync(path)) throw new Error(`модели «${mid}» нет`);
   const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-  const changes: string[] = [];
+  const touched: string[] = [];
   for (const [key, value] of Object.entries(fields ?? {})) {
     if (key === 'provider') {
       const provider = String(value ?? '').trim();
@@ -322,10 +342,11 @@ export function updateModelConfig(dir: string, id: string, fields: Record<string
     } else {
       raw[key] = value;
     }
-    changes.push(`${key}="${String(raw[key] ?? '')}"`);
+    touched.push(key);
   }
-  if (changes.length === 0) throw new Error('не понятно, что менять — в полях нет узнаваемых имён');
-  validateCard(path, raw);
+  if (touched.length === 0) throw new Error('не понятно, что менять — в полях нет узнаваемых имён');
+  validateCard(path, raw); // заодно приводит строковые true|false и числа к типам контракта
+  const changes = touched.map((key) => `${key}="${String(raw[key] ?? '')}"`);
   writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
   return tf('✓ модель «{id}»: {changes}', { id: mid, changes: changes.join(', ') });
 }

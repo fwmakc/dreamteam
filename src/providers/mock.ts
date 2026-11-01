@@ -1,4 +1,4 @@
-import type { LLMProvider, RoundUsage, StreamRequest } from '../types.js';
+import type { LLMProvider, ProviderQuota, RoundUsage, StreamRequest } from '../types.js';
 import { sleep } from './utils.js';
 import type { AdapterContract, ProviderConfig, ProviderFactory } from './types.js';
 
@@ -9,6 +9,7 @@ export const contract: AdapterContract = {
     note: { type: 'string', desc: 'текст заготовленного ответа' },
     temperature: { type: 'number' },
     maxTokens: { type: 'number' },
+    contextWindow: { type: 'number', desc: 'Размер контекстного окна (токены)' },
   },
   ref: ['temperature', 'maxTokens'],
 };
@@ -163,6 +164,20 @@ export class MockProvider implements LLMProvider {
       promptTokens: 400,
       cachedTokens: 0,
       outputTokens: Math.ceil(text.length / 4),
+    });
+  }
+
+  /** Демо-лимиты: статус-бар с квотами можно показывать без настоящих API. */
+  quota(): Promise<ProviderQuota | null> {
+    const now = Date.now();
+    return Promise.resolve({
+      plan: 'demo',
+      windows: [
+        { key: '5h', kind: 'tokens', usedPercent: 27, resetAt: now + 2 * 3_600_000 },
+        { key: 'week', kind: 'tokens', usedPercent: 41, resetAt: now + 3 * 86_400_000 },
+        { key: 'mcp', kind: 'calls', usedPercent: 12, resetAt: now + 20 * 86_400_000 },
+      ],
+      fetchedAt: now,
     });
   }
 }

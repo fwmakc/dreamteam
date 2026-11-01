@@ -6,6 +6,16 @@ export interface ChatMessage {
   authorRole?: string;
   text: string;
   ts: number;
+  /** файлы, прикреплённые к реплике (имена в inbox проекта) — только у пользователя */
+  attachments?: string[];
+}
+
+/** Накопительная статистика токенов разговора (как /usage в терминале) */
+export interface SessionUsage {
+  promptTokens: number;
+  cachedTokens: number;
+  outputTokens: number;
+  rounds: number;
 }
 
 export interface SessionMeta {
@@ -14,6 +24,14 @@ export interface SessionMeta {
   createdAt: number;
   updatedAt: number;
   count: number;
+  /** токены разговора — отчёт «Статистика…» (ПКМ в сайдбаре) */
+  usage?: SessionUsage;
+  /** тот же срез по моделям: id → счётчики */
+  usageByModel?: Record<string, SessionUsage>;
+  /** заполнение контекста последним раундом — индикатор в статус-баре */
+  contextTokens?: number;
+  /** модель этой оценки (окно берётся из её карточки) */
+  contextModel?: string;
 }
 
 export interface AgentInfo {
@@ -29,6 +47,26 @@ export interface AgentInfo {
   inChat: boolean;
 }
 
+/** Одно окно лимита тарифа провайдера (зеркало src/types.ts) */
+export interface QuotaWindow {
+  /** стабильный id окна: '5h' | 'week' | 'month' | 'mcp' | … */
+  key: string;
+  kind: 'tokens' | 'credits' | 'calls' | 'time';
+  /** сколько ИСПОЛЬЗОВАНО, 0..100 (индикатор показывает остаток 100−used) */
+  usedPercent: number;
+  limit?: number;
+  remaining?: number;
+  /** epoch ms следующего сброса окна */
+  resetAt?: number;
+}
+
+/** Снимок лимитов провайдера на момент опроса (зеркало src/types.ts) */
+export interface ProviderQuota {
+  plan?: string;
+  windows: QuotaWindow[];
+  fetchedAt: number;
+}
+
 /** Карточка модели из models/ дома (id = имя файла) */
 export interface ModelInfo {
   id: string;
@@ -38,6 +76,10 @@ export interface ModelInfo {
   ok: boolean;
   note?: string;
   vision?: boolean;
+  /** размер контекстного окна (токены) — знаменатель индикатора контекста */
+  contextWindow?: number;
+  /** лимиты тарифа — только у дефолтной модели, из кеша сервера */
+  quota?: ProviderQuota;
   isDefault: boolean;
   isManager: boolean;
 }
@@ -45,11 +87,47 @@ export interface ModelInfo {
 export interface ProjectHost {
   name: string;
   host: string;
+  user?: string;
+  port?: number;
+  dir?: string;
+  /** true — пароль задан (сам пароль сервер не отдаёт) */
+  hasPassword?: boolean;
+}
+
+export interface MailInfo {
+  id: string;
+  user: string;
+  imap: string;
+  smtp: string;
+  port?: number;
+  smtpPort?: number;
+  tlsNoVerify?: boolean;
+  /** true — пароль задан (сам пароль сервер не отдаёт) */
+  hasPassword?: boolean;
+}
+
+export interface MessengerInfo {
+  /** 'telegram' | 'max' */
+  key: string;
+  /** true — токен задан (сам токен сервер не отдаёт) */
+  hasToken?: boolean;
 }
 
 export interface ProjectInfo {
   id: string;
   hosts: ProjectHost[];
+  mails?: MailInfo[];
+  messengers?: MessengerInfo[];
+}
+
+/** Ответ rpc fs.dirs — листинг каталога для встроенного браузера путей */
+export interface DirListing {
+  path: string;
+  /** родитель; null — корень диска, выше некуда */
+  parent: string | null;
+  dirs: { name: string; path: string }[];
+  /** диски (только win32) */
+  drives: string[];
 }
 
 /** Проект дома (папка в projects/) — для переключения */
@@ -76,16 +154,26 @@ export interface OpHint {
   help: string;
 }
 
+/** Известный язык интерфейса: встроенный (ru/en/zh) или свой из lang/ дома */
+export interface LanguageInfo {
+  id: string;
+  /** Название на самом языке (для селектора в ⚙) */
+  name: string;
+  builtIn: boolean;
+}
+
 /** Поле схемы карточки (card-schema.ts ядра) — форма «Изменить» рендерится из него */
 export interface FieldSpec {
   /** Путь значения в карточке: «name», «model.temperature» */
   path: string;
-  type: 'string' | 'text' | 'number' | 'enum' | 'password';
+  type: 'string' | 'text' | 'number' | 'boolean' | 'object' | 'enum' | 'password';
   /** Метка поля — русский ключ, переводится словарём ui.strings */
   label: string;
   /** Варианты для enum */
   values?: string[];
   placeholder?: string;
+  /** Поле обязательно по контракту провайдера (схема модели) */
+  required?: boolean;
 }
 
 export interface CardSchema {
@@ -110,12 +198,13 @@ export interface StateSnapshot {
   /** проекты дома — клик = переключение (rpc project.open) */
   knownProjects?: ProjectRecordInfo[];
   auto: { mode: boolean; left: number };
-  settings: { width: number; language: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string; maxInputRows: number };
+  settings: { width: number; language?: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string; maxInputRows: number; compressThreshold: number };
   completion: { operations: OpHint[] };
   /** схемы карточек: формы «Изменить» (агент/модель/разговор/проект) рендерятся из них */
   schemas?: Record<string, CardSchema>;
-  /** язык интерфейса и словарь переводов (русский ключ → перевод) */
-  ui?: { id: string; strings: Record<string, string> };
+  /** язык интерфейса, словарь переводов (русский ключ → перевод) и список
+   *  известных языков — системные (ru/en/zh) и свои из lang/ дома (селектор в ⚙) */
+  ui?: { id: string; strings: Record<string, string>; languages?: LanguageInfo[] };
   /** кэш последнего события schedule (в снапшот state не входит) */
   scheduleTasks?: ScheduleTaskInfo[];
   /** память команды: общая и «из других разговоров» по участникам */
@@ -155,7 +244,7 @@ export type WsEvent =
 export type WsMessage =
   | { type: 'hello' }
   | { type: 'auth'; token: string }
-  | { type: 'user_message'; text: string }
+  | { type: 'user_message'; text: string; attachments?: string[] }
   | { type: 'command'; text: string }
   | { type: 'abort' }
   | { type: 'confirm_response'; id: string; approved: boolean }

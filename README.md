@@ -175,6 +175,7 @@ exist in its protocol.
 |---|---|
 | `openai-compatible` | Z.ai (GLM), OpenAI, OpenRouter, DeepSeek, Ollama, LM Studio… |
 | `anthropic-compatible` | Claude |
+| `zai-coding-plan` | Z.AI GLM Coding Plan (Anthropic-style endpoint, plan quotas built in) |
 | `gigachat` | Sber GigaChat (with the full OAuth token cycle inside) |
 | `mock` | working without keys |
 
@@ -187,8 +188,24 @@ be overridden per-agent:
 
 ```json
 { "provider": "openai-compatible", "baseUrl": "https://api.z.ai/api/paas/v4",
-  "model": "glm-4.6", "apiKey": "…", "maxTokens": 4096, "thinking": "disabled" }
+  "model": "glm-4.6", "apiKey": "…", "maxTokens": 4096, "contextWindow": 128000,
+  "thinking": "disabled" }
 ```
+
+`contextWindow` — the model's context window in tokens (optional). It feeds the
+context indicator in both shells (`[███░░░░░░░] 27% · 34k / 128k`), the
+"Context: …" line of `/usage`, the "window 128k" suffix in `/models` and the
+auto-compression trigger (see `compressThreshold` in the settings). Without it
+the indicator stays hidden and compression falls back to the message counter.
+
+If the adapter knows the plan limits, both status bars show them next to the
+context indicator: `Q 5h 97% · week 81% · mcp 100%` — the remainder of each
+window, red when one of them runs low. `quota()` is optional in the provider
+contract: a provider without limits simply shows nothing. Today the limits
+come with `zai-coding-plan` — the 5-hour and weekly windows of the Z.AI GLM
+Coding Plan plus the MCP-calls window, read from a monitor endpoint that
+Z.AI does not document; the adapter treats every unexpected answer as «no
+data» and refreshes at most once a minute.
 
 Agents reference models with a **`ModelRef`** — an object with `id` plus
 generation-param overrides (temperature, maxTokens, thinking, reasoning).
@@ -316,7 +333,7 @@ There are no aliases or short forms: one name — one operation.
 | `settings.import <file.zip>` | `/settings import dt-settings-….zip` | replace settings/profile/manager/models (projects untouched); asks for confirmation |
 | `agents.list` | `/agents` | the team roster: ids, roles, tools, who is in the chat |
 | `agent.new <id> [field=value…]` | `/agent new yurist name=Yurist role=law` | a new member (the name defaults to the id) |
-| `agent.update <id> field=value…` | `/agent update yurist role=sourcream model.temperature=0.4` | edit: name= role= emoji= color= description= prompt= temperature= and the nested model.id= model.temperature= |
+| `agent.update <id> field=value…` | `/agent update yurist role=sourcream model.temperature=0.4 vision=glm` | edit: name= role= emoji= color= description= prompt= temperature= workspace= and the nested model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=, plus vision= image= (a model id from `models/`; empty — remove the reference) |
 | `agent.delete <id…>` | `/agent delete yurist, keks` | delete members: a comma- or space-separated list |
 | `agent.tools <id>` | `/agent tools yurist` | which tools are enabled and with what settings |
 | `agent.tool add <id> <tool…>` | `/agent tool add yurist files shell` | enable tools (several at once): built-ins (the full list — `/tools`) or a custom one from tools/ |
@@ -326,9 +343,10 @@ There are no aliases or short forms: one name — one operation.
 | `tool.new <id>` | `/tool new calc` | a new own tool: a tools/calc.ts template (answers hello world) and a card with description; edit the code by hand |
 | `tool.update <tool> field=value…` | `/tool update calc description=does the math` | the house card tools/<tool>.json: field=value… |
 | `tool.delete <tool…\|all>` | `/tool delete calc, temp` | delete an own tool: the file and the card; the tool is disabled for the agents that had it; built-ins can't be deleted |
-| `models.list` | `/models` | the models and their status |
+| `models.list` | `/models` | the models and their status; with `contextWindow` — a "window 128k" suffix |
 | `model.new <id> field=value…` | `/model new glm provider=openai-compatible model=glm-4.6 baseUrl=… apiKey=…` | a new card (provider is required) |
 | `model.update <id> field=value…` | `/model update glm model=glm-4.6` | edit a card: provider, model, baseUrl, apiKey, maxTokens, temperature… |
+| `model.get <id>` | `/model get glm` | the full card JSON — every field of the provider's contract (what the web form edits) |
 | `model.delete <id…>` | `/model delete glm spare` | delete models (several at once); the main one can't be deleted — `/settings update model.id=other` first |
 | `profile.show` | `/profile` | how the team sees you (user.json) |
 | `profile.update field=value…` | `/profile update name=Alexey role=founder about=brief` | fields: name, role, about |
@@ -357,7 +375,7 @@ There are no aliases or short forms: one name — one operation.
 | `schedule.add <task> [minutes]` | `/schedule add "standup" 60` | a new task; the default interval is 10 minutes |
 | `schedule.toggle <id…>` / `schedule.delete <id…>` | `/schedule toggle task-… task-…` | pause and delete tasks: several at once |
 | `auto.on [N]` / `auto.off` | `/auto on 5`, `/auto off` | autonomous mode: the agents decide on their own for up to N turns |
-| `usage.show [model id]` | `/usage`, `/usage glm` | token spend: input/output/cache cumulative; with an id — only that model |
+| `usage.show [model id]` | `/usage`, `/usage glm` | token spend: input/output/cache cumulative; with an id — only that model; the tail is the context line ("Context: 34 112 of 128 000 (27%)") when the window is known |
 | `settings.show` | `/settings` | the current settings |
 | `settings.update field=value…` | `/settings update maxTurns=2 model.id=glm` | settings (take effect from the next round); nested: model.id, serviceModel.id, model.temperature |
 | `manager.show` | `/manager` | the war-room manager: model, temperature, name |
@@ -457,15 +475,46 @@ in the browser.
 - on the left — conversations (click to switch, "＋" for a new one), the team
   roster (click a member to summon/send them out of the chat), the models
   (click to make one the default for the agents) and the projects (click to switch
-  project, "＋" by the section — a form with a path field);
+  project, "＋" by the section — a form with a path field); the current project
+  answers a right-click with "Project settings…": the name, the working folder
+  (picked in a built-in folder browser) and the registries of servers, mailboxes
+  and bots — add, edit and delete; secrets never reach the browser, only a
+  "is set" mark;
 - there is no double click in the web UI: right-clicking an entry opens an
   "Edit" and "Delete" menu ("Rename" for a conversation); deletion always goes
   through a "Delete this entry for sure?" confirmation — "Yes"/"No";
+- card forms are built from the provider contracts: a model's "Edit" shows
+  every field its provider supports (ten for openai-compatible, nine for
+  anthropic-compatible, ten for zai-coding-plan, thirteen for GigaChat, five
+  for mock) with real input
+  types — a checkbox for booleans (`vision`), a JSON textarea for objects
+  (`extra`), selects for `thinking`/`reasoning`, password inputs for keys
+  (the stored key is not shown; leave the field empty to keep it). The agent
+  form edits `model.thinking`, `model.reasoning`, `vision` and `image` (model
+  ids from `models/`); a sighted model is marked with ◉ in the sidebar;
+- the ⚙ in the top bar opens the settings form shared with the terminal
+  (conversation language, autonomous-mode auto-reply, screen width, max
+  input rows, the auto-compress threshold); the same dialog carries the
+  settings-only export/import buttons (a zip with settings, profile,
+  manager and models — projects untouched); the interface language there is
+  a dropdown built from the built-in `ru`/`en`/`zh` and your own languages
+  from `~/.dreamteam/lang/` (marked "own") — picking one switches the
+  interface on the fly;
+- "Usage stats" in the right-click menu of a conversation — that session's
+  token totals (rounds, input/output, prompt-cache hit) with a per-model
+  breakdown — and of a model, summed across all sessions of the home; these
+  are the same figures `/usage` prints in the terminal, and mock rounds don't
+  count;
 - in the center — the same chat: answer streaming, manager lines (including chat
-  events — joined/left), tool results, `@session` digest attachments;
+  events — joined/left), tool results, `@session` digest attachments; messages
+  render Markdown (bold, headings, lists, tables, code — raw HTML is shown
+  literally), a `[file.ext]` label stays a file link;
 - a tool's "allow?" question is shown as ✓/✗ buttons; with no answer for 5 minutes
   it counts as a refusal — a round never hangs forever;
 - "⏹ Abort" stops the round, like Esc in the terminal.
+- a thin status line under the input mirrors the terminal's context indicator —
+  `[███░░░░░░░] 27% · 34k / 128k` in green/yellow/red against the
+  `compressThreshold`; the tooltip holds the exact numbers with separators.
 - the input field grows as you type up to `maxInputRows` lines (the setting is
   shared with the terminal), scrolling inside beyond that.
 
@@ -514,6 +563,7 @@ screen and the agents' tool limits.
   "language": "english",
   "margin": 2,
   "screen": true,
+  "compressThreshold": 85,
   "runTimeoutMs": 180000,
   "maxOutputChars": 4000,
   "maxInputRows": 8
@@ -532,10 +582,14 @@ screen and the agents' tool limits.
 - `maxTurns` — the maximum number of answerers per round (3 by default;
   0 — no limit, the moderator decides who and how many). Goes into the moderator's
   prompt: "pick from 1 to N".
-- `language` — the language the team converses in (default: Russian). It goes into
-  the system prompts verbatim — "answer strictly in the language: …" — so any
-  wording works: `russian`, `ru-RU`, `english`, `中文`. The language is re-read in
-  every round: edits are picked up without a restart.
+- `language` — the language the team converses in. It goes into the system
+  prompts verbatim — "answer strictly in the language: …" — so any wording
+  works: `russian`, `ru-RU`, `english`, `中文`. When the field is absent, the
+  team speaks the interface language: `ru` → «русский», `en` → english,
+  `zh` → 中文, and a custom language contributes its own name ("Deutsch") —
+  the fallback lives in the core, the same in the terminal and in the browser;
+  an explicit value still wins. The language is re-read in every round: edits
+  are picked up without a restart.
 - `width` — the logical screen width, an integer from 40 to 500. All output (agent
   answers, the banner, the help) wraps at this width rather than the full terminal
   width: text doesn't stretch across wide windows. If the terminal is narrower,
@@ -554,6 +608,12 @@ screen and the agents' tool limits.
 - `maxInputRows` — how many input lines are visible at once, an integer from 1 to
   20 (8 by default). Shared by the TUI (the visible input window sticks to the
   cursor) and the web shell (the textarea grows up to this limit).
+- `compressThreshold` — the auto-compression trigger as a percent of the
+  model's context window fill, an integer from 10 to 99 (85 by default). When
+  the last round's tokens (prompt + answer) cross the line against the smallest
+  `contextWindow` among the conversation's models, old messages are rolled up
+  into a digest before the next round even if the usual message counter hasn't
+  fired. Without `contextWindow` in the cards the counter works as before.
 
 **How the full screen works** (the terminal's alternative buffer — after quitting,
 your terminal looks like it did before the launch):
@@ -571,9 +631,16 @@ your terminal looks like it did before the launch):
 ├──────────────────────────────┤
 │  [session title]             │  ← status bar: the current session («[no project]»)
 │  @name — to a member · Esc…  │  ← keys; with / and @ — the list and the popup
+│  [███░░░░░░░] 27% · 34k/128k │  ← context fill (hidden until the first round)
 │  status/spinner              │  ← "Yana is typing…", y/n, the history counter
 └──────────────────────────────┘
 ```
+
+The third status-bar line is the **context indicator**: a 10-cell bar, the
+percent and the exact numbers ("34k / 128k") against the model's
+`contextWindow`. Green up to 15 points below the threshold, yellow closer,
+red from `compressThreshold` and above. After the first round the bar is
+refreshed in place — the spinner line below never blinks.
 
 On launch a short banner is printed: a frame with the name, a
 "version · home · project" line, the mode (`TUI`; `Server` for `dreamteam serve`)
@@ -627,11 +694,12 @@ history, the selection is dropped (the lines stay in place, but as regular histo
 now). When you are scrolled up through the history, the live stream is not shown —
 it finishes "off screen" and appears when the view returns to the fresh messages.
 
-**The status bar** (3 lines below the input): the current session title
+**The status bar** (4 lines below the input): the current session title
 (truncated to 24 characters; "no project" when there is none), the keys line —
 `@name or !name — to a member · Esc — abort the round · /exit — quit · /help — commands`
 (while typing `/` it becomes the command list, with `@` — the mentions popup,
-which can grow over the status bar), and the bottom line is the status: the
+which can grow over the status bar), the context-fill line, and the bottom line
+is the status: the
 "Yana is typing…" spinner, an agent's action confirmation question (`y/n`), and,
 when the history is scrolled up, the "↑ history: N more pages above" counter.
 
@@ -1152,9 +1220,14 @@ redraw" scenario can be checked on any machine.
 - **Context compaction.** When a conversation gets long (more than ~24 messages),
   the old messages are automatically rolled up by an LLM into a short digest
   (`session.summary`), and only the digest + the last 16 messages go into the
-  context. The full history is never deleted anywhere — it stays in the JSON and
+  context. The same roll-up fires early — before the counter — when the context
+  fill (the last round's tokens against the smallest `contextWindow` among the
+  conversation's models) reaches `compressThreshold` (85% by default). The full
+  history is never deleted anywhere — it stays in the JSON and
   the transcript. A note appears in the chat that "old messages were rolled up
   into a digest", and the agents keep remembering the gist of the discussion.
+  The fill itself is shown by the context indicator in the status bars of both
+  shells.
 
 In messages: `@marina` / `@viktor` — address specific members (works by name and
 by id, case doesn't matter; `!` is a synonym of `@`).
@@ -1268,6 +1341,7 @@ Through it — and only through it — the app changes the configuration:
 | "add the server …" | the project's servers (the "hosts" field of project.json): a new server in the current project |
 | "add a mailbox …", "remove the mailbox …" | the mailboxes (the "mails" field of project.json; like `/project mail add` and `/project mail delete`) |
 | "add a telegram bot …", "remove the bot …" | a bot token (the "messengers" field of project.json; like `/project messenger add` and `/project messenger delete`) |
+| "make the model see images", "set vision=true on …", "add a model …" | the model cards in `models/`: add, edit (`vision`, `maxTokens`, `temperature`…) or delete — like `/model new`, `/model update`, `/model delete`; the main, service and manager cards are protected from deletion |
 
 Edits of `agents/` and of the current project's project.json (the `"hosts"`,
 `"mails"`, `"messengers"` fields) are safe: the file is rewritten through a
@@ -1501,6 +1575,7 @@ dreamteam/
 │       ├── utils.ts          #   the SSE parser, message normalization
 │       ├── openai-compatible.ts
 │       ├── anthropic.ts
+│       ├── zai-coding-plan.ts  #   GLM Coding Plan: anthropic transport + plan quotas
 │       ├── gigachat.ts       #   OAuth tokens + the Sber TLS certificates
 │       ├── openai-images.ts  #   image adapter: OpenAI images API / docker facade
 │       ├── mock-images.ts    #   test image adapter (real PNGs, no models)

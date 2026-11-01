@@ -97,6 +97,7 @@ You > alright Gleb, look at the structure and propose a refactoring plan
 |---|---|
 | `openai-compatible` | Z.ai (GLM)、OpenAI、OpenRouter、DeepSeek、Ollama、LM Studio… |
 | `anthropic-compatible` | Claude |
+| `zai-coding-plan` | Z.AI GLM Coding Plan（Anthropic 风格端点，内置套餐配额） |
 | `gigachat` | Sber GigaChat（内置完整 OAuth 令牌周期） |
 | `mock` | 无密钥工作 |
 
@@ -107,8 +108,13 @@ You > alright Gleb, look at the structure and propose a refactoring plan
 
 ```json
 { "provider": "openai-compatible", "baseUrl": "https://api.z.ai/api/paas/v4",
-  "model": "glm-4.6", "apiKey": "…", "maxTokens": 4096, "thinking": "disabled" }
+  "model": "glm-4.6", "apiKey": "…", "maxTokens": 4096, "contextWindow": 128000,
+  "thinking": "disabled" }
 ```
+
+`contextWindow` — 模型的上下文窗口大小（token 数，可选）。它供两个外壳的上下文指示器（`[███░░░░░░░] 27% · 34k / 128k`）、`/usage` 的「上下文：…」行、`/models` 的「窗口 128k」后缀以及自动压缩阈值（见设置中的 `compressThreshold`）使用。没有它时指示器隐藏，压缩退回消息计数逻辑。
+
+如果适配器能获取套餐配额，两个外壳的状态栏会在上下文指示器旁显示：`Q 5小时 97% · 周 81% · mcp 100%` —— 各窗口的剩余量，某个窗口快用完时变红。`quota()` 在提供方契约中是可选的：没有配额的提供方什么都不显示。目前 `zai-coding-plan` 自带配额 —— GLM Coding Plan 的 5 小时与每周窗口以及 MCP 调用窗口，取自 Z.ai 未写入文档的监控端点；适配器把任何意外响应都当作「无数据」，刷新频率不超过每分钟一次。
 
 智能体通过 **`ModelRef`** 引用模型 — 带 `id` 和生成参数覆盖的对象（temperature、maxTokens、thinking、reasoning）。连接字段（`baseUrl`、`apiKey`）不可覆盖 — 请创建另一张模型卡片：
 
@@ -207,7 +213,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `settings.import <file>` | `/settings import dt-settings-….zip` | 替换设置/资料/经理/模型（项目不动）；需确认 |
 | `agents.list` | `/agents` | 团队名单：id、角色、工具、谁在聊天 |
 | `agent.new <id> [field=value…]` | `/agent new lawyer name=律师 role=法律` | 新成员（默认名字 = id） |
-| `agent.update <id> field=value…` | `/agent update lawyer role=法律 model.temperature=0.4` | 编辑：name= role= emoji= color= description= prompt= temperature= 及嵌套的 model.id= model.temperature= |
+| `agent.update <id> field=value…` | `/agent update lawyer role=法律 model.temperature=0.4 vision=glm` | 编辑：name= role= emoji= color= description= prompt= temperature= workspace= 及嵌套的 model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=，另有 vision= image=（`models/` 中的模型 id；留空 —— 移除引用） |
 | `agent.delete <id…>` | `/agent delete lawyer, keks` | 删除成员：逗号或空格分隔的列表 |
 | `agent.tools <id>` | `/agent tools lawyer` | 启用了哪些工具、什么设置 |
 | `agent.tool add <id> <tool…>` | `/agent tool add lawyer files shell` | 启用工具（可多个）：内置的（完整列表 — `/tools`）或 tools/ 里自定义的 |
@@ -217,9 +223,10 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `tool.new <id>` | `/tool new calc` | 新的自定义工具：tools/calc.ts 模板（回答 hello world）和带 description 的卡片；代码自己改 |
 | `tool.update <tool> field=value…` | `/tool update calc description=会算账` | 家里的卡片 tools/<tool>.json：field=value… |
 | `tool.delete <tool…\|all>` | `/tool delete calc, temp` | 删除自定义工具：文件和卡片；已启用的智能体会被停用该工具；内置的删不掉 |
-| `models.list` | `/models` | 模型及其状态 |
+| `models.list` | `/models` | 模型及其状态；有 `contextWindow` 的模型带「窗口 128k」后缀 |
 | `model.new <id> field=value…` | `/model new glm provider=openai-compatible model=glm-4.6 baseUrl=… apiKey=…` | 新卡片（provider 必填） |
 | `model.update <id> field=value…` | `/model update glm model=glm-4.6` | 编辑卡片：provider、model、baseUrl、apiKey、maxTokens、temperature… |
+| `model.get <id>` | `/model get glm` | 整张卡片 JSON —— 提供方契约的全部字段（网页表单编辑的内容） |
 | `model.delete <id…>` | `/model delete glm spare` | 删除模型（可多个）；默认的删不掉 —— 先 `/settings update model.id=别的` |
 | `profile.show` | `/profile` | 团队如何看你（user.json） |
 | `profile.update field=value…` | `/profile update name=阿辽沙 role=创业者 about=重视简短` | 字段：name、role、about |
@@ -248,7 +255,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `schedule.add <task> [minutes]` | `/schedule add "晨会" 60` | 新任务；间隔默认 10 分钟 |
 | `schedule.toggle <id…>` / `schedule.delete <id…>` | `/schedule toggle task-… task-…` | 暂停/恢复与删除任务：可多个 |
 | `auto.on [N]` / `auto.off` | `/auto on 5`、`/auto off` | 自主模式：智能体自行决定，最多 N 步 |
-| `usage.show [模型 id]` | `/usage`、`/usage glm` | token 用量：输入/输出/缓存累计；带 id —— 仅该模型 |
+| `usage.show [模型 id]` | `/usage`、`/usage glm` | token 用量：输入/输出/缓存累计；带 id —— 仅该模型；结尾是上下文行（「上下文：34 112 / 128 000（27%）」），窗口已知时显示 |
 | `settings.show` | `/settings` | 当前设置 |
 | `settings.update field=value…` | `/settings update maxTurns=2 model.id=glm` | 设置（自下一轮生效）；嵌套：model.id、serviceModel.id、model.temperature |
 | `manager.show` | `/manager` | 会议室经理：模型、温度、名字 |
@@ -286,11 +293,15 @@ dreamteam serve .       # 直接带着当前文件夹的项目
 
 本地服务器启动：`http://127.0.0.1:8080` 提供 `gui-dist/` 的网页外壳（由 `gui-src/` 构建的 Vue 应用，`npm run build:gui` 构建）并通过 WebSocket 与之通信。默认只监听 127.0.0.1 —— 机器外部看不到服务器。端口和地址由 `PORT` 和 `HOST` 变量设置 —— 可以放进 `~/.dreamteam/.env`：全局重装和切换项目后设置仍在。**注意：** `HOST=0.0.0.0` 会把服务器暴露到网络 —— API 没有鉴权，只在自己的网络里这样做。谈话、团队和配置与终端共享 `--open` 标志让 serve 自己打开浏览器；首次启动时向导会提议在桌面创建「Dream Team」快捷方式 — 它运行的就是这条命令（Windows、Linux、macOS 上行为一致）。：可以在 TUI 工作，再到浏览器继续。
 
-- 左侧 —— 谈话（点击切换，“＋”新建）、团队名单（点击成员召唤/请出聊天）、模型（点击设为智能体的默认）和项目（点击切换项目，区块旁的“＋”—— 带路径字段的表单）；
+- 左侧 —— 谈话（点击切换，“＋”新建）、团队名单（点击成员召唤/请出聊天）、模型（点击设为智能体的默认）和项目（点击切换项目，区块旁的“＋”—— 带路径字段的表单）；当前项目右键打开「项目设置…」：名称、工作文件夹（在内置文件夹浏览器中选择）以及服务器、邮箱和机器人登记表 —— 添加、修改和删除；密钥不会发送到浏览器，只显示“已设置”标记；
 - 网页界面没有双击：右键条目打开“编辑”和“删除”菜单（谈话多一项“重命名”）；删除总要经过“确定删除这条记录？”确认 —— “是”/“否”；
-- 中间 —— 同样的聊天：回答流式输出、经理行（包括聊天事件 —— 加入/离开）、工具结果、`@session` 摘要附件；
+- 卡片表单按提供方契约生成：模型的“编辑”显示其提供方支持的全部字段（openai-compatible 十个、anthropic-compatible 九个、zai-coding-plan 十个、GigaChat 十三个、mock 五个），且带真实的输入类型 —— 布尔用复选框（`vision`）、对象用 JSON 文本域（`extra`）、`thinking`/`reasoning` 用下拉框、密钥用密码框（已保存的密钥不回显；留空 —— 不修改）。智能体表单编辑 `model.thinking`、`model.reasoning`、`vision` 和 `image`（`models/` 中的模型 id）；有视觉的模型在侧栏标记 ◉；
+- 顶栏的 ⚙ 打开与终端共用的设置表单（对话语言、离线自动回复、屏幕宽度、输入区最大行数、自动压缩阈值）；同一对话框里还有「导出设置 / 导入设置」按钮（zip 含设置、资料、经理和模型 —— 项目不动）；其中的「界面语言」是下拉框，选项为内置的 `ru`/`en`/`zh` 以及 `~/.dreamteam/lang/` 里的自定义语言（标「(自定义)」）—— 选择后界面即时切换；
+- 右键菜单中的「统计」：谈话（本次谈话的 token 合计 —— 轮数、输入/输出、提示词缓存命中 —— 并按模型细分）和模型（家中所有谈话的同样合计）；数字与终端里的 `/usage` 相同，mock 轮次不计入；
+- 中间 —— 同样的聊天：回答流式输出、经理行（包括聊天事件 —— 加入/离开）、工具结果、`@session` 摘要附件；消息按 Markdown 渲染（粗体、标题、列表、表格、代码 —— 原始 HTML 按文字显示），`[文件.ext]` 标记仍是文件链接；
 - 工具的“是否允许？”问题显示为 ✓/✗ 按钮；5 分钟无回答按拒绝计 —— 一轮永远不会永久卡住；
 - “⏹ 中止”停止本轮，如同终端里的 Esc。
+- 输入框下方一条细状态行，对应终端的上下文指示器 —— `[███░░░░░░░] 27% · 34k / 128k`，按 `compressThreshold` 显示绿/黄/红；悬停提示里是带分隔符的精确数字。
 - 输入区随输入增长到 `maxInputRows` 行（与终端共用该设置），超出后在框内滚动。
 
 **外部访问。** 如果服务器暴露在外（`HOST` 不是 127.0.0.1），保护是令牌：`~/.dreamteam/.env` 里的 `TOKEN` 变量。向导在新机器首次启动时会创建它；家目录迁到别的机器后 `.env` 不会跟过去 —— 按样例（`scaffold/home/env.example`）创建文件并手动生成令牌：
@@ -316,6 +327,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
   "language": "english",
   "margin": 2,
   "screen": true,
+  "compressThreshold": 85,
   "runTimeoutMs": 180000,
   "maxOutputChars": 4000,
   "maxInputRows": 8
@@ -324,13 +336,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 - `ui` — 界面语言：内置 `ru`、`en`、`zh`，或 `~/.dreamteam/lang/<id>.json` 里自定义语言的 id（文件格式 `{ "name": "Deutsch", "translations": { … } }`；id 即不含 `.json` 的文件名，`_` 开头的文件被忽略）。在首次启动向导中选择，用 `/settings update ui=en` 更改。界面和三份 README（`README.md`、`README.ru.md`、`README.zh.md`）提供英语、俄语和中文。刻意不翻译：智能体与经理的系统提示词（回答语言由 `language` 决定）、命令参数名（语法的一部分）、配置诊断（fail-fast 层）。
 - `maxTurns` — 每轮最多回答人数（默认 3；0 — 不限，由主持人决定谁答、答几人）。会进入主持人的提示词：“从 1 到 N 中挑选”。
-- `language` — 团队交谈使用的语言（默认：俄语）。它会原样进入系统提示词 —— “严格用以下语言回答：……” —— 所以任何写法都行：`russian`、`ru-RU`、`english`、`中文`。每轮都会重读该语言：改动无需重启即生效。
+- `language` — 团队交谈使用的语言。它会原样进入系统提示词 —— “严格用以下语言回答：……” —— 所以任何写法都行：`russian`、`ru-RU`、`english`、`中文`。字段缺失时，团队说界面语言：`ru` → «русский»、`en` → english、`zh` → 中文，自定义语言用自己的文件名（“Deutsch”）—— 回退逻辑在内核里，终端与浏览器行为一致；显式设置始终优先。每轮都会重读该语言：改动无需重启即生效。
 - `width` — 逻辑屏幕宽度，40 到 500 的整数。所有输出（智能体回答、横幅、帮助）都按这个宽度折行，而不是整个终端宽度：文本不会在宽窗口里拉满。终端更窄时，宽度会被压到终端宽度。
 - `margin` — 屏幕边缘留白，0 到 10 的整数（默认 2）：内容左右缩进书写，聊天面板从顶部缩进之下开始，提示行贴着底边，聊天面板与输入区之间、输入区与提示行之间各隔两个空行。
 - `screen` — 全屏模式（默认 `true`）。`false` 恢复旧的“线性”readline 界面 —— 比如用于管道和特殊终端（非 TTY 启动本来就会自动切过去）。
 - `runTimeoutMs` — 命令超时（`run` 和 `ssh` 块，默认 180000 = 3 分钟）；挂起的进程连同子进程一起被中断。
 - `maxOutputChars` — 命令输出裁剪到的字符数（默认 4000）。
 - `maxInputRows` — 输入区同时可见的行数，1 到 20 的整数（默认 8）。终端 TUI（可见输入窗口贴着光标）和网页外壳（textarea 长到该上限为止）共用。
+- `compressThreshold` — 自动压缩触发阈值，按模型上下文窗口填充百分比计，10 到 99 的整数（默认 85）。当最后一轮的 token 数（提示词 + 回答）对上谈话所有模型中最小的 `contextWindow` 越过这条线时，旧消息会在下一轮之前卷成摘要 —— 即使通常的消息计数还没触发。卡片里没有 `contextWindow` 时，计数逻辑照旧。
 
 **全屏的工作方式**（终端的备用缓冲 —— 退出后终端恢复启动前的样子）：
 
@@ -347,9 +360,12 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ├──────────────────────────────┤
 │  [谈话标题]                  │  ← 状态栏：当前谈话（无谈话时「[未选项目]」）
 │  @名字 — 向成员 · Esc · …    │  ← 按键；输入 / 和 @ 时变成列表和面板
+│  [███░░░░░░░] 27% · 34k/128k │  ← 上下文填充（首轮之前隐藏）
 │  状态/转轮                   │  ← “Yana 正在输入…”、y/n、历史计数
 └──────────────────────────────┘
 ```
+
+状态栏第三行是**上下文指示器**：10 格进度条、百分比和精确数字（「34k / 128k」，对上模型的 `contextWindow`）。离阈值 15 个百分点以内为黄色，达到 `compressThreshold` 起为红色。首轮之后该行原地刷新 —— 下面的转轮行不闪动。
 
 启动时打印简短横幅：名称边框、「版本 · 主目录 · 项目」行、模式（`TUI`；`dreamteam serve` 下为 `Server`）与网页外壳地址（`dreamteam serve → http://127.0.0.1:8080`），以及尾行 `/project — 项目 · /session — 谈话`。团队名单看 `/agents`，模型看 `/models`。智能体的发言把标题打在单独一行，正文从下一行开始；发言之间隔一个空行。
 
@@ -363,7 +379,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 **正在流式输出的回答**不会被裁成一行：智能体未完成的流会折行并占据面板底部几行（从一行到整个面板高度 —— 取更短者），紧贴输入区。流式期间对那些“活”行同样可以选择 —— 鼠标和空输入下的 Shift+方向键都行；回答结束进入历史后选择即被丢弃（行还在原地，只是成了普通历史）。向上翻历史时看不到实时流 —— 它在“屏外”结束，视图回到最新消息时再出现。
 
-**状态栏**（输入区下方 3 行）：当前谈话标题（截断到 24 个字符；无谈话时「未选项目」）、按键行 —— `@名字 或 !名字 — 向成员 · Esc — 中止本轮 · /exit — 退出 · /help — 命令`（输入 `/` 时变成命令列表，输入 `@` 时变成提及面板，面板可以继续长高、盖过状态栏），最底一行是状态：“Yana 正在输入…”转轮、智能体动作的确认问题（`y/n`），以及历史翻起时的“↑ 历史：上面还有 N 页”计数。
+**状态栏**（输入区下方 4 行）：当前谈话标题（截断到 24 个字符；无谈话时「未选项目」）、按键行 —— `@名字 或 !名字 — 向成员 · Esc — 中止本轮 · /exit — 退出 · /help — 命令`（输入 `/` 时变成命令列表，输入 `@` 时变成提及面板，面板可以继续长高、盖过状态栏）、上下文填充行，最底一行是状态：“Yana 正在输入…”转轮、智能体动作的确认问题（`y/n`），以及历史翻起时的“↑ 历史：上面还有 N 页”计数。
 
 **输入编辑键：** ↑/↓ — 输入行间移动，到边上 — 消息历史（草稿保留），Ctrl+U — 清行，Ctrl+W 或 Alt+Backspace — 清词，←/→/Home/End — 光标，Ctrl+←/→ — 按词，Delete — 删除光标后字符，空行上 Ctrl+D — 退出。剪贴板粘贴保留换行（多行粘贴不会分片发出）。光标不会把表情或其他复合字符切半。
 
@@ -608,7 +624,7 @@ mock 模式下整个循环无需模型即可工作：`mock` 按模板描述图�
   - `~/.dreamteam/projects/<id>/transcripts/<id>.md` — 人类可读的日志（任意编辑器可开），随谈话更新；
   - `~/.dreamteam/projects/<id>/sessions/<id>.json` — 机器可读的状态（`/session history` 用它）。
 - **`/session history [from] [to]`** 在终端打印当前谈话的历史切片，带成员颜色。
-- **上下文压缩。** 谈话变长时（超过约 24 条消息），旧消息由 LLM 自动卷成简短摘要（`session.summary`），上下文只进摘要 + 最后 16 条消息。完整历史在任何地方都不会被删除 — 它留在 JSON 和 transcript 里。聊天里会出现“旧消息已卷成摘要”的提示，智能体继续记得讨论的要点。
+- **上下文压缩。** 谈话变长时（超过约 24 条消息），旧消息由 LLM 自动卷成简短摘要（`session.summary`），上下文只进摘要 + 最后 16 条消息。同样的卷叠会更早触发 —— 在计数之前：当上下文填充（最后一轮 token 数对上谈话所有模型中最小的 `contextWindow`）到达 `compressThreshold`（默认 85%）。完整历史在任何地方都不会被删除 — 它留在 JSON 和 transcript 里。聊天里会出现“旧消息已卷成摘要”的提示，智能体继续记得讨论的要点。填充量本身由两个外壳状态栏里的上下文指示器显示。
 
 消息里：`@marina` / `@viktor` — 点名特定成员（按名字和 id 都行，大小写无关；`!` 是 `@` 的同义词）。
 
@@ -690,6 +706,7 @@ You > @manager add the router server — admin@192.168.1.1
 | “添加服务器 …” | 项目服务器（project.json 的 "hosts" 字段）：在当前项目添加新服务器 |
 | “添加邮箱 …”、“移除邮箱 …” | 邮箱（project.json 的 "mails" 字段；同 `/project mail add` 和 `/project mail delete`） |
 | “添加 telegram 机器人 …”、“移除机器人 …” | 机器人令牌（project.json 的 "messengers" 字段；同 `/project messenger add` 和 `/project messenger delete`） |
+| “让模型看得见图片”、“给 … 设 vision=true”、“添加模型 …” | `models/` 里的模型卡片：新建、编辑（`vision`、`maxTokens`、`temperature`…）或删除 —— 同 `/model new`、`/model update`、`/model delete`；主模型、服务模型和经理模型不可删除 |
 
 对 `agents/` 和当前项目 project.json（"hosts"、"mails"、"messengers" 字段）的编辑是安全的：文件经临时文件带有效性校验地重写 — 失败的编辑不会毁掉配置，未知字段被保留。如果你手动弄坏了 `agents/`（JSON 损坏、缺 `name` 或 `prompt` 的智能体），团队不会无声消失：错误在一轮中可见，也出现在网页外壳团队面板的红行里。文件缺失不是错误 — 就是从与经理一对一的空状态开始。
 
@@ -835,6 +852,7 @@ dreamteam/
 │       ├── utils.ts          #   SSE 解析器、消息规范化
 │       ├── openai-compatible.ts
 │       ├── anthropic.ts
+│       ├── zai-coding-plan.ts  #   GLM Coding Plan：anthropic 传输 + 套餐配额
 │       ├── gigachat.ts       #   OAuth 令牌 + Sber TLS 证书
 │       ├── openai-images.ts  #   图像适配器：OpenAI images API / docker 门面
 │       ├── mock-images.ts    #   测试图像适配器（真实 PNG，无需模型）

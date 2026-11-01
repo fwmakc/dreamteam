@@ -98,8 +98,11 @@ const operationsSrc = read('src/core/operations.ts');
 const manifestOps = new Set([...operationsSrc.matchAll(/\n    name: '([a-z.]+)'/g)].map((m) => m[1]));
 check('манифест: имена — группа.глагол (или глобальный глагол) без подчёркиваний',
   [...manifestOps].every((m) => /^[a-z]+(\.[a-z]+){0,2}$/.test(m)));
-const rpcWithoutManifest = [...rpcCases].filter((m) => m !== 'state' && !manifestOps.has(m));
-check('сервер: rpc не бывает вне манифеста (кроме state)', rpcWithoutManifest.length === 0,
+// сервисные rpc вне манифеста: state (снапшот для оболочки) и fs.dirs
+// (браузер путей для форм GUI) — только чтение, командой их звать не нужно
+const SERVICE_RPC = new Set(['state', 'fs.dirs']);
+const rpcWithoutManifest = [...rpcCases].filter((m) => !SERVICE_RPC.has(m) && !manifestOps.has(m));
+check('сервер: rpc не бывает вне манифеста (кроме сервисных state и fs.dirs)', rpcWithoutManifest.length === 0,
   `вне манифеста: ${rpcWithoutManifest.join(', ')}`);
 // мутации обязаны быть доступны rpc-методом (скриптовый API); просмотры и
 // транспорт (export/import) имеют право жить только командой или WS-сообщением

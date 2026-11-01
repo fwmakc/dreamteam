@@ -129,6 +129,19 @@ check('без ошибок провайдера', errors.length === 0, errors.jo
   await compressIfNeeded(long, mp, undefined, 'Хозяин');
   check('окно: длинный сжат — граница после KEEP_RECENT', long.compressedUpTo === 14, `compressedUpTo=${long.compressedUpTo}`);
   check('окно: контекст длинного — KEEP_RECENT последних', contextSlice(long).length === 16);
+
+  // порог заполнения (opts): триггер по токенам обходит счётчик сообщений,
+  // KEEP_RECENT и «сжимать нечего» действуют и там
+  const tiny = mk(20); // 4 старых: счётчиком (< 8) не сжался бы
+  check('порог: без данных об окне — прежний счётчик, не сжато',
+    (await compressIfNeeded(tiny, mp, undefined, 'Хозяин')) === false);
+  check('порог: 99% заполнения сжимает и 4 старых (обход счётчика)',
+    (await compressIfNeeded(tiny, mp, undefined, 'Хозяин', { tokens: 31600, window: 32000, threshold: 85 })) === true
+    && tiny.compressedUpTo === 4, `compressedUpTo=${tiny.compressedUpTo}`);
+  check('порог: низкое заполнение — счётчик по-прежнему сжимает накопившееся',
+    (await compressIfNeeded(mk(24), mp, undefined, 'Хозяин', { tokens: 3000, window: 32000, threshold: 85 })) === true);
+  check('порог: сжимать нечего (короче KEEP_RECENT) — процент не помогает',
+    (await compressIfNeeded(mk(10), mp, undefined, 'Хозяин', { tokens: 31600, window: 32000, threshold: 85 })) === false);
 }
 
 process.chdir(tmpdir());

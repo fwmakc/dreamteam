@@ -15,6 +15,8 @@ import {
   revokeTool,
   loadManagerConfig,
   loadHostsFile,
+  loadMailsFile,
+  loadMessengersFile,
   addMailAccount,
   addMessengerBot,
   addHostRecord,
@@ -36,14 +38,15 @@ import { openBrowser } from './open.js';
 import { loadSettings } from './settings.js';
 import { AGENTS_DIR, APP_VERSION, DT_HOME, MANAGER_FILE, MODELS_DIR, PROJECT_DIR, PROJECT_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
 import { listProjects } from './core/projects.js';
+import { cachedQuota, fetchQuota } from './core/quota.js';
 import { agentToolIds } from './tools-api.js';
 import { safePath } from './actions.js';
 import { basename } from 'node:path';
 import { Engine, chatTeam, type App } from './core/engine.js';
 import { cliProjectArgs, parseCliProject } from './cli-project.js';
 import { bootstrapApp } from './core/bootstrap.js';
-import { operationHints, runOperationArgs, stamp, profileLabel } from './core/operations.js';
-import { CARD_SCHEMAS } from './card-schema.js';
+import { listDirs, operationHints, runOperationArgs, stamp, profileLabel } from './core/operations.js';
+import { CARD_SCHEMAS, maskModelCard, modelCardSchema } from './card-schema.js';
 import {
   applyHomeImport,
   applyProjectImport,
@@ -59,7 +62,7 @@ import {
 import { loadSchedule, saveSchedule, type ScheduleTask } from './core/schedule.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, ModelRef, Session } from './types.js';
-import { localeId, localeDict, applyLocale, t } from './i18n.js';
+import { localeId, localeDict, applyLocale, knownLanguages, t } from './i18n.js';
 
 /**
  * Локальный API поверх ядра: `dreamteam serve` поднимает HTTP+WS на
@@ -83,7 +86,8 @@ import { localeId, localeDict, applyLocale, t } from './i18n.js';
  *    project.list/new/open/close/delete/update, project.host.add/update/delete,
  *    project.mail.add/update/delete, project.messenger.add/update/delete,
  *    profile.update, settings.show/update, manager.show/update,
- *    schedule.list/add/delete/toggle).
+ *    schedule.list/add/delete/toggle; сервисные вне манифеста: state,
+ *    fs.dirs (подпапки каталога — браузер путей для форм GUI).
  *
  * `command` — текст `/…`: ядро исполняет те же команды, что и терминал
  * (перехват в handleMessage), отчёты уходят notice-событиями. GUI посылает
@@ -103,7 +107,7 @@ export const CONFIRM_TIMEOUT_MS = 5 * 60_000;
 function publicSession(session: Session): {
   id: string;
   title: string;
-  messages: { authorId: string; authorName: string; authorRole?: string; text: string; ts: number }[];
+  messages: { authorId: string; authorName: string; authorRole?: string; text: string; ts: number; attachments?: string[] }[];
 } {
   return {
     id: session.id,
@@ -114,6 +118,7 @@ function publicSession(session: Session): {
       authorRole: m.authorRole,
       text: m.text,
       ts: m.ts,
+      attachments: m.attachments,
     })),
   };
 }
@@ -155,6 +160,10 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       ok: s.ok,
       note: s.note,
       vision: s.vision,
+      contextWindow: typeof s.config?.contextWindow === 'number' ? s.config.contextWindow : undefined,
+      // квота — только у дефолтной модели (индикатор в статус-баре); значение
+      // из синхронного кеша, сеть гасит фоновый таймер в startServe
+      quota: id === app.settings.model?.id ? (cachedQuota(id) ?? undefined) : undefined,
       isDefault: id === app.settings.model?.id,
       isManager: id === app.mgr.model.id,
     })),
@@ -175,8 +184,9 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
     // схемы карточек (агент/модель/разговор/проект) — формы «Изменить» в GUI
     // рендерятся из них, значения полей — rpc agent.get / поля снапшота
     schemas: CARD_SCHEMAS,
-    // язык интерфейса и его словарь: оболочка переводит строки через tr(s)
-    ui: { id: localeId(), strings: localeDict() },
+    // язык интерфейса, его словарь и список известных языков — системные
+    // (ru/en/zh) и свои из lang/ дома: оболочка строит из него селектор в ⚙
+    ui: { id: localeId(), strings: localeDict(), languages: knownLanguages(DT_HOME) },
   };
 }
 
@@ -384,6 +394,26 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     presenter.broadcast({ type: 'state', state: stateSnapshot(app, engine, readProjects()) });
   };
 
+  // ── квоты дефолтной модели: фоновая подкачка (TTL внутри fetchQuota гасит
+  // частоту); обновление уезжает клиентам свежим state-пушем. Первый опрос —
+  // сразу, чтобы клиент, подключившийся после старта, увидел квоту в снапшоте.
+  let lastQuotaJson = '';
+  const kickQuota = (): void => {
+    const id = app.settings.model?.id;
+    const status = id ? app.models.get(id) : undefined;
+    if (!id || !status?.ok || typeof status.provider.quota !== 'function') return;
+    void fetchQuota(status.provider).then((quota) => {
+      const json = quota ? JSON.stringify(cachedQuota(id)) : '';
+      if (json && json !== lastQuotaJson) {
+        lastQuotaJson = json;
+        broadcastState();
+      }
+    });
+  };
+  kickQuota();
+  const quotaTimer = setInterval(kickQuota, 30_000);
+  quotaTimer.unref();
+
   // Открыли проект в пустой разговор — консьерж здоровается сам (как на старте
   // терминала и как по /session new); раунд в общей очереди.
   const welcomeIfEmpty = async (): Promise<void> => {
@@ -393,12 +423,38 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   };
 
   const readProjects = (): unknown[] => {
-    if (!PROJECT_FILE) return []; // нет проекта — панели серверов нет
+    if (!PROJECT_FILE || !PROJECT_DIR) return []; // нет проекта — панели реестров нет
     try {
-      const hosts = loadHostsFile(PROJECT_FILE);
-      // пустой реестр = блока в снимке нет
-      if (Object.keys(hosts).length === 0) return [];
-      return [{ id: PROJECT_DIR ? basename(PROJECT_DIR) : '', hosts }];
+      // секреты в GUI не уходят: пароли и токены — только флагом «задан»
+      const hosts = Object.entries(loadHostsFile(PROJECT_FILE)).map(([name, h]) => {
+        const spec = h as { host?: unknown; user?: unknown; port?: unknown; dir?: unknown; password?: unknown };
+        return {
+          name,
+          host: String(spec.host ?? ''),
+          user: spec.user !== undefined ? String(spec.user) : undefined,
+          port: typeof spec.port === 'number' ? spec.port : undefined,
+          dir: spec.dir !== undefined ? String(spec.dir) : undefined,
+          hasPassword: Boolean(spec.password),
+        };
+      });
+      const mails = Object.entries(loadMailsFile(PROJECT_FILE)).map(([id, raw]) => {
+        const m = raw as { user?: unknown; password?: unknown; imap?: unknown; smtp?: unknown; port?: unknown; smtpPort?: unknown; tlsNoVerify?: unknown };
+        return {
+          id,
+          user: String(m.user ?? ''),
+          imap: String(m.imap ?? ''),
+          smtp: String(m.smtp ?? ''),
+          port: typeof m.port === 'number' ? m.port : undefined,
+          smtpPort: typeof m.smtpPort === 'number' ? m.smtpPort : undefined,
+          tlsNoVerify: m.tlsNoVerify === true,
+          hasPassword: Boolean(m.password),
+        };
+      });
+      const messengers = Object.entries(loadMessengersFile(PROJECT_FILE)).map(([key, raw]) => ({
+        key,
+        hasToken: Boolean((raw as { token?: unknown })?.token),
+      }));
+      return [{ id: basename(PROJECT_DIR), hosts, mails, messengers }];
     } catch {
       return [];
     }
@@ -540,10 +596,19 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       case 'hello':
         ws.send(JSON.stringify({ type: 'state', state: stateSnapshot(app, engine, readProjects()) }));
         return;
-      case 'user_message':
+      case 'user_message': {
+        const text = String(msg.text ?? '').trim();
+        if (!text) return;
+        // прикреплённые файлы: имена уже лежат в inbox (📎/🔗 кладут до сообщения)
+        const files = Array.isArray(msg.attachments)
+          ? msg.attachments.map((n) => String(n).trim()).filter(Boolean).slice(0, 20)
+          : [];
+        await runRound((signal) => engine.handleMessage(text, signal, files));
+        return;
+      }
       case 'command': {
-        // `command` — `/…`-текст от GUI (не рисуется пузырём пользователя);
-        // серверу разницы нет: перехват '/' живёт в ядре
+        // `/…`-текст от GUI (не рисуется пузырём пользователя); перехват '/'
+        // живёт в ядре — серверу разницы нет
         const text = String(msg.text ?? '').trim();
         if (!text) return;
         await runRound((signal) => engine.handleMessage(text, signal));
@@ -701,6 +766,9 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
     switch (method) {
       case 'state':
         return stateSnapshot(app, engine, readProjects());
+      case 'fs.dirs':
+        // браузер путей в GUI (формы проекта): подпапки каталога, только чтение
+        return listDirs(typeof args.path === 'string' && args.path.trim() ? args.path : undefined);
       case 'sessions.list':
         return { sessions: app.store ? app.store.list() : [] };
       case 'session.open': {
@@ -816,6 +884,13 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         if (!agent) throw new Error(`нет агента с id «${id}»`);
         return { card: agent };
       }
+      case 'model.get': {
+        const id = String(args.id ?? '').trim();
+        const slot = app.models.get(id);
+        if (!slot) throw new Error(`модели «${id}» нет — см. /models`);
+        const card = maskModelCard({ ...(slot.config ?? {}) });
+        return { card, schema: modelCardSchema(String(card.provider ?? slot.provider.id)) };
+      }
       case 'agent.tools': {
         const id = String(args.id ?? '').trim().toLowerCase();
         const agent = engine.team().find((a) => a.id === id);
@@ -920,8 +995,10 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         if (!PROJECT_FILE) throw new Error('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>');
         const id = String(args.id ?? args.hostName ?? '').trim();
         if (!id) throw new Error('project.host.add: жду id сервера');
-        const spec: { host: string; user?: string; port?: number } = { host: String(args.host ?? '') };
+        const spec: { host: string; user?: string; password?: string; dir?: string; port?: number } = { host: String(args.host ?? '') };
         if (args.user) spec.user = String(args.user);
+        if (args.password) spec.password = String(args.password);
+        if (args.dir) spec.dir = String(args.dir);
         if (args.port) spec.port = Number(args.port);
         const report = spec.host
           ? addProjectHosts(PROJECT_FILE, { [id]: spec })
@@ -1112,6 +1189,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
     authToken,
     close(): Promise<void> {
       clearInterval(scheduleTimer);
+      clearInterval(quotaTimer);
       return new Promise((resolve) => {
         wss.close();
         httpServer.close(() => resolve());

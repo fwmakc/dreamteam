@@ -115,6 +115,10 @@ export class SessionStore {
           createdAt: s.createdAt,
           updatedAt: s.updatedAt,
           count: s.messages.length,
+          usage: s.usage,
+          usageByModel: s.usageByModel,
+          contextTokens: s.contextTokens,
+          contextModel: s.contextModel,
         });
       } catch {
         // битый файл не должен ронять список

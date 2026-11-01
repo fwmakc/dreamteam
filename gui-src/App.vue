@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import MarkdownIt from 'markdown-it';
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue';
 import type {
-  AgentInfo, CardSchema, ChatMessage, FieldSpec, OpHint, ProjectHost, ProjectInfo,
-  ProjectRecordInfo, ModelInfo, ScheduleTaskInfo, SessionMeta,
+  AgentInfo, CardSchema, ChatMessage, DirListing, FieldSpec, MailInfo, MessengerInfo, OpHint,
+  ProjectHost, ProjectInfo, ProjectRecordInfo, ModelInfo, ScheduleTaskInfo, SessionMeta,
+  SessionUsage, LanguageInfo,
 } from './types';
 import {
   addFeed, answerChoose, answerConfirm, authError, authNeeded, authed, busyCount, busyLabel,
@@ -41,33 +43,61 @@ watchEffect(() => {
   if (def) document.title = `Dream Team — ${def.id}`;
 });
 
-// ── текст реплики: ```блоки``` → pre, [файл.ext] → ссылка на файл ────────────
-const esc = (s: string): string => String(s).replace(/[&<>"']/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string
-));
-function fileLinks(escaped: string): string {
-  return escaped.replace(/\[([^\[\]]+\.[A-Za-z0-9]{2,8})\]/g, (_m, name: string) => {
-    const href = `/api/file?path=${encodeURIComponent(name)}`;
-    // клик — открыть в новой вкладке (тип отдаёт сервер), Ctrl+клик — скачать,
-    // ПКМ — своё меню «Открыть/Сохранить» (onChatContext)
-    const title = esc(tr('Клик — открыть · Ctrl+клик — сохранить'));
-    return `<a class="file-link" href="${href}" target="_blank" rel="noopener" title="${title}">[${name}]</a>`;
-  });
-}
-function formatText(text: string): string {
-  const parts = String(text).split('```');
-  let html = '';
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 1) {
-      let code = parts[i];
-      const nl = code.indexOf('\n');
-      if (nl !== -1 && nl <= 20) code = code.slice(nl + 1); // «язык» блока
-      html += `<pre>${esc(code.replace(/\n$/, ''))}</pre>`;
-    } else if (parts[i]) {
-      html += `<span class="txt">${fileLinks(esc(parts[i]))}</span>`;
-    }
+// ── текст реплики: markdown (md-it; html:false — сырой HTML из ответа
+// экранируется, теги генерирует сама библиотека; breaks:true — одиночный
+// перевод строки = <br>, как в чатах) ────────────────────────────────────────
+const md = new MarkdownIt({ html: false, breaks: true, linkify: false });
+// [имя.ext] — вложенный файл → ссылка /api/file (класс file-link нужен
+// делегатам onChatClick/onChatContext: клик — открыть, Ctrl+клик — скачать,
+// ПКМ — своё меню). Правило живёт в inline-контексте — в ```-блоках и
+// `code`-спанах не срабатывает; «(?!\()» не трогает обычные [текст](url).
+md.inline.ruler.before('link', 'file_link', (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x5b /* [ */) return false;
+  const m = /^\[([^\[\]\n]+\.[A-Za-z0-9]{2,8})\](?!\()/.exec(state.src.slice(state.pos, state.pos + 300));
+  if (!m) return false;
+  if (silent) return true;
+  const open = state.push('link_open', 'a', 1);
+  open.attrSet('href', `/api/file?path=${encodeURIComponent(m[1])}`);
+  open.attrSet('class', 'file-link');
+  const text = state.push('text', '', 0);
+  text.content = m[0];
+  state.push('link_close', 'a', -1);
+  state.pos += m[0].length;
+  return true;
+});
+// обычные ссылки — в новой вкладке (не уводим GUI), файловые — с подсказкой;
+// title ставится на каждый рендер — на случай смены языка на лету
+const linkOpen = md.renderer.rules.link_open
+  ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const href = String(tokens[idx].attrGet('href') ?? '');
+  if (href.startsWith('/api/file?')) {
+    tokens[idx].attrSet('target', '_blank');
+    tokens[idx].attrSet('rel', 'noopener');
+    tokens[idx].attrSet('title', tr('Клик — открыть · Ctrl+клик — сохранить'));
+  } else if (/^https?:/i.test(href)) {
+    tokens[idx].attrSet('target', '_blank');
+    tokens[idx].attrSet('rel', 'noopener');
   }
-  return html || '<span class="txt"></span>';
+  return linkOpen(tokens, idx, options, env, self);
+};
+// md-it сам триммит содержимое блоков — краевые пробелы и пустые строки
+// больше не рисуются (прежние span-обёртки оставляли их в пузырях);
+// trim и у html — md-it оставляет хвостовой \n после последнего блока
+function formatText(text: string): string {
+  return md.render(String(text).trim()).trim();
+}
+// видимый текст реплики пользователя: ведущие метки [имя] прикреплённых файлов
+// уже показаны чипами (att-row) — из текста их убираем, остальное не трогаем
+function attachmentsText(m: ChatMessage): string {
+  const names = new Set(m.attachments ?? []);
+  let out = m.text.trimStart();
+  for (;;) {
+    const mm = out.match(/^\[([^\[\]]+)\]\s*/);
+    if (!mm || !names.has(mm[1])) break;
+    out = out.slice(mm[0].length);
+  }
+  return out;
 }
 function colorByAuthor(m: ChatMessage): string {
   if (m.authorId === 'manager') return colorOf(manager.value?.color);
@@ -116,8 +146,9 @@ watch(
 type CtxItem = { label: string; fn: () => void };
 const ctx = reactive({ show: false, x: 0, y: 0, items: [] as CtxItem[] });
 function openCtx(e: MouseEvent, items: CtxItem[]): void {
-  ctx.x = Math.min(e.clientX, window.innerWidth - 180);
-  ctx.y = Math.min(e.clientY, window.innerHeight - items.length * 36 - 12);
+  // клампим с двух сторон: меню не должно вылезать ни справа, ни слева
+  ctx.x = Math.max(8, Math.min(e.clientX, window.innerWidth - 180));
+  ctx.y = Math.max(8, Math.min(e.clientY, window.innerHeight - items.length * 42 - 16));
   ctx.items = items;
   ctx.show = true;
 }
@@ -160,6 +191,60 @@ function onChatContext(e: MouseEvent): void {
     { label: tr('Открыть'), fn: () => window.open(href, '_blank', 'noopener') },
     { label: tr('Сохранить'), fn: () => downloadFile(href) },
   ]);
+}
+
+// ── мобильный вид: сайдбар — выдвижная шторка (кнопка ☰ в топбаре) ───────────
+const navOpen = ref(false);
+function onSidebarClick(e: MouseEvent): void {
+  // шторку держим открытой, пока строки прокликаывают подряд (позвать
+  // агента, сменить модель); закрываем только при смене содержимого чата —
+  // выбрали разговор или проект, создали новый разговор
+  const t = e.target as HTMLElement;
+  if (t.closest('#sessions li, #projects .proj-row')) navOpen.value = false;
+  else if (t.matches('.sec-add') && t.closest('[data-sec="sessions"]')) navOpen.value = false;
+}
+// долгое нажатие на строке — то же меню, что по правой кнопке: синтезируем
+// contextmenu, его ловят обычные @contextmenu-обработчики строк
+let lpTimer: ReturnType<typeof setTimeout> | null = null;
+let lpFired = false; // меню уже открылось этим жестом — отрыв пальца гасим
+const lpAt = { x: 0, y: 0 };
+function onSidebarTouchStart(e: TouchEvent): void {
+  const t = e.touches[0];
+  if (!t) return;
+  lpFired = false;
+  lpAt.x = t.clientX;
+  lpAt.y = t.clientY;
+  const el = e.target as HTMLElement;
+  lpTimer = setTimeout(() => {
+    lpTimer = null;
+    lpFired = true;
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: lpAt.x, clientY: lpAt.y }));
+  }, 550);
+}
+function onSidebarTouchMove(e: TouchEvent): void {
+  const t = e.touches[0];
+  if (lpTimer && t && (Math.abs(t.clientX - lpAt.x) > 12 || Math.abs(t.clientY - lpAt.y) > 12)) {
+    clearTimeout(lpTimer);
+    lpTimer = null;
+  }
+}
+function onSidebarTouchEnd(e: TouchEvent): void {
+  if (lpTimer) {
+    clearTimeout(lpTimer);
+    lpTimer = null;
+  } else if (lpFired) {
+    // меню уже открылось этим жестом: после отрыва браузер синтезирует
+    // click, тот попадёт в оверлей и тут же закроет меню — гасим его
+    lpFired = false;
+    e.preventDefault();
+  }
+}
+function onSidebarTouchCancel(): void {
+  if (lpTimer) {
+    clearTimeout(lpTimer);
+    lpTimer = null;
+  }
+  lpFired = false;
 }
 
 // ── ширина сайдбара: тянуть за правую границу, запоминать в localStorage ─────
@@ -207,13 +292,17 @@ function ctxTeam(e: MouseEvent, a: AgentInfo): void {
   ]);
 }
 function ctxModel(e: MouseEvent, p: ModelInfo): void {
-  const items: CtxItem[] = [{ label: tr('Изменить'), fn: () => openModelSettings(p) }];
+  const items: CtxItem[] = [
+    { label: tr('Изменить'), fn: () => openModelSettings(p) },
+    { label: tr('Статистика'), fn: () => modelUsageReport(p.id) },
+  ];
   if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => delModel(p) });
   openCtx(e, items);
 }
 function ctxSession(e: MouseEvent, id: string, title: string): void {
   openCtx(e, [
     { label: tr('Изменить'), fn: () => openSessionEdit(id) },
+    { label: tr('Статистика'), fn: () => sessionUsageReport(id, title) },
     { label: tr('Удалить'), fn: () => deleteSession(id, title) },
   ]);
 }
@@ -231,21 +320,26 @@ function ctxHost(e: MouseEvent, p: ProjectInfo, h: ProjectHost): void {
 type FormField = {
   key: string; label: string; value?: string; placeholder?: string;
   type?: FieldSpec['type']; values?: string[];
+  /** Подписи вариантов enum (по индексу values); нет — подпись = само значение */
+  optionLabels?: string[];
 };
 const modal = reactive({
   show: false, title: '', error: '',
-  fields: [] as { key: string; label: string; value: string; placeholder?: string; type?: FieldSpec['type']; values?: string[] }[],
+  fields: [] as FormField[],
   onSave: null as null | ((v: Record<string, string>) => void),
+  settingsActions: false,
 });
 const modalBox = ref<HTMLElement | null>(null);
-function openForm(title: string, fields: FormField[], onSave: (v: Record<string, string>) => void): void {
+function openForm(title: string, fields: FormField[], onSave: (v: Record<string, string>) => void,
+  opts?: { settingsActions?: boolean }): void {
   modal.title = title;
   modal.fields = fields.map((f) => ({
     key: f.key, label: f.label, value: f.value ?? '', placeholder: f.placeholder,
-    type: f.type, values: f.values,
+    type: f.type, values: f.values, optionLabels: f.optionLabels,
   }));
   modal.error = '';
   modal.onSave = onSave;
+  modal.settingsActions = opts?.settingsActions ?? false;
   modal.show = true;
   nextTick(() => modalBox.value?.querySelector<HTMLElement>('input, textarea, select')?.focus());
 }
@@ -253,10 +347,117 @@ function closeForm(): void {
   modal.show = false;
   modal.onSave = null;
 }
+
+// ── отчёт по токенам: ПКМ «Статистика» у разговора или модели ───────────────
+const report = reactive({ show: false, title: '', lines: [] as string[] });
+const reportBox = ref<HTMLElement | null>(null);
+function openReport(title: string, lines: string[]): void {
+  report.title = title;
+  report.lines = lines;
+  report.show = true;
+  nextTick(() => reportBox.value?.querySelector<HTMLElement>('button')?.focus());
+}
+function closeReport(): void {
+  report.show = false;
+}
+/** Числа в отчётах — в локали интерфейса (неизвестный id — локаль браузера). */
+const NUM_LOCALES: Record<string, string> = { ru: 'ru-RU', en: 'en-US', zh: 'zh-CN' };
+function fmtNum(n: number): string {
+  return n.toLocaleString(NUM_LOCALES[snapshot.ui?.id ?? '']);
+}
+/** Тысячи — «128k», меньше тысячи — как есть (индикатор контекста). */
+function fmtK(n: number): string {
+  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+}
+
+// ── индикатор контекста: статус-бар под вводом ───────────────────────────────
+/** Заполнение контекста текущего разговора: токены последнего раунда против
+ *  окна модели, отвечавшей последней. Нет данных — null, бар скрыт. */
+const ctxInfo = computed(() => {
+  const meta = sessions.value.find((s) => s.id === currentSessionId.value);
+  const tokens = meta?.contextTokens ?? 0;
+  const win = meta?.contextModel
+    ? models.value.find((m) => m.id === meta.contextModel)?.contextWindow
+    : undefined;
+  if (!tokens || !win || win <= 0) return null;
+  const pct = Math.min(100, Math.round((tokens / win) * 100));
+  const threshold = snapshot.settings?.compressThreshold ?? 85;
+  const band = pct >= threshold ? 'bad' : pct >= threshold - 15 ? 'warn' : 'ok';
+  return { pct, tokens, win, band };
+});
+
+// ── индикатор квот: рядом с индикатором контекста ────────────────────────────
+/** Короткие метки окон квоты — русский ключ переводится словарём ui.strings. */
+const QUOTA_LABELS: Record<string, string> = { '5h': '5ч', week: 'нед', month: 'мес', mcp: 'mcp' };
+/** Лимиты тарифа дефолтной модели (z.ai coding plan и др.): остаток в %, цвет
+ *  по самому низкому окну, в подсказке — тариф и время сброса. Нет данных — null. */
+const quotaInfo = computed(() => {
+  const quota = models.value.find((m) => m.isDefault)?.quota;
+  if (!quota || quota.windows.length === 0) return null;
+  const remain = (w: { usedPercent: number }): number => Math.max(0, 100 - w.usedPercent);
+  const parts = quota.windows.map((w) => ({
+    key: w.key,
+    label: tr(QUOTA_LABELS[w.key] ?? w.key),
+    pct: remain(w),
+    resetAt: w.resetAt,
+  }));
+  const worst = Math.min(...parts.map((p) => p.pct));
+  const band = worst < 20 ? 'bad' : worst < 50 ? 'warn' : 'ok';
+  const title = [
+    quota.plan ? `plan: ${quota.plan}` : '',
+    ...parts.map((p) => `${p.label}: ${p.pct}%${p.resetAt ? ` · ${tr('сброс {time}', { time: fmtDate(p.resetAt) })}` : ''}`),
+  ].filter(Boolean).join('\n');
+  return { band, title, windows: parts };
+});
+function usageLines(u: SessionUsage): string[] {
+  const pct = u.promptTokens > 0 ? Math.round((u.cachedTokens / u.promptTokens) * 100) : 0;
+  return [
+    tr('Раундов: {rounds}', { rounds: u.rounds }),
+    tr('Вход: {in} · Выход: {out} · Из кэша: {cached} ({pct}%)', {
+      in: fmtNum(u.promptTokens), out: fmtNum(u.outputTokens), cached: fmtNum(u.cachedTokens), pct,
+    }),
+  ];
+}
+/** Отчёт разговора: его итог + разбивка по моделям. */
+function sessionUsageReport(id: string, title: string): void {
+  const meta = sessions.value.find((s) => s.id === id);
+  const u = meta?.usage;
+  const lines: string[] = u && u.rounds > 0 ? usageLines(u) : [tr('Статистики пока нет — сделайте раунд с API (не mock).')];
+  const byModel = Object.entries(meta?.usageByModel ?? {}).filter(([, v]) => v.rounds > 0);
+  if (byModel.length > 0) {
+    lines.push('', tr('По моделям:'));
+    for (const [mid, v] of byModel) {
+      lines.push(`• ${mid} — ${tr('{r} раунд(ов), вход {in}, выход {out}', { r: v.rounds, in: fmtNum(v.promptTokens), out: fmtNum(v.outputTokens) })}`);
+    }
+  }
+  openReport(tr('Статистика разговора «{title}»', { title }), lines);
+}
+/** Отчёт модели: суммарно по всем разговорам дома (считается из state). */
+function modelUsageReport(id: string): void {
+  let rounds = 0, inTok = 0, outTok = 0, cached = 0, chats = 0;
+  for (const s of sessions.value) {
+    const u = s.usageByModel?.[id];
+    if (!u || u.rounds === 0) continue;
+    chats++;
+    rounds += u.rounds;
+    inTok += u.promptTokens;
+    outTok += u.outputTokens;
+    cached += u.cachedTokens;
+  }
+  const lines = rounds > 0
+    ? [...usageLines({ rounds, promptTokens: inTok, cachedTokens: cached, outputTokens: outTok }), tr('В разговорах: {n}', { n: chats })]
+    : [tr('Статистики пока нет — сделайте раунд с API (не mock).')];
+  openReport(tr('Статистика модели {id} — все разговоры', { id }), lines);
+}
+/** Чекбокс булева поля: значение живёт строкой 'true'/'false' (пусто — не менять). */
+function setBool(f: { value?: string }, ev: Event): void {
+  f.value = (ev.target as HTMLInputElement).checked ? 'true' : 'false';
+}
 function submitForm(): void {
   if (!modal.onSave) return;
   const values: Record<string, string> = {};
-  for (const f of modal.fields) values[f.key] = f.value.trim();
+  // v-model на input[type=number] кладёт в value число (looseToNumber) — возвращаем строку
+  for (const f of modal.fields) values[f.key] = String(f.value ?? '').trim();
   try {
     modal.onSave(values);
     closeForm();
@@ -277,15 +478,19 @@ function getPath(obj: unknown, path: string): string {
   }
   return v == null ? '' : String(v);
 }
-/** Поля формы по схеме сущности; значения — из текущей карточки по путям. */
-function schemaFields(entity: string, current: unknown): FormField[] {
-  const schema = schemaOf(entity);
-  if (!schema) return [];
+/** Поля формы по готовой схеме; значения — из текущей карточки по путям. */
+function fieldsFromSchema(schema: CardSchema, current: unknown): FormField[] {
   return schema.fields.map((f) => ({
     key: f.path, label: tr(f.label), value: getPath(current, f.path),
     type: f.type, values: f.values ? [...f.values] : undefined,
     placeholder: f.placeholder ? tr(f.placeholder) : undefined,
   }));
+}
+/** Поля формы по схеме сущности (agent/session/project — snapshot.schemas). */
+function schemaFields(entity: string, current: unknown): FormField[] {
+  const schema = schemaOf(entity);
+  if (!schema) return [];
+  return fieldsFromSchema(schema, current);
 }
 /** Значения формы → вложенный объект по путям схемы (пусто — поле не менять). */
 function fieldsFromForm(schema: CardSchema, values: Record<string, string>): Record<string, unknown> {
@@ -293,6 +498,23 @@ function fieldsFromForm(schema: CardSchema, values: Record<string, string>): Rec
   for (const f of schema.fields) {
     const raw = (values[f.path] ?? '').trim();
     if (!raw) continue;
+    if (f.type === 'boolean') {
+      out[f.path] = raw === 'true';
+      continue;
+    }
+    if (f.type === 'object') {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error(tr('поле «{path}»: жду JSON', { path: f.path }));
+      }
+      if (parsed === null || typeof parsed !== 'object') {
+        throw new Error(tr('поле «{path}»: жду JSON', { path: f.path }));
+      }
+      out[f.path] = parsed;
+      continue;
+    }
     const num = Number(raw);
     if (f.type === 'number' && !Number.isFinite(num)) continue;
     const v: unknown = f.type === 'number' ? num : raw;
@@ -386,12 +608,20 @@ function setModel(p: ModelInfo): void {
 function delModel(p: ModelInfo): void {
   if (!roundActive.value) modelDelete(p);
 }
-function openModelSettings(p: ModelInfo): void {
-  const schema = schemaOf('model');
+async function openModelSettings(p: ModelInfo): Promise<void> {
+  // схема и карточка приходят парой: поля модели — это контракт её провайдера
+  let card: Record<string, unknown> = {};
+  let schema: CardSchema | undefined;
+  try {
+    const r = await rpc<{ card: Record<string, unknown>; schema: CardSchema }>('model.get', { id: p.id });
+    card = r.card ?? {};
+    schema = r.schema;
+  } catch (err) {
+    addFeed('error', `✗ ${(err as Error).message}`);
+    return;
+  }
   if (!schema) return;
-  openForm(tr('Модель {id}', { id: p.id }), schemaFields('model', {
-    provider: p.kind, model: p.model, baseUrl: p.baseUrl,
-  }), (v) => {
+  openForm(tr('Модель {id}', { id: p.id }), fieldsFromSchema(schema, card), (v) => {
     rpcReport(rpc('model.update', { id: p.id, fields: fieldsFromForm(schema, v) }));
   });
 }
@@ -400,19 +630,30 @@ function openModelSettings(p: ModelInfo): void {
 function openSettingsForm(): void {
   const st = snapshot.settings;
   if (!st) return;
+  // селектор языка: системные (ru/en/zh) + свои из lang/ дома; без списка
+  // (старый сервер) — прежнее текстовое поле
+  const langs: LanguageInfo[] = snapshot.ui?.languages ?? [];
+  const uiField: FormField = langs.length
+    ? {
+        key: 'ui', label: tr('Язык интерфейса'), value: snapshot.ui?.id ?? '', type: 'enum',
+        values: langs.map((l) => l.id),
+        optionLabels: langs.map((l) => `${l.id} — ${l.name}${l.builtIn ? '' : ` (${tr('свой')})`}`),
+      }
+    : { key: 'ui', label: tr('Язык интерфейса'), value: snapshot.ui?.id ?? '' };
   openForm(tr('Настройки'), [
-    { key: 'language', label: tr('Язык общения (russian / ru-RU / english…)'), value: st.language ?? '' },
+    { key: 'language', label: tr('Язык общения (russian / ru-RU / english…)'), value: st.language ?? '', placeholder: tr('пусто — как язык интерфейса') },
     { key: 'autoMessage', label: tr('Автоответ в автономном режиме'), value: st.autoMessage ?? '' },
-    { key: 'ui', label: tr('Язык интерфейса (ru / en / zh / свой из ~/.dreamteam/lang)'), value: snapshot.ui?.id ?? '' },
+    uiField,
     { key: 'width', label: tr('Ширина экрана (40–500)'), value: st.width != null ? String(st.width) : '' },
     { key: 'maxInputRows', label: tr('Максимум строк поля ввода (1–20)'), value: st.maxInputRows != null ? String(st.maxInputRows) : '' },
+    { key: 'compressThreshold', label: tr('Порог автосжатия контекста, % (10–99)'), value: st.compressThreshold != null ? String(st.compressThreshold) : '' },
   ], (v) => {
     const patch: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' || k === 'maxInputRows' ? Number(val) : val;
+    for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' || k === 'maxInputRows' || k === 'compressThreshold' ? Number(val) : val;
     rpc('settings.update', { patch })
       .then(() => addFeed('notice', `· ${tr('настройки сохранены')}`))
       .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
-  });
+  }, { settingsActions: true });
 }
 function openUserProfileForm(): void {
   const p = profile.value;
@@ -466,59 +707,173 @@ function switchProject(p: ProjectRecordInfo): void {
   if (currentProject.value && p.name === currentProject.value.id) return;
   rpcReport(rpc('project.open', p.path ? { path: p.path } : { id: p.name }));
 }
-/** Переименовать текущий проект (папка в доме + id). */
-function renameProjectForm(): void {
-  if (roundActive.value) return;
-  openForm(tr('Переименовать проект'), [
-    { key: 'name', label: tr('Новое имя (без пробелов)'), value: currentProject.value?.name ?? '' },
-  ], (v) => {
-    const name = String(v.name ?? '').trim();
-    if (name) rpcReport(rpc('project.update', { name }));
-  });
+// ── настройки текущего проекта: имя, рабочая папка (браузер путей), ──────────
+// ── серверы/ящики/боты; реестры живут в снапшоте (сервер маскирует секреты) ──
+const projSettings = reactive({
+  show: false, name: '', path: '',
+  browse: false, browsePath: '', browseParent: null as string | null,
+  browseDirs: [] as { name: string; path: string }[], browseDrives: [] as string[],
+  browseError: '',
+});
+/** Реестры текущего проекта из снапшота (сервер отдаёт один элемент — текущий). */
+const curReg = computed(() => projects.value.find((p) => p.id === currentProject.value?.id));
+function openProjectSettings(): void {
+  if (roundActive.value || !currentProject.value) return;
+  projSettings.name = currentProject.value.name;
+  projSettings.path = currentProject.value.path;
+  projSettings.browse = false;
+  projSettings.browseError = '';
+  projSettings.show = true;
 }
-/** Сменить рабочую папку текущего проекта (форма из схемы project). */
-function projectPathForm(): void {
-  if (roundActive.value) return;
+/** Листинг каталога с сервера (fs.dirs); без path — домашний каталог пользователя. */
+function browseTo(path?: string): void {
+  projSettings.browseError = '';
+  rpc<DirListing>('fs.dirs', path ? { path } : {})
+    .then((r) => {
+      projSettings.browsePath = r.path;
+      projSettings.browseParent = r.parent;
+      projSettings.browseDirs = r.dirs;
+      projSettings.browseDrives = r.drives;
+      projSettings.browse = true;
+    })
+    .catch((err: Error) => {
+      projSettings.browseError = err.message;
+      projSettings.browse = true;
+    });
+}
+function browseUp(): void { if (projSettings.browseParent) void browseTo(projSettings.browseParent); }
+function browsePick(): void { projSettings.path = projSettings.browsePath; projSettings.browse = false; }
+function saveProjectSettings(): void {
   const cur = currentProject.value;
-  const schema = schemaOf('project');
-  if (!cur || !schema) return;
-  openForm(tr('Проект {name}', { name: cur.name }), schemaFields('project', cur), (v) => {
-    const fields = fieldsFromForm(schema, v);
-    if (fields.path) rpcReport(rpc('project.update', { path: fields.path }));
-  });
+  if (!cur) return;
+  const name = projSettings.name.trim();
+  const path = projSettings.path.trim();
+  const args: Record<string, string> = {};
+  if (name && name !== cur.name) args.name = name;
+  if (path && path !== cur.path) args.path = path;
+  projSettings.show = false;
+  if (!Object.keys(args).length) return;
+  rpcReport(rpc('project.update', args));
 }
 function ctxProjectCurrent(e: MouseEvent): void {
   if (!currentProject.value) return;
-  openCtx(e, [
-    { label: tr('Переименовать'), fn: renameProjectForm },
-    { label: tr('Сменить рабочую папку'), fn: projectPathForm },
-  ]);
+  openCtx(e, [{ label: tr('Настройки проекта…'), fn: openProjectSettings }]);
 }
 function ctxProjectKnown(e: MouseEvent, p: ProjectRecordInfo): void {
   openCtx(e, [{ label: tr('Удалить из дома (разговоры тоже)'), fn: () =>
     askDelete(tr('проект «{name}»', { name: p.name }), () => rpcReport(rpc('project.delete', { id: p.name }))) }]);
 }
-/** Первый сервер проекта (когда список серверов ещё пуст): из контекстного меню. */
-function projectAdd(): void {
-  openForm(tr('Новый сервер проекта'), [
-    { key: 'id', label: tr('id сервера (напр. prod)') },
-    { key: 'host', label: tr('Хост (адрес)') },
-    { key: 'user', label: tr('Пользователь (можно пропустить)') },
-    { key: 'port', label: tr('Порт (можно пропустить)') },
-  ], (v) => rpcReport(rpc('project.host.add', v)));
-}
+/** Новый сервер проекта: ＋ в сайдбаре и ＋ в разделе диалога настроек. */
 function projectHostAdd(p: ProjectInfo): void {
   if (roundActive.value) return;
   openForm(tr('Сервер проекта «{id}»', { id: p.id }), [
     { key: 'id', label: tr('id сервера (напр. prod)') },
     { key: 'host', label: tr('Хост (адрес)') },
     { key: 'user', label: tr('Пользователь (можно пропустить)') },
+    { key: 'password', label: tr('Пароль (можно пропустить)'), type: 'password' },
     { key: 'port', label: tr('Порт (можно пропустить)') },
-  ], (v) => rpcReport(rpc('project.host.add', v)));
+    { key: 'dir', label: tr('Папка на сервере (можно пропустить)') },
+  ], (v) => {
+    if (!v.id) throw new Error(tr('Жду id сервера'));
+    const args: Record<string, unknown> = { id: v.id, host: v.host };
+    if (v.user) args.user = v.user;
+    if (v.password) args.password = v.password;
+    if (v.port) args.port = Number(v.port);
+    if (v.dir) args.dir = v.dir;
+    rpcReport(rpc('project.host.add', args));
+  });
+}
+function projectHostEdit(h: ProjectHost): void {
+  if (roundActive.value) return;
+  openForm(tr('Сервер «{name}»', { name: h.name }), [
+    { key: 'host', label: tr('Хост (адрес)'), value: h.host },
+    { key: 'user', label: tr('Пользователь (можно пропустить)'), value: h.user ?? '' },
+    { key: 'password', label: tr('Пароль (пусто — не менять)'), type: 'password' },
+    { key: 'port', label: tr('Порт (можно пропустить)'), value: h.port ? String(h.port) : '' },
+    { key: 'dir', label: tr('Папка на сервере (можно пропустить)'), value: h.dir ?? '' },
+  ], (v) => {
+    const args: Record<string, unknown> = { id: h.name, host: v.host };
+    if (v.user) args.user = v.user;
+    if (v.password) args.password = v.password;
+    if (v.port) args.port = Number(v.port);
+    if (v.dir) args.dir = v.dir;
+    rpcReport(rpc('project.host.update', args));
+  });
 }
 function projectHostDelete(p: ProjectInfo, h: ProjectHost): void {
   if (roundActive.value) return;
   askDelete(tr('сервер «{name}» проекта «{id}»', { name: h.name, id: p.id }), () => rpcReport(rpc('project.host.delete', { id: h.name })));
+}
+function projectMailAdd(p: ProjectInfo): void {
+  if (roundActive.value) return;
+  openForm(tr('Ящик проекта «{id}»', { id: p.id }), [
+    { key: 'id', label: tr('id ящика (напр. support)') },
+    { key: 'user', label: tr('Логин') },
+    { key: 'password', label: tr('Пароль'), type: 'password' },
+    { key: 'imap', label: tr('IMAP-сервер') },
+    { key: 'smtp', label: tr('SMTP-сервер') },
+    { key: 'port', label: tr('IMAP-порт (можно пропустить)') },
+    { key: 'smtpPort', label: tr('SMTP-порт (можно пропустить)') },
+  ], (v) => {
+    if (!v.id) throw new Error(tr('Жду id ящика'));
+    const args: Record<string, unknown> = { id: v.id };
+    if (v.user) args.user = v.user;
+    if (v.password) args.password = v.password;
+    if (v.imap) args.imap = v.imap;
+    if (v.smtp) args.smtp = v.smtp;
+    if (v.port) args.port = Number(v.port);
+    if (v.smtpPort) args.smtpPort = Number(v.smtpPort);
+    rpcReport(rpc('project.mail.add', args));
+  });
+}
+function projectMailEdit(m: MailInfo): void {
+  if (roundActive.value) return;
+  openForm(tr('Ящик «{id}»', { id: m.id }), [
+    { key: 'user', label: tr('Логин'), value: m.user },
+    { key: 'password', label: tr('Пароль (пусто — не менять)'), type: 'password' },
+    { key: 'imap', label: tr('IMAP-сервер'), value: m.imap },
+    { key: 'smtp', label: tr('SMTP-сервер'), value: m.smtp },
+    { key: 'port', label: tr('IMAP-порт (можно пропустить)'), value: m.port ? String(m.port) : '' },
+    { key: 'smtpPort', label: tr('SMTP-порт (можно пропустить)'), value: m.smtpPort ? String(m.smtpPort) : '' },
+  ], (v) => {
+    const fields: Record<string, unknown> = {};
+    if (v.user) fields.user = v.user;
+    if (v.password) fields.password = v.password;
+    if (v.imap) fields.imap = v.imap;
+    if (v.smtp) fields.smtp = v.smtp;
+    if (v.port) fields.port = Number(v.port);
+    if (v.smtpPort) fields.smtpPort = Number(v.smtpPort);
+    if (!Object.keys(fields).length) throw new Error(tr('Нечего менять: заполните хотя бы одно поле'));
+    rpcReport(rpc('project.mail.update', { id: m.id, fields }));
+  });
+}
+function projectMailDelete(m: MailInfo): void {
+  if (roundActive.value) return;
+  askDelete(tr('ящик «{id}»', { id: m.id }), () => rpcReport(rpc('project.mail.delete', { id: m.id })));
+}
+function projectBotAdd(p: ProjectInfo): void {
+  if (roundActive.value) return;
+  openForm(tr('Бот проекта «{id}»', { id: p.id }), [
+    { key: 'key', label: tr('Тип бота'), type: 'enum', values: ['telegram', 'max'] },
+    { key: 'token', label: tr('Токен'), type: 'password' },
+  ], (v) => {
+    if (!v.token) throw new Error(tr('Жду токен бота'));
+    rpcReport(rpc('project.messenger.add', { key: v.key, token: v.token }));
+  });
+}
+function projectBotEdit(b: MessengerInfo): void {
+  if (roundActive.value) return;
+  openForm(tr('Бот {key}', { key: b.key }), [
+    { key: 'token', label: tr('Новый токен'), type: 'password' },
+  ], (v) => {
+    // сервер трактует пустой token как «убрать поле» — из формы пустым не шлём
+    if (!v.token) throw new Error(tr('Пустой токен удалил бы токен бота — заполните поле'));
+    rpcReport(rpc('project.messenger.update', { key: b.key, token: v.token }));
+  });
+}
+function projectBotDelete(b: MessengerInfo): void {
+  if (roundActive.value) return;
+  askDelete(tr('бота «{key}»', { key: b.key }), () => rpcReport(rpc('project.messenger.delete', { key: b.key })));
 }
 
 // ── расписание ───────────────────────────────────────────────────────────────
@@ -610,6 +965,13 @@ function pickImport(kind: ImportKind): void {
   if (roundActive.value) return;
   importKind = kind;
   importFileEl.value?.click();
+}
+/** Импорт настроек из окна настроек: форма закрывается — поля держат копию
+ *  значений на момент открытия, «Сохранить» по ним откатил бы импорт. */
+function importSettingsForm(): void {
+  if (roundActive.value) return;
+  closeForm();
+  pickImport('settings');
 }
 async function onImportFile(e: Event): Promise<void> {
   const inp = e.target as HTMLInputElement;
@@ -706,7 +1068,6 @@ const inputEl = ref<HTMLTextAreaElement | null>(null);
 function autosize(): void {
   const el = inputEl.value;
   if (!el) return;
-  el.style.height = 'auto';
   // лимит строк из настроек дома (maxInputRows): строки × высота строки + рамка/паддинг
   const rows = Math.max(1, snapshot.settings?.maxInputRows ?? 8);
   const cs = getComputedStyle(el);
@@ -715,10 +1076,16 @@ function autosize(): void {
     parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) +
     parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
   const max = Math.round(rows * lineH + frame);
+  // пустое поле свернуто в две строки и растёт с текстом до max, дальше — скролл
+  const min = Math.min(Math.round(2 * lineH + frame), max);
   el.style.maxHeight = `${max}px`;
-  el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+  el.style.height = 'auto';
+  // высоту пустого поля по scrollHeight не меряем: хром включает в него
+  // переносы плейсхолдера, и поле стартует в несколько строк
+  const need = el.value ? el.scrollHeight : min;
+  el.style.height = `${Math.max(min, Math.min(need, max))}px`;
   // под лимитом скролла не место: округление scrollHeight даёт лишний пиксель
-  el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
+  el.style.overflowY = el.value && el.scrollHeight > max ? 'auto' : 'hidden';
 }
 function sendUserMessage(): void {
   const text = draft.value.trim();
@@ -728,8 +1095,9 @@ function sendUserMessage(): void {
   hideHints();
   roundActive.value = true;
   // 🔗-файлы сервер копирует в inbox сам (без передачи); загруженные через 📎
-  // уже там — осталось послать текст с метками [имя]
-  const names = stagedFiles.value.map((f) => `[${f.name}]`).join(' ');
+  // уже там — осталось послать текст с метками [имя] и списком аттачей
+  const attachNames = stagedFiles.value.map((f) => f.name);
+  const names = attachNames.map((n) => `[${n}]`).join(' ');
   for (const f of stagedFiles.value) {
     if (f.path) send({ type: 'file_ref', name: f.name, path: f.path, defer: true });
   }
@@ -739,8 +1107,10 @@ function sendUserMessage(): void {
     send({ type: 'command', text });
   } else {
     const full = names ? `${names} ${text}`.trim() : text;
-    messages.push({ authorId: 'user', authorName: profile.value?.name ?? tr('Вы'), text: full, ts: Date.now() });
-    send({ type: 'user_message', text: full });
+    const msg: ChatMessage = { authorId: 'user', authorName: profile.value?.name ?? tr('Вы'), text: full, ts: Date.now() };
+    if (attachNames.length) msg.attachments = attachNames;
+    messages.push(msg);
+    send({ type: 'user_message', text: full, ...(attachNames.length ? { attachments: attachNames } : {}) });
   }
 }
 
@@ -967,6 +1337,8 @@ onMounted(connectWs);
 <template>
   <!-- ── топбар ──────────────────────────────────────────────────────────── -->
   <header id="topbar">
+    <!-- на телефоне каркас не помещается: ☰ выдвигает сайдбар шторкой -->
+    <button id="btn-menu" class="tb-btn" :title="tr('Разделы')" @click="navOpen = !navOpen">☰</button>
     <span id="logo">🎬 Dream Team</span>
     <span
       v-if="profile?.name"
@@ -983,8 +1355,6 @@ onMounted(connectWs);
     <button class="tb-btn" :title="tr('Настройки')" @click="openSettingsForm()">⚙</button>
     <button class="tb-btn" :title="tr('Экспорт всего приложения (дом и все проекты, без .env)')" @click="exportHome">⬇</button>
     <button class="tb-btn" :title="tr('Импорт всего приложения из zip')" @click="pickImport('home')">⬆</button>
-    <button class="tb-btn" :title="tr('Экспорт настроек (без проектов)')" @click="exportSettings">⬇⚙</button>
-    <button class="tb-btn" :title="tr('Импорт настроек из zip (проекты не трогаются)')" @click="pickImport('settings')">⬆⚙</button>
     <input ref="importFileEl" type="file" accept=".zip" class="hidden" @change="onImportFile">
     <span class="spacer"></span>
     <span class="conn" :class="{ on: conn === 'on', off: conn !== 'on' }">
@@ -1010,9 +1380,17 @@ onMounted(connectWs);
     </div>
   </div>
 
-  <main id="layout">
+  <main id="layout" :class="{ 'drawer-open': navOpen }">
     <!-- ── сайдбар ────────────────────────────────────────────────────────── -->
-    <aside id="sidebar" :style="{ width: sbWidth + 'px' }">
+    <aside
+      id="sidebar"
+      :style="{ width: sbWidth + 'px' }"
+      @click="onSidebarClick"
+      @touchstart.passive="onSidebarTouchStart"
+      @touchmove.passive="onSidebarTouchMove"
+      @touchend="onSidebarTouchEnd"
+      @touchcancel.passive="onSidebarTouchCancel"
+    >
       <section class="side-sec" :class="{ collapsed: isCollapsed('projects') }" data-sec="projects">
         <div class="side-head" @click="toggleSec('projects')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
@@ -1028,7 +1406,7 @@ onMounted(connectWs);
           <li
             class="proj-current"
             data-project-current
-            :title="tr('Текущий проект — его данные в доме, projects/<id>/ · правая кнопка — переименовать/папка')"
+            :title="tr('Текущий проект — его данные в доме, projects/<id>/ · правая кнопка — настройки проекта')"
             @contextmenu.prevent="ctxProjectCurrent($event)"
           >
             <span>📁 {{ currentProject?.name ?? tr('не выбран — выберите или создайте') }}</span><span class="meta">{{ currentProject?.path }}</span>
@@ -1128,13 +1506,14 @@ onMounted(connectWs);
             :key="p.id"
             :title="(p.isDefault ? tr('Модель по умолчанию') : tr('Сделать основной (для агентов)'))
               + (p.isDefault ? '' : ` · ${tr('клик — сделать основным')} · ${tr('правая кнопка — изменить/удалить')}`)
+              + (p.vision ? ` · ${tr('◉ зрение')}` : '')
               + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)"
             @click="setModel(p)"
             @contextmenu.prevent="ctxModel($event, p)"
           >
             <div class="content">
               <div class="sess-main">
-                <span>{{ p.ok ? '●' : '○' }} {{ p.id }}</span>
+                <span>{{ p.ok ? '●' : '○' }} {{ p.id }}<template v-if="p.vision"> <span class="vision">◉</span></template></span>
                 <span v-if="p.isDefault" class="tag in">{{ tr('основная') }}</span>
               </div>
               <div class="sub">{{ p.model ?? p.kind ?? '' }}{{ p.ok ? '' : ` · ${p.note ?? ''}` }}</div>
@@ -1171,6 +1550,9 @@ onMounted(connectWs);
 
     </aside>
 
+    <!-- на телефоне затемняет чат под выдвинутой шторкой; клик — закрыть -->
+    <div id="sb-backdrop" :class="{ show: navOpen }" @click="navOpen = false"></div>
+
     <!-- ширина сайдбара меняется перетаскиванием этой границы -->
     <div id="sb-resize" :title="tr('Потянуть — изменить ширину')" @mousedown.prevent="startSidebarResize"></div>
 
@@ -1182,8 +1564,18 @@ onMounted(connectWs);
             <div v-if="it.kind === 'notice'" class="sysline" :class="it.notice.kind">{{ it.notice.text }}</div>
             <div v-else-if="it.msg.authorId === 'user'" class="msg user">
               <div class="head">👤 {{ it.msg.authorName }}</div>
+              <div v-if="it.msg.attachments?.length" class="att-row">
+                <a
+                  v-for="(name, i) in it.msg.attachments"
+                  :key="`${name}:${i}`"
+                  class="file-link att-chip"
+                  :href="`/api/file?path=${encodeURIComponent(name)}`"
+                  target="_blank"
+                  rel="noopener"
+                >📎 {{ name }}</a>
+              </div>
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
-              <div class="txt" v-html="formatText(it.msg.text)"></div>
+              <div class="txt" v-html="formatText(attachmentsText(it.msg))"></div>
             </div>
             <div v-else-if="it.msg.authorId === 'tool'" class="toolblock">{{ it.msg.text }}</div>
             <div v-else-if="it.msg.authorId === 'session-ref'" class="attachment">
@@ -1203,7 +1595,8 @@ onMounted(connectWs);
               {{ streaming.emoji }} {{ streaming.name }}
               <span v-if="streaming.role" class="role">{{ streaming.role }}</span>
             </div>
-            <div class="txt">{{ streaming.text }}</div>
+            <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
+            <div class="txt" v-html="formatText(streaming.text)"></div>
           </div>
         </div>
       </div>
@@ -1261,12 +1654,6 @@ onMounted(connectWs);
         </div>
       </div>
 
-      <div v-if="stagedFiles.length" id="staged">
-        <span v-for="(f, i) in stagedFiles" :key="`${f.name}:${i}`" class="chip" :title="f.path">
-          📎 {{ f.path ?? `${f.name} (${f.size} ${tr('Б')})` }}
-          <button :title="tr('убрать')" @click="removeStaged(i)">✕</button>
-        </span>
-      </div>
       <div v-if="refVisible" id="refrow">
         <input
           ref="refEl"
@@ -1278,20 +1665,45 @@ onMounted(connectWs);
         >
       </div>
       <div id="inputrow">
-        <button id="btn-attach" :title="tr('Прикрепить файл (загрузится в inbox проекта)')" @click="pickAttach">📎</button>
-        <button id="btn-ref" :title="tr('Прикрепить по пути на сервере (файл не передаётся через браузер)')" @click="pickRef">🔗</button>
-        <input ref="attachFileEl" type="file" multiple class="hidden" @change="onAttachFile">
+        <div v-if="stagedFiles.length" id="staged">
+          <span v-for="(f, i) in stagedFiles" :key="`${f.name}:${i}`" class="chip" :title="f.path">
+            📎 {{ f.path ?? `${f.name} (${f.size} ${tr('Б')})` }}
+            <button :title="tr('убрать')" @click="removeStaged(i)">✕</button>
+          </span>
+        </div>
         <textarea
           id="input"
           ref="inputEl"
           v-model="draft"
-          rows="1"
+          rows="2"
           :placeholder="tr('Напишите команде… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику, /help — команды)')"
           @keydown="onInputKey"
           @input="autosize(); updateHints()"
           @click="updateHints"
         ></textarea>
-        <button id="btn-send" :title="tr('Отправить')" :disabled="roundActive" @click="sendUserMessage">➤</button>
+        <div class="input-bar">
+          <div class="input-tools">
+            <button id="btn-attach" :title="tr('Прикрепить файл (загрузится в inbox проекта)')" @click="pickAttach">📎</button>
+            <button id="btn-ref" :title="tr('Прикрепить по пути на сервере (файл не передаётся через браузер)')" @click="pickRef">🔗</button>
+            <input ref="attachFileEl" type="file" multiple class="hidden" @change="onAttachFile">
+          </div>
+          <button id="btn-send" :title="tr('Отправить')" :disabled="roundActive" @click="sendUserMessage">↑</button>
+        </div>
+      </div>
+      <div v-if="ctxInfo || quotaInfo" id="metricsbar">
+        <div
+          v-if="ctxInfo"
+          id="ctxbar"
+          :class="ctxInfo.band"
+          :title="tr('Контекст: {t} из {w} ({pct}%)', { t: fmtNum(ctxInfo.tokens), w: fmtNum(ctxInfo.win), pct: ctxInfo.pct })"
+        >
+          <span class="meter"><span class="fill" :style="{ width: ctxInfo.pct + '%' }"></span></span>
+          <span>{{ ctxInfo.pct }}% · {{ fmtK(ctxInfo.tokens) }} / {{ fmtK(ctxInfo.win) }}</span>
+        </div>
+        <div v-if="quotaInfo" id="quotabar" :class="quotaInfo.band" :title="quotaInfo.title">
+          <span class="qcap">Q</span>
+          <span v-for="w in quotaInfo.windows" :key="w.key" class="qwin">{{ w.label }}<span class="meter"><span class="fill" :style="{ width: w.pct + '%' }"></span></span>{{ w.pct }}%</span>
+        </div>
       </div>
     </section>
   </main>
@@ -1301,20 +1713,117 @@ onMounted(connectWs);
     <div class="modal-box" ref="modalBox">
       <h2>{{ modal.title }}</h2>
       <div>
-        <div v-for="f in modal.fields" :key="f.key" class="fld">
+        <div v-for="f in modal.fields" :key="f.key" class="fld" :class="{ 'fld-chk': f.type === 'boolean' }">
           <label>{{ f.label }}</label>
-          <textarea v-if="f.type === 'text'" v-model="f.value" :placeholder="f.placeholder" rows="4"></textarea>
+          <textarea v-if="f.type === 'text' || f.type === 'object'" v-model="f.value" :placeholder="f.placeholder" rows="4"></textarea>
+          <input v-else-if="f.type === 'boolean'" type="checkbox" class="chk" :checked="f.value === 'true'" @change="setBool(f, $event)">
           <select v-else-if="f.type === 'enum'" v-model="f.value">
-            <option v-for="v in f.values" :key="v" :value="v">{{ v }}</option>
+            <option v-for="(v, i) in f.values" :key="v" :value="v">{{ f.optionLabels?.[i] ?? v }}</option>
           </select>
           <input v-else-if="f.type === 'password'" v-model="f.value" type="password" :placeholder="f.placeholder" autocomplete="new-password">
           <input v-else v-model="f.value" :type="f.type === 'number' ? 'number' : 'text'" :placeholder="f.placeholder" :step="f.type === 'number' ? 'any' : undefined">
         </div>
       </div>
       <div v-if="modal.error" class="errline">{{ modal.error }}</div>
+      <div v-if="modal.settingsActions" class="row">
+        <button :title="tr('Экспорт настроек (без проектов)')" @click="exportSettings">⬇ {{ tr('экспорт настроек') }}</button>
+        <button :title="tr('Импорт настроек из zip (проекты не трогаются)')" @click="importSettingsForm">⬆ {{ tr('импорт настроек') }}</button>
+      </div>
       <div class="row">
         <button @click="submitForm">{{ tr('Сохранить') }}</button>
         <button @click="closeForm">{{ tr('Отмена') }}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── отчёт по токенам: ПКМ «Статистика» у разговора или модели ─────────── -->
+  <div v-if="report.show" id="modal" @keydown.esc="closeReport">
+    <div class="modal-box" ref="reportBox">
+      <h2>{{ report.title }}</h2>
+      <div v-for="(l, i) in report.lines" :key="i" class="repline" :class="{ 'repline-gap': l === '' }">{{ l }}</div>
+      <div class="row">
+        <button @click="closeReport">{{ tr('Закрыть') }}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── настройки проекта: имя, рабочая папка (браузер путей с сервера), ──── -->
+  <!-- ── серверы/ящики/боты; секреты в списке замаскированы (🔑 = задан) ──── -->
+  <div v-if="projSettings.show" id="projdlg" @keydown.esc="projSettings.show = false">
+    <div class="modal-box proj-box">
+      <h2>{{ tr('Настройки проекта «{name}»', { name: currentProject?.name ?? '' }) }}</h2>
+
+      <div class="fld"><label>{{ tr('Имя') }}</label><input v-model="projSettings.name"></div>
+      <div class="fld">
+        <label>{{ tr('Рабочая папка') }}</label>
+        <div class="pathline">
+          <input v-model="projSettings.path">
+          <button :title="tr('Обзор папок компьютера')" @click="browseTo(projSettings.path || undefined)">📂</button>
+        </div>
+      </div>
+
+      <div v-if="projSettings.browse" id="dirbrowse">
+        <div class="dirnav">
+          <button :title="tr('Домашний каталог')" @click="browseTo()">🏠</button>
+          <button :disabled="!projSettings.browseParent" :title="tr('На уровень выше')" @click="browseUp">↑</button>
+          <span class="meta">{{ projSettings.browsePath }}</span>
+        </div>
+        <div v-if="projSettings.browseDrives.length" class="dirdrives">
+          <button v-for="d in projSettings.browseDrives" :key="d" @click="browseTo(d)">{{ d }}</button>
+        </div>
+        <div v-if="projSettings.browseError" class="errline">{{ projSettings.browseError }}</div>
+        <ul v-else class="dirlist">
+          <li v-for="d in projSettings.browseDirs" :key="d.path" @click="browseTo(d.path)">📁 {{ d.name }}</li>
+          <li v-if="!projSettings.browseDirs.length" class="reg-empty">{{ tr('подпапок нет') }}</li>
+        </ul>
+        <div class="row">
+          <button @click="browsePick">{{ tr('Выбрать эту папку') }}</button>
+          <button @click="projSettings.browse = false">{{ tr('Скрыть обзор') }}</button>
+        </div>
+      </div>
+
+      <div class="proj-secs">
+        <section>
+          <h3>{{ tr('Серверы') }} <button class="sec-add" :title="tr('Добавить сервер в проект')" @click="curReg && projectHostAdd(curReg)">＋</button></h3>
+          <ul class="reglist">
+            <li v-for="h in curReg?.hosts ?? []" :key="h.name">
+              <span>{{ h.name }}</span>
+              <span class="meta">{{ h.host }}{{ h.user ? ' · ' + h.user : '' }}{{ h.port ? ':' + h.port : '' }}{{ h.hasPassword ? ' · 🔑' : '' }}</span>
+              <span class="del" :title="tr('Изменить сервер')" @click="projectHostEdit(h)">✎</span>
+              <span class="del" :title="tr('Удалить сервер')" @click="curReg && projectHostDelete(curReg, h)">✕</span>
+            </li>
+            <li v-if="!(curReg?.hosts ?? []).length" class="reg-empty">{{ tr('пока пусто — «＋» добавит запись') }}</li>
+          </ul>
+        </section>
+        <section>
+          <h3>{{ tr('Почтовые ящики') }} <button class="sec-add" :title="tr('Добавить ящик в проект')" @click="curReg && projectMailAdd(curReg)">＋</button></h3>
+          <ul class="reglist">
+            <li v-for="m in curReg?.mails ?? []" :key="m.id">
+              <span>{{ m.id }}</span>
+              <span class="meta">{{ m.user }}{{ m.imap ? ' · ' + m.imap : '' }}{{ m.smtp ? ' · ' + m.smtp : '' }}{{ m.hasPassword ? ' · 🔑' : '' }}</span>
+              <span class="del" :title="tr('Изменить ящик')" @click="projectMailEdit(m)">✎</span>
+              <span class="del" :title="tr('Удалить ящик')" @click="projectMailDelete(m)">✕</span>
+            </li>
+            <li v-if="!(curReg?.mails ?? []).length" class="reg-empty">{{ tr('пока пусто — «＋» добавит запись') }}</li>
+          </ul>
+        </section>
+        <section>
+          <h3>{{ tr('Боты') }} <button class="sec-add" :title="tr('Добавить бота в проект')" @click="curReg && projectBotAdd(curReg)">＋</button></h3>
+          <ul class="reglist">
+            <li v-for="b in curReg?.messengers ?? []" :key="b.key">
+              <span>{{ b.key }}</span>
+              <span class="meta">{{ b.hasToken ? tr('токен задан 🔑') : tr('токена нет') }}</span>
+              <span class="del" :title="tr('Изменить бота')" @click="projectBotEdit(b)">✎</span>
+              <span class="del" :title="tr('Удалить бота')" @click="projectBotDelete(b)">✕</span>
+            </li>
+            <li v-if="!(curReg?.messengers ?? []).length" class="reg-empty">{{ tr('пока пусто — «＋» добавит запись') }}</li>
+          </ul>
+        </section>
+      </div>
+
+      <div class="row">
+        <button @click="saveProjectSettings">{{ tr('Сохранить') }}</button>
+        <button @click="projSettings.show = false">{{ tr('Отмена') }}</button>
       </div>
     </div>
   </div>

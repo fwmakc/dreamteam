@@ -13,7 +13,9 @@ export const contract: AdapterContract = {
     model: { type: 'string', desc: 'по умолчанию claude-sonnet-4-5' },
     baseUrl: { type: 'string', desc: 'по умолчанию https://api.anthropic.com' },
     maxTokens: { type: 'number', desc: 'потолок ответа (по умолчанию 2048)' },
+    contextWindow: { type: 'number', desc: 'Размер контекстного окна (токены)' },
     temperature: { type: 'number' },
+    thinking: { type: 'string', enum: ['enabled', 'disabled'], desc: 'размышления GLM (биллятся)' },
     cache: { type: 'boolean', desc: 'кэш промптов (по умолчанию включён)' },
     vision: { type: 'boolean', desc: 'модель видит картинки — тулу look (Claude мультимодален)' },
   },
@@ -49,6 +51,11 @@ export const anthropicFactory: ProviderFactory = (
   // Anthropic требует max_tokens в каждом запросе
   const defaultMaxTokens = num(config.maxTokens) ?? 2048;
   const cacheEnabled = config.cache !== false;
+  // размышления GLM (антропосовместимый эндпоинт z.ai): тело {thinking:{type}}.
+  // Только из карточки, не из ссылки: у Claude собственный формат thinking —
+  // {type, budget_tokens}, вслепую подставлять его нельзя.
+  const thinking =
+    config.thinking === 'enabled' || config.thinking === 'disabled' ? config.thinking : undefined;
 
   const provider: LLMProvider = {
     id,
@@ -106,6 +113,7 @@ export const anthropicFactory: ProviderFactory = (
           max_tokens: req.maxTokens ?? defaultMaxTokens,
           temperature: req.temperature ?? 0.7,
           stream: true,
+          ...(thinking ? { thinking: { type: thinking } } : {}),
           ...(systemField ? { system: systemField } : {}),
           messages: apiMessages,
         }),
@@ -116,12 +124,14 @@ export const anthropicFactory: ProviderFactory = (
         throw new Error(`HTTP ${res.status}: ${detail.slice(0, 300)}`);
       }
       const usage: RoundUsage = {};
+      let cacheWrite = 0; // токены, записанные в кэш промпта этим раундом
       for await (const data of sseData(res.body as unknown as AsyncIterable<Uint8Array>)) {
         if (!data) continue;
         let event: {
           type?: string;
           delta?: { type?: string; text?: unknown };
           error?: { message?: unknown };
+          usage?: { input_tokens?: unknown; output_tokens?: unknown; cache_read_input_tokens?: unknown };
           message?: { usage?: {
             input_tokens?: unknown;
             cache_read_input_tokens?: unknown;
@@ -143,12 +153,24 @@ export const anthropicFactory: ProviderFactory = (
           const u = event.message.usage;
           if (typeof u.input_tokens === 'number') usage.promptTokens = u.input_tokens;
           if (typeof u.cache_read_input_tokens === 'number') usage.cachedTokens = u.cache_read_input_tokens;
+          if (typeof u.cache_creation_input_tokens === 'number') cacheWrite = u.cache_creation_input_tokens;
+        } else if (event.type === 'message_delta' && typeof event.usage === 'object') {
+          // GLM на z.ai настоящий usage кладёт в message_delta (в message_start —
+          // нули), Anthropic — накопленный output_tokens; читаем оба места.
+          const u = event.usage;
+          if (typeof u.input_tokens === 'number') usage.promptTokens = u.input_tokens;
+          if (typeof u.output_tokens === 'number') usage.outputTokens = u.output_tokens;
+          if (typeof u.cache_read_input_tokens === 'number') usage.cachedTokens = u.cache_read_input_tokens;
         } else if (event.type === 'error') {
           throw new Error(String(event.error?.message ?? data.slice(0, 300)));
         } else if (event.type === 'message_stop') {
           break;
         }
       }
+      // Полный промпт = новые токены + кэш-чтение + кэш-запись: input_tokens у
+      // Anthropic кэш-токены не учитывает, а движок сравнивает сумму с окном
+      // контекста (openai-адаптер тоже включает кэш в prompt_tokens).
+      if (typeof usage.promptTokens === 'number') usage.promptTokens += (usage.cachedTokens ?? 0) + cacheWrite;
       onUsage?.(usage);
     },
   };

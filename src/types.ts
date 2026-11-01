@@ -111,6 +111,8 @@ export interface ChatMessage {
   authorRole?: string;
   text: string;
   ts: number;
+  /** файлы, прикреплённые к реплике (имена в inbox проекта) — только у пользователя */
+  attachments?: string[];
 }
 
 /** Разговор, сохраняемый в data/sessions/<id>.json */
@@ -148,6 +150,10 @@ export interface Session {
   usage?: SessionUsage;
   /** Та же статистика по каждой модели отдельно (id модели → счётчики) */
   usageByModel?: Record<string, SessionUsage>;
+  /** Насколько полон контекст после последнего раунда: промпт+ответ в токенах */
+  contextTokens?: number;
+  /** Какая модель дала эту оценку (её contextWindow — знаменатель индикатора) */
+  contextModel?: string;
 }
 
 /** Краткие сведения о разговоре для списка /sessions */
@@ -157,6 +163,14 @@ export interface SessionMeta {
   createdAt: number;
   updatedAt: number;
   count: number;
+  /** Накопительные токены (как /usage) — отчёт «Статистика…» в веб-оболочке */
+  usage?: SessionUsage;
+  /** Тот же срез по моделям: id → счётчики */
+  usageByModel?: Record<string, SessionUsage>;
+  /** Заполнение контекста последним раундом — индикатор в статус-барах */
+  contextTokens?: number;
+  /** Модель этой оценки (окно берётся из её карточки) */
+  contextModel?: string;
 }
 
 /** Универсальное сообщение для LLM */
@@ -206,6 +220,10 @@ export interface ManagerUpdateFields {
   prompt?: string;
   /** id модели строкой или объект-ссылка */
   model?: string | ModelRef;
+  /** Чем агент смотрит картинки (​```look): id строкой или ссылка; пустая строка — убрать */
+  vision?: string | ModelRef;
+  /** Image-модель агента: id строкой или ссылка; пустая строка — убрать */
+  image?: string | ModelRef;
   temperature?: number;
   /** Подпапка рабочей папки или абсолютный путь — блоки без префикса */
   workspace?: string;
@@ -251,7 +269,13 @@ export type ManagerAction =
   /** Токен бота в поле "messengers" project.json проекта */
   | { op: 'messenger.add'; key: 'telegram' | 'max'; token: string }
   /** Убрать бота из поля "messengers" project.json проекта */
-  | { op: 'messenger.remove'; key: 'telegram' | 'max' };
+  | { op: 'messenger.remove'; key: 'telegram' | 'max' }
+  /** Новая карточка models/<id>.json — поля как в /model new, provider обязателен */
+  | { op: 'model.new'; id: string; fields: Record<string, unknown> }
+  /** Правка карточки модели по ключам контракта провайдера (vision, maxTokens…) */
+  | { op: 'model.update'; id: string; fields: Record<string, unknown> }
+  /** Удалить карточку модели (основная, служебная и менеджерская защищены) */
+  | { op: 'model.delete'; id: string };
 
 /** Сервер в действии менеджера (project.host.add) */
 export interface ManagerHostSpec {
@@ -290,6 +314,35 @@ export interface LLMProvider {
    * «Token caching»); адаптер вызывает его один раз ближе к концу потока.
    */
   stream(req: StreamRequest, onUsage?: (usage: RoundUsage) => void): AsyncIterable<string>;
+  /**
+   * Лимиты тарифа/аккаунта (подписка coding-плана, кредиты…), если API их
+   * отдаёт. Необязательный метод: его отсутствие — «у провайдера нет лимитов».
+   * Ошибки сети/авторизации наружу не бросаются — возвращается null.
+   */
+  quota?(): Promise<ProviderQuota | null>;
+}
+
+/** Одно окно лимита: 5-часовой/недельный запас токенов, вызовы тулов… */
+export interface QuotaWindow {
+  /** стабильный id окна: '5h' | 'week' | 'month' | 'mcp' | … */
+  key: string;
+  kind: 'tokens' | 'credits' | 'calls' | 'time';
+  /** сколько ИСПОЛЬЗОВАНО, 0..100 (интерфейсы показывают остаток 100−used) */
+  usedPercent: number;
+  /** абсолютные значения в единицах окна, если API их отдаёт */
+  limit?: number;
+  remaining?: number;
+  /** epoch ms следующего сброса окна */
+  resetAt?: number;
+}
+
+/** Снимок лимитов провайдера на момент опроса. */
+export interface ProviderQuota {
+  /** тариф, если API сообщает ('lite' | 'pro' | 'max' | …) */
+  plan?: string;
+  windows: QuotaWindow[];
+  /** epoch ms момента опроса */
+  fetchedAt: number;
 }
 
 /** Статистика токенов раунда (что API сообщил; чего нет — undefined). */

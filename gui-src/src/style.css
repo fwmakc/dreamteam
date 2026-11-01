@@ -9,6 +9,7 @@
   --dim: #8a919e;
   --accent: #61afef;
   --ok: #98c379;
+  --warn: #e5c07b;
   --bad: #e06c75;
 }
 
@@ -68,6 +69,8 @@
 .file-link { color: var(--accent); text-decoration: underline; }
 
 /* ── модальная форма ────────────────────────────────────────── */
+/* 60 — выше мобильной шторки (40): форму открыли из шторки — она должна
+   быть видна, а не прятаться под ещё не закрытым сайдбаром */
 #modal {
   position: fixed;
   inset: 0;
@@ -75,7 +78,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 20;
+  z-index: 60;
 }
 .modal-box {
   width: min(480px, 92vw);
@@ -99,15 +102,83 @@
   font: inherit;
 }
 .modal-box .fld textarea { resize: vertical; }
+/* булево поле — чекбокс вместо инпута на всю ширину */
+.modal-box .fld.fld-chk input.chk {
+  width: 15px; height: 15px; padding: 0; margin: 2px 0 0; accent-color: var(--accent, #4a9eff); cursor: pointer;
+}
+/* зрячая модель в сайдбаре — ◉ рядом с id */
+.vision { color: var(--accent, #4a9eff); }
 .modal-box .row { display: flex; gap: 8px; margin-top: 14px; }
 .confirm-subject { color: var(--dim); margin: 0; font-size: 13px; }
+
+/* ── отчёт «Статистика…» (токены): строки итогов, пустая строка — отступ ── */
+.repline { line-height: 1.6; overflow-wrap: anywhere; }
+.repline-gap { height: 0.7em; }
+
+/* ── настройки проекта: реестры (серверы/ящики/боты) и браузер папок ────── */
+/* свой оверлей (не #modal): 59 — ниже модальных форм (60) — формы ✎/＋,
+   открытые из диалога, и подтверждение удаления рисуются ПОВЕРХ него */
+#projdlg {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 59;
+}
+.proj-box { width: min(640px, 94vw); }
+.proj-box h3 { margin: 14px 0 4px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.proj-box h3 .sec-add { background: none; border: none; color: var(--dim); cursor: pointer; font: inherit; padding: 0 2px; }
+.proj-box h3 .sec-add:hover { color: var(--accent); }
+.pathline { display: flex; gap: 6px; }
+.pathline input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font: inherit;
+}
+.pathline button { flex: none; }
+#dirbrowse {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 6px;
+  background: var(--panel2);
+}
+.dirnav { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.dirnav .meta { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dirdrives { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.dirlist { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.dirlist li {
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dirlist li:hover { background: var(--border); }
+.reglist { list-style: none; margin: 0; padding: 0; }
+.reglist li { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; min-width: 0; }
+.reglist li > span:first-child { flex: none; font-weight: 600; }
+.reglist .meta { flex: 1; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reglist .del { visibility: visible; cursor: pointer; color: var(--dim); padding: 0 4px; flex: none; }
+.reglist .del:hover { color: var(--bad); }
+.reg-empty { color: var(--dim); font-size: 12px; padding: 2px 0; cursor: default; }
 .side-err { margin: 4px 10px; font-size: 12px; }
 
 /* ── контекстное меню (правая кнопка мыши) ─────────────────────────────── */
-.ctx-overlay { position: fixed; inset: 0; z-index: 30; }
+/* 50 — выше мобильной шторки (40): меню по правой кнопке/долгому
+   нажатию на строке сайдбара не должно прятаться под ней */
+.ctx-overlay { position: fixed; inset: 0; z-index: 50; }
 .ctx-menu {
   position: fixed;
-  z-index: 31;
+  z-index: 51;
   min-width: 170px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -353,7 +424,7 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 /* свои сообщения — у правого края, пузырём */
 .msg.user { margin-left: auto; text-align: right; }
 .msg .head { font-weight: 600; margin-bottom: 2px; }
-.msg .txt { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg .txt { overflow-wrap: anywhere; }
 .msg.user .txt {
   background: var(--panel2);
   border: 1px solid var(--border);
@@ -361,15 +432,63 @@ button.bad { border-color: var(--bad); color: var(--bad); }
   padding: 6px 10px;
   display: inline-block;
 }
+/* прикреплённые файлы — чипы над пузырём (метки [имя] из текста убраны) */
+.msg.user .att-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+.att-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+}
+.att-chip:hover { border-color: var(--accent); color: var(--text); }
 .msg pre {
   background: #12141a;
   border: 1px solid var(--border);
   border-radius: 6px;
+  margin: 6px 0;
   padding: 8px 10px;
   overflow-x: auto;
   font: 12px/1.5 Consolas, monospace;
   white-space: pre-wrap;
 }
+/* markdown в репликах (md-it): абзацы, заголовки, списки, цитаты, таблицы */
+.msg .txt > :first-child { margin-top: 0; }
+.msg .txt > :last-child { margin-bottom: 0; }
+.msg p { margin: 0 0 6px; }
+.msg h1, .msg h2, .msg h3, .msg h4, .msg h5, .msg h6 { margin: 10px 0 6px; line-height: 1.35; }
+.msg h1 { font-size: 1.2em; }
+.msg h2 { font-size: 1.1em; }
+.msg h3, .msg h4, .msg h5, .msg h6 { font-size: 1.03em; }
+.msg ul, .msg ol { margin: 0 0 6px; padding-left: 1.5em; }
+.msg li { margin: 2px 0; }
+.msg li > ul, .msg li > ol { margin-bottom: 0; }
+.msg blockquote { margin: 0 0 6px; padding: 2px 10px; border-left: 2px solid var(--border); color: var(--dim); }
+.msg code {
+  background: #12141a;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  font: 12px Consolas, monospace;
+}
+.msg pre code { background: none; border: none; padding: 0; font: inherit; }
+.msg table { border-collapse: collapse; margin: 0 0 6px; font-size: 13px; }
+.msg th, .msg td { border: 1px solid var(--border); padding: 3px 8px; text-align: left; }
+.msg th { background: var(--panel2); font-weight: 600; }
+.msg hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.msg .txt a { color: var(--accent); text-decoration: underline; }
+.msg .txt img { max-width: 100%; }
 .msg .head .role { font-weight: 400; color: var(--dim); font-size: 12px; }
 
 .errline { color: var(--bad); margin-bottom: 10px; white-space: pre-wrap; }
@@ -440,19 +559,19 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 }
 #busy-label::before { content: "⏳ "; }
 
-/* накопленные вложения: чипы над строкой ввода, уходят с следующим сообщением */
+/* накопленные вложения: чипы внутри композера, уходят с следующим сообщением */
 #staged {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 18px 6px;
+  padding: 2px 4px 0;
 }
 #staged .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
-  background: var(--panel);
+  background: var(--panel2);
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text);
@@ -482,23 +601,157 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 }
 #refrow input:focus { outline: none; border-color: var(--accent); }
 
+/* ввод: один скруглённый композер — поле сверху, тулбар снизу; фокус
+   подсвечивает весь пузырь, полю своя рамка не нужна */
 #inputrow {
   display: flex;
-  gap: 8px;
-  padding: 10px 18px 14px;
-  align-items: flex-end;
-}
-#input {
-  flex: 1;
-  resize: none;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 18px 14px;
+  padding: 10px 12px 8px;
   background: var(--panel);
-  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 10px;
+}
+#inputrow:focus-within { border-color: var(--accent); }
+
+/* метрики под вводом — одна флекс-строка: контекст + квоты тарифа.
+   Шкала — CSS-полоска (.meter), заливка красится currentColor, т.е. цветом
+   своего сегмента: ok/warn/bad (контекст — по compressThreshold, квоты —
+   по самому низкому окну) */
+#metricsbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 22px;
+  row-gap: 3px;
+  padding: 4px 22px 10px;
+  font-size: 12px;
+  color: var(--dim);
+  font-family: ui-monospace, Consolas, monospace;
+}
+#ctxbar { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+#quotabar { display: inline-flex; align-items: center; gap: 14px; min-width: 0; }
+.qcap { font-weight: 700; }
+.qwin { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+#ctxbar.ok, #quotabar.ok { color: var(--ok); }
+#ctxbar.warn, #quotabar.warn { color: var(--warn); }
+#ctxbar.bad, #quotabar.bad { color: var(--bad); }
+.meter {
+  display: inline-block;
+  width: 90px;
+  height: 7px;
+  border-radius: 4px;
+  background: rgb(128 128 128 / 28%);
+  overflow: hidden;
+  flex: none;
+}
+.qwin .meter { width: 44px; }
+.meter .fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: currentColor;
+  transition: width 0.5s ease;
+}
+.input-bar { display: flex; align-items: center; gap: 6px; }
+.input-tools { display: flex; align-items: center; gap: 2px; flex: 1; }
+#btn-attach,
+#btn-ref {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--dim);
+  font-size: 16px;
+}
+#btn-attach:hover:not(:disabled),
+#btn-ref:hover:not(:disabled) { background: var(--panel2); color: var(--text); }
+#input {
+  width: 100%;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  padding: 2px 6px;
   font: inherit;
   /* лимит высоты ставит autosize() из настроек (maxInputRows); до него — без скролла */
   overflow-y: hidden;
 }
-#input:focus { outline: none; border-color: var(--accent); }
-#btn-send { padding: 8px 14px; }
+#input:focus { outline: none; }
+#btn-send {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #16181d;
+  font-size: 17px;
+  line-height: 1;
+}
+#btn-send:hover:not(:disabled) { filter: brightness(1.12); }
+
+/* ── мобильный вид ──────────────────────────────────────────── */
+/* на десктопе ☰ и затемнение не нужны; touch-action гасит двойной
+   тап-зум, чтобы тапы по кнопкам не казались «задумчивыми» */
+#btn-menu { display: none; }
+#sb-backdrop { display: none; }
+button { touch-action: manipulation; }
+
+@media (max-width: 820px) {
+  html, body { height: 100dvh; } /* адресная строка телефона: 100vh выше экрана */
+
+  #topbar { flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px; }
+  #btn-menu { display: inline-block; }
+
+  /* сайдбар — выдвижная шторка поверх чата; !important перекрывает
+     inline width из ручки ресайза */
+  #sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: min(84vw, 340px) !important;
+    min-width: 0 !important;
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+    -webkit-touch-callout: none;
+    user-select: none; /* иначе долгое нажатие на Android запускает выделение текста */
+  }
+  .drawer-open #sidebar {
+    transform: none;
+    box-shadow: 0 0 24px rgb(0 0 0 / 45%);
+  }
+  #sb-backdrop.show {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgb(0 0 0 / 40%);
+  }
+  #sb-resize { display: none; }
+
+  #chat { padding: 10px 12px; }
+  .msg { max-width: none; }
+  #hints { margin: 0 12px 6px; }
+  #statusbar { flex-wrap: wrap; padding: 4px 12px; font-size: 12px; }
+  #refrow { padding-left: 12px; padding-right: 12px; }
+  #inputrow { margin: 0 10px 10px; padding: 8px 10px 6px; }
+  #metricsbar { padding: 2px 14px 8px; column-gap: 14px; }
+  .meter { width: 64px; }
+  .qwin .meter { width: 36px; }
+  /* под палец: тач-цель иконок и отправки — 36px */
+  #btn-attach, #btn-ref, #btn-send { width: 36px; height: 36px; }
+
+  /* 16px в полях: меньше — iOS фокусом поднимает зум */
+  #input, #refrow input, #auth input,
+  .modal-box input, .modal-box textarea, .modal-box select { font-size: 16px; }
+
+  /* пункты контекстного меню — под палец, а не под курсор мыши */
+  .ctx-menu { max-width: 90vw; }
+  .ctx-menu button { padding: 10px 12px; font-size: 14px; }
+}

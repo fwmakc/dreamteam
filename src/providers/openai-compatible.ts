@@ -16,6 +16,7 @@ export const contract: AdapterContract = {
     model: { type: 'string', required: true, desc: 'имя модели у API' },
     apiKey: { type: 'string', desc: 'ключ API; для локальных API можно опустить' },
     maxTokens: { type: 'number', desc: 'потолок ответа' },
+    contextWindow: { type: 'number', desc: 'Размер контекстного окна (токены)' },
     temperature: { type: 'number', desc: '0 — строже, 1 — креативнее' },
     thinking: { type: 'string', enum: ['enabled', 'disabled'], desc: 'размышления GLM (биллятся)' },
     reasoning: { type: 'string', enum: ['minimal', 'low', 'medium', 'high', 'max'], desc: 'глубина размышлений' },

@@ -12,8 +12,9 @@ export interface SettingsConfig {
   /** Логическая ширина экрана (обрезается по ширине терминала) */
   width: number;
   /** Язык общения команды: попадает в системные промты как есть
-   *  («russian», «ru-RU», «русский» — нейросети поймут любую запись) */
-  language: string;
+   *  («russian», «ru-RU», «русский» — нейросети поймут любую запись);
+   *  не задан — команда общается на языке интерфейса (ui) */
+  language?: string;
   /** Язык интерфейса (en, ru, zh или свой из ~/.dreamteam/lang/<id>.json);
    *  отсутствует поле — русский (интерфейс старых установок) */
   ui: string;
@@ -32,6 +33,8 @@ export interface SettingsConfig {
   runTimeoutMs: number;
   /** До скольких символов обрезается вывод команды */
   maxOutputChars: number;
+  /** Порог автосжатия контекста, % заполнения окна модели (10–99) */
+  compressThreshold: number;
   /** Модель по умолчанию: ссылка {id, temperature…} — агенты без своей модели берут её */
   model?: ModelRef;
   /** Служебная модель (модератор, нейминг, сжатие, память); пусто — model */
@@ -78,6 +81,13 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   if (maxOutputChars !== undefined && (typeof maxOutputChars !== 'number' || maxOutputChars <= 0)) {
     throw new Error(`${file}: поле "maxOutputChars" — положительное число символов`);
   }
+  const compressThreshold = raw.compressThreshold;
+  if (
+    compressThreshold !== undefined &&
+    (typeof compressThreshold !== 'number' || !Number.isInteger(compressThreshold) || compressThreshold < 10 || compressThreshold > 99)
+  ) {
+    throw new Error(`${file}: поле "compressThreshold" — целое число от 10 до 99 (процент заполнения окна)`);
+  }
   const language = raw.language;
   if (language !== undefined && (typeof language !== 'string' || language.trim() === '')) {
     throw new Error(`${file}: поле "language" — непустая строка («russian», «ru-RU», «русский» — как угодно)`);
@@ -100,7 +110,7 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   const serviceModel = checkModelRef(file, 'serviceModel', raw.serviceModel);
   return {
     width: termCols > 0 ? Math.min(width, termCols) : width,
-    language: typeof language === 'string' ? language.trim() : 'русский',
+    language: typeof language === 'string' ? language.trim() : undefined,
     ui: typeof ui === 'string' ? ui.trim() : 'ru',
     autoMessage: typeof autoMessage === 'string' ? autoMessage.trim() : 'Решите вопрос на своё усмотрение.',
     maxTurns: typeof maxTurns === 'number' ? maxTurns : 3,
@@ -109,6 +119,7 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
     screen: screen !== false,
     runTimeoutMs: typeof runTimeoutMs === 'number' ? runTimeoutMs : 180000,
     maxOutputChars: typeof maxOutputChars === 'number' ? maxOutputChars : 4000,
+    compressThreshold: typeof compressThreshold === 'number' ? compressThreshold : 85,
     model,
     serviceModel,
   };

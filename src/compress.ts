@@ -30,24 +30,40 @@ export function contextSlice(session: Session): ChatMessage[] {
 /** Сколько последних tool-результатов не сжимаем (свежие нужны агенту в полном виде). */
 const TOOL_KEEP_FULL = 2;
 
+/** Опции порогового сжатия: заполнение контекста последним раундом и порог */
+export interface CompressOpts {
+  /** Насколько полон контекст (промпт+ответ последнего раунда, токены) */
+  tokens?: number;
+  /** Размер окна модели — минимум среди участников разговора */
+  window?: number;
+  /** Порог автосжатия, % заполнения (settings.compressThreshold) */
+  threshold?: number;
+}
+
 /**
  * Периодическое сжатие контекста: когда старых сообщений накопилось много,
  * сворачивает их в конспект (LLM-вызов через провайдера модератора) и
  * запоминает границу. Полную историю при этом никто не удаляет — она остаётся
  * в session.messages и в транскрипте, уменьшается только то, что уходит в LLM.
- * Возвращает true, если разговор был сжат.
+ * Триггер — заполнение контекста (opts: tokens/window ≥ threshold %); без
+ * данных об окне — прежний счётчик сообщений. Возвращает true, если сжато.
  */
 export async function compressIfNeeded(
   session: Session,
   provider: LLMProvider,
   signal?: AbortSignal,
   userName = 'Пользователь',
+  opts?: CompressOpts,
 ): Promise<boolean> {
   const keepFrom = session.messages.length - KEEP_RECENT;
   if (keepFrom <= 0) return false; // разговор короче окна: сжимать нечего
   const from = session.compressedUpTo ?? 0;
   const skipped = session.messages.slice(from, keepFrom);
-  if (skipped.length < COMPRESS_BATCH) return false;
+  if (skipped.length === 0) return false;
+  const pct =
+    opts?.tokens && opts?.window ? Math.ceil((opts.tokens / opts.window) * 100) : null;
+  const byFill = pct !== null && pct >= (opts?.threshold ?? 85);
+  if (!byFill && skipped.length < COMPRESS_BATCH) return false;
 
   const dialog = skipped
     .map((m) => {

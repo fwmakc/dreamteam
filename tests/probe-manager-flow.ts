@@ -46,10 +46,11 @@ const { BUILTIN_TOOL_DESCS, BUILTIN_TOOL_IDS } = await import('../src/tools-api.
 mkdirSync(join(home, 'models'), { recursive: true });
 writeFileSync(join(home, 'models', 'mock.json'), JSON.stringify({ provider: 'mock' }, null, 2) + '\n');
 writeFileSync(join(home, 'models', 'claude.json'), JSON.stringify({ provider: 'mock' }, null, 2) + '\n');
-// язык общения задаём до старта: ensureHome не перезаписывает существующий settings
+// язык общения НЕ задаём: пустой — следует языку интерфейса (ui по умолчанию
+// ru → «русский»); ensureHome не перезаписывает существующий settings
 writeFileSync(
   join(home, 'settings.json'),
-  JSON.stringify({ width: 100, language: 'english', model: { id: 'mock' } }, null, 2) + '\n',
+  JSON.stringify({ width: 100, model: { id: 'mock' } }, null, 2) + '\n',
 );
 // свой тул на полке дома — должен попасть в реестр тулов для менеджера
 mkdirSync(join(home, 'tools'), { recursive: true });
@@ -130,7 +131,7 @@ function lastManagerMessage(): string {
   await askManager('Слушаю.', 'докладывай');
   const req = requests.at(-1)!;
   check('снимок: system начинается с промта менеджера', req.system?.startsWith(MANAGER_PROMPT) ?? false);
-  check('снимок: язык общения в промте менеджера', req.system?.includes('отвечай строго на языке: english') ?? false, req.system?.slice(-80));
+  check('снимок: пустой язык общения — языка интерфейса (русский)', req.system?.includes('отвечай строго на языке: русский') ?? false, req.system?.slice(-80));
   check('снимок: пустые участники — «вся команда»', req.user?.includes('В этом чате: вся команда') ?? false, req.user);
   check('снимок: разговоры с id и текущим', (req.user?.includes('сообщ.') && req.user?.includes('(текущий)')) ?? false);
   check('снимок: без проектов блока нет', !req.user?.includes('Проекты (реестр серверов для ssh)'), String(req.user?.slice(0, 80)));
@@ -413,7 +414,7 @@ function lastManagerMessage(): string {
   const managersBefore = app.session!.messages.filter((m) => m.authorId === 'manager').length;
   await engine.handleMessage('привет команде, как продвигается?', signal());
   const agentReq = requests.filter((r) => !r.system?.startsWith(MANAGER_PROMPT)).at(-1);
-  check('роутинг: язык общения в промте агента', agentReq?.system?.includes('отвечай строго на языке: english') ?? false, agentReq?.system?.slice(-80));
+  check('роутинг: язык общения (пустой — из интерфейса) в промте агента', agentReq?.system?.includes('отвечай строго на языке: русский') ?? false, agentReq?.system?.slice(-80));
   const last = app.session!.messages.at(-1)!;
   check('роутинг: без @менеджер отвечает участник', last.authorId === 'katya', JSON.stringify({ authorId: last.authorId }));
   check('роутинг: менеджер молчал', app.session!.messages.filter((m) => m.authorId === 'manager').length === managersBefore);

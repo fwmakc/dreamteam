@@ -16,8 +16,9 @@
  * файл — громкая ошибка при старте, как у остальных конфигов.
  *
  * Не переводится (осознанно): системные промты агентов и менеджера (языком
- * ответов управляет settings.language), названия аргументов команд (часть
- * синтаксиса), диагностические ошибки конфигов (fail-fast слой).
+ * ответов управляет settings.language; пустой — язык интерфейса), названия
+ * аргументов команд (часть синтаксиса), диагностические ошибки конфигов
+ * (fail-fast слой).
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -134,6 +135,24 @@ export function knownLanguages(homeDir: string): LanguageInfo[] {
   const builtIn = Object.entries(BUILT_IN).map(([id, v]) => ({ id, name: v.name, builtIn: true }));
   const external = loadExternalLanguages(homeDir).map((l) => ({ id: l.id, name: l.name, builtIn: false }));
   return [...builtIn, ...external];
+}
+
+/** Язык общения по id языка интерфейса — фолбэк пустого settings.language
+ *  (ядро, одинаково для TUI и веб-оболочки). Встроенные — как принято в
+ *  промтах: «русский», english, 中文; свой язык — его name из lang/<id>.json
+ *  («Deutsch»); неизвестный id — сам id: нейросети понятны и такие записи,
+ *  а битый lang/ уронит applyLocale при старте раньше. */
+const CONVERSATION_NAMES: Record<string, string> = { ru: 'русский', en: 'english', zh: '中文' };
+export function conversationLanguage(id: string, homeDir: string): string {
+  const name = CONVERSATION_NAMES[id];
+  if (name) return name;
+  try {
+    const own = loadExternalLanguages(homeDir).find((l) => l.id === id);
+    if (own) return own.name;
+  } catch {
+    // битый файл в lang/ — громко упадёт applyLocale при старте
+  }
+  return id;
 }
 
 /**

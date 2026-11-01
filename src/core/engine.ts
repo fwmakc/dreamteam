@@ -42,12 +42,14 @@ import {
   type ToolRunContext,
 } from '../tools-api.js';
 import { buildToolset, loadHouseCards, loadUserTools } from '../tools-registry.js';
-import { operationHints, runOperationText } from './operations.js';
+import { operationHints, reloadModels, runOperationText } from './operations.js';
 import { basename, join, resolve } from 'node:path';
 // все пути приложения — только в paths.ts (PROJECT_DIR и др. — живые привязки)
 import {
   AGENTS_DIR,
+  DT_HOME,
   MEMORY_FILE,
+  MODELS_DIR,
   PROJECTS_DIR,
   PROJECT_DIR,
   PROJECT_FILE,
@@ -73,7 +75,7 @@ import {
   reflectSessionMemory,
   saveTeamMemory,
 } from '../memory.js';
-import { instantiateModel, resolveRefId, type ImageProviderStatus, type ProviderStatus } from '../providers/registry.js';
+import { instantiateModel, resolveRefId, addModelConfig, updateModelConfig, removeModelConfig, type ImageProviderStatus, type ProviderStatus } from '../providers/registry.js';
 import { SessionStore } from '../sessions.js';
 import { loadSettings, type SettingsConfig } from '../settings.js';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -92,9 +94,10 @@ import type {
   UserProfile,
 } from '../types.js';
 import type { Presenter, SpeakerRef } from './presenter.js';
-import { t, tf } from '../i18n.js';
+import { t, tf, conversationLanguage } from '../i18n.js';
 
-/** Общие правила агента; язык общения — из settings.json, в промт идёт как есть. */
+/** Общие правила агента; язык общения — из settings.json, в промт идёт как есть
+ *  (пустой settings.language — языка интерфейса: conversationLanguage). */
 const commonRules = (language: string) =>
   `Общие правила: отвечай строго на языке: ${language}, от первого лица, коротко и живо (обычно 2–5 предложений), ` +
   'без заголовков и списков, если тебя прямо не просят. Не выходи из роли и не упоминай, что ты ИИ. ' +
@@ -244,7 +247,8 @@ export class Engine {
   /** Очередь фоновых вливаний: закрывают чаты подряд — merges не перетирают друг друга. */
   private flushChain: Promise<void> = Promise.resolve();
 
-  /** Язык общения из settings.json — перечитывается каждый раунд (как профиль). */
+  /** Язык общения из settings.json; пустой — языка интерфейса. Перечитывается
+   *  каждый раунд и перед приветствием менеджера (как профиль). */
   private language = 'русский';
 
   /** Автономный режим: вопросы человеку решаются сами, раунды продолжаются. */
@@ -318,6 +322,28 @@ export class Engine {
   /** Служебная модель (модератор, нейминг, сжатие, память); пусто — основная. */
   private serviceModel(): LLMProvider {
     return this.resolveProvider(this.app.settings.serviceModel);
+  }
+
+  /** Уровень контекста после раунда: промпт+ответ и модель-автор оценки —
+   *  для индикатора в статус-барах и порогового сжатия. */
+  private touchContext(session: Session, usage: RoundUsage | undefined, providerId: string): void {
+    if (!usage) return;
+    session.contextTokens = (usage.promptTokens ?? 0) + (usage.outputTokens ?? 0);
+    session.contextModel = providerId;
+  }
+
+  /** Самое тесное окно среди моделей разговора (min) — знаменатель порога
+   *  сжатия: если не переполнилось оно, не переполнятся и остальные. */
+  private minContextWindow(session: Session): number | undefined {
+    const ids = new Set(Object.keys(session.usageByModel ?? {}));
+    if (this.app.settings.model?.id) ids.add(this.app.settings.model.id);
+    if (session.contextModel) ids.add(session.contextModel);
+    const wins: number[] = [];
+    for (const id of ids) {
+      const w = this.app.models.get(id)?.config?.contextWindow;
+      if (typeof w === 'number' && w > 0) wins.push(w);
+    }
+    return wins.length > 0 ? Math.min(...wins) : undefined;
   }
 
   /** Глаза и руки агентов: vision-модель для look и image-модель для image. */
@@ -576,7 +602,7 @@ export class Engine {
   // ── раунд ────────────────────────────────────────────────────────────────
 
   /** Реплика пользователя: весь раунд под одним signal (Esc/Ctrl+C у оболочки). */
-  async handleMessage(text: string, signal: AbortSignal): Promise<void> {
+  async handleMessage(text: string, signal: AbortSignal, files: string[] = []): Promise<void> {
     // команды исполняет ядро: один набор для терминала, сети и менеджера;
     // текст команды в историю разговора не пишется
     if (text.startsWith('/')) {
@@ -606,8 +632,10 @@ export class Engine {
     // раунд, пока не кончатся ходы (лимит) или авто-режим не выключат
     let current = text;
     let turns = 0;
+    let firstRound = true; // прикреплённые файлы едут с настоящей репликой, не с auto-сообщением
     while (current !== null) {
-      await this.runRound(current, team, signal);
+      await this.runRound(current, team, signal, firstRound ? files : []);
+      firstRound = false;
       if (!this.autoMode || this.autoLeft <= 0 || signal.aborted) {
         if (this.autoMode && this.autoLeft <= 0 && this.autoMode) {
           this.autoMode = false;
@@ -620,14 +648,15 @@ export class Engine {
     }
   }
 
-  private async runRound(text: string, fullTeam: Agent[], signal: AbortSignal): Promise<void> {
+  private async runRound(text: string, fullTeam: Agent[], signal: AbortSignal, files: string[] = []): Promise<void> {
     const { session, store } = requireProject(this.app);
     // профиль читаем каждый раунд: правки config/user.json подхватываются на лету
     const profile = loadUserProfile(USER_FILE);
     this.app.profile = profile;
-    // язык общения, автоответ, лимит отвечающих — из settings.json, на лету
+    // язык общения, автоответ, лимит отвечающих — из settings.json, на лету;
+    // язык общения пустой — команда говорит на языке интерфейса
     const ui = loadSettings(SETTINGS_FILE, 0);
-    this.language = ui.language;
+    this.language = ui.language ?? conversationLanguage(ui.ui, DT_HOME);
     this.autoMessage = ui.autoMessage;
     this.maxTurns = ui.maxTurns;
     // тулы тоже: переимпорт tools/*.ts и свежие карточки — без перезапуска
@@ -666,7 +695,10 @@ export class Engine {
 
     const userText = cleaned || (attachments.length > 0 ? 'Ознакомься с приложенным конспектом' : '');
     if (!userText) return;
-    session.messages.push({ authorId: 'user', authorName: 'Вы', text: userText, ts: Date.now() });
+    const userMsg: ChatMessage = { authorId: 'user', authorName: 'Вы', text: userText, ts: Date.now() };
+    // метки [имя] в тексте остаются (агенты ищут файлы в inbox по ним), список — рядом
+    if (files.length) userMsg.attachments = files;
+    session.messages.push(userMsg);
     if (session.title === 'Новый разговор') {
       const flat = userText.replace(/\s+/g, ' ');
       session.title = flat.slice(0, 42) + (flat.length > 42 ? '…' : '');
@@ -694,7 +726,11 @@ export class Engine {
     const compressing = this.presenter.busy(t('Проверяю длину разговора…'));
     let compressed = false;
     try {
-      compressed = await compressIfNeeded(session, moderator, signal, profile.name);
+      compressed = await compressIfNeeded(session, moderator, signal, profile.name, {
+        tokens: session.contextTokens,
+        window: this.minContextWindow(session),
+        threshold: ui.compressThreshold,
+      });
     } catch (err) {
       if (signal.aborted) return;
       this.presenter.notice(tf('  … не удалось сжать историю, продолжаю как есть: {err}', { err: err instanceof Error ? err.message : String(err) }));
@@ -780,6 +816,7 @@ export class Engine {
         bump(session.usage ?? (session.usage = { promptTokens: 0, cachedTokens: 0, outputTokens: 0, rounds: 0 }));
         const byModel = session.usageByModel ?? (session.usageByModel = {});
         bump(byModel[provider.id] ?? (byModel[provider.id] = { promptTokens: 0, cachedTokens: 0, outputTokens: 0, rounds: 0 }));
+        this.touchContext(session, usage, provider.id);
       }
       if (full.trim()) {
         session.messages.push({
@@ -860,6 +897,12 @@ export class Engine {
               })),
               operations: operationHints(),
               houseTools: this.houseTools(),
+              models: [...this.app.models.entries()].map(([id, s]) => ({
+                id,
+                provider: String(s.config?.provider ?? ''),
+                vision: s.vision === true,
+                main: id === this.app.settings.model?.id || id === this.app.mgr.model.id,
+              })),
               appVersion: appVersion() || undefined,
             }),
           },
@@ -884,6 +927,11 @@ export class Engine {
           total: (usage.promptTokens ?? usage.cachedTokens ?? 0).toLocaleString('ru-RU'),
         }),
       );
+    }
+    // контекст растёт и от менеджерского хода (приветствие, роутинг) — фиксируем сразу
+    if (usage) {
+      this.touchContext(session, usage, provider.id);
+      store.save(session);
     }
     if (signal.aborted) {
       this.presenter.notice(t('  ⏹ Прервано (Esc).'));
@@ -935,6 +983,25 @@ export class Engine {
         return addTeamAgent(AGENTS_DIR, action, this.app.models);
       case 'team.update':
         return updateTeamAgent(AGENTS_DIR, action.id, action.fields, this.app.models);
+      case 'model.new':
+      case 'model.update': {
+        // тот же исполнитель, что у /model new|update: контракт валидирует
+        // карточку и приводит строковые true|false/числа; карта перечитывается
+        const report = action.op === 'model.new'
+          ? addModelConfig(MODELS_DIR, action.id, action.fields)
+          : updateModelConfig(MODELS_DIR, action.id, action.fields);
+        reloadModels(this);
+        return report;
+      }
+      case 'model.delete': {
+        // те же защищённые, что у /model delete: основная, служебная, менеджерская
+        const s = this.app.settings;
+        const protectedIds = [s.model?.id, s.serviceModel?.id, this.app.mgr.model.id]
+          .filter((x): x is string => Boolean(x));
+        const report = removeModelConfig(MODELS_DIR, action.id, protectedIds);
+        reloadModels(this);
+        return report;
+      }
       case 'chat.add': {
         const res = this.addToChat(action.who, fullTeam);
         if (!res.changed) return res.text;
@@ -1365,6 +1432,10 @@ export class Engine {
 
   /** Реплика-приветствие менеджера в новом (пустом) разговоре. */
   async welcomeManager(signal: AbortSignal): Promise<void> {
+    // язык — свежий из settings.json (пустой — языка интерфейса): приветствие
+    // идёт до первого раунда, поле по-другому остаётся с зашитым «русский»
+    const { language, ui } = loadSettings(SETTINGS_FILE, 0);
+    this.language = language ?? conversationLanguage(ui, DT_HOME);
     let team: Agent[] = [];
     try {
       team = this.team();

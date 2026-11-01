@@ -105,11 +105,17 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   bad({ width: 80, maxInputRows: 0 }, 'maxInputRows', 'maxInputRows=0');
   bad({ width: 80, maxInputRows: 21 }, 'maxInputRows', 'maxInputRows=21');
   bad({ width: 80, maxInputRows: 2.5 }, 'maxInputRows', 'maxInputRows=2.5');
+  bad({ width: 80, compressThreshold: 0 }, 'compressThreshold', 'compressThreshold=0');
+  bad({ width: 80, compressThreshold: 100 }, 'compressThreshold', 'compressThreshold=100');
+  bad({ width: 80, compressThreshold: 2.5 }, 'compressThreshold', 'compressThreshold=2.5');
   bad({ width: 80, workspace: 'ws' }, 'workspace', 'workspace удалён');
-  // поле не задано — дефолт 8
+  // поле не задано — дефолты 8 и 85
   writeFileSync(f, JSON.stringify({ width: 80 }));
   const def = loadSettings(f, 100);
   check('settings: maxInputRows по умолчанию 8', def.maxInputRows === 8, String(def.maxInputRows));
+  check('settings: compressThreshold по умолчанию 85', def.compressThreshold === 85, String(def.compressThreshold));
+  writeFileSync(f, JSON.stringify({ width: 80, compressThreshold: 90 }));
+  check('settings: compressThreshold читается', loadSettings(f, 100).compressThreshold === 90);
   let missing = '';
   try {
     loadSettings(join(tmp, 'settings.nope.json'), 100);
@@ -132,21 +138,21 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   scr.start();
   // мышиный режим: кнопки + SGR-расширение (в e2e не проверить — ConPTY их глотает)
   check('screen: мышь включена при старте', buf.includes('\x1b[?1000h') && buf.includes('\x1b[?1006h'), JSON.stringify(buf.slice(0, 120)));
-  // 2 строки ввода → relayout: hintsTop=24-3+1=22, inputTop=18, chatBot=15 (зазор TOP_PAD)
+  // 2 строки ввода → relayout: hintsTop=24-4+1=21, inputTop=17, chatBot=14 (зазор TOP_PAD)
   buf = '';
   scr.setInput(['Ты > ', 'продолжение'], 0, 5);
   const st = scr as unknown as { chatBot: number; hintsTop: number; inputTop: number; paneRow: number; chat: string[] };
-  check('screen: chatBot=15', st.chatBot === 15, String(st.chatBot));
-  check('screen: hintsTop=22', st.hintsTop === 22, String(st.hintsTop));
-  check('screen: inputTop=18', st.inputTop === 18, String(st.inputTop));
-  check('screen: scroll region', buf.includes('\x1b[1;15r'), JSON.stringify(buf.slice(0, 80)));
-  // стрим: живая строка копится и рисуется в последней строке панели (K=1, панель 1..16)
+  check('screen: chatBot=14', st.chatBot === 14, String(st.chatBot));
+  check('screen: hintsTop=21', st.hintsTop === 21, String(st.hintsTop));
+  check('screen: inputTop=17', st.inputTop === 17, String(st.inputTop));
+  check('screen: scroll region', buf.includes('\x1b[1;14r'), JSON.stringify(buf.slice(0, 80)));
+  // стрим: живая строка копится и рисуется в последней строке панели (K=1, панель 1..15)
   buf = '';
-  scr.setInput(['Ты > '], 0, 5); // обратно 1 строка → relayout, paneH=16
+  scr.setInput(['Ты > '], 0, 5); // обратно 1 строка → relayout, paneH=15
   buf = '';
   scr.push('При');
   scr.push('вет');
-  check('screen: живая строка копится', /\x1b\[16;1H\x1b\[2KПривет/.test(buf), JSON.stringify(buf.slice(-60)));
+  check('screen: живая строка копится', /\x1b\[15;1H\x1b\[2KПривет/.test(buf), JSON.stringify(buf.slice(-60)));
   buf = '';
   scr.push(' и ещё длинный хвост, который точно шире сорока колонок экрана\n');
   const chunks = buf.split('\x1b[');
@@ -162,22 +168,22 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   scr.push('слово '.repeat(30)); // ~180 символов → 5 строк по ширине 40
   const livePainted = [...buf.matchAll(/\x1b\[(\d+);1H\x1b\[2K([^\x1b][^\x1b]*)/g)]
     .map((m) => ({ row: Number(m[1]), text: m[2] }))
-    .filter((x) => x.text.trim() !== '' && x.row >= 1 && x.row <= 16);
+    .filter((x) => x.text.trim() !== '' && x.row >= 1 && x.row <= 15);
   check('stream: длинная строка — не меньше 5 нижних строк', livePainted.length >= 5, JSON.stringify(livePainted.map((x) => x.row)));
   check(
     'stream: живой блок прижат к низу панели',
-    livePainted[livePainted.length - 1]?.row === 16 && livePainted.slice(-5).map((x) => x.row).join(',') === '12,13,14,15,16',
+    livePainted[livePainted.length - 1]?.row === 15 && livePainted.slice(-5).map((x) => x.row).join(',') === '11,12,13,14,15',
     JSON.stringify(livePainted.map((x) => x.row)),
   );
   // --- выделение по живым строкам стрима ---
-  scr.selMouseDown(3, 16); // низ живого блока (строки 12..16)
-  scr.selMouseDrag(30, 12); // протянули через весь блок
+  scr.selMouseDown(3, 15); // низ живого блока (строки 11..15)
+  scr.selMouseDrag(30, 11); // протянули через весь блок
   const liveSel = scr.selectedText();
   check('stream: выделение по живым строкам', liveSel.trim().length > 0 && liveSel.includes('\n'), JSON.stringify(liveSel));
   check('stream: живое выделение — 5 строк', liveSel.split('\n').length === 5, String(liveSel.split('\n').length));
   scr.clearSelection();
-  scr.selMouseDown(3, 15);
-  scr.selMouseDrag(30, 11);
+  scr.selMouseDown(3, 14);
+  scr.selMouseDrag(30, 10);
   check('stream: живое выделение есть', scr.hasSelection(), '');
   scr.push('хвост\n'); // стрим завершился — виртуальные строки ушли в chat[]
   check('stream: коммит снял живое выделение', !scr.hasSelection() && scr.selectedText() === '', JSON.stringify(scr.selectedText()));
@@ -185,7 +191,7 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   // hints и статус
   buf = '';
   scr.setHints(['подсказка']);
-  check('screen: подсказки в своей зоне', buf.includes('\x1b[22;1H'), JSON.stringify(buf.slice(0, 40)));
+  check('screen: подсказки в своей зоне', buf.includes('\x1b[21;1H'), JSON.stringify(buf.slice(0, 40)));
   buf = '';
   scr.setStatus('⋯ думаю');
   check('screen: статус в нижней строке зоны', buf.includes('\x1b[24;1H'), JSON.stringify(buf.slice(0, 40)));
@@ -193,12 +199,12 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   scr.push('строка в чате один\n');
   scr.push('строка в чате два\n');
   buf = '';
-  scr.setOverlay(['@Катя', '@Ника', '@Сергей', '@Виктор']); // 4 строки → top=20
-  check('screen: всплывашка под вводом', buf.includes('\x1b[20;1H\x1b[2K@Катя'), JSON.stringify(buf.slice(0, 120)));
+  scr.setOverlay(['@Катя', '@Ника', '@Сергей', '@Виктор']); // 4 строки → top=19
+  check('screen: всплывашка под вводом', buf.includes('\x1b[19;1H\x1b[2K@Катя'), JSON.stringify(buf.slice(0, 120)));
   buf = '';
   scr.setOverlay(null);
-  check('screen: закрытие перерисовало подсказки', buf.includes('\x1b[22;1H\x1b[2Kподсказка'), JSON.stringify(buf.slice(0, 200)));
-  // статус поверх открытой всплывашки рисуется только ниже неё (строка 24), зоны 22..23 не трогаются
+  check('screen: закрытие перерисовало подсказки', buf.includes('\x1b[21;1H\x1b[2Kподсказка'), JSON.stringify(buf.slice(0, 200)));
+  // статус поверх открытой всплывашки рисуется только ниже неё (строка 24), зоны 21..22 не трогаются
   scr.setOverlay(['@Катя', '@Ника', '@Сергей', '@Виктор']);
   buf = '';
   scr.setStatus('⋯ думаю');
@@ -219,7 +225,7 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   (scr as unknown as { height: number }).height = 24;
   check('margin: внутренняя ширина 36', scr.inner === 36, String(scr.inner));
   scr.start();
-  check('margin: scroll region 3..16', buf.includes('\x1b[3;16r'), JSON.stringify(buf.slice(0, 80)));
+  check('margin: scroll region 3..15', buf.includes('\x1b[3;15r'), JSON.stringify(buf.slice(0, 80)));
   buf = '';
   scr.setInput(['Ты > '], 0, 5);
   const st = scr as unknown as {
@@ -230,18 +236,18 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
     paneRow: number;
     chat: string[];
   };
-  // 24 строки, margin 2 сверху: чат в строках 3..16, ввод 19, подсказки 22..24
+  // 24 строки, margin 2 сверху: чат в строках 3..15, ввод 18, подсказки 21..24
   check('margin: chatTop=3', st.chatTop === 3, String(st.chatTop));
-  check('margin: chatBot=16', st.chatBot === 16, String(st.chatBot));
-  check('margin: inputTop=19', st.inputTop === 19, String(st.inputTop));
-  check('margin: ввод с колонки 3', buf.includes('\x1b[19;3H'), JSON.stringify(buf.slice(0, 120)));
-  check('margin: курсор с учётом отступа', buf.includes('\x1b[19;8H'), JSON.stringify(buf.slice(-80)));
+  check('margin: chatBot=15', st.chatBot === 15, String(st.chatBot));
+  check('margin: inputTop=18', st.inputTop === 18, String(st.inputTop));
+  check('margin: ввод с колонки 3', buf.includes('\x1b[18;3H'), JSON.stringify(buf.slice(0, 120)));
+  check('margin: курсор с учётом отступа', buf.includes('\x1b[18;8H'), JSON.stringify(buf.slice(-80)));
   // стрим пишется с колонки 3 и переносится по внутренней ширине
   buf = '';
   scr.push('При');
   scr.push('вет');
-  // живая строка рисуется у низа панели (строка 16), а не под верхней строкой чата
-  check('margin: живая строка в последней строке панели', /\x1b\[16;3H\x1b\[2KПривет/.test(buf), JSON.stringify(buf.slice(-60)));
+  // живая строка рисуется у низа панели (строка 15), а не под верхней строкой чата
+  check('margin: живая строка в последней строке панели', /\x1b\[15;3H\x1b\[2KПривет/.test(buf), JSON.stringify(buf.slice(-60)));
   buf = '';
   scr.push(' и длинный хвост, который заведомо шире внутренней ширины в тридцать шесть\n');
   const first = st.chat[0] ?? '';
@@ -249,7 +255,7 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   check('margin: завершённая строка с колонки 3', buf.includes('\x1b[3;3H'), JSON.stringify(buf.slice(0, 60)));
   buf = '';
   scr.setHints(['подсказка']);
-  check('margin: подсказки с колонки 3', buf.includes('\x1b[22;3H'), JSON.stringify(buf.slice(0, 40)));
+  check('margin: подсказки с колонки 3', buf.includes('\x1b[21;3H'), JSON.stringify(buf.slice(0, 40)));
   scr.stop();
 }
 
@@ -262,15 +268,15 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   const scr = new Screen(pt as unknown as NodeJS.WriteStream, 40);
   (scr as unknown as { height: number }).height = 24;
   scr.start();
-  scr.setInput(['Ты > '], 0, 5); // чат 1..16 (paneH=16), подсказки 22..24
+  scr.setInput(['Ты > '], 0, 5); // чат 1..15 (paneH=15), подсказки 21..24
   const st = scr as unknown as { viewOffset: number; chat: string[]; chatTop: number; chatBot: number };
   for (let i = 1; i <= 20; i++) scr.push(`строка ${i}\n`);
   check('scroll: 20 строк в истории', st.chat.length === 20, String(st.chat.length));
   buf = '';
   scr.scrollUp(3);
-  // окно chat[1..16]: сверху «строка 2», снизу «строка 17»
-  check('scroll: вверх — старое сверху', /\x1b\[1;1H\x1b\[2Kстрока 2/.test(buf), JSON.stringify(buf.slice(0, 60)));
-  check('scroll: низ окна — строка 17', buf.includes('\x1b[16;1H\x1b[2Kстрока 17'), JSON.stringify(buf.slice(-160)));
+  // окно chat[2..16]: сверху «строка 3», снизу «строка 17»
+  check('scroll: вверх — старое сверху', /\x1b\[1;1H\x1b\[2Kстрока 3/.test(buf), JSON.stringify(buf.slice(0, 60)));
+  check('scroll: низ окна — строка 17', buf.includes('\x1b[15;1H\x1b[2Kстрока 17'), JSON.stringify(buf.slice(-160)));
   check('scroll: индикатор «выше ещё на 3»', buf.includes('\x1b[24;1H') && buf.includes('выше ещё на 3'), JSON.stringify(buf.slice(-120)));
   // новая реплика при прокрутке: вид закреплён, счётчик растёт
   buf = '';
@@ -286,14 +292,14 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   // потолок прокрутки (22 строки в истории: 20 + «ещё одна» + «живой кусок»)
   buf = '';
   scr.scrollUp(1000);
-  check('scroll: потолок — самая первая строка', /\x1b\[1;1H\x1b\[2Kстрока 1/.test(buf) && st.viewOffset === 6, String(st.viewOffset));
+  check('scroll: потолок — самая первая строка', /\x1b\[1;1H\x1b\[2Kстрока 1/.test(buf) && st.viewOffset === 7, String(st.viewOffset));
   buf = '';
   scr.scrollDown(2);
   check('scroll: частично вниз — строка 3 сверху', /\x1b\[1;1H\x1b\[2Kстрока 3/.test(buf), JSON.stringify(buf.slice(0, 60)));
-  check('scroll: индикатор «на 4»', buf.includes('выше ещё на 4'), JSON.stringify(buf.slice(-120)));
+  check('scroll: индикатор «на 5»', buf.includes('выше ещё на 5'), JSON.stringify(buf.slice(-120)));
   buf = '';
   scr.scrollDown(100);
-  check('scroll: вниз до конца — хвост в панели', buf.includes('\x1b[15;1H\x1b[2Kещё одна') && buf.includes('\x1b[16;1H\x1b[2Kживой кусок'), JSON.stringify(buf.slice(-160)));
+  check('scroll: вниз до конца — хвост в панели', buf.includes('\x1b[14;1H\x1b[2Kещё одна') && buf.includes('\x1b[15;1H\x1b[2Kживой кусок'), JSON.stringify(buf.slice(-160)));
   check('scroll: вниз до конца — индикатор исчез', !buf.includes('история'), JSON.stringify(buf.slice(-200)));
   check('scroll: вниз до конца — viewOffset=0', st.viewOffset === 0, String(st.viewOffset));
   buf = '';
@@ -302,18 +308,18 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   // Ctrl+PgUp / Ctrl+PgDn: прыжок в начало и обратно к свежим
   buf = '';
   scr.scrollToStart();
-  check('scroll: в начало — первая строка сверху', /\x1b\[1;1H\x1b\[2Kстрока 1/.test(buf) && st.viewOffset === 6, String(st.viewOffset));
+  check('scroll: в начало — первая строка сверху', /\x1b\[1;1H\x1b\[2Kстрока 1/.test(buf) && st.viewOffset === 7, String(st.viewOffset));
   buf = '';
   scr.scrollToStart();
   check('scroll: в начало на начале — пусто', buf === '', JSON.stringify(buf.slice(0, 80)));
   buf = '';
   scr.scrollToEnd();
-  check('scroll: к свежим — хвост в панели', st.viewOffset === 0 && buf.includes('\x1b[16;1H\x1b[2Kживой кусок'), JSON.stringify(buf.slice(-160)));
+  check('scroll: к свежим — хвост в панели', st.viewOffset === 0 && buf.includes('\x1b[15;1H\x1b[2Kживой кусок'), JSON.stringify(buf.slice(-160)));
   buf = '';
   scr.scrollToEnd();
   check('scroll: к свежим на свежих — пусто', buf === '', JSON.stringify(buf.slice(0, 80)));
   // --- выделение мышью: нажать, протянуть, отпустить ---
-  // панель 1..16, margin 0; строка 5 экрана = chat[idx]: end=22, idx=22-16+(5-1)=10 → «строка 11»
+  // панель 1..15, margin 0; строка 5 экрана = chat[idx]: end=22, idx=22-15+(5-1)=11 → «строка 12»
   buf = '';
   scr.selMouseDown(3, 5); // колонка 3 экрана = колонка 2 строки
   check('sel: нажатие рисует панель без реверса', !buf.includes('\x1b[7m'), JSON.stringify(buf.slice(0, 80)));
@@ -324,7 +330,7 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   buf = '';
   scr.selMouseDrag(15, 6); // захват следующих строк
   const text = scr.selectedText();
-  check('sel: текст через строки', text.startsWith('рока 11') && text.includes('\n') && text.includes('строка 12'), JSON.stringify(text));
+  check('sel: текст через строки', text.startsWith('рока 12') && text.includes('\n') && text.includes('строка 13'), JSON.stringify(text));
   check('sel: hasSelection', scr.hasSelection() === true, '');
   scr.clearSelection();
   check('sel: сброс', !scr.hasSelection() && scr.selectedText() === '', '');
@@ -337,7 +343,7 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   scr.selMouseDrag(8, 5);
   scr.selMouseDown(1, 22); // строка подсказок
   check('sel: клик вне панели снял выделение', !scr.hasSelection(), '');
-  // --- Shift+стрелки: свежий старт — якорь на последней видимой строке (16,0) ---
+  // --- Shift+стрелки: свежий старт — якорь на последней видимой строке (15,0) ---
   scr.selMoveKeyboard('up');
   const up1 = scr.selectedText(); // голова (20,0) «ещё одна»
   check('sel: Shift+вверх захватил строку выше', up1 === 'ещё одна\n', JSON.stringify(up1));

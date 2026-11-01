@@ -1,5 +1,6 @@
 {
   "provider": "anthropic-compatible",
   "model": "claude-sonnet-4-5",
-  "apiKey": ""
+  "apiKey": "",
+  "contextWindow": 200000
 }

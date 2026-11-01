@@ -129,7 +129,8 @@ import type { Presenter } from '../src/core/presenter.js';
     (u) => { usage = u; },
   )) out += c;
   check('anthropic: ответ стримится', out.includes('ок'), out);
-  check('anthropic: usage из message_start (900 из 1000)', usage?.cachedTokens === 900 && usage?.promptTokens === 1000, JSON.stringify(usage));
+  check('anthropic: usage из message_start (кэш 900+50, полный промпт 1950)',
+    usage?.cachedTokens === 900 && usage?.promptTokens === 1950, JSON.stringify(usage));
   const body = JSON.parse(bodies['/v1/messages'] ?? '{}') as {
     system?: Array<{ type?: string; cache_control?: unknown }>;
     messages?: Array<{ content: unknown }>;

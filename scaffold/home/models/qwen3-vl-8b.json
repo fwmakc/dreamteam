@@ -2,5 +2,6 @@
   "provider": "openai-compatible",
   "baseUrl": "http://localhost:8001/v1",
   "model": "Qwen3-VL-8B-Instruct",
-  "vision": true
+  "vision": true,
+  "contextWindow": 32768
 }

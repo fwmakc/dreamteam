@@ -7,6 +7,256 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
+## [Unreleased]
+
+### Added
+
+- **Plan quotas: an optional `quota()` in the provider contract, the
+  `zai-coding-plan` adapter and a quota indicator next to the context bar in
+  both shells.** `LLMProvider` gains an optional `quota()` returning a
+  `ProviderQuota` — the plan name plus limit windows (a stable key like `5h` /
+  `week` / `mcp`, the kind — tokens/credits/calls/time, `usedPercent` as
+  *used*, optional `limit`/`remaining` and `resetAt`); the method's absence is
+  the contract's way to say «this provider has no limits», and a failed fetch
+  never reaches the UI — it degrades to `null`. A universal consumer
+  (`src/core/quota.ts`) caches snapshots by provider id — a 60-second TTL, a
+  ten-minute stale grace, in-flight dedup — so neither shell hammers the API.
+  The new `zai-coding-plan` adapter speaks the coding plan's Anthropic-style
+  GLM endpoint (its own default `https://api.z.ai/api/anthropic`) and reads
+  the plan limits from a Z.ai monitor endpoint (Bearer first, a bare key on a
+  401; the endpoint is not documented by Z.AI and may change — every
+  unexpected answer degrades to «no data»). The scaffold `glm.json` card
+  switches to the new provider, and `anthropic-compatible` gains a `thinking`
+  switch (`enabled`/`disabled` → GLM's `{thinking: {type}}` body field). Both
+  status bars show the limits as `Q 5ч 97% · нед 81% · mcp 100%` — the
+  remainder of each window, green/yellow/red like the context bar; the web
+  GUI receives the default model's quota inside the state snapshot (no new
+  rpc) with a resets-at tooltip. `mock` carries a demo quota for the GUI
+  probe. New probe: `npm run probe:quota` (hermetic: window mapping, auth
+  fallback, transport, TTL/stale).
+
+- **Card forms in the web GUI follow the provider contracts.** The model form
+  is no longer a fixed four-field stub: a `model.get` rpc hands the browser
+  the card (secrets masked — an empty key field means «don't change») plus a
+  schema built from the provider's contract, so an openai-compatible model
+  shows all nine fields (baseUrl, model, apiKey, maxTokens, temperature,
+  thinking, reasoning, vision, extra), anthropic-compatible — seven,
+  gigachat — twelve, mock — four; a custom adapter without a contract gets a
+  five-field universal fallback. Real field types arrived with the schema:
+  a boolean renders as a checkbox, an object as a JSON textarea (a parse
+  error is shown in the form and nothing is saved), enums as selects,
+  secrets as password inputs — and the card lands on disk with real JSON
+  types (`vision: true`, `extra` as an object). The agent form grew four
+  fields of its own — `model.thinking`, `model.reasoning`, `vision.id` and
+  `image.id` (a model id from `models/`, checked by the server) — and
+  sighted models are marked with a ◉ in the sidebar. The CLI counterpart
+  `/model get <id>` prints the full card.
+
+- **Project settings dialog in the web GUI.** The current project's
+  right-click menu gets one «Настройки проекта…» item instead of the rename
+  and change-folder forms. The dialog edits the name and the working folder
+  (the folder comes from a built-in path browser — 🏠 home, ↑ up, Windows
+  drives, subfolder list, «pick» — because a native folder picker cannot
+  hand an absolute path to the page) and manages the project registries:
+  hosts, mailboxes and messenger bots, each with add / edit / delete forms.
+  Secrets never reach the browser — the state lists «password is set 🔑»
+  marks instead; the `fs.dirs` listing rpc (subfolders of a directory) backs
+  the path browser and is intentionally not an operation: it is service
+  transport like `state`, so `/help` and the manager's hints stay clean.
+
+- **The manager manages model cards.** "Make the model see images" now lands
+  with the manager himself: three new actions — `model.new`, `model.update`
+  and `model.delete`, the same executors as `/model new|update|delete`
+  (the provider contract validates the card; the main, service and manager
+  cards are protected from deletion; the model map reloads immediately).
+  The negotiation-room state now lists the house models — id, provider,
+  the vision flag, the main/manager card marked — so the manager knows the
+  ids without being told.
+
+- **Chat messages render Markdown.** Replies and user messages are formatted
+  as markdown: paragraphs, **bold**/*italic*, headings, ordered and unordered
+  lists, `inline code`, fenced code blocks, quotes, tables, rules and links
+  (external links open in a new tab). Raw HTML in a reply is shown literally,
+  not executed. The markdown parser trims block content, so the leading and
+  trailing blank lines and stray whitespace that the old span wrappers used
+  to paint inside bubbles are gone. A `[file.ext]` label keeps working as a
+  file link (click to open · Ctrl+click to save · right-click menu), also
+  inside markdown text, and never fires in code blocks or in ordinary
+  `[text](url)` links. The streaming preview is formatted the same way.
+
+- **Adaptive mobile layout for the web GUI.** Below a viewport width of 820 px
+  the sidebar becomes a slide-in drawer: a ☰ button in the top bar toggles it,
+  the backdrop closes it, and picking a section (a conversation, a project, an
+  agent) closes it automatically. The drawer rows answer long-press with the
+  same context menu as a right-click. The layout itself is reworked for
+  touch: the top bar and status bar wrap, paddings shrink, buttons get larger
+  touch targets, inputs are 16 px so iOS Safari does not zoom in on focus,
+  `100dvh` keeps the chat within the visible screen, and double-tap zoom is
+  suppressed on buttons. Desktop rendering is unchanged.
+
+- **The interface language in the web GUI is a selector.** The ⚙ settings
+  form no longer asks to type a locale id: the «Язык интерфейса» field is now
+  a dropdown fed by the server (`state.ui.languages` — the same
+  `knownLanguages` list the first-launch wizard uses): the built-in
+  `ru`/`en`/`zh` plus every own language from `~/.dreamteam/lang/`, options
+  reading `id — name`, own languages marked «(свой)». Picking one and saving
+  applies it on the fly — the next state carries the new dictionary. With an
+  older server that doesn't list languages the field falls back to plain
+  text. The conversation-language field stays free text.
+
+- **Usage stats in the web GUI.** The right-click menu of a conversation gets
+  a «Статистика» item — that session's token totals (rounds, input/output,
+  prompt-cache hit) with a per-model breakdown — and a model's menu gets the
+  same totals summed across all sessions of the home. The report opens in a
+  read-only modal. The numbers ride the regular state snapshot (SessionMeta
+  now carries the session's usage and its per-model slice, and the store was
+  already reading the session files whole), so no new rpc is needed — and
+  they are the same figures `/usage` prints in the terminal.
+
+- **Context fill indicator and threshold-based compression.** Model cards
+  gained an optional `contextWindow` — a contract field on every adapter, so
+  it appears in the web card form, the card validation and `/model get` by
+  itself. Each session now remembers how full its context is: the last
+  round's prompt + answer tokens (`contextTokens`) and the model that
+  reported them (`contextModel`). Both shells show it in the same format, as
+  visible text — a 10-cell bar, the percent and the exact numbers:
+  `[++++------] 27% · 34k / 128k`. The TUI status bar grew to four lines
+  (session title, keys, context, status — the spinner still owns only the
+  bottom line, so the bar never blinks); the web shell draws the same line
+  under the input with the exact numbers in the tooltip. Colors follow the
+  new `compressThreshold` setting (an integer from 10 to 99, 85 by default):
+  green up to 15 points below the line, yellow closer, red from it. `/usage`
+  appends a "Context: 34 112 of 128 000 (27%)" line when the window is
+  known, `/models` marks such cards with a "window 128k" suffix. Compression
+  learned a second trigger: as soon as the fill crosses the threshold against
+  the smallest `contextWindow` among the conversation's models, old messages
+  roll up into a digest before the next round — even before the old
+  ~24-messages counter fires. Without `contextWindow` in the cards
+  everything works as before; KEEP_RECENT and "nothing to compress" guard
+  the threshold trigger too. The indicator appears after the first round
+  (mock synthesizes usage, so it shows up immediately there).
+
+### Changed
+
+- **The context indicator got a real bar.** The terminal's `[++++------]`
+  fills with block characters — `[██████░░░░] 27% · 34k / 128k`; in the web
+  GUI the context line and the quota line merged into one flex status row
+  under the input, and the ASCII bar became a CSS scale — a rounded track
+  with a fill that inherits the segment's color (green/yellow/red), one
+  meter per quota window.
+
+- **Settings export/import moved into the settings dialog.** The toolbar's
+  ⬇⚙/⬆⚙ buttons are gone; the ⚙ settings form now carries a row of two
+  labeled buttons — «⬇ экспорт настроек» (a zip with settings, profile,
+  manager and models, no projects) and «⬆ импорт настроек» (projects
+  untouched). Importing from the dialog closes it first: the form fields
+  hold a copy of the values from the moment the dialog opened, so a
+  «Сохранить» afterwards would silently roll the import back.
+
+- **An empty conversation language follows the interface language.** With no
+  `language` field in settings.json the team now speaks whatever the interface
+  speaks: `ru` maps to «русский», `en` to english, `zh` to 中文, and a custom
+  language from `~/.dreamteam/lang/` contributes its own name ("Deutsch").
+  The fallback lives in the core — the same in the terminal and in the
+  browser — and an explicit `language` still wins. The settings scaffold no
+  longer pins «русский», so the wizard's single language choice decides both
+  the interface and the team's tongue. The manager's greeting prompt re-reads
+  the language now too (before, it stayed Russian until the first real round),
+  and the web settings form shows the empty field with an "empty — follows the
+  UI language" placeholder instead of pretending a value is set.
+
+- **Attached files stay attachment chips in the sent message.** Attachments
+  used to be encoded as `[name.ext]` text markers glued to the front of the
+  message, so in the feed they rendered as ordinary inline file links,
+  indistinguishable from a file mentioned mid-sentence. The attachment list
+  now travels as a structured field on the user message (through the engine
+  and the state snapshot; the transcript and the LLM context keep the text
+  markers), and the feed renders each attachment as a pill chip above the
+  user bubble — click opens, Ctrl+click downloads, right-click gives the
+  same menu as before. The leading `[name]` markers are hidden from the
+  displayed text, while manually written `[file]` references inside the
+  text remain inline links. Older messages without the field render as
+  they always did.
+
+- **Web GUI composer.** The input area is now a single rounded bubble
+  (8 px radius): the textarea on top, an attachment toolbar below it —
+  📎 upload and 🔗 attach-by-path on the left, a round accent send button
+  with an up arrow on the right. Staged-file chips sit inside the bubble,
+  and focus highlights the whole composer instead of the bare field. The
+  field itself rests at two rows while empty, grows with the text up to
+  the `maxInputRows` cap and scrolls past it. Enter/Shift+Enter and the
+  @// hints are unchanged.
+
+### Fixed
+
+- **Usage from the anthropic-compatible stream reaches the context indicator.**
+  GLM on z.ai reports the real token counts in `message_delta` and zeros in
+  `message_start` (Anthropic puts input tokens in `message_start` and only the
+  cumulative output in `message_delta`) — the adapter now reads both places.
+  `promptTokens` also counts cache reads and cache writes in, like OpenAI's
+  `prompt_tokens` does: `input_tokens` alone excludes them, so with prompt
+  caching on (the default) the context bar and the auto-compression threshold
+  saw a nearly empty context. `cachedTokens` keeps its meaning — cache reads,
+  for the /usage hit stats.
+
+- **`agent update` silently dropped `vision` and `image`.** The manager's
+  updatable-field whitelist never listed them, and unknown keys are skipped
+  without a word — so «помни скриншоты» set nothing, be it the GUI form, the
+  word or the manager himself. Both are whitelisted now: a string becomes a
+  `{id}` reference, an unknown model id is rejected loudly, an empty string
+  removes the reference.
+
+- **Saving a web-GUI form crashed on an edited number field.** Vue's
+  `v-model` on `<input type="number">` casts the typed value to a number,
+  and the modal submit handler called `.trim()` on every field value — the
+  thrown TypeError was swallowed by Vue's error logging, so the form
+  silently stayed open and nothing was saved (the temperature and
+  max-tokens fields of the model and agent forms were affected). The
+  handler now stringifies field values before trimming.
+
+- **Host passwords leaked into the web GUI state.** The project projection in
+  `state` copied the hosts registry raw, so every connected browser received
+  the passwords in plain text. The projection now masks secrets: hosts,
+  mailboxes and bots are listed with `hasPassword`/`hasToken` flags instead
+  of the values (the registries were not sent to the GUI at all before —
+  only hosts were, with passwords).
+
+- **`/model update id vision=true` rejected `true` as a string.** The
+  `field=value` parser only typed `temperature`/`maxTokens` as numbers, so a
+  boolean like `vision` arrived as the string `"true"` and failed the
+  provider-contract check («параметр "vision" — true или false»). The card
+  validator now coerces values by the contract key's type — `"true"`/`"false"`
+  to booleans, numeric strings to numbers — so `/model new|update`, the GUI
+  rpc and the manager's JSON actions all accept string-typed values, while a
+  numeric `apiKey` stays a string. Non-coercible junk still fails loudly, and
+  the card file is written with real JSON types.
+
+- **User messages rendered a bubble inside a bubble.** The text renderer put
+  a `txt` class on the inner spans it generates, and the user-message styles
+  match descendants — so the nested span got the same background, border and
+  padding as the outer container. The class is dropped from the generated
+  spans (nothing referenced it — styles for messages key off the container
+  only), for agent messages as well, where it had no styling.
+
+- **The empty input field started several rows tall.** Chromium counts the
+  wrapped placeholder text in a textarea's `scrollHeight`, and the autosize
+  run that fires when settings arrive sized the empty field after that
+  inflated measurement — with the long hint line the composer opened two or
+  three rows high. The empty field is now sized directly to its two-row
+  minimum; `scrollHeight` is only consulted when there is text to measure.
+
+- **Three mobile-drawer defects.** The long-press context menu only stayed
+  open while the finger was down — the browser's synthetic click after
+  `touchend` landed on the overlay and closed it at once; that click is now
+  suppressed, so the menu survives the lift and its items can be tapped.
+  Tapping an agent row (call into the chat, recall) closed the drawer after
+  every tap; the drawer now closes only when the chat content actually
+  switches — a conversation or a project is picked. And a modal form opened
+  from the drawer (e.g. editing an agent) hid beneath it: the modal's z-index
+  is now 60, above the drawer's 40. Also: context-menu items get touch-sized
+  padding, and text selection is disabled in the drawer so a long press does
+  not start a selection on Android.
+
 ## [0.0.13] — 2026-10-31
 
 ### Added

@@ -146,13 +146,13 @@ const BUILTIN_TOOL_LIST = (BUILTIN_TOOL_IDS as readonly string[]).join(', ');
 /** Короткий промпт менеджера (маркер «менеджер переговорки» в начале — по нему mock-провайдер узнаёт его) */
 export const MANAGER_PROMPT =
   'Ты — менеджер переговорки: модератор беседы и единственный, кто меняет состав команды, ' +
-  'состав чата, разговоры, инструменты участников и реестры проекта (серверы, ящики, боты). Пиши коротко, по-русски. ' +
+  'состав чата, разговоры, инструменты участников, реестры проекта (серверы, ящики, боты) и карточки моделей. Пиши коротко, по-русски. ' +
   'Если просят изменение — сделай его сам.\n' +
   'Формат ответа: сначала короткий текст для человека, затем строго один JSON-объект:\n' +
   '{"say":"текст для человека","actions":[...действия...]}\n' +
   'Действия:\n' +
   '- {"op":"team.add","id":"логин-латиницей","name":"Имя","description":"чем занимается, одной фразой","prompt":"системный промпт от первого лица","emoji":"🎯","color":"blue","temperature":0.5,"tools":{"shell":{},"files":null}} — tools: объект-карточки, имя тула → настройки (объект или null = по умолчанию); модель наследуется (переопределить можно полем "model":"id-модели")\n' +
-  '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","temperature":0.3,"name":"...","emoji":"...","color":"..."}}\n' +
+  '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","vision":"...","image":"...","temperature":0.3,"name":"...","emoji":"...","color":"..."}}\n' +
   '- {"op":"chat.add","who":"id"} / {"op":"chat.remove","who":"id"} — позвать или вывести из текущего чата\n' +
   '- {"op":"session.list"} — показать разговоры; {"op":"session.open","id":"20261027-143052"} — открыть по id; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","id":"20261027-143052"} — удалить по id (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (имя — по краткому содержанию)\n' +
   '- {"op":"agent.tool.add","agent":"id","tool":"files","card":{"allow":["git *"]}} — включить тул агенту; card можно опустить; {"op":"agent.tool.update",…} — обновить карточку; {"op":"agent.tool.delete","agent":"id","tool":"files"} — выключить. Встроенные: ' +
@@ -160,8 +160,9 @@ export const MANAGER_PROMPT =
   '; свои — файл из tools/ (включать можно только существующий, код тулов пишет человек); какие есть — блок «Тулы дома»\n' +
    '- {"op":"project.host.add","name":"prod","host":"203.0.113.10","user":"deploy","port":22,"dir":"/srv/app"} — сервер в текущий проект (password лучше не передавать в переписке — пусть человек впишет сам)\n' +
    '- {"op":"project.open","path":"путь или имя"} — сменить проект: рабочая папка и разговоры\n' +
-  '- {"op":"mail.add","name":"ящик","user":"робот@corp.ru","password":"пароль-приложения","imap":"imap.corp.ru","smtp":"smtp.corp.ru","smtpPort":587} — ящик в mails.json (tlsNoVerify — опционально)\n' +
+   '- {"op":"mail.add","name":"ящик","user":"робот@corp.ru","password":"пароль-приложения","imap":"imap.corp.ru","smtp":"smtp.corp.ru","smtpPort":587} — ящик в mails.json (tlsNoVerify — опционально)\n' +
   '- {"op":"mail.remove","name":"ящик"}; {"op":"messenger.add","key":"telegram","token":"123456:ABC…"} / {"op":"messenger.remove","key":"max"} — токены ботов в messengers.json (key: telegram|max)\n' +
+  '- {"op":"model.update","id":"main","fields":{"vision":true}} — править карточку модели (vision, maxTokens, temperature…; булевы и числа — настоящими true/false/числами); {"op":"model.new","id":"новая","fields":{"provider":"openai-compatible","model":"…","baseUrl":"…","apiKey":"…","vision":true}} — новая карточка (provider обязателен); {"op":"model.delete","id":"…"} — удалить карточку (основная, служебная и менеджерская защищены). Какие есть — блок «Модели дома»\n' +
   'Делай только те действия, о которых попросили. Если изменение не требуется — ответь одним текстом, без JSON.';
 
 export interface ManagerContext {
@@ -187,6 +188,8 @@ export interface ManagerContext {
   operations?: { cmd: string; args?: string; help: string }[];
   /** Тулы дома: встроенные и свои из tools/ — id и короткое описание (что умеет) */
   houseTools?: { id: string; builtin: boolean; desc: string }[];
+  /** Карточки моделей дома: id, провайдер, зрение; main — основная или менеджерская */
+  models?: { id: string; provider: string; vision: boolean; main: boolean }[];
   /** Версия приложения (из package.json); пусто — строки в состоянии не будет */
   appVersion?: string;
 }
@@ -223,12 +226,16 @@ export function managerStateInput(ctx: ManagerContext): string {
   const house = (ctx.houseTools ?? [])
     .map((tl) => `- ${tl.id} — ${tl.desc}${tl.builtin ? '' : ' (свой, из tools/)'}`)
     .join('\n');
+  const models = (ctx.models ?? [])
+    .map((m) => `- ${m.id} — ${m.provider}, зрение: ${m.vision ? 'да' : 'нет'}${m.main ? ' (основная/менеджерская)' : ''}`)
+    .join('\n');
   const history = ctx.history.length
     ? `\nПоследние сообщения:\n${ctx.history.map((m) => `${m.authorName}: ${m.text}`).join('\n')}\n`
     : '';
   return (
     `Текущее состояние.${ctx.appVersion ? `\nПриложение: dreamteam ${ctx.appVersion}` : ''}\nКоманда:\n${roster}\nВ этом чате: ${inChat}\n` +
     (house ? `Тулы дома (id — что умеет; включить агенту можно только существующий):\n${house}\n` : '') +
+    (models ? `Модели дома (править карточки можно model.new/model.update/model.delete):\n${models}\n` : '') +
     `Разговоры (id — для session.open/session.delete):\n${sessions || '- нет'}\n` +
     (projects ? `Проекты (реестр серверов для ssh):\n${projects}\n` : '') +
     (known ? `Известные проекты (для project.open):\n${known}\n` : '') +
@@ -259,6 +266,9 @@ const MANAGER_OPS = new Set([
   'mail.remove',
   'messenger.add',
   'messenger.remove',
+  'model.new',
+  'model.update',
+  'model.delete',
 ]);
 
 function isManagerAction(a: unknown): a is ManagerAction {
@@ -303,6 +313,14 @@ function isManagerAction(a: unknown): a is ManagerAction {
       return (o.key === 'telegram' || o.key === 'max') && typeof o.token === 'string';
     case 'messenger.remove':
       return o.key === 'telegram' || o.key === 'max';
+    case 'model.new':
+    case 'model.update':
+      return (
+        typeof o.id === 'string' && !!o.id.trim() &&
+        !!o.fields && typeof o.fields === 'object' && !Array.isArray(o.fields)
+      );
+    case 'model.delete':
+      return typeof o.id === 'string' && !!o.id.trim();
     default:
       return true; // session.list, session.new — обязательных полей нет
   }
@@ -355,6 +373,8 @@ const UPDATABLE_FIELDS = new Set([
   'description',
   'prompt',
   'model',
+  'vision',
+  'image',
   'temperature',
   'workspace',
 ]);
@@ -473,6 +493,20 @@ export function updateTeamAgent(dir: string, id: string, fields: ManagerUpdateFi
       requireModel(models, ref.id.trim());
       card.model = ref;
       changes.push(`model="${ref.id.trim()}"`);
+    } else if (key === 'vision' || key === 'image') {
+      // пустая строка — убрать ссылку (вернуть модели по умолчанию)
+      if (typeof value === 'string' && !value.trim()) {
+        if (card[key] === undefined) continue;
+        delete card[key];
+        changes.push(`-${key}`);
+        continue;
+      }
+      if (value === undefined || value === null) continue;
+      const ref = normalizeModelRef(value as string | ModelRef);
+      if (!ref.id || !ref.id.trim()) continue;
+      requireModel(models, ref.id.trim());
+      card[key] = ref;
+      changes.push(`${key}="${ref.id.trim()}"`);
     } else if (typeof value === 'string' && value.trim()) {
       card[key] = value.trim();
       changes.push(`${key}="${value.trim()}"`);
@@ -769,8 +803,9 @@ function applyRecordFields(
       changes.push(`-${key}`);
       continue;
     }
-    if ((key === 'port' || key === 'smtpPort') && typeof value === 'string') {
-      const num = Number(value);
+    if (key === 'port' || key === 'smtpPort') {
+      // строка — путь команды (port=22), число — путь rpc; на диск всегда число
+      const num = typeof value === 'number' ? value : Number(value);
       if (!Number.isInteger(num) || num <= 0) throw new Error(`${key} — целое число больше нуля, а не «${value}»`);
       record[key] = num;
       changes.push(`${key}=${num}`);

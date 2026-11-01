@@ -194,5 +194,30 @@ lines = await run(engine, '/settings update ui=ru');
 check('назад на русский', lines.some((l) => l.includes('Настройки обновлены')) && t('Настройки') === 'Настройки', lines.join(' | '));
 check('settings.json хранит ui:ru', JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')).ui === 'ru');
 
+// ── serve.stateSnapshot: в state.ui уезжает список языков — селектор ⚙ в GUI ──
+const { stateSnapshot } = await import('../src/serve.js');
+const snap = stateSnapshot(app, engine) as {
+  settings?: { language?: string; compressThreshold?: number };
+  ui?: { id: string; languages?: { id: string; name: string; builtIn: boolean }[] };
+};
+const langList = snap.ui?.languages ?? [];
+check('state.ui.languages: системные ru/en/zh встроенные',
+  ['ru', 'en', 'zh'].every((id) => langList.find((l) => l.id === id)?.builtIn === true));
+const deInfo = langList.find((l) => l.id === 'de');
+check('state.ui.languages: свой de из lang/ — не встроенный, имя из файла',
+  deInfo?.builtIn === false && deInfo?.name === 'Deutsch');
+check('state.ui.id — активная локаль', snap.ui?.id === 'ru');
+
+// ── пустой язык общения следует языку интерфейса: ядро — для TUI и GUI сразу ──
+const { conversationLanguage } = await import('../src/i18n.js');
+check('язык общения: встроенные — подсказки для промтов',
+  conversationLanguage('ru', home) === 'русский' && conversationLanguage('en', home) === 'english' && conversationLanguage('zh', home) === '中文');
+check('язык общения: свой — name из lang/<id>.json', conversationLanguage('de', home) === 'Deutsch');
+check('язык общения: неизвестный id — сам id', conversationLanguage('xx', home) === 'xx');
+check('settings без language: в state поле пустое (форма честно показывает «не задан»)',
+  snap.settings?.language === undefined);
+check('settings: порог автосжатия в state (дефолт 85 — scaffold без поля)',
+  snap.settings?.compressThreshold === 85);
+
 console.log(fails === 0 ? '\nВсе проверки прошли' : `\nПровалено: ${fails}`);
 process.exit(fails === 0 ? 0 : 1);

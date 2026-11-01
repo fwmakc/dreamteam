@@ -20,6 +20,7 @@ export const contract: AdapterContract = {
     insecureTLS: { type: 'boolean', desc: 'не проверять сертификат (только тесты)' },
     model: { type: 'string', desc: 'по умолчанию GigaChat' },
     maxTokens: { type: 'number' },
+    contextWindow: { type: 'number', desc: 'Размер контекстного окна (токены)' },
     temperature: { type: 'number' },
     vision: { type: 'boolean', desc: 'модель видит картинки — тулу look (GigaChat Vision)' },
   },

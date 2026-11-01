@@ -1,5 +1,6 @@
 import pc from 'picocolors';
-import type { Agent } from './types.js';
+import type { Agent, ProviderQuota } from './types.js';
+import { t } from './i18n.js';
 
 const COLORS: Record<string, (s: string) => string> = {
   black: pc.black,
@@ -25,6 +26,35 @@ export function agentHeader(agent: Agent): string {
 export function rosterLine(agent: Agent): string {
   const c = colorFn(agent.color);
   return `  ${c(`${agent.emoji} ${agent.name}`)} — ${agent.role}${agent.description ? `: ${agent.description}` : ''}`;
+}
+
+/** Тысячи — «128k», меньше тысячи — как есть (индикатор контекста). */
+export function fmtK(n: number): string {
+  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+}
+
+/** Строка индикатора контекста для статус-бара: `[██████░░░░] 27% · 34k / 128k`,
+ *  целиком окрашена по порогу: зелёная до жёлтой зоны, жёлтая за 15% до
+ *  порога, красная от порога. */
+export function ctxBar(tokens: number, win: number, threshold = 85): string {
+  const pct = Math.min(100, Math.round((tokens / win) * 100));
+  const filled = Math.max(0, Math.min(10, Math.round((pct / 100) * 10)));
+  const text = `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}] ${pct}% · ${fmtK(tokens)} / ${fmtK(win)}`;
+  return pct >= threshold ? pc.red(text) : pct >= threshold - 15 ? pc.yellow(text) : pc.green(text);
+}
+
+/** Короткие метки окон квоты для статус-бара: t() на каждом вызове — язык
+ *  выбирается после импорта модуля (как в staticHints). */
+const QUOTA_LABELS: Record<string, string> = { '5h': '5ч', week: 'нед', month: 'мес', mcp: 'mcp' };
+
+/** Сегмент квот для статус-бара: `Q 5ч 73% · нед 59% · mcp 88%` — ОСТАТОК в
+ *  процентах (как в личном кабинете), целиком окрашен по самому низкому окну:
+ *  зелёный / жёлтый <50 / красный <20. */
+export function quotaBar(quota: ProviderQuota): string {
+  const remain = (w: { usedPercent: number }): number => Math.max(0, 100 - w.usedPercent);
+  const text = `Q ${quota.windows.map((w) => `${t(QUOTA_LABELS[w.key] ?? w.key)} ${remain(w)}%`).join(' · ')}`;
+  const worst = quota.windows.length > 0 ? Math.min(...quota.windows.map(remain)) : 100;
+  return worst < 20 ? pc.red(text) : worst < 50 ? pc.yellow(text) : pc.green(text);
 }
 
 /**

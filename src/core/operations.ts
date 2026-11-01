@@ -21,8 +21,9 @@
  * своими JSON-действиями: валидация и tmp+rename-откат общие. Ошибки летят
  * вызывающему (терминал покажет, сервер ушлёт error/rpc_error).
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, renameSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { isToolId } from '../ids.js';
 import { loadTeam } from '../agents.js';
 import {
@@ -112,7 +113,7 @@ function sessionsText(app: App): string[] {
 }
 
 /** Перечитывает карточки моделей после правки файлов; app.models/images — новые карты. */
-function reloadModels(engine: Engine): void {
+export function reloadModels(engine: Engine): void {
   const { models, images } = loadModels(MODELS_DIR);
   engine.app.models = models;
   engine.app.images = images;
@@ -146,13 +147,20 @@ function agentsText(app: App): string[] {
   return lines;
 }
 
+/** Тысячи — в «128k», меньше тысячи — как есть (для окон моделей). */
+function ctxK(n: number): string {
+  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+}
+
 function modelsText(app: App): string[] {
   const lines: string[] = [];
   for (const [id, s] of app.models) {
     const state = s.ok ? t('✓ готов') : `✗ ${s.note ?? t('не настроен')}`;
+    const w = s.config?.contextWindow;
     lines.push(
       `• ${id} (${s.provider.kind}, ${s.provider.model}) ${state}` +
       (s.vision ? ` ${t('◉ зрение')}` : '') +
+      (typeof w === 'number' && w > 0 ? ` · ${tf('окно {n}', { n: ctxK(w) })}` : '') +
       (id === app.settings.model?.id ? ` ${t('★ основной')}` : '') +
       (id === app.mgr.model.id ? ` ${t('🛎 менеджер')}` : ''),
     );
@@ -658,13 +666,13 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: true },
     ],
     title: 'править агента',
-    help: 'поля: name, role, emoji, color, description, prompt, temperature, workspace; вложенные: model.id, model.temperature, model.maxTokens',
+    help: 'поля: name, role, emoji, color, description, prompt, temperature, workspace, vision, image; вложенные: model.id, model.temperature, model.maxTokens, model.thinking, model.reasoning',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
         return [
           t('Синтаксис: /agent update <id> поле=значение…'),
-          t('Поля: name, role, emoji, color, description, prompt, temperature, workspace; вложенные: model.id, model.temperature, model.maxTokens'),
+          t('Поля: name, role, emoji, color, description, prompt, temperature, workspace, vision, image; вложенные: model.id, model.temperature, model.maxTokens, model.thinking, model.reasoning'),
         ];
       }
       const parsed = parseFields(pairs);
@@ -1048,6 +1056,19 @@ export const OPERATIONS: OpSpec[] = [
       const report = updateModelConfig(MODELS_DIR, id, fields);
       reloadModels(engine);
       return [report];
+    },
+  },
+  {
+    name: 'model.get',
+    args: [{ name: 'id', required: true, hint: 'models' }],
+    title: 'показать модель',
+    help: 'полная карточка JSON — все поля контракта провайдера',
+    run: async (engine, rest) => {
+      const id = (rest[0] ?? '').trim();
+      if (!id) return [t('Синтаксис: /model get <id> (список — /models)')];
+      const slot = engine.app.models.get(id);
+      if (!slot) return [tf('модели «{id}» нет — список: /models', { id })];
+      return [JSON.stringify(slot.config ?? { provider: id }, null, 2)];
     },
   },
   {
@@ -1553,6 +1574,16 @@ export const OPERATIONS: OpSpec[] = [
       const u = session.usage;
       if (!u || u.rounds === 0) return [t('Статистики пока нет — сделайте раунд с API (не mock).')];
       const lines = ['', t('Итого за разговор:'), ...line(u)];
+      const win = typeof session.contextModel === 'string'
+        ? engine.app.models.get(session.contextModel)?.config?.contextWindow
+        : undefined;
+      if (session.contextTokens && typeof win === 'number' && win > 0) {
+        lines.push(tf('Контекст: {t} из {w} ({pct}%)', {
+          t: session.contextTokens.toLocaleString('ru-RU'),
+          w: win.toLocaleString('ru-RU'),
+          pct: Math.min(100, Math.round((session.contextTokens / win) * 100)),
+        }));
+      }
       const byModel = Object.entries(session.usageByModel ?? {}).filter(([, v]) => v.rounds > 0);
       if (byModel.length > 1) {
         lines.push('', t('По моделям:'));
@@ -1761,6 +1792,54 @@ export function operationHints(): OpHint[] {
     };
   });
   return [...ops, ...extraHints()];
+}
+
+// ── браузер путей для GUI (rpc fs.dirs): только чтение имён подпапок ─────────
+
+/** Подпапка каталога: имя и полный путь (строка в браузере путей GUI). */
+export interface DirEntry {
+  name: string;
+  path: string;
+}
+
+/** Ответ fs.dirs: текущий каталог, родитель (null — корень диска), подпапки, диски (Windows). */
+export interface DirListing {
+  path: string;
+  parent: string | null;
+  dirs: DirEntry[];
+  drives: string[];
+}
+
+/**
+ * Подпапки каталога для браузера путей в GUI; без аргумента — домашняя папка
+ * пользователя. Настоящее системное окно выбора папки абсолютный путь странице
+ * не отдаёт (ограничение браузеров), поэтому путь серверу приносит этот
+ * просмотр. Читаются только имена — содержимое не трогается.
+ */
+export function listDirs(rawPath?: string): DirListing {
+  const target = rawPath && rawPath.trim() ? resolve(rawPath.trim()) : homedir();
+  if (!existsSync(target) || !statSync(target).isDirectory()) {
+    throw new Error(tf('папки «{path}» нет', { path: target }));
+  }
+  let dirs: DirEntry[] = [];
+  try {
+    dirs = readdirSync(target, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => ({ name: e.name, path: join(target, e.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  } catch {
+    // нет прав на чтение — в браузере папка выглядит пустой
+  }
+  const parent = dirname(target);
+  return {
+    path: target,
+    parent: parent !== target ? parent : null,
+    dirs,
+    drives:
+      process.platform === 'win32'
+        ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((l) => `${l}:\\`).filter((d) => existsSync(d))
+        : [],
+  };
 }
 
 /** Принимаются вводом вне реестра (runOperationText) — подсказки для них живут здесь же. */

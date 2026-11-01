@@ -4,6 +4,7 @@
  *    неизвестный провайдер), цвет;
  *  - managerMentioned: @менеджер/@manager/@имя и синоним «!», регистр и «ё» не важны;
  *  - parseManagerReply: текст + JSON-действия, мусор и чужие op отсеиваются;
+ *    model.new/update/delete проходят, update/delete без id и fields — нет;
  *  - addTeamAgent/updateTeamAgent на временных agents.json: валидность после
  *    записи (loadTeam), дефолты, белый список tools, сохранение неизвестных
  *    полей корня, дубликаты, «неудачная правка не портит файл».
@@ -138,7 +139,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('псевдо-агент: id/имя/роль/эмодзи/цвет',
     agent.id === 'manager' && agent.name === cfg.name && agent.role === 'менеджер переговорки' &&
     agent.emoji === cfg.emoji && agent.color === cfg.color);
-  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 2700 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
+  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 3200 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
 }
 
 // --- parseManagerReply ---
@@ -190,6 +191,23 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     (r.actions[1] as { host: string }).host === 'stg.example.com',
     JSON.stringify(r.actions));
 }
+{
+  const r = parseManagerReply(
+    '{"say":"ставлю зрение","actions":[' +
+      '{"op":"model.update","id":"main","fields":{"vision":true}},' +
+      '{"op":"model.update","id":"main"},' +
+      '{"op":"model.new","id":"new-vl","fields":{"provider":"mock"}},' +
+      '{"op":"model.delete","id":"старая"},' +
+      '{"op":"model.delete"}]}',
+  );
+  check('парсер: model-действия прошли, без id/fields отсеяны',
+    r.actions.length === 3 &&
+    r.actions[0].op === 'model.update' &&
+    (r.actions[0] as { fields: Record<string, unknown> }).fields.vision === true &&
+    r.actions[1].op === 'model.new' &&
+    r.actions[2].op === 'model.delete',
+    JSON.stringify(r.actions));
+}
 
 // --- managerStateInput ---
 {
@@ -212,6 +230,10 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     history: [{ authorId: 'user', authorName: 'Хозяин', text: 'привет', ts: 1 }],
     request: '@менеджер, позови Глеба',
     projects: [{ id: 'shop', hosts: ['prod', 'staging'] }],
+    models: [
+      { id: 'claude', provider: 'anthropic-compatible', vision: true, main: false },
+      { id: 'openai', provider: 'openai-compatible', vision: false, main: true },
+    ],
     operations: [{ cmd: '/session new', help: 'новый разговор' }, { cmd: '/session open', args: '<id>', help: 'открыть разговор' }],
   });
   check('стейт: ростер с провайдером и temp', input.includes('katya — Катя, модель: claude, temp 0.3'), input);
@@ -219,6 +241,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('стейт: состав чата', input.includes('В этом чате: katya'));
   check('стейт: список разговоров с id и текущим', input.includes('- s1 — Текущий — 4 сообщ. (текущий)') && input.includes('- s2 — Прошлый — 9 сообщ.'), input);
   check('стейт: проект с серверами', input.includes('- shop: серверы prod, staging'), input);
+  check('стейт: модели дома — провайдер, зрение, основная', input.includes('- claude — anthropic-compatible, зрение: да') && input.includes('- openai — openai-compatible, зрение: нет (основная/менеджерская)'), input);
   check('стейт: операции манифеста с аргументами', input.includes('/session open <id>'), input);
   check('стейт: просьба руководителя', input.includes('Просьба руководителя: «@менеджер, позови Глеба»'));
   check('стейт: имя и краткое содержание разговора', input.includes('имя: «Текущий»') && input.includes('Краткое содержание разговора:'), input.slice(-400));

@@ -68,7 +68,7 @@ const {
   check('wizard: заметка о карточке модели', notes.some((n) => n.includes('mock.json')), notes.join(' | '));
   const settings = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'));
   check('настройки: созданы с дефолтами', settings.width === 100 && settings.screen === true, JSON.stringify(settings));
-  check('настройки: язык по умолчанию из скелета', settings.language === 'русский', JSON.stringify(settings));
+  check('настройки: язык общения не задан — следует языку интерфейса', settings.language === undefined, JSON.stringify(settings));
   check('настройки: язык интерфейса из ответа мастера', settings.ui === 'ru', JSON.stringify(settings));
   check('настройки: модель по умолчанию из мастера', settings.model?.id === 'mock', JSON.stringify(settings));
   check('команда: стартовая пятёрка в доме', (() => {
@@ -97,8 +97,8 @@ const {
     const { SCAFFOLD_DIR } = await import('../src/wizard.js');
     const { loadSettings } = await import('../src/settings.js');
     const { loadTeam } = await import('../src/agents.js');
-    check('скелет: home/settings.json валиден по loadSettings', (() => {
-      try { return loadSettings(join(SCAFFOLD_DIR, 'home', 'settings.json'), 0).language === 'русский'; } catch { return false; }
+    check('скелет: home/settings.json валиден по loadSettings, язык общения не задан', (() => {
+      try { return loadSettings(join(SCAFFOLD_DIR, 'home', 'settings.json'), 0).language === undefined; } catch { return false; }
     })());
     check('скелет: интерфейс по умолчанию английский (ui:"en")', (() => {
       try { return JSON.parse(readFileSync(join(SCAFFOLD_DIR, 'home', 'settings.json'), 'utf8')).ui === 'en'; } catch { return false; }

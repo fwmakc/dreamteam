@@ -49,7 +49,7 @@ mkdirSync(home, { recursive: true });
 mkdirSync(proj, { recursive: true }); // project.open открывает существующую папку
 process.env.DT_HOME = home;
 process.chdir(base); // рабочая папка тулов — песочница
-writeModels(home, { mock: { provider: 'mock' } });
+writeModels(home, { mock: { provider: 'mock', contextWindow: 32000 } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 process.on('exit', () => { try { rmSync(base, { recursive: true, force: true }); } catch { /* Windows держит файлы — песочница во временной папке */ } });
@@ -193,6 +193,25 @@ try {
   check('5: на каждое сообщение пришёл ответ участника (на диске)', repliesCount() >= 2);
   check('5: у ответов есть текст (не пустышки)',
     msgs.filter((m: any) => m.authorId !== 'user' && m.authorId !== '').every((m: any) => String(m.text).length > 5));
+
+  // ── 5a. индикатор контекста: state несёт заполнение и окно модели ────────
+  // mock синтезирует usage → после раундов у разговора есть contextTokens,
+  // а mock-карточка отдаёт contextWindow (знаменатель статус-баров)
+  const stC = await client.awaitState<{
+    models: { id: string; contextWindow?: number; isDefault?: boolean; quota?: { plan?: string; windows: { key: string; usedPercent: number }[] } }[];
+    sessions: { id: string; contextTokens?: number; contextModel?: string }[];
+  }>((s) => (s.sessions.find((x: any) => x.id === st1.session.id)?.contextTokens ?? 0) > 0);
+  const mockInfo = stC.models.find((m) => m.id === 'mock');
+  const curMeta = stC.sessions.find((x) => x.id === st1.session.id);
+  check('5a: mock-карточка отдаёт окно в state', mockInfo?.contextWindow === 32000, JSON.stringify(mockInfo));
+  check('5a: разговор несёт заполнение контекста и модель оценки',
+    (curMeta?.contextTokens ?? 0) > 0 && curMeta?.contextModel === 'mock',
+    JSON.stringify({ tokens: curMeta?.contextTokens, model: curMeta?.contextModel }));
+  // квота дефолтной модели едет в снапшоте (у mock — демо-образец)
+  const defInfo = stC.models.find((m) => m.isDefault);
+  check('5a: дефолтная модель несёт квоту (demo-образец mock)',
+    defInfo?.quota?.plan === 'demo' && defInfo.quota.windows.length === 3,
+    JSON.stringify(defInfo?.quota));
 
   // ── 6. экспорт сессии ────────────────────────────────────────────────────
   client.send({ type: 'export_session', id: st1.session.id });

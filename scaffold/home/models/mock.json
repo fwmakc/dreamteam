@@ -1,3 +1,4 @@
 {
-  "provider": "mock"
+  "provider": "mock",
+  "contextWindow": 32000
 }
