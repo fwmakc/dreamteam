@@ -33,7 +33,7 @@ import {
   updateMessengerRecord,
   updateManagerConfig,
 } from './manager.js';
-import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from './providers/registry.js';
+import { addModelConfig, loadModels, providerIds, removeModelConfig, updateModelConfig } from './providers/registry.js';
 import { openBrowser } from './open.js';
 import { loadSettings } from './settings.js';
 import { AGENTS_DIR, APP_VERSION, DT_HOME, MANAGER_FILE, MODELS_DIR, PROJECT_DIR, PROJECT_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from './paths.js';
@@ -168,6 +168,9 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       isManager: id === app.mgr.model.id,
     })),
     images: [...app.images].map(([id, s]) => ({ id, ok: s.ok, note: s.note })),
+    // все имена провайдеров (встроенные + кастомные из providers/ дома) —
+    // селектор «провайдер» в форме новой модели GUI
+    providers: providerIds(),
     memory: { shared: app.memory.shared ?? '', agents: app.memory.agents },
     profile: { name: app.profile.name, role: app.profile.role },
     settings: loadSettings(SETTINGS_FILE, 0),

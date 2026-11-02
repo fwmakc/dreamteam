@@ -412,8 +412,10 @@ const client = await makeClient(handle.port);
     check(
       'state: ключи верхнего уровня',
       JSON.stringify(Object.keys(st).sort()) ===
-        JSON.stringify(['auto', 'completion', 'images', 'knownProjects', 'manager', 'memory', 'models', 'profile', 'project', 'projects', 'schemas', 'session', 'sessions', 'settings', 'team', 'teamError', 'ui']),
+        JSON.stringify(['auto', 'completion', 'images', 'knownProjects', 'manager', 'memory', 'models', 'profile', 'project', 'projects', 'providers', 'schemas', 'session', 'sessions', 'settings', 'team', 'teamError', 'ui']),
     );
+    const providers = st.providers as unknown[] | undefined;
+    check('state: providers — имена провайдеров (селектор в GUI)', Array.isArray(providers) && providers.includes('mock') && providers.every((p) => typeof p === 'string'), JSON.stringify(providers));
     const models = st.models as { id?: string; kind?: string; ok?: boolean; isDefault?: boolean }[] | undefined;
     check('state: models — карточки с id/kind/ok/isDefault', Array.isArray(models) && models.length > 0 && models.every((m) => typeof m.id === 'string' && typeof m.ok === 'boolean'), JSON.stringify(models));
     const uiSt = st.ui as { id?: unknown; strings?: unknown } | undefined;

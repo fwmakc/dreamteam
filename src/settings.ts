@@ -20,6 +20,9 @@ export interface SettingsConfig {
   ui: string;
   /** Автоответ в автономном режиме: отправляется вместо ожидания человека */
   autoMessage: string;
+  /** Сообщение для цитирования (GUI, кнопка reply): текст между упоминанием
+   *  агента и цитатой — «Вы пишете:» */
+  quotePrefix: string;
   /** Максимальное число отвечающих за раунд (0 — без ограничения) */
   maxTurns: number;
   /** Отступы по краям экрана в колонках/строках (0–10) */
@@ -102,6 +105,10 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   if (autoMessage !== undefined && (typeof autoMessage !== 'string' || autoMessage.trim() === '')) {
     throw new Error(`${file}: поле "autoMessage" — непустая строка`);
   }
+  const quotePrefix = raw.quotePrefix;
+  if (quotePrefix !== undefined && (typeof quotePrefix !== 'string' || quotePrefix.trim() === '')) {
+    throw new Error(`${file}: поле "quotePrefix" — непустая строка`);
+  }
   const maxTurns = raw.maxTurns;
   if (maxTurns !== undefined && (typeof maxTurns !== 'number' || !Number.isInteger(maxTurns) || maxTurns < 0)) {
     throw new Error(`${file}: поле "maxTurns" — целое число ≥ 0 (0 — без ограничения)`);
@@ -113,6 +120,7 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
     language: typeof language === 'string' ? language.trim() : undefined,
     ui: typeof ui === 'string' ? ui.trim() : 'ru',
     autoMessage: typeof autoMessage === 'string' ? autoMessage.trim() : 'Решите вопрос на своё усмотрение.',
+    quotePrefix: typeof quotePrefix === 'string' ? quotePrefix.trim() : 'Вы пишете:',
     maxTurns: typeof maxTurns === 'number' ? maxTurns : 3,
     margin: typeof margin === 'number' ? margin : 2,
     maxInputRows: typeof maxInputRows === 'number' ? maxInputRows : 8,

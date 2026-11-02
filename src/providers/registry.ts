@@ -62,7 +62,8 @@ function resolveAdapter(name: string): ProviderFactory | undefined {
   return adapters[name] ?? userAdapters.get(name);
 }
 
-function adapterIds(): string[] {
+/** Все имена провайдеров: встроенные + кастомные (селектор в GUI, подсказки). */
+export function providerIds(): string[] {
   return [...Object.keys(adapters), ...userAdapters.keys()];
 }
 
@@ -147,7 +148,7 @@ function validateCard(file: string, raw: unknown): { config: ProviderConfig; ima
   const contract = contractOf(provider);
   const isCustom = !contract && Boolean(resolveAdapter(provider));
   if (!contract && !isCustom) {
-    throw new Error(`${file}: провайдер «${provider}» неизвестен — доступны: ${adapterIds().join(', ')}`);
+    throw new Error(`${file}: провайдер «${provider}» неизвестен — доступны: ${providerIds().join(', ')}`);
   }
   if (contract) {
     for (const [k, v] of Object.entries(cfg)) {
@@ -239,7 +240,8 @@ export function loadModels(dir: string): LoadedModels {
           note: reason,
         });
       } else {
-        models.set(id, { provider: unconfiguredProvider(id, reason), ok: false, note: reason });
+        // карточку сохраняем: GUI правит именно битую модель (вписывает ключ)
+        models.set(id, { provider: unconfiguredProvider(id, reason), ok: false, note: reason, config });
       }
     }
   }
@@ -289,7 +291,8 @@ export function instantiateModel(id: string, status: ProviderStatus, ref?: Model
     };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    return { provider: unconfiguredProvider(id, reason), ok: false, note: reason };
+    // карточку сохраняем: GUI правит именно битую модель (вписывает ключ)
+    return { provider: unconfiguredProvider(id, reason), ok: false, note: reason, config: merged };
   }
 }
 
@@ -334,7 +337,7 @@ export function updateModelConfig(dir: string, id: string, fields: Record<string
     if (key === 'provider') {
       const provider = String(value ?? '').trim();
       if (!resolveAdapter(provider) && !(provider in imageAdapters)) {
-        throw new Error(`провайдер «${provider}» неизвестен — доступны: ${adapterIds().join(', ')}`);
+        throw new Error(`провайдер «${provider}» неизвестен — доступны: ${providerIds().join(', ')}`);
       }
       raw.provider = provider;
     } else if (value === '' || value === undefined) {

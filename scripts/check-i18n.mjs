@@ -33,10 +33,13 @@ for (const f of files) {
     raws.add(m[2]);
   }
 }
-// метки и подсказки полей схем карточек едут в GUI динамически (tr(f.label)) —
-// собираем их из card-schema.ts отдельно
+// метки, подсказки и описания полей схем карточек едут в GUI динамически
+// (tr(f.label), tr(f.desc)) — собираем их из card-schema.ts отдельно
 const schemaSrc = readFileSync(join(root, 'src', 'card-schema.ts'), 'utf8');
-for (const m of schemaSrc.matchAll(/(?:label|placeholder): '((?:[^'\\\n]|\\.)*)'/g)) raws.add(m[1]);
+for (const m of schemaSrc.matchAll(/(?:label|placeholder|desc): '((?:[^'\\\n]|\\.)*)'/g)) raws.add(m[1]);
+// FIELD_TITLES — карта «ключ → метка», значения тоже становятся метками
+const titlesBody = schemaSrc.match(/const FIELD_TITLES[^=]*= \{([\s\S]*?)\n\};/);
+if (titlesBody) for (const m of titlesBody[1].matchAll(/: '((?:[^'\\\n]|\\.)*)'/g)) raws.add(m[1]);
 const decode = (r) => JSON.parse('"' + r.replace(/(?<!\\)"/g, String.fromCharCode(92) + '"') + '"');
 
 const { en } = await import(pathToFileURL(join(root, 'src', 'locales', 'en.ts')).href);

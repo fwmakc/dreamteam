@@ -13,7 +13,7 @@
 import type { Agent, Session } from './types.js';
 import type { ProjectConfig } from './core/projects.js';
 import type { ModelKeySpec } from './providers/types.js';
-import { contractOf } from './providers/registry.js';
+import { contractOf, providerIds } from './providers/registry.js';
 
 export interface FieldSpec {
   /** Путь значения в карточке: «name», «model.temperature» */
@@ -27,6 +27,8 @@ export interface FieldSpec {
   placeholder?: string;
   /** Поле обязательно по контракту — подсказку ставит modelCardSchema */
   required?: boolean;
+  /** Описание поля (контракт провайдера): GUI рисует под контролем мелким */
+  desc?: string;
 }
 
 export interface CardSchema {
@@ -69,10 +71,10 @@ export const CARD_SCHEMAS: Record<string, CardSchema> = {
       { path: 'model.id', type: 'string', label: 'Модель (id из models/)' },
       { path: 'model.temperature', type: 'number', label: 'Температура модели (0–2)' },
       { path: 'model.maxTokens', type: 'number', label: 'Максимум токенов' },
-      { path: 'model.thinking', type: 'enum', label: 'размышления GLM (биллятся)', values: ['enabled', 'disabled'] },
-      { path: 'model.reasoning', type: 'enum', label: 'глубина размышлений', values: ['minimal', 'low', 'medium', 'high', 'max'] },
+      { path: 'model.thinking', type: 'enum', label: 'Размышления GLM', values: ['enabled', 'disabled'], desc: 'биллятся' },
+      { path: 'model.reasoning', type: 'enum', label: 'Глубина размышлений', values: ['minimal', 'low', 'medium', 'high', 'max'] },
       { path: 'vision.id', type: 'string', label: 'Модель зрения (id из models/)' },
-      { path: 'image.id', type: 'string', label: 'Модель картинок (id из models/)' },
+      { path: 'image.id', type: 'string', label: 'Модель генерации изображений (id из models/)' },
       { path: 'workspace', type: 'string', label: 'Рабочая папка (подпапка рабочей или путь)' },
     ]),
   },
@@ -101,15 +103,28 @@ const UNIVERSAL_KEYS: Record<string, ModelKeySpec> = {
   note: { type: 'string' },
 };
 
-/** Метки для ключей без desc в контракте провайдера. */
-const FALLBACK_LABELS: Record<string, string> = {
-  model: 'Модель',
+/** Метки полей карточки — имя поля в форме (описание живёт в desc контракта).
+ *  Ключ без записи здесь рисуется как есть (кастомные адаптеры). */
+const FIELD_TITLES: Record<string, string> = {
+  provider: 'Провайдер',
+  model: 'Модель (имя у API)',
   baseUrl: 'Адрес API',
   apiKey: 'Ключ API',
-  maxTokens: 'Максимум токенов',
-  temperature: 'Температура (0–2)',
   authUrl: 'Адрес авторизации',
+  clientId: 'Client ID',
   clientSecret: 'Client secret',
+  scope: 'Scope',
+  caCertPath: 'Сертификаты Минцифры (путь)',
+  insecureTLS: 'Не проверять сертификат TLS',
+  monitorUrl: 'Адрес мониторинга квот',
+  maxTokens: 'Максимум токенов',
+  contextWindow: 'Размер контекстного окна (токены)',
+  temperature: 'Температура (0–2)',
+  thinking: 'Размышления GLM',
+  reasoning: 'Глубина размышлений',
+  cache: 'Кэш промптов',
+  vision: 'Зрение',
+  extra: 'Доп. поля тела запроса (JSON)',
   note: 'Заметка',
 };
 
@@ -119,25 +134,37 @@ const FALLBACK_LABELS: Record<string, string> = {
  * без контракта (кастомный адаптер из providers/) — универсальный набор:
  * перечислить его ключи неоткуда. Секреты (SECRET_KEYS) — тип password:
  * форма GUI рисует точками, а значение присылает только если ввели новое.
+ * Метка — имя поля (FIELD_TITLES), описание из контракта — desc (GUI рисует
+ * под контролем); provider — селектор всех провайдеров (встроенные + кастомные).
  */
 export function modelCardSchema(provider: string): CardSchema {
   const contract = contractOf(provider);
   const keys: Record<string, ModelKeySpec> = contract?.keys ?? UNIVERSAL_KEYS;
-  const fields: FieldSpec[] = [{ path: 'provider', type: 'string', label: 'Провайдер' }];
+  const fields: FieldSpec[] = [{ path: 'provider', type: 'enum', label: FIELD_TITLES.provider, values: providerIds() }];
   for (const [key, spec] of Object.entries(keys)) {
-    const label = spec.desc ?? FALLBACK_LABELS[key] ?? key;
+    const label = FIELD_TITLES[key] ?? key;
     const secret = (SECRET_KEYS as readonly string[]).includes(key);
     const placeholder = secret
       ? 'пусто — не менять'
       : spec.required
         ? 'обязательное поле'
         : undefined;
-    if (secret) fields.push({ path: key, type: 'password', label, placeholder, required: spec.required });
-    else if (spec.type === 'boolean') fields.push({ path: key, type: 'boolean', label, placeholder, required: spec.required });
-    else if (spec.type === 'number') fields.push({ path: key, type: 'number', label, placeholder, required: spec.required });
-    else if (spec.type === 'object') fields.push({ path: key, type: 'object', label, placeholder, required: spec.required });
-    else if (spec.enum) fields.push({ path: key, type: 'enum', label, values: spec.enum, placeholder, required: spec.required });
-    else fields.push({ path: key, type: 'string', label, placeholder, required: spec.required });
+    const type: FieldSpec['type'] = secret
+      ? 'password'
+      : spec.type === 'boolean'
+        ? 'boolean'
+        : spec.type === 'number'
+          ? 'number'
+          : spec.type === 'object'
+            ? 'object'
+            : spec.enum
+              ? 'enum'
+              : 'string';
+    fields.push({
+      path: key, type, label, placeholder, required: spec.required,
+      ...(spec.enum ? { values: spec.enum } : {}),
+      ...(spec.desc ? { desc: spec.desc } : {}),
+    });
   }
   return { entity: 'model', fields };
 }
