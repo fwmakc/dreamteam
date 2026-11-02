@@ -87,6 +87,48 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 function formatText(text: string): string {
   return md.render(String(text).trim()).trim();
 }
+
+// ── копирование в буфер: navigator.clipboard живёт только в secure context
+// (https или localhost) — по LAN его нет, фолбэк — скрытый textarea+execCommand
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+// короткий фидбек на кнопке: ✓ скопировано / ✗ не вышло, через секунду — обратно
+function flashCopy(btn: HTMLElement, ok: boolean): void {
+  btn.textContent = ok ? '✓' : '✗';
+  setTimeout(() => { btn.textContent = '⧉'; }, 900);
+}
+
+// `code` и ```fence``` — с кнопкой копирования (.code-copy): клик ловит
+// делегат onChatClick; title ставится на каждый рендер — на случай смены
+// языка на лету (как у file-link)
+md.renderer.rules.code_inline = (tokens, idx) => {
+  const title = md.utils.escapeHtml(tr('Скопировать'));
+  return `<span class="codewrap"><code>${md.utils.escapeHtml(tokens[idx].content)}</code><button class="code-copy" title="${title}">⧉</button></span>`;
+};
+const fenceBase = md.renderer.rules.fence
+  ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  const title = md.utils.escapeHtml(tr('Скопировать'));
+  return `<div class="codeblock"><button class="code-copy" title="${title}">⧉</button>${fenceBase(tokens, idx, options, env, self)}</div>`;
+};
 // видимый текст реплики пользователя: ведущие метки [имя] прикреплённых файлов
 // уже показаны чипами (att-row) — из текста их убираем, остальное не трогаем
 function attachmentsText(m: ChatMessage): string {
@@ -122,6 +164,49 @@ const fmtDate = (ts: number): string => {
   const tag = { ru: 'ru-RU', en: 'en-US', zh: 'zh-CN' }[snapshot.ui?.id ?? 'ru'] ?? 'ru-RU';
   return new Date(ts).toLocaleString(tag);
 };
+
+// ── действия под сообщением: копировать markdown · ответить с цитатой ────────
+type MsgItem = Extract<ChatItem, { kind: 'msg' }>;
+/** Исходный markdown реплики: у пользователя маркеры вложений уже сняты. */
+function msgRaw(m: ChatMessage): string {
+  return (m.authorId === 'user' ? attachmentsText(m) : m.text).trim();
+}
+async function msgCopy(it: MsgItem, btn: HTMLElement): Promise<void> {
+  const ok = await copyText(msgRaw(it.msg));
+  flashCopy(btn, ok);
+}
+// выделение в чате: клик по кнопке reply сбрасывает выделение — храним
+// последний непустой фрагмент (текст + сообщение, где он выделен)
+let selText = '';
+let selKey = '';
+function onSelectionChange(): void {
+  const sel = document.getSelection();
+  const text = (sel?.toString() ?? '').trim();
+  if (!text || !sel?.anchorNode) return;
+  if (!chatEl.value?.contains(sel.anchorNode)) return;
+  selText = text;
+  const host = (sel.anchorNode.nodeType === 1 ? sel.anchorNode as HTMLElement : sel.anchorNode.parentElement)?.closest('[data-key]');
+  selKey = host?.getAttribute('data-key') ?? '';
+}
+document.addEventListener('selectionchange', onSelectionChange);
+/** Ответить с цитатой: выделение этого сообщения или весь его текст;
+ *  упоминание автора (!Имя — движок матчит по имени), префикс из настроек. */
+function msgReply(it: MsgItem): void {
+  const quote = (selKey === it.key && selText) || msgRaw(it.msg);
+  if (!quote) return;
+  const fence = quote.includes('```') ? '````' : '```';
+  const prefix = snapshot.settings?.quotePrefix ?? tr('Вы пишете:');
+  const mention = it.msg.authorId === 'user' ? '' : `!${it.msg.authorName} `;
+  const text = `${mention}${prefix}\n${fence}\n${quote}\n${fence}`;
+  draft.value = draft.value ? `${draft.value.replace(/\s+$/, '')}\n${text}` : text;
+  nextTick(() => {
+    const el = inputEl.value;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+    autosize();
+  });
+}
 
 // ── автоскролл чата ──────────────────────────────────────────────────────────
 const chatEl = ref<HTMLElement | null>(null);
@@ -177,7 +262,16 @@ function downloadFile(href: string): void {
   a.remove();
 }
 function onChatClick(e: MouseEvent): void {
-  const a = (e.target as HTMLElement).closest('a.file-link');
+  const t = e.target as HTMLElement;
+  // кнопка на `code`/```fence```: копирует текст соседнего кода
+  const btn = t.closest('button.code-copy') as HTMLElement | null;
+  if (btn) {
+    e.preventDefault();
+    const code = btn.closest('.codeblock, .codewrap')?.querySelector('code, pre');
+    void copyText(code?.textContent ?? '').then((ok) => flashCopy(btn, ok));
+    return;
+  }
+  const a = t.closest('a.file-link');
   if (!a || !(e.ctrlKey || e.metaKey)) return;
   e.preventDefault();
   downloadFile(a.getAttribute('href') ?? '');
@@ -322,6 +416,10 @@ type FormField = {
   type?: FieldSpec['type']; values?: string[];
   /** Подписи вариантов enum (по индексу values); нет — подпись = само значение */
   optionLabels?: string[];
+  /** Описание поля (схема модели): мелкая строка под контролем */
+  desc?: string;
+  /** Сворачиваемая группа: поля без группы — верхний уровень формы */
+  group?: string;
 };
 const modal = reactive({
   show: false, title: '', error: '',
@@ -329,17 +427,40 @@ const modal = reactive({
   onSave: null as null | ((v: Record<string, string>) => void),
   settingsActions: false,
 });
+/** Свёрнутые группы текущей формы (пересобираются при каждом открытии). */
+const modalCollapsed = reactive(new Set<string>());
+function toggleModalGroup(title: string): void {
+  if (modalCollapsed.has(title)) modalCollapsed.delete(title);
+  else modalCollapsed.add(title);
+}
+/** Секции формы: верхний уровень (всегда открыт) + группы по порядку полей. */
+type ModalSection = { title: string; collapsible: boolean; fields: FormField[] };
+const modalSections = computed<ModalSection[]>(() => {
+  const top: FormField[] = [];
+  const map = new Map<string, FormField[]>();
+  for (const f of modal.fields) {
+    if (!f.group) { top.push(f); continue; }
+    const arr = map.get(f.group);
+    if (arr) arr.push(f);
+    else map.set(f.group, [f]);
+  }
+  const out: ModalSection[] = [{ title: '', collapsible: false, fields: top }];
+  for (const [title, fields] of map) out.push({ title, collapsible: true, fields });
+  return out;
+});
 const modalBox = ref<HTMLElement | null>(null);
 function openForm(title: string, fields: FormField[], onSave: (v: Record<string, string>) => void,
   opts?: { settingsActions?: boolean }): void {
   modal.title = title;
   modal.fields = fields.map((f) => ({
     key: f.key, label: f.label, value: f.value ?? '', placeholder: f.placeholder,
-    type: f.type, values: f.values, optionLabels: f.optionLabels,
+    type: f.type, values: f.values, optionLabels: f.optionLabels, desc: f.desc, group: f.group,
   }));
   modal.error = '';
   modal.onSave = onSave;
   modal.settingsActions = opts?.settingsActions ?? false;
+  modalCollapsed.clear();
+  for (const f of modal.fields) if (f.group) modalCollapsed.add(f.group); // группы по умолчанию свёрнуты
   modal.show = true;
   nextTick(() => modalBox.value?.querySelector<HTMLElement>('input, textarea, select')?.focus());
 }
@@ -478,19 +599,62 @@ function getPath(obj: unknown, path: string): string {
   }
   return v == null ? '' : String(v);
 }
-/** Поля формы по готовой схеме; значения — из текущей карточки по путям. */
-function fieldsFromSchema(schema: CardSchema, current: unknown): FormField[] {
+/** Поля формы по готовой схеме; значения — из текущей карточки по путям;
+ *  desc — описание из контракта (подпись под контролем); groupOf раскладывает
+ *  поля по сворачиваемым группам. */
+function fieldsFromSchema(schema: CardSchema, current: unknown,
+  groupOf?: (path: string) => string | undefined): FormField[] {
   return schema.fields.map((f) => ({
     key: f.path, label: tr(f.label), value: getPath(current, f.path),
     type: f.type, values: f.values ? [...f.values] : undefined,
     placeholder: f.placeholder ? tr(f.placeholder) : undefined,
+    desc: f.desc ? tr(f.desc) : undefined,
+    group: groupOf?.(f.path),
   }));
 }
+/** Группы формы агента: ссылки на модели — сворачиваемые секции. */
+function agentGroupOf(path: string): string | undefined {
+  if (path.startsWith('model.')) return tr('Модель');
+  if (path.startsWith('vision.')) return tr('Модель зрения');
+  if (path.startsWith('image.')) return tr('Модель генерации изображений');
+  return undefined;
+}
+// верхний уровень формы модели: провайдер, имя/адрес/ключ, температура, зрение;
+// остальной контракт (размышления, кэш, окна, доп. поля…) — «Расширенные»
+const MODEL_PRIMARY = new Set(['provider', 'model', 'baseUrl', 'apiKey', 'clientSecret', 'clientId', 'temperature', 'vision']);
+function modelGroupOf(path: string): string | undefined {
+  return MODEL_PRIMARY.has(path) ? undefined : tr('Расширенные настройки');
+}
+/** Подпись модели в селекторе: id — имя у API, ◉ — зрячая. */
+function modelOption(m: ModelInfo): string {
+  return `${m.id} — ${m.model ?? m.kind}${m.vision ? ' ◉' : ''}`;
+}
+/** Селекторы вместо текстового ввода у ссылок агента: model.id — все модели
+ *  (встроенные и кастомные), vision.id — только зрячие, image.id — image-
+ *  модели; пустое значение = «не менять» (форма пустое не шлёт). */
+function withModelSelects(fields: FormField[]): FormField[] {
+  const keep = tr('— не менять —');
+  return fields.map((f) => {
+    if (f.key === 'model.id') {
+      return { ...f, type: 'enum' as const, values: ['', ...models.value.map((m) => m.id)], optionLabels: [keep, ...models.value.map(modelOption)] };
+    }
+    if (f.key === 'vision.id') {
+      const vis = models.value.filter((m) => m.vision);
+      return { ...f, type: 'enum' as const, values: ['', ...vis.map((m) => m.id)], optionLabels: [keep, ...vis.map((m) => `${m.id} — ${m.model ?? m.kind}`)] };
+    }
+    if (f.key === 'image.id') {
+      const imgs = (snapshot.images ?? []) as { id: string; ok: boolean }[];
+      return { ...f, type: 'enum' as const, values: ['', ...imgs.map((m) => m.id)], optionLabels: [keep, ...imgs.map((m) => `${m.id}${m.ok ? '' : ' ⚠'}`)] };
+    }
+    return f;
+  });
+}
 /** Поля формы по схеме сущности (agent/session/project — snapshot.schemas). */
-function schemaFields(entity: string, current: unknown): FormField[] {
+function schemaFields(entity: string, current: unknown,
+  groupOf?: (path: string) => string | undefined): FormField[] {
   const schema = schemaOf(entity);
   if (!schema) return [];
-  return fieldsFromSchema(schema, current);
+  return fieldsFromSchema(schema, current, groupOf);
 }
 /** Значения формы → вложенный объект по путям схемы (пусто — поле не менять). */
 function fieldsFromForm(schema: CardSchema, values: Record<string, string>): Record<string, unknown> {
@@ -555,7 +719,7 @@ async function openAgentSettings(a: AgentInfo): Promise<void> {
     return;
   }
   openForm(tr('Настройки агента {name}', { name: a.name }), [
-    ...schemaFields('agent', card),
+    ...withModelSelects(schemaFields('agent', card, agentGroupOf)),
     { key: 'tools', label: tr('Тулы через запятую (есть: {list})', { list: (a.tools ?? []).join(', ') || tr('нет') }), type: 'text' },
   ], (v) => {
     const fields = fieldsFromForm(schema, v);
@@ -587,11 +751,14 @@ function delAgent(a: AgentInfo): void {
 
 // ── модели: создать/удалить/настроить ────────────────────────────────────────
 function modelCreate(): void {
+  // селектор провайдеров: встроенные + кастомные (снапшот; старый сервер —
+  // без поля — прежний короткий список)
+  const providers = (snapshot.providers as string[] | undefined) ?? ['openai-compatible', 'anthropic-compatible', 'zai-coding-plan', 'gigachat', 'mock'];
   openForm(tr('Новая модель'), [
     { key: 'id', label: tr('id (латиница, цифры, ./-/_)') },
-    { key: 'provider', label: tr('Провайдер (openai-compatible / anthropic-compatible / gigachat)'), value: 'openai-compatible' },
-    { key: 'baseUrl', label: 'baseUrl' },
-    { key: 'model', label: tr('Модель') },
+    { key: 'provider', label: tr('Провайдер'), type: 'enum', value: 'openai-compatible', values: providers },
+    { key: 'baseUrl', label: tr('Адрес API') },
+    { key: 'model', label: tr('Модель (имя у API)') },
     { key: 'apiKey', label: tr('Ключ API (можно пусто — для локальных API)') },
   ], (v) => rpcReport(rpc('model.new', { id: v.id, config: v })));
 }
@@ -621,7 +788,7 @@ async function openModelSettings(p: ModelInfo): Promise<void> {
     return;
   }
   if (!schema) return;
-  openForm(tr('Модель {id}', { id: p.id }), fieldsFromSchema(schema, card), (v) => {
+  openForm(tr('Модель {id}', { id: p.id }), fieldsFromSchema(schema, card, modelGroupOf), (v) => {
     rpcReport(rpc('model.update', { id: p.id, fields: fieldsFromForm(schema, v) }));
   });
 }
@@ -643,6 +810,7 @@ function openSettingsForm(): void {
   openForm(tr('Настройки'), [
     { key: 'language', label: tr('Язык общения (russian / ru-RU / english…)'), value: st.language ?? '', placeholder: tr('пусто — как язык интерфейса') },
     { key: 'autoMessage', label: tr('Автоответ в автономном режиме'), value: st.autoMessage ?? '' },
+    { key: 'quotePrefix', label: tr('Сообщение для цитирования'), value: st.quotePrefix ?? '', placeholder: tr('Вы пишете:') },
     uiField,
     { key: 'width', label: tr('Ширина экрана (40–500)'), value: st.width != null ? String(st.width) : '' },
     { key: 'maxInputRows', label: tr('Максимум строк поля ввода (1–20)'), value: st.maxInputRows != null ? String(st.maxInputRows) : '' },
@@ -1470,7 +1638,7 @@ onMounted(connectWs);
       <section class="side-sec" :class="{ collapsed: collapsed.has('team') }" data-sec="team">
         <div class="side-head" @click="toggleSec('team')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
-          <span class="sec-name">{{ tr('Команда') }}</span>
+          <span class="sec-name">{{ tr('Агенты') }}</span>
           <button class="sec-add" :title="tr('Новый агент')" @click.stop="openAgentCreate">＋</button>
         </div>
         <div v-if="teamError" class="errline side-err">agents.json: {{ teamError }}</div>
@@ -1562,7 +1730,7 @@ onMounted(connectWs);
         <div id="msgs">
           <template v-for="it in chatFlow" :key="it.key">
             <div v-if="it.kind === 'notice'" class="sysline" :class="it.notice.kind">{{ it.notice.text }}</div>
-            <div v-else-if="it.msg.authorId === 'user'" class="msg user">
+            <div v-else-if="it.msg.authorId === 'user'" class="msg user" :data-key="it.key">
               <div class="head">👤 {{ it.msg.authorName }}</div>
               <div v-if="it.msg.attachments?.length" class="att-row">
                 <a
@@ -1576,18 +1744,26 @@ onMounted(connectWs);
               </div>
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
               <div class="txt" v-html="formatText(attachmentsText(it.msg))"></div>
+              <div class="msg-actions">
+                <button class="msg-act" :title="tr('Копировать сообщение')" @click="msgCopy(it, $event.currentTarget as HTMLElement)">⧉</button>
+                <button class="msg-act" :title="tr('Ответить с цитатой')" @click="msgReply(it)">↩</button>
+              </div>
             </div>
             <div v-else-if="it.msg.authorId === 'tool'" class="toolblock">{{ it.msg.text }}</div>
             <div v-else-if="it.msg.authorId === 'session-ref'" class="attachment">
               <b>📎 {{ it.msg.authorName }}</b>
               <div class="digest">{{ it.msg.text }}</div>
             </div>
-            <div v-else class="msg">
+            <div v-else class="msg" :data-key="it.key">
               <div class="head" :style="{ color: colorByAuthor(it.msg) }">
                 {{ it.msg.authorName }} <span v-if="it.msg.authorRole" class="role">{{ it.msg.authorRole }}</span>
               </div>
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
               <div class="txt" v-html="formatText(it.msg.text)"></div>
+              <div class="msg-actions">
+                <button class="msg-act" :title="tr('Копировать сообщение')" @click="msgCopy(it, $event.currentTarget as HTMLElement)">⧉</button>
+                <button class="msg-act" :title="tr('Ответить с цитатой')" @click="msgReply(it)">↩</button>
+              </div>
             </div>
           </template>
           <div v-if="streaming.open" class="msg">
@@ -1676,7 +1852,7 @@ onMounted(connectWs);
           ref="inputEl"
           v-model="draft"
           rows="2"
-          :placeholder="tr('Напишите команде… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику, /help — команды)')"
+          :placeholder="tr('Напишите агентам… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику, /help — команды)')"
           @keydown="onInputKey"
           @input="autosize(); updateHints()"
           @click="updateHints"
@@ -1713,15 +1889,30 @@ onMounted(connectWs);
     <div class="modal-box" ref="modalBox">
       <h2>{{ modal.title }}</h2>
       <div>
-        <div v-for="f in modal.fields" :key="f.key" class="fld" :class="{ 'fld-chk': f.type === 'boolean' }">
-          <label>{{ f.label }}</label>
-          <textarea v-if="f.type === 'text' || f.type === 'object'" v-model="f.value" :placeholder="f.placeholder" rows="4"></textarea>
-          <input v-else-if="f.type === 'boolean'" type="checkbox" class="chk" :checked="f.value === 'true'" @change="setBool(f, $event)">
-          <select v-else-if="f.type === 'enum'" v-model="f.value">
-            <option v-for="(v, i) in f.values" :key="v" :value="v">{{ f.optionLabels?.[i] ?? v }}</option>
-          </select>
-          <input v-else-if="f.type === 'password'" v-model="f.value" type="password" :placeholder="f.placeholder" autocomplete="new-password">
-          <input v-else v-model="f.value" :type="f.type === 'number' ? 'number' : 'text'" :placeholder="f.placeholder" :step="f.type === 'number' ? 'any' : undefined">
+        <div
+          v-for="sec in modalSections"
+          :key="sec.title || '_top'"
+          class="fld-sec"
+          :class="{ collapsed: sec.collapsible && modalCollapsed.has(sec.title) }"
+        >
+          <button
+            v-if="sec.collapsible"
+            type="button"
+            class="fld-group-head"
+            :title="tr('Свернуть/развернуть')"
+            @click="toggleModalGroup(sec.title)"
+          ><span class="sec-toggle">▾</span> {{ sec.title }}</button>
+          <div v-for="f in sec.fields" :key="f.key" class="fld" :class="{ 'fld-chk': f.type === 'boolean' }">
+            <label>{{ f.label }}</label>
+            <textarea v-if="f.type === 'text' || f.type === 'object'" v-model="f.value" :placeholder="f.placeholder" rows="4"></textarea>
+            <input v-else-if="f.type === 'boolean'" type="checkbox" class="chk" :checked="f.value === 'true'" @change="setBool(f, $event)">
+            <select v-else-if="f.type === 'enum'" v-model="f.value">
+              <option v-for="(v, i) in f.values" :key="v" :value="v">{{ f.optionLabels?.[i] ?? v }}</option>
+            </select>
+            <input v-else-if="f.type === 'password'" v-model="f.value" type="password" :placeholder="f.placeholder" autocomplete="new-password">
+            <input v-else v-model="f.value" :type="f.type === 'number' ? 'number' : 'text'" :placeholder="f.placeholder" :step="f.type === 'number' ? 'any' : undefined">
+            <div v-if="f.desc" class="fld-desc">{{ f.desc }}</div>
+          </div>
         </div>
       </div>
       <div v-if="modal.error" class="errline">{{ modal.error }}</div>

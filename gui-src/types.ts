@@ -174,6 +174,8 @@ export interface FieldSpec {
   placeholder?: string;
   /** Поле обязательно по контракту провайдера (схема модели) */
   required?: boolean;
+  /** Описание поля (контракт провайдера) — мелкая подпись под контролем */
+  desc?: string;
 }
 
 export interface CardSchema {
@@ -191,6 +193,8 @@ export interface StateSnapshot {
   manager: { name: string; emoji: string; color: string; model?: string; temperature?: number };
   models: ModelInfo[];
   images: { id: string; ok: boolean; note?: string }[];
+  /** все имена провайдеров (встроенные + кастомные) — селектор в новой модели */
+  providers?: string[];
   profile: { name: string; role?: string; about?: string };
   projects: ProjectInfo[];
   /** текущий проект (id = папка в projects/ дома); null — не выбран */
@@ -198,7 +202,7 @@ export interface StateSnapshot {
   /** проекты дома — клик = переключение (rpc project.open) */
   knownProjects?: ProjectRecordInfo[];
   auto: { mode: boolean; left: number };
-  settings: { width: number; language?: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string; maxInputRows: number; compressThreshold: number };
+  settings: { width: number; language?: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string; quotePrefix?: string; maxInputRows: number; compressThreshold: number };
   completion: { operations: OpHint[] };
   /** схемы карточек: формы «Изменить» (агент/модель/разговор/проект) рендерятся из них */
   schemas?: Record<string, CardSchema>;

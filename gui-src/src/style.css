@@ -111,6 +111,74 @@
 .modal-box .row { display: flex; gap: 8px; margin-top: 14px; }
 .confirm-subject { color: var(--dim); margin: 0; font-size: 13px; }
 
+/* ── сворачиваемые группы полей в модалке (заголовок-кнопка) ────────────── */
+.fld-sec { margin-bottom: 4px; }
+.fld-sec .fld { margin-bottom: 10px; }
+.fld-group-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  margin-bottom: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+.fld-group-head:hover { color: var(--text); border-color: var(--accent); }
+.fld-group-head .sec-toggle { font-size: 10px; transition: transform 0.15s; display: inline-block; }
+.fld-sec.collapsed .sec-toggle { transform: rotate(-90deg); }
+.fld-sec.collapsed .fld { display: none; }
+/* описание поля из контракта провайдера — мелкая строка под контролем */
+.fld-desc { font-size: 11px; color: var(--dim); margin-top: 3px; line-height: 1.4; }
+
+/* ── кнопка копирования на `code` и ```-блоках ───────────────────────────── */
+.codewrap { display: inline-flex; align-items: center; gap: 2px; }
+.code-copy {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.code-copy:hover { color: var(--accent); }
+.codeblock { position: relative; }
+.codeblock .code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 12px;
+}
+
+/* ── действия под сообщением: копировать markdown · ответить с цитатой ───── */
+/* приглушены всегда (видны на тач-экранах), на hover — ярче */
+.msg-actions { display: flex; gap: 2px; margin-top: 3px; opacity: 0.4; }
+.msg:hover .msg-actions { opacity: 1; }
+.msg.user .msg-actions { justify-content: flex-end; }
+.msg-act {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.msg-act:hover { color: var(--accent); background: var(--panel2); }
+
 /* ── отчёт «Статистика…» (токены): строки итогов, пустая строка — отступ ── */
 .repline { line-height: 1.6; overflow-wrap: anywhere; }
 .repline-gap { height: 0.7em; }
