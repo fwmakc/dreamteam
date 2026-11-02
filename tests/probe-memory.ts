@@ -26,8 +26,8 @@ function check(name: string, cond: boolean, detail?: string): void {
 const root = mkdtempSync(join(tmpdir(), 'dt-memory-'));
 process.env.DT_HOME = root; // memory.ts сам по себе дом не читает — но импорты src могут
 
-const gleb: Agent = { id: 'gleb', name: 'Глеб', emoji: '🧠', color: 'cyan', role: 'архитектор', prompt: '' };
-const mira: Agent = { id: 'mira', name: 'Мира', emoji: '🎨', color: 'magenta', role: 'дизайнер', prompt: '' };
+const gleb: Agent = { id: 'gleb', name: 'Глеб', emoji: '🧠', color: 'cyan', prompt: '' };
+const mira: Agent = { id: 'mira', name: 'Мира', emoji: '🎨', color: 'magenta', prompt: '' };
 
 /** Стаб LLM: выдаёт заготовленный текст, запоминает полученный запрос. */
 function stubLLM(reply: string): { provider: LLMProvider; requests: { system?: string; user: string }[] } {
@@ -157,7 +157,7 @@ function stubLLM(reply: string): { provider: LLMProvider; requests: { system?: s
   const mock = new MockProvider('mock');
   const dialog = [
     { authorId: 'user', authorName: 'Вы', text: 'привет', ts: 1 },
-    { authorId: 'gleb', authorName: 'Глеб', authorRole: 'архитектор', text: 'приветствую', ts: 2 },
+    { authorId: 'gleb', authorName: 'Глеб', text: 'приветствую', ts: 2 },
   ];
 
   const base = { task: 'была задача', towardUser: 'было отношение', ties: { mira: 'коллега' }, updatedAtMsg: 1 };
@@ -177,9 +177,9 @@ function stubLLM(reply: string): { provider: LLMProvider; requests: { system?: s
   const tieWords = (reflected.ties?.mira ?? '').replace('…', '').split(' ').length;
   check('рефлексия: связи в бюджете, мусор отфильтрован', tieWords <= 20 && reflected.ties?.kirk === undefined && reflected.ties?.ghost === undefined, JSON.stringify(reflected.ties));
   check('рефлексия: в промпте ростер, память и диалог', requests[0] !== undefined
-    && (requests[0].user.includes('Участники команды') && requests[0].user.includes('gleb — Глеб, архитектор')
+    && (requests[0].user.includes('Участники команды') && requests[0].user.includes('gleb — Глеб')
       && requests[0].user.includes('была задача')
-      && requests[0].user.includes('Хозяин: привет') && requests[0].user.includes('Глеб (архитектор): приветствую')), requests[0]?.user.slice(0, 200));
+      && requests[0].user.includes('Хозяин: привет') && requests[0].user.includes('Глеб: приветствую')), requests[0]?.user.slice(0, 200));
 
   const noJson = stubLLM('совсем не JSON');
   await reflectSessionMemory(gleb, base, dialog, 'Хозяин', [gleb, mira], noJson.provider)

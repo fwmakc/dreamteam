@@ -109,7 +109,7 @@ export class MockProvider implements LLMProvider {
             ? '{"say":"Зову Теста в этот чат.","actions":[{"op":"chat.add","who":"test_probe"}]}'
             : hasTest
               ? '«Тест» уже в команде — второй раз не дублирую.'
-              : '{"say":"Позываю нового участника «Тест».","actions":[{"op":"team.add","id":"test_probe","name":"Тест","role":"гость","prompt":"Ты — Тест, гость переговорки. Отвечай коротко.","emoji":"🧪","color":"cyan","tools":{"files":{},"shell":{}}}]}';
+              : '{"say":"Позываю нового участника «Тест».","actions":[{"op":"team.add","id":"test_probe","name":"Тест","description":"гость переговорки","prompt":"Ты — Тест. Отвечай коротко.","emoji":"🧪","color":"cyan","tools":{"files":{},"shell":{}}}]}';
       }
     } else if (!this.fixedReply && req.messages.some((m) => m.images?.length)) {
       // mock-зрение: запрос с картинкой — это инструмент look, отвечаем заготовленным разбором

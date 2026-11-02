@@ -154,7 +154,7 @@ try {
     JSON.stringify(fresh?.messages?.[0] ?? null).slice(0, 120));
 
   // ── 2. агент-юрист ───────────────────────────────────────────────────────
-  client.send({ type: 'rpc', id: rpcId(), method: 'agent.new', args: { id: 'yurist', name: 'Юрист', role: 'право и договоры' } });
+  client.send({ type: 'rpc', id: rpcId(), method: 'agent.new', args: { id: 'yurist', name: 'Юрист', description: 'право и договоры' } });
   const r2 = await client.next<{ result: { text: string } }>((m) => m.type === 'rpc_result' && m.id === `c${rpc}`);
   check('2: agent.new — отчёт о добавлении', String(r2.result.text).includes('Юрист'));
   await waitDisk(() => { try { return loadTeam(agentsDir).some((a) => a.id === 'yurist'); } catch { return false; } }, 'юрист в agents/');

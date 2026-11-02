@@ -56,7 +56,7 @@ const s1: Session = storeTUI.create();
 s1.title = 'Проект Альфа — обсуждение';
 s1.messages.push(
   { authorId: 'user', authorName: 'Вы', text: 'первое сообщение альфы', ts: 1 },
-  { authorId: 'manager', authorName: 'Менеджер', authorRole: 'менеджер переговорки', text: 'ответ альфы', ts: 2 },
+  { authorId: 'manager', authorName: 'Менеджер', text: 'ответ альфы', ts: 2 },
   { authorId: 'tool', authorName: '⚙ инструменты', text: '✅ ок', ts: 3 },
 );
 storeTUI.save(s1);
@@ -109,7 +109,7 @@ function makeClient(port: number): Promise<{
 /** Взгляд GUI: sessions + сообщения текущего разговора из state-снапшота. */
 type GuiView = {
   sessions: { id: string; title: string; createdAt: number; updatedAt: number; count: number }[];
-  messages: { authorId: string; authorName: string; authorRole?: string; text: string; ts: number }[];
+  messages: { authorId: string; authorName: string; text: string; ts: number }[];
 };
 async function guiView(port: number): Promise<GuiView> {
   const c = await makeClient(port);
@@ -126,7 +126,7 @@ function tuiView(): GuiView {
   return {
     sessions: list,
     messages: (fresh.load(list[0].id)?.messages ?? []).map((m) => ({
-      authorId: m.authorId, authorName: m.authorName, authorRole: m.authorRole, text: m.text, ts: m.ts,
+      authorId: m.authorId, authorName: m.authorName, text: m.text, ts: m.ts,
     })),
   };
 }

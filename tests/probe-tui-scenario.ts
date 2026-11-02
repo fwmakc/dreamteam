@@ -124,7 +124,7 @@ async function main(): Promise<void> {
     Boolean(freshFull) && freshFull.title === 'Новый разговор' && (freshFull.messages ?? []).length >= 1);
 
   // ── 2. агент-юрист ───────────────────────────────────────────────────────
-  await type('/agent new yurist name=Юрист role=право и договоры');
+  await type('/agent new yurist name=Юрист description=право и договоры');
   await waitDisk(() => agentCards().includes('yurist.json'), 'юрист в agents/');
   const yurist = readJson(join(agentsDir, 'yurist.json'));
   check('2: /agent new — юрист на диске с дефолтами',

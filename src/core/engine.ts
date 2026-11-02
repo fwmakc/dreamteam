@@ -2,7 +2,6 @@ import { findMentions, loadTeam, loadUserProfile, MENTION_TRIGGERS } from '../ag
 import {
   MANAGER_ID,
   MANAGER_PROMPT,
-  MANAGER_ROLE,
   addMailAccount,
   addMessengerBot,
   addProjectHosts,
@@ -453,7 +452,7 @@ export class Engine {
       } else {
         messages.push({
           role: 'user',
-          content: `${m.authorName} (${m.authorRole ?? 'коллега'}): ${m.text}`,
+          content: `${m.authorName}: ${m.text}`,
         });
       }
     }
@@ -463,9 +462,8 @@ export class Engine {
         ? `Модератор передаёт слово тебе. Фокус: ${focus}`
         : 'Модератор передаёт слово тебе. Ответь по существу.',
     });
-    const who = user.role ? ` (${user.role})` : '';
     const identity =
-      `Твой собеседник — ${user.name}${who}.${user.about ? ` О себе: ${user.about}.` : ''} ` +
+      `Твой собеседник — ${user.name}.${user.about ? ` О себе: ${user.about}.` : ''} ` +
       'Обращайся к собеседнику по имени, когда это уместно.';
     const blocks = [agent.prompt, identity];
     if (personal) {
@@ -493,7 +491,9 @@ export class Engine {
     return {
       system: blocks.join('\n\n'),
       messages,
-      temperature: agent.temperature ?? 0.7,
+      // не задано — дефолт провайдера: температура карточки модели (с учётом
+      // переопределений settings.model и model.* агента), без своего хардкода
+      temperature: agent.model?.temperature,
     };
   }
 
@@ -555,7 +555,7 @@ export class Engine {
       parts.push(
         'Сообщения разговора:\n' +
         rest.map((m) =>
-          `${m.authorId === 'user' ? userName : `${m.authorName} (${m.authorRole ?? 'участник'})`}: ${m.text}`,
+          `${m.authorId === 'user' ? userName : m.authorName}: ${m.text}`,
         ).join('\n'),
       );
     }
@@ -822,7 +822,6 @@ export class Engine {
         session.messages.push({
           authorId: turn.agent.id,
           authorName: turn.agent.name,
-          authorRole: turn.agent.role,
           text: full.trim(),
           ts: Date.now(),
         });
@@ -963,7 +962,6 @@ export class Engine {
       session.messages.push({
         authorId: MANAGER_ID,
         authorName: agent.name,
-        authorRole: MANAGER_ROLE,
         text: summary,
         ts: Date.now(),
       });
@@ -1103,7 +1101,7 @@ export class Engine {
   /** Подтверждение для команд уровня ядра (импорт дома и т.п.) — через Presenter. */
   async confirmAction(label: string, desc = ''): Promise<boolean> {
     const agent = managerAsAgent(this.app.mgr);
-    return this.presenter.confirm({ label, desc, who: { id: agent.id, name: agent.name, emoji: agent.emoji, color: agent.color, role: agent.role } });
+    return this.presenter.confirm({ label, desc, who: { id: agent.id, name: agent.name, emoji: agent.emoji, color: agent.color } });
   }
 
   /** Удаление разговора по id; текущий — отказ: сначала /session close. */
@@ -1317,7 +1315,6 @@ export class Engine {
     this.session.messages.push({
       authorId: mgr.id,
       authorName: mgr.name,
-      authorRole: mgr.role,
       text,
       ts: Date.now(),
     });
@@ -1378,23 +1375,8 @@ export class Engine {
     return true;
   }
 
-  /** /profile set Имя; роль; о себе — сохранить профиль (config/user.json). */
-  setProfile(name: string, role?: string, about?: string): string {
-    this.app.profile = { name, role, about };
-    try {
-      writeFileSync(USER_FILE, JSON.stringify(this.app.profile, null, 2) + '\n');
-    } catch (err) {
-      throw new Error(`не удалось сохранить ${USER_FILE}: ${err instanceof Error ? err.message : err}`);
-    }
-    return (
-      tf('Запомнил: вы — {name}', { name: this.app.profile.name }) +
-      (this.app.profile.role ? ` (${this.app.profile.role})` : '') +
-      `. ${t('Команда теперь знает, кто вы.')}`
-    );
-  }
-
-  /** /profile update поле=значение: точечная правка профиля (name, role, about). */
-  updateProfile(fields: { name?: string; role?: string; about?: string }): string {
+  /** /profile update поле=значение: точечная правка профиля (name, about). */
+  updateProfile(fields: { name?: string; about?: string }): string {
     const next = { ...this.app.profile };
     for (const [k, v] of Object.entries(fields)) {
       if (v === undefined) continue;
@@ -1409,7 +1391,6 @@ export class Engine {
     }
     return (
       tf('Запомнил: вы — {name}', { name: this.app.profile.name }) +
-      (this.app.profile.role ? ` (${this.app.profile.role})` : '') +
       `. ${t('Команда теперь знает, кто вы.')}`
     );
   }
@@ -1669,7 +1650,6 @@ export class Engine {
       session.messages.push({
         authorId: agent.id,
         authorName: agent.name,
-        authorRole: agent.role,
         text: follow,
         ts: Date.now(),
       });

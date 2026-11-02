@@ -107,7 +107,7 @@ export const CONFIRM_TIMEOUT_MS = 5 * 60_000;
 function publicSession(session: Session): {
   id: string;
   title: string;
-  messages: { authorId: string; authorName: string; authorRole?: string; text: string; ts: number; attachments?: string[] }[];
+  messages: { authorId: string; authorName: string; text: string; ts: number; attachments?: string[] }[];
 } {
   return {
     id: session.id,
@@ -115,7 +115,6 @@ function publicSession(session: Session): {
     messages: session.messages.map((m) => ({
       authorId: m.authorId,
       authorName: m.authorName,
-      authorRole: m.authorRole,
       text: m.text,
       ts: m.ts,
       attachments: m.attachments,
@@ -144,7 +143,7 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
     team: team.map((a) => ({
       id: a.id,
       name: a.name,
-      role: a.role,
+      description: a.description,
       emoji: a.emoji,
       color: a.color,
       model: a.model?.id,
@@ -156,6 +155,8 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       id,
       kind: s.provider.kind,
       model: s.provider.model,
+      // адаптер из карточки — селектор «Провайдер» и фильтр сайдбара
+      provider: s.config?.provider ? String(s.config.provider) : undefined,
       baseUrl: s.config?.baseUrl ? String(s.config.baseUrl) : undefined,
       ok: s.ok,
       note: s.note,
@@ -167,12 +168,21 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       isDefault: id === app.settings.model?.id,
       isManager: id === app.mgr.model.id,
     })),
-    images: [...app.images].map(([id, s]) => ({ id, ok: s.ok, note: s.note })),
+    // image-модели — с тем же набором, что и LLM (kind/model), сайдбар и
+    // селектор «модель генерации изображений» показывают их одним списком
+    images: [...app.images].map(([id, s]) => ({
+      id,
+      kind: s.provider.kind,
+      model: s.provider.model,
+      provider: s.config?.provider ? String(s.config.provider) : undefined,
+      ok: s.ok,
+      note: s.note,
+    })),
     // все имена провайдеров (встроенные + кастомные из providers/ дома) —
     // селектор «провайдер» в форме новой модели GUI
     providers: providerIds(),
     memory: { shared: app.memory.shared ?? '', agents: app.memory.agents },
-    profile: { name: app.profile.name, role: app.profile.role },
+    profile: { name: app.profile.name, about: app.profile.about },
     settings: loadSettings(SETTINGS_FILE, 0),
     projects: projects ?? [],
     // текущий проект (null — не выбран) и все проекты дома (смена — project.open,
@@ -834,7 +844,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text: res.text };
       }
       case 'agent.new': {
-        const report = addTeamAgent(AGENTS_DIR, { id: String(args.id ?? ''), name: String(args.name ?? args.id ?? ''), role: args.role ? String(args.role) : undefined }, engine.app.models);
+        const report = addTeamAgent(AGENTS_DIR, { id: String(args.id ?? ''), name: String(args.name ?? args.id ?? ''), description: args.description ? String(args.description) : undefined }, engine.app.models);
         broadcastState();
         return { text: report };
       }
@@ -885,7 +895,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       }
       case 'model.get': {
         const id = String(args.id ?? '').trim();
-        const slot = app.models.get(id);
+        const slot = app.models.get(id) ?? app.images.get(id);
         if (!slot) throw new Error(`модели «${id}» нет — см. /models`);
         const card = maskModelCard({ ...(slot.config ?? {}) });
         return { card, schema: modelCardSchema(String(card.provider ?? slot.provider.id)) };
@@ -1078,7 +1088,6 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         // профиль владельца: форма настроек в обеих оболочках идёт через rpc
         const report = engine.updateProfile({
           name: args.name !== undefined ? String(args.name) : undefined,
-          role: args.role !== undefined ? String(args.role) : undefined,
           about: args.about !== undefined ? String(args.about) : undefined,
         });
         presenter.notice('  ' + report);

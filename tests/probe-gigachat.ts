@@ -103,7 +103,7 @@ const chats = (): Captured[] => captured.filter((c) => c.url?.endsWith('/chat/co
 {
   let threw = '';
   try { gigachatFactory('g', { provider: 'gigachat' }); } catch (e) { threw = String(e); }
-  check('конфиг: без ключа — ConfigurationError с подсказкой', threw.includes('apiKey') && threw.includes('models/g.json'), threw);
+  check('конфиг: без ключа — ConfigurationError с подсказкой', threw.includes('apiKey') && threw.includes('clientId'), threw);
   let isConfigErr = false;
   try { gigachatFactory('g', { provider: 'gigachat', apiKey: 'x', caCertPath: join(here, 'no-such.pem') }); } catch (e) { threw = String(e); isConfigErr = e instanceof ConfigurationError; }
   check('конфиг: битый caCertPath — ConfigurationError', isConfigErr && threw.includes('не удалось прочитать сертификат'), threw);

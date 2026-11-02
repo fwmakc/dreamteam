@@ -62,6 +62,11 @@ function resolveAdapter(name: string): ProviderFactory | undefined {
   return adapters[name] ?? userAdapters.get(name);
 }
 
+/** Подменить встроенный адаптер — для проб: скриптовый LLM вместо сети. */
+export function setAdapter(name: string, factory: ProviderFactory): void {
+  adapters[name] = factory;
+}
+
 /** Все имена провайдеров: встроенные + кастомные (селектор в GUI, подсказки). */
 export function providerIds(): string[] {
   return [...Object.keys(adapters), ...userAdapters.keys()];
@@ -121,6 +126,8 @@ export interface ImageProviderStatus {
   provider: ImageProvider;
   ok: boolean;
   note?: string;
+  /** Исходная карточка из models/<id>.json — для правки и подсказок GUI */
+  config?: ProviderConfig;
 }
 
 /**
@@ -212,7 +219,7 @@ export function loadModels(dir: string): LoadedModels {
       if (image) {
         const factory = imageAdapters[provider];
         if (!factory) throw new Error(`провайдер «${provider}» не найден`);
-        images.set(id, { provider: factory(id, config), ok: true });
+        images.set(id, { provider: factory(id, config), ok: true, config });
       } else {
         const factory = resolveAdapter(provider);
         if (!factory) throw new Error(`провайдер «${provider}» не найден`);
@@ -238,6 +245,7 @@ export function loadModels(dir: string): LoadedModels {
           },
           ok: false,
           note: reason,
+          config,
         });
       } else {
         // карточку сохраняем: GUI правит именно битую модель (вписывает ключ)

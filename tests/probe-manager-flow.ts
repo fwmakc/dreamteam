@@ -42,6 +42,7 @@ process.chdir(base); // рабочая папка инструментов — �
 // загрузки, а manager.ts теперь транзитно тянет paths.js (через mail.js)
 const { MANAGER_PROMPT, MANAGER_ID } = await import('../src/manager.js');
 const { BUILTIN_TOOL_DESCS, BUILTIN_TOOL_IDS } = await import('../src/tools-api.js');
+const { setAdapter } = await import('../src/providers/registry.js');
 
 mkdirSync(join(home, 'models'), { recursive: true });
 writeFileSync(join(home, 'models', 'mock.json'), JSON.stringify({ provider: 'mock' }, null, 2) + '\n');
@@ -81,6 +82,9 @@ const fakeProvider: LLMProvider = {
     yield reply;
   },
 };
+// подмена на уровне адаптера: инстансы с переопределениями (model.temperature
+// агента) фабрика заново — карточной подмены они бы не унаследовали
+setAdapter('mock', () => fakeProvider);
 
 // ── заглушка Presenter: собирает всё, что ядро говорит оболочке ─────────────
 const says: string[] = [];
@@ -109,8 +113,6 @@ const engine = new Engine(app, stub);
 engine.newProject('dev', join(base, 'ws'));
 const projFile = join(home, 'projects', 'dev', 'project.json');
 const sessionsDir = join(home, 'projects', 'dev', 'sessions');
-// все провайдеры дома (mock и claude) — под одним скриптовым LLM
-for (const p of app.models.values()) p.provider = fakeProvider;
 const signal = () => new AbortController().signal;
 
 /** Ход менеджера: заготовленный ответ + просьба руководителя. */
@@ -210,14 +212,14 @@ function lastManagerMessage(): string {
 {
   const before = agentsSnapshot();
   await askManager(
-    'Готово, зову Пашу.\n{"say":"Зову Пашу.","actions":[{"op":"team.add","id":"pasha","name":"Паша","role":"тестировщик","model":"claude","temperature":0.4,"tools":{"files":{},"shell":null}}]}',
+    'Готово, зову Пашу.\n{"say":"Зову Пашу.","actions":[{"op":"team.add","id":"pasha","name":"Паша","description":"тестировщик","model":"claude","temperature":0.4,"tools":{"files":{},"shell":null}}]}',
     'добавь Пашу тестировщиком',
   );
   const team = (await import('../src/agents.js')).loadTeam(agentsDir);
   const pasha = team.find((a) => a.id === 'pasha');
   check('team.add: участник в agents/', !!pasha);
-  check('team.add: спецификация целиком', pasha?.name === 'Паша' && pasha?.model?.id === 'claude' && pasha?.temperature === 0.4, JSON.stringify(pasha));
-  check('team.add: дефолты эмодзи/цвета/промпта', pasha?.emoji === '🤖' && pasha?.color === 'white' && pasha?.prompt === 'Ты — Паша, тестировщик.', JSON.stringify(pasha));
+  check('team.add: спецификация целиком', pasha?.name === 'Паша' && pasha?.model?.id === 'claude' && pasha?.model?.temperature === 0.4, JSON.stringify(pasha));
+  check('team.add: дефолты эмодзи/цвета/промпта', pasha?.emoji === '🤖' && pasha?.color === 'white' && pasha?.prompt === 'Ты — Паша.', JSON.stringify(pasha));
   check('team.add: карточки тула­ов записаны', JSON.stringify(pasha?.tools?.shell) === '{}', JSON.stringify(pasha?.tools));
   const msg = lastManagerMessage();
   check('team.add: say + ✓-отчёт в истории менеджера', msg.includes('Зову Пашу.') && msg.includes('✓ Паша'), msg.slice(0, 160));
@@ -227,14 +229,14 @@ function lastManagerMessage(): string {
 // team.update: белые поля правятся, соседние целы
 {
   await askManager(
-    'Правлю.\n{"say":"Правлю.","actions":[{"op":"team.update","id":"pasha","fields":{"role":"ведущий тестировщик","temperature":0.1}}]}',
+    'Правлю.\n{"say":"Правлю.","actions":[{"op":"team.update","id":"pasha","fields":{"description":"ведущий тестировщик","model":{"id":"claude","temperature":0.1}}}]}',
     'Пашу — ведущим',
   );
   const team = (await import('../src/agents.js')).loadTeam(agentsDir);
   const pasha = team.find((a) => a.id === 'pasha');
-  check('team.update: роль и temp применились', pasha?.role === 'ведущий тестировщик' && pasha?.temperature === 0.1, JSON.stringify(pasha));
+  check('team.update: описание и temp применились', pasha?.description === 'ведущий тестировщик' && pasha?.model?.temperature === 0.1, JSON.stringify(pasha));
   check('team.update: соседние поля целы', pasha?.model?.id === 'claude' && pasha?.emoji === '🤖');
-  check('team.update: отчёт в истории', lastManagerMessage().includes('role="ведущий тестировщик"'), lastManagerMessage().slice(0, 160));
+  check('team.update: отчёт в истории', lastManagerMessage().includes('description="ведущий тестировщик"'), lastManagerMessage().slice(0, 160));
 }
 
 // chat.add + chat.remove одной репликой: состав чата меняется

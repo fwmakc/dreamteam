@@ -71,7 +71,7 @@ export async function compressIfNeeded(
         ? userName
         : m.authorId === 'session-ref'
           ? `Конспект разговора «${m.authorName}»`
-          : `${m.authorName} (${m.authorRole ?? 'участник'})`;
+          : m.authorName;
       return `${who}: ${m.text}`;
     })
     .join('\n');

@@ -36,7 +36,7 @@ process.chdir(base);
 writeModels(home, { mock: { provider: 'mock' } });
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
-writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Босс', role: 'руководитель' }, null, 2) + '\n');
+writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Босс' }, null, 2) + '\n');
 
 const { startServe } = await import('../src/serve.js');
 const { SessionStore } = await import('../src/sessions.js');
@@ -110,7 +110,7 @@ let freshId = '';
 
 // ── Шаг 2: создать агента-юриста ─────────────────────────────────────────────
 {
-  gui.send({ type: 'rpc', id: 'r2a', method: 'agent.new', args: { id: 'lawyer', name: 'Юрист', role: 'право' } });
+  gui.send({ type: 'rpc', id: 'r2a', method: 'agent.new', args: { id: 'lawyer', name: 'Юрист', description: 'право' } });
   const st = await gui.next(
     (m) => m.type === 'state' && (m.state as { team: { id: string }[] }).team.some((a) => a.id === 'lawyer'),
   );

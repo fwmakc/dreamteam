@@ -18,7 +18,7 @@ import { contractOf, providerIds } from './providers/registry.js';
 export interface FieldSpec {
   /** Путь значения в карточке: «name», «model.temperature» */
   path: string;
-  type: 'string' | 'text' | 'number' | 'boolean' | 'object' | 'enum' | 'password';
+  type: 'string' | 'text' | 'number' | 'boolean' | 'object' | 'enum' | 'password' | 'model';
   /** Метка поля в форме — русский ключ, переводы в locales en/zh */
   label: string;
   /** Варианты для enum */
@@ -37,15 +37,16 @@ export interface CardSchema {
   fields: readonly FieldSpec[];
 }
 
-/** Скалярные поля агента (верхний уровень) + вложенные ссылки model.* и vision/image. */
+/** Скалярные поля агента (верхний уровень) + ссылка на модель целиком и vision/image. */
 type AgentPath =
-  | 'name' | 'emoji' | 'color' | 'role' | 'description' | 'prompt' | 'temperature' | 'workspace'
-  | 'model.id' | 'model.temperature' | 'model.maxTokens' | 'model.thinking' | 'model.reasoning'
-  | 'vision.id' | 'image.id';
+  | 'name' | 'emoji' | 'color' | 'description' | 'prompt' | 'workspace'
+  | 'model'
+  | 'vision.id' | 'image.id'
+  | 'tools';
 
 // компилятор: каждое верхнее поле пути обязано существовать в интерфейсе
-type _AgentCheck = Exclude<AgentPath, `model.${string}` | `vision.${string}` | `image.${string}`> extends keyof Agent ? true : never;
-type _AgentModelCheck = 'id' extends keyof NonNullable<Agent['model']> ? ('temperature' extends keyof NonNullable<Agent['model']> ? ('maxTokens' extends keyof NonNullable<Agent['model']> ? ('thinking' extends keyof NonNullable<Agent['model']> ? ('reasoning' extends keyof NonNullable<Agent['model']> ? true : never) : never) : never) : never) : never;
+type _AgentCheck = Exclude<AgentPath, 'model' | `vision.${string}` | `image.${string}`> extends keyof Agent ? true : never;
+type _AgentModelCheck = 'id' extends keyof NonNullable<Agent['model']> ? true : never;
 type _AgentRefCheck = 'id' extends keyof NonNullable<Agent['vision']> ? ('id' extends keyof NonNullable<Agent['image']> ? true : never) : never;
 type _SessionCheck = 'title' extends keyof Session ? true : never;
 type _ProjectCheck = 'path' extends keyof ProjectConfig ? true : never;
@@ -64,17 +65,33 @@ export const CARD_SCHEMAS: Record<string, CardSchema> = {
       { path: 'name', type: 'string', label: 'Имя' },
       { path: 'emoji', type: 'string', label: 'Emoji' },
       { path: 'color', type: 'enum', label: 'Цвет', values: COLOR_VALUES },
-      { path: 'role', type: 'string', label: 'Роль' },
       { path: 'description', type: 'string', label: 'Описание' },
-      { path: 'prompt', type: 'text', label: 'Промпт (системный)' },
-      { path: 'temperature', type: 'number', label: 'Температура (0–2)' },
-      { path: 'model.id', type: 'string', label: 'Модель (id из models/)' },
-      { path: 'model.temperature', type: 'number', label: 'Температура модели (0–2)' },
-      { path: 'model.maxTokens', type: 'number', label: 'Максимум токенов' },
-      { path: 'model.thinking', type: 'enum', label: 'Размышления GLM', values: ['enabled', 'disabled'], desc: 'биллятся' },
-      { path: 'model.reasoning', type: 'enum', label: 'Глубина размышлений', values: ['minimal', 'low', 'medium', 'high', 'max'] },
-      { path: 'vision.id', type: 'string', label: 'Модель зрения (id из models/)' },
-      { path: 'image.id', type: 'string', label: 'Модель генерации изображений (id из models/)' },
+      { path: 'prompt', type: 'text', label: 'Промпт (системный)', placeholder: 'от первого лица: кто ты, чем занимаешься, как отвечаешь' },
+      {
+        path: 'model',
+        type: 'model',
+        label: 'Модель',
+        desc: 'пусто — основная модель дома; выберите карточку или задайте вручную (JSON): {"id": "…", "temperature": 0.3} — id можно опустить, останется переопределение параметров основной',
+      },
+      {
+        path: 'vision.id',
+        type: 'model',
+        label: 'Модель зрения',
+        desc: 'пусто — не менять; выберите зрячую модель (◉) или задайте вручную (JSON): {"id": "…", "temperature": 0.3} — "id" обязателен',
+      },
+      {
+        path: 'image.id',
+        type: 'model',
+        label: 'Модель генерации изображений',
+        desc: 'пусто — не менять; выберите модель картинок или задайте вручную (JSON): {"id": "…"} — "id" обязателен',
+      },
+      {
+        path: 'tools',
+        type: 'object',
+        label: 'Тулы',
+        placeholder: '{"files": {}, "look": {}}',
+        desc: 'карта целиком — что в JSON, то в карточке (не дополнение): ключ — тул, значение — его настройки ({} или null — по умолчанию); {} — убрать все; пусто — не менять. Встроенные и свои из tools/ дома',
+      },
       { path: 'workspace', type: 'string', label: 'Рабочая папка (подпапка рабочей или путь)' },
     ]),
   },
@@ -148,7 +165,9 @@ export function modelCardSchema(provider: string): CardSchema {
       ? 'пусто — не менять'
       : spec.required
         ? 'обязательное поле'
-        : undefined;
+        : spec.type === 'object'
+          ? '{"поле": "значение"}'
+          : undefined;
     const type: FieldSpec['type'] = secret
       ? 'password'
       : spec.type === 'boolean'

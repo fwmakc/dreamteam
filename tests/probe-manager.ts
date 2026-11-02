@@ -126,7 +126,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('mention: чужое @имя — мимо', !managerMentioned('@катя, привет', cfg));
   check('mention: мимо и без слова вообще', !managerMentioned('привет всем', cfg));
   // триггер ! для обычных участников (findMentions); результат — уникальные агенты
-  const team: Agent[] = [{ id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'p' }];
+  const team: Agent[] = [{ id: 'katya', name: 'Катя', emoji: '🎨', description: 'дизайнер', color: 'cyan', prompt: 'p' }];
   check('mention: findMentions @имя и @id', findMentions('@Катя и @katya', team).length === 1);
   check('mention: findMentions !имя и !id', findMentions('!катя, !katya', team).length === 1);
   check('mention: findMentions «ё» и регистр', findMentions('Ёжик !КАТЯ', team).length === 1);
@@ -136,8 +136,8 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   // псевдо-агент пригоден для шапки: есть все поля рендера
   const cfg = loadManagerConfig(cfgFile, ['openai']);
   const agent = managerAsAgent(cfg);
-  check('псевдо-агент: id/имя/роль/эмодзи/цвет',
-    agent.id === 'manager' && agent.name === cfg.name && agent.role === 'менеджер переговорки' &&
+  check('псевдо-агент: id/имя/эмодзи/цвет',
+    agent.id === 'manager' && agent.name === cfg.name &&
     agent.emoji === cfg.emoji && agent.color === cfg.color);
   check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 3200 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
 }
@@ -212,8 +212,8 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 // --- managerStateInput ---
 {
   const team: Agent[] = [
-    { id: 'katya', name: 'Катя', emoji: '🎨', role: 'дизайнер', color: 'cyan', prompt: 'p', model: { id: 'claude' }, temperature: 0.3, tools: { files: {}, look: null } },
-    { id: 'gleb', name: 'Глеб', emoji: '💾', role: 'разработчик', color: 'green', prompt: 'p', projects: ['shop'] },
+    { id: 'katya', name: 'Катя', emoji: '🎨', description: 'дизайнер', color: 'cyan', prompt: 'p', model: { id: 'claude', temperature: 0.3 }, tools: { files: {}, look: null } },
+    { id: 'gleb', name: 'Глеб', emoji: '💾', description: 'разработчик', color: 'green', prompt: 'p', projects: ['shop'] },
   ];
   const sessions: SessionMeta[] = [
     { id: 's1', title: 'Текущий', createdAt: 0, updatedAt: 1, count: 4 },
@@ -236,7 +236,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     ],
     operations: [{ cmd: '/session new', help: 'новый разговор' }, { cmd: '/session open', args: '<id>', help: 'открыть разговор' }],
   });
-  check('стейт: ростер с провайдером и temp', input.includes('katya — Катя, модель: claude, temp 0.3'), input);
+  check('стейт: ростер с провайдером и temp', input.includes('katya — Катя (дизайнер), модель: claude, temp 0.3'), input);
   check('стейт: тулы агента в ростере', input.includes('тулы: files, look') && input.includes('тулов нет'), input);
   check('стейт: состав чата', input.includes('В этом чате: katya'));
   check('стейт: список разговоров с id и текущим', input.includes('- s1 — Текущий — 4 сообщ. (текущий)') && input.includes('- s2 — Прошлый — 9 сообщ.'), input);
@@ -252,15 +252,15 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   writeFileSync(join(agentsDir, 'gleb.json'), JSON.stringify({ name: 'Глеб', emoji: '💾', color: 'green', prompt: 'Ты — Глеб.' }, null, 2) + '\n');
 
   const report = addTeamAgent(agentsDir, {
-    id: 'katya', name: 'Катя', role: 'дизайнер', tools: { files: {}, shell: null }, temperature: 0.4,
+    id: 'katya', name: 'Катя', description: 'дизайнер', tools: { files: {}, shell: null }, temperature: 0.4,
   }, models);
-  check('team.add: отчёт с именем и ролью', report.includes('Катя') && report.includes('дизайнер'), report);
+  check('team.add: отчёт с именем', report.includes('Катя'), report);
 
   const agents = loadTeam(agentsDir);
   const katya = agents.find((a) => a.id === 'katya');
   check('team.add: loadTeam валиден, участник на месте', !!katya);
   check('team.add: дефолты эмодзи/цвета', katya?.emoji === '🤖' && katya?.color === 'white', JSON.stringify(katya));
-  check('team.add: дефолтный промпт', katya?.prompt === 'Ты — Катя, дизайнер.', katya?.prompt);
+  check('team.add: дефолтный промпт', katya?.prompt === 'Ты — Катя.', katya?.prompt);
   // карточки доходят как есть, null → {} (настройки по умолчанию)
   const kt = katya?.tools;
   check(
@@ -268,7 +268,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     !!kt && !Array.isArray(kt) && Object.keys(kt).length === 2 && 'files' in kt && JSON.stringify(kt.shell) === '{}',
     JSON.stringify(kt),
   );
-  check('team.add: temperature записана', katya?.temperature === 0.4);
+  check('team.add: легаси-temperature переехала в model', katya?.model?.temperature === 0.4, JSON.stringify(katya));
   check('team.add: ростер не пустой', loadTeam(agentsDir).length > 0);
   check('team.add: tmp-файл убран за собой', !existsSync(agentsDir + '.tmp'));
 
@@ -297,17 +297,17 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('team.add: существующий провайдер записан', loadTeam(agentsDir).find((a) => a.id === 'mira')?.model?.id === 'claude');
 }
 {
-  const report = updateTeamAgent(agentsDir, 'gleb', { role: 'ведущий разработчик', model: 'openai', temperature: 0.1 }, models);
-  check('team.update: отчёт перечисляет правки', report.includes('ведущий разработчик') && report.includes('openai') && report.includes('temperature=0.1'), report);
+  const report = updateTeamAgent(agentsDir, 'gleb', { description: 'ведущий разработчик', model: { id: 'openai', temperature: 0.1 } }, models);
+  check('team.update: отчёт перечисляет правки', report.includes('ведущий разработчик') && report.includes('openai') && report.includes('temperature'), report);
   const agents = loadTeam(agentsDir);
   const gleb = agents.find((a) => a.id === 'gleb');
-  check('team.update: роль/провайдер/temp применились', gleb?.role === 'ведущий разработчик' && gleb?.model?.id === 'openai' && gleb?.temperature === 0.1, JSON.stringify(gleb));
+  check('team.update: описание/провайдер/temp применились', gleb?.description === 'ведущий разработчик' && gleb?.model?.id === 'openai' && gleb?.model?.temperature === 0.1, JSON.stringify(gleb));
   check('team.update: остальные поля целы', gleb?.prompt === 'Ты — Глеб.' && gleb?.emoji === '💾');
   check('team.update: loadTeam по-прежнему валиден', agents.length === 3);
 
   const before2 = agentsSnapshot();
   let threw = '';
-  try { updateTeamAgent(agentsDir, 'никого', { role: 'x' }, models); } catch (e) { threw = (e as Error).message; }
+  try { updateTeamAgent(agentsDir, 'никого', { description: 'x' }, models); } catch (e) { threw = (e as Error).message; }
   check('team.update: чужой id — ошибка', threw.includes('никого'), threw);
   threw = '';
   try { updateTeamAgent(agentsDir, 'gleb', { projects: ['x'] } as never, models); } catch (e) { threw = (e as Error).message; }
@@ -497,7 +497,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   const bare = resolveHost('staging', cfg);
   check('ssh: голое имя резолвится', !('error' in bare) && bare.project === 'project', JSON.stringify(bare));
   check('ssh: чужой хост — отказ', 'error' in resolveHost('project:nope', cfg), '');
-  const devops: Agent = { id: 'y', name: 'Яна', emoji: '🏍', role: 'devops', color: 'cyan', prompt: 'x', tools: { ssh: {} }, projects: ['project'] };
+  const devops: Agent = { id: 'y', name: 'Яна', emoji: '🏍', color: 'cyan', prompt: 'x', tools: { ssh: {} }, projects: ['project'] };
   check('права: ssh по проекту разрешён', checkPermission(devops, { kind: 'ssh', host: 'project:prod', command: 'uptime' }, cfg) === null);
   check('права: ssh по голому имени разрешён', checkPermission(devops, { kind: 'ssh', host: 'staging', command: 'uptime' }, cfg) === null);
   const deny = checkPermission(devops, { kind: 'ssh', host: 'ghost:prod', command: 'uptime' }, cfg);

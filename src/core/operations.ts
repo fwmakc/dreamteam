@@ -139,7 +139,7 @@ function agentsText(app: App): string[] {
       a.model?.id ? tf('модель: {id}', { id: a.model.id }) : '',
     ].filter(Boolean);
     lines.push(
-      `• ${a.id} — ${a.emoji} ${a.name} — ${a.role}${a.description ? ': ' + a.description : ''}` +
+      `• ${a.id} — ${a.emoji} ${a.name}${a.description ? ' — ' + a.description : ''}` +
       (marks.length > 0 ? ` [${marks.join(' · ')}]` : '') +
       (app.session && !inChat.has(a.id) ? ` · ${t('не в этом чате')} (/session agent add ${a.id})` : ''),
     );
@@ -200,7 +200,7 @@ function historyText(app: App, fromStr?: string, toStr?: string): string[] {
         ? t('⚙ инструменты')
         : isSessionRef(m)
           ? `📎 ${m.authorName}`
-          : `${m.authorName}${m.authorRole ? ` (${m.authorRole})` : ''}`;
+          : m.authorName;
     lines.push('', `${who}: ${m.text}`);
   }
   lines.push('');
@@ -636,10 +636,10 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: false },
     ],
     title: 'новый агент',
-    help: 'имя по умолчанию = id; поля: name= role= emoji= color= description= prompt= model.id= temperature=',
+    help: 'имя по умолчанию = id; поля: name= emoji= color= description= prompt= model.id= (тонкие параметры — model.temperature= и соседи, можно без id: переопределение на основной модели)',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
-      if (!id) return [t('Синтаксис: /agent new <id> [поле=значение…] — затем /agent update <id> name=… role=…')];
+      if (!id) return [t('Синтаксис: /agent new <id> [поле=значение…] — затем /agent update <id> name=… description=…')];
       if (!/^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9_-]+)*$/.test(id)) {
         return [tf('id «{id}» не по маске: строчная латиница и цифры, внутри точка, «-», «_»', { id })];
       }
@@ -647,9 +647,10 @@ export const OPERATIONS: OpSpec[] = [
       if (pairs.length > 0) {
         const parsed = parseFields(pairs);
         if (Array.isArray(parsed)) return parsed;
+        const tempKey = Object.keys(parsed).find((k) => k.toLowerCase() === 'temperature');
+        if (tempKey !== undefined) return [tf('temperature= — больше поля агента; температура живёт в модели: model.temperature={v}', { v: String(parsed[tempKey]) })];
         const { patch, error } = modelRefPatch(parsed, ['model'], {});
         if (error) return error;
-        if (patch.model && !patch.model.id) return [t('model.temperature= без model.id= — не знаю, к какой модели отнести')];
         for (const [k, v] of Object.entries(parsed)) {
           if (k.includes('.')) continue;
           fields[k.toLowerCase()] = v;
@@ -666,17 +667,19 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: true },
     ],
     title: 'править агента',
-    help: 'поля: name, role, emoji, color, description, prompt, temperature, workspace, vision, image; вложенные: model.id, model.temperature, model.maxTokens, model.thinking, model.reasoning',
+    help: 'поля: name, emoji, color, description, prompt, workspace, vision, image; вложенные: model.id, model.temperature, model.maxTokens, model.thinking, model.reasoning',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
         return [
           t('Синтаксис: /agent update <id> поле=значение…'),
-          t('Поля: name, role, emoji, color, description, prompt, temperature, workspace, vision, image; вложенные: model.id, model.temperature, model.maxTokens, model.thinking, model.reasoning'),
+          t('Поля: name, emoji, color, description, prompt, workspace, vision, image; вложенные: model.id, model.temperature, model.maxTokens, model.thinking, model.reasoning'),
         ];
       }
       const parsed = parseFields(pairs);
       if (Array.isArray(parsed)) return parsed;
+      const tempKey = Object.keys(parsed).find((k) => k.toLowerCase() === 'temperature');
+      if (tempKey !== undefined) return [tf('temperature= — больше поля агента; температура живёт в модели: model.temperature={v}', { v: String(parsed[tempKey]) })];
       // текущая ссылка агента — база для мерджа model.*
       let current: ModelRef | undefined;
       try {
@@ -1100,12 +1103,11 @@ export const OPERATIONS: OpSpec[] = [
     run: async (engine) => {
       const p = engine.app.profile;
       return [
-        tf('Вы: {name}{role}{about}', {
+        tf('Вы: {name}{about}', {
           name: p.name,
-          role: p.role ? ` — ${p.role}` : '',
           about: p.about ? ` — ${p.about}` : '',
         }),
-        t('Поправить: /profile update name=… role=… about=…'),
+        t('Поправить: /profile update name=… about=…'),
       ];
     },
   },
@@ -1113,18 +1115,17 @@ export const OPERATIONS: OpSpec[] = [
     name: 'profile.update',
     args: [{ name: 'поле=значение…', required: true }],
     title: 'править профиль',
-    help: 'поля: name, role, about',
+    help: 'поля: name, about',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /profile update name=… role=… about=…')];
+      if (rest.length === 0) return [t('Синтаксис: /profile update name=… about=…')];
       const parsed = parseFields(rest);
       if (Array.isArray(parsed)) return parsed;
       const keys = Object.keys(parsed);
-      if (keys.some((k) => !['name', 'role', 'about'].includes(k))) {
-        return [t('Поля профиля: name, role, about')];
+      if (keys.some((k) => !['name', 'about'].includes(k))) {
+        return [t('Поля профиля: name, about')];
       }
       return [engine.updateProfile({
         name: typeof parsed.name === 'string' ? parsed.name : undefined,
-        role: typeof parsed.role === 'string' ? parsed.role : undefined,
         about: typeof parsed.about === 'string' ? parsed.about : undefined,
       })];
     },
@@ -1684,7 +1685,7 @@ export const OPERATIONS: OpSpec[] = [
       '',
       tf('Менеджер: {emoji} {name}', { emoji: engine.app.mgr.emoji, name: engine.app.mgr.name }),
       `    ${t('модель:')} ${engine.app.mgr.model.id} · ${t('температура:')} ${engine.app.mgr.temperature ?? '—'}`,
-      t('Поменять: /manager update model.id=… model.temperature=… name=… emoji=… color=…'),
+      t('Поменять: /manager update model.id=… temperature=… name=… emoji=… color=…'),
       '',
     ],
   },
@@ -1692,19 +1693,24 @@ export const OPERATIONS: OpSpec[] = [
     name: 'manager.update',
     args: [{ name: 'поле=значение…', required: true }],
     title: 'настроить менеджера',
-    help: 'поля: name, emoji, color, temperature; вложенные: model.id, model.temperature',
+    help: 'поля: name, emoji, color, temperature; вложенные: model.id (температура менеджера — его поле temperature, остальные параметры — в карточке модели)',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /manager update model.id=… model.temperature=… name=… emoji=… color=…')];
+      if (rest.length === 0) return [t('Синтаксис: /manager update model.id=… temperature=… name=… emoji=… color=…')];
       const parsed = parseFields(rest);
       if (Array.isArray(parsed)) return parsed;
       const { patch, error } = modelRefPatch(parsed, ['model'], { model: engine.app.mgr.model });
       if (error) return error;
-      if (patch.model && !patch.model.id) return [t('model.temperature= без model.id= — не знаю, к какой модели отнести')];
+      // каждый запрос менеджера несёт его temperature (поле manager.json), поэтому
+      // переопределения model.temperature/maxTokens/… в его ссылке не срабатывают
+      const extra = Object.keys(parsed).filter((k) => k.toLowerCase().startsWith('model.') && k.toLowerCase() !== 'model.id');
+      if (extra.length > 0) {
+        return [tf('manager.{key} не сработает — у менеджера переопределяется только id; параметры правь в карточке модели', { key: extra[0] })];
+      }
       const fields: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(parsed)) {
         if (k.includes('.')) continue;
         if (!['name', 'emoji', 'color', 'temperature'].includes(k)) {
-          return [tf('Поле «{key}» не знаю — можно: name, emoji, color, temperature, model.id, model.temperature', { key: k })];
+          return [tf('Поле «{key}» не знаю — можно: name, emoji, color, temperature, model.id', { key: k })];
         }
         fields[k] = v;
       }

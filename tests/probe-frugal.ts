@@ -38,7 +38,7 @@ writeFileSync(join(home, 'settings.json'),
 {
   const { planTurns } = await import('../src/orchestrator.js');
   const { MockProvider } = await import('../src/providers/mock.js');
-  const kirk = { id: 'kirk', name: 'Кир', emoji: '🔧', color: 'cyan', prompt: 'Ты — Кир.', role: 'тест' };
+  const kirk = { id: 'kirk', name: 'Кир', emoji: '🔧', color: 'cyan', prompt: 'Ты — Кир.' };
   const moderator = new MockProvider('moderator');
   let llmCalled = false;
   const spy: import('../src/types.js').LLMProvider = {
@@ -53,11 +53,11 @@ writeFileSync(join(home, 'settings.json'),
   check('соло: план вернул одного агента', solo.turns.length === 1 && solo.turns[0].agent.id === 'kirk', JSON.stringify(solo.turns.map((t) => t.agent.id)));
   check('соло: LLM не вызван', !llmCalled, 'модератор был вызван для одного агента');
   // два агента → LLM вызывается (mock→mockPlan эвристика, но проверяем что путь не skip)
-  const mira = { id: 'mira', name: 'Мира', emoji: '🎨', color: 'magenta', prompt: 'Ты — Мира.', role: 'тест' };
+  const mira = { id: 'mira', name: 'Мира', emoji: '🎨', color: 'magenta', prompt: 'Ты — Мира.' };
   const duo = await planTurns({ text: 'привет', mentioned: [], team: [kirk, mira], moderator: spy, maxTurns: 3, userName: 'Хозяин', history: [] });
   check('два агента: план вернулся', duo.turns.length > 0, JSON.stringify(duo.turns.map((t) => t.agent.id)));
   // вопрос в mock-режиме добавляет критика (последний), если есть место
-  const third = { id: 'boris', name: 'Борис', emoji: '📊', color: 'yellow', prompt: 'Ты — Борис.', role: 'тест' };
+  const third = { id: 'boris', name: 'Борис', emoji: '📊', color: 'yellow', prompt: 'Ты — Борис.' };
   const question = await planTurns({ text: 'как считаете, это надёжно?', mentioned: [], team: [kirk, mira, third], moderator: spy, maxTurns: 3, userName: 'Хозяин', history: [] });
   check('mock-вопрос: критик добавлен последним', question.turns.length === 3 && question.turns[2].agent.id === 'boris', JSON.stringify(question.turns.map((t) => t.agent.id)));
 }
@@ -66,7 +66,7 @@ writeFileSync(join(home, 'settings.json'),
 {
   const { planTurns } = await import('../src/orchestrator.js');
   const mk = (id: string, name: string, description?: string) =>
-    ({ id, name, emoji: '🧪', color: 'cyan', prompt: `Ты — ${name}.`, role: 'тест', ...(description ? { description } : {}) });
+    ({ id, name, emoji: '🧪', color: 'cyan', prompt: `Ты — ${name}.`, ...(description ? { description } : {}) });
   const team = [mk('kirk', 'Кир', 'инженер'), mk('mira', 'Мира'), mk('gleb', 'Глеб'), mk('yana', 'Яна')];
   const requests: { system?: string; user: string }[] = [];
   let reply = '';
@@ -104,8 +104,8 @@ writeFileSync(join(home, 'settings.json'),
   // сборка запроса: ростер, история (последние 12), вопрос
   const req = requests[requests.length - 1]!;
   check('запрос: системная строка модератора', (req.system ?? '').startsWith('Ты — модератор'), req.system?.slice(0, 40));
-  check('запрос: ростер с описанием', req.user.includes('- kirk — Кир, тест: инженер'), req.user.slice(0, 200));
-  check('запрос: ростер без описания', req.user.includes('- mira — Мира, тест'), req.user.slice(0, 200));
+  check('запрос: ростер с описанием', req.user.includes('- kirk — Кир: инженер'), req.user.slice(0, 200));
+  check('запрос: ростер без описания', req.user.includes('- mira — Мира'), req.user.slice(0, 200));
   check('запрос: история — последние 12', req.user.includes('Хозяин: сообщение 4') && req.user.includes('Кир: сообщение 15'), req.user.slice(-300));
   check('запрос: старое за лимитом не попало', req.user.includes('сообщение 0') === false, req.user.slice(0, 200));
   check('запрос: вопрос с именем собеседника', req.user.includes('Новое сообщение от Хозяин:') && req.user.includes('«обсудим макет»'), req.user.slice(-200));

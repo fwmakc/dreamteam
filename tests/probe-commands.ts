@@ -180,7 +180,7 @@ const threw = async (line: string): Promise<string> => {
   );
   check(
     'session agent add: автор события — менеджер-модератор',
-    app.session!.messages.at(-1)?.authorId === MANAGER_ID && app.session!.messages.at(-1)?.authorRole === 'менеджер переговорки',
+    app.session!.messages.at(-1)?.authorId === MANAGER_ID,
   );
   lines = await run(engine, '/session agent add test_probe');
   check('session agent add: повтор — уже в чате (без события)', lines[0]?.includes('уже в чате') ?? false);
@@ -192,14 +192,14 @@ const threw = async (line: string): Promise<string> => {
 
 // ── профиль и память ─────────────────────────────────────────────────────────
 {
-  let lines = await run(engine, '/profile update name=Иванов role=инженер about=пишу код');
+  let lines = await run(engine, '/profile update name=Иванов about=пишу код');
   check('profile update: сохранение профиля', lines[0]?.includes('Иванов') ?? false);
   check(
     'profile update: поля в app (пробел в about склеен)',
-    app.profile.name === 'Иванов' && app.profile.role === 'инженер' && app.profile.about === 'пишу код',
+    app.profile.name === 'Иванов' && app.profile.about === 'пишу код',
   );
   lines = await run(engine, '/profile');
-  check('profile: показ профиля', lines[0]?.includes('Иванов — инженер') ?? false);
+  check('profile: показ профиля', lines[0]?.includes('Иванов — пишу код') ?? false);
 
   lines = await run(engine, '/memory shared');
   check('memory shared: пустая общая — подсказка', lines[0]?.includes('пока пуста') ?? false);
@@ -258,11 +258,11 @@ const threw = async (line: string): Promise<string> => {
   const dup = await threw('/agent new test2 name=Дубль');
   check('agent new: дубликат id — ошибка', dup.includes('уже есть'));
 
-  lines = await run(engine, '/agent update test2 role=сметана model.id=mock');
-  check('agent update: отчёт с полями', lines[0]?.includes('role="сметана"') ?? false);
+  lines = await run(engine, '/agent update test2 description=сметана model.id=mock');
+  check('agent update: отчёт с полями', lines[0]?.includes('description="сметана"') ?? false);
   team = await load();
   const t2 = team.find((a) => a.id === 'test2');
-  check('agent update: роль записана', t2?.role === 'сметана');
+  check('agent update: описание записано', t2?.description === 'сметана');
   check('agent update: вложенная модель записана', t2?.model?.id === 'mock');
   const badTemp = await run(engine, '/agent update test2 temperature=жарко');
   check('agent update: temperature не число — отказ', badTemp[0]?.includes('числом') ?? false);
@@ -627,8 +627,8 @@ const threw = async (line: string): Promise<string> => {
     sessions: () => [],
     agentIds: () => [],
     chatAgents: () => [
-      { id: 'kirk', name: 'Кир', role: 'инженер' },
-      { id: 'mira', name: 'Мира', role: 'аналитик' },
+      { id: 'kirk', name: 'Кир', description: 'инженер' },
+      { id: 'mira', name: 'Мира', description: 'аналитик' },
     ],
     modelIds: () => [],
     managerName: () => 'Босс',
@@ -667,8 +667,8 @@ const threw = async (line: string): Promise<string> => {
   const many = {
     ...mctx,
     chatAgents: () => [
-      ...Array.from({ length: 10 }, (_, i) => ({ id: `a${i}`, name: `Агент-${i}`, role: 'р' })),
-      { id: 'dlinny', name: 'Д'.repeat(60), role: 'очень долгая роль — ' + 'х'.repeat(40) },
+      ...Array.from({ length: 10 }, (_, i) => ({ id: `a${i}`, name: `Агент-${i}`, description: 'р' })),
+      { id: 'dlinny', name: 'Д'.repeat(60), description: 'очень долгое описание — ' + 'х'.repeat(40) },
     ],
   };
   const big = new MentionPicker();

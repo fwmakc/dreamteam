@@ -52,7 +52,7 @@ mkdirSync(join(home, 'models'), { recursive: true });
 j('models/mock.json', { provider: 'mock' });
 j('models/mock-images.json', { provider: 'mock-images' });
 j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000, model: { id: 'mock' } });
-j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
+j('user.json', { name: 'Босс', about: '' });
 // менеджер — вещь машины: в доме, на mock-модели
 j('manager.json', { model: { id: 'mock' }, name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
 import { rmTemp } from './rm-tmp.js';

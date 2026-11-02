@@ -116,7 +116,7 @@ export const gigachatFactory: ProviderFactory = (
     const key = config.apiKey ? String(config.apiKey) : undefined;
     if (!key) {
       throw new ConfigurationError(
-        `в карточке провайдера «${id}» нет "apiKey" (или пары "clientId"/"clientSecret") — впиши ключ из кабинета в карточку models/${id}.json`,
+        `нет "apiKey" (или пары "clientId"/"clientSecret") — впиши ключ из кабинета`,
       );
     }
     // Ключ из личного кабинета GigaChat — это уже base64(client_id:secret)

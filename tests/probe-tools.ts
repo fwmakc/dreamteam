@@ -187,7 +187,7 @@ const tctx: ToolContext = {
   check('загрузчик: кривое имя файла — ошибка', threw.includes('id тула'), threw);
   rmSync(join(toolsDir, 'Кривой!.ts'));
 
-  const agent: Agent = { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p', tools: {} };
+  const agent: Agent = { id: 'a', name: 'А', emoji: '🤖',color: 'green', prompt: 'p', tools: {} };
   const missing = (name: string, code: string) => {
     writeFileSync(join(toolsDir, `${name}.ts`), code);
     return loadUserTools(toolsDir).then((m) => {
@@ -222,7 +222,7 @@ const tctx: ToolContext = {
     id: 'a',
     name: 'А',
     emoji: '🤖',
-    role: 'р',
+
     color: 'green',
     prompt: 'p',
     tools: { shell: { allow: ['echo *'], deny: ['rm *'] }, files: {} },
@@ -278,7 +278,7 @@ const tctx: ToolContext = {
   const root = mkdtempSync(join(tmpdir(), 'dt-tooldefault-'));
   const localCfg: ToolsConfig = { ...cfg, workspaceAbs: root };
   const agent: Agent = {
-    id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p',
+    id: 'a', name: 'А', emoji: '🤖',color: 'green', prompt: 'p',
     tools: { shell: {}, ssh: {} },
   };
   const toolset = buildToolset(agent, localCfg, tctx, undefined, new Map());
@@ -505,7 +505,7 @@ const tctx: ToolContext = {
   const cfgS: ToolsConfig = { ...cfg, projects };
   const mk = (card: ToolConfig) =>
     buildToolset(
-      { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p', tools: { ssh: card }, projects: ['shop'] },
+      { id: 'a', name: 'А', emoji: '🤖',color: 'green', prompt: 'p', tools: { ssh: card }, projects: ['shop'] },
       cfgS, tctx, undefined, new Map(),
     ).get('ssh')!;
   const ctx = { ...makeCheckCtx(root), project: 'shop', arg: 'shop:prod' };
@@ -550,7 +550,7 @@ const tctx: ToolContext = {
   const root = mkdtempSync(join(tmpdir(), 'dt-filesmask-'));
   const localCfg: ToolsConfig = { ...cfg, workspaceAbs: root };
   const toolset = buildToolset(
-    { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p', tools: { files: { masks: ['*.key', '!safe.key'] } } },
+    { id: 'a', name: 'А', emoji: '🤖',color: 'green', prompt: 'p', tools: { files: { masks: ['*.key', '!safe.key'] } } },
     localCfg, tctx, undefined, new Map(),
   );
   const files = toolset.get('files')!;
@@ -595,7 +595,7 @@ const tctx: ToolContext = {
 {
   const projects = new Map([['shop', { hosts: new Map() }]]);
   const withShop: ToolsConfig = { ...cfg, projects };
-  const noTool: Agent = { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p' };
+  const noTool: Agent = { id: 'a', name: 'А', emoji: '🤖',color: 'green', prompt: 'p' };
   const action = { kind: 'tool', tool: 'git', command: 'status', project: 'shop' } as const;
   check('гейт: тул не включён — отказ', checkPermission(noTool, action, withShop)?.includes('не включён') === true);
   const withTool: Agent = { ...noTool, tools: { git: {} } };
@@ -626,7 +626,7 @@ const tctx: ToolContext = {
 // --- actionsHint: шпаргалка блоков по включённым тулам агента ---
 {
   const { actionsHint } = await import('../src/actions.js');
-  const empty: Agent = { id: 'a', name: 'А', emoji: '🤖', role: 'р', color: 'green', prompt: 'p' };
+  const empty: Agent = { id: 'a', name: 'А', emoji: '🤖',color: 'green', prompt: 'p' };
   check('шпаргалка: без тулов — null', actionsHint(empty, cfg) === null);
 
   const hostsCfg: ToolsConfig = {

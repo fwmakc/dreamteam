@@ -47,7 +47,7 @@ writeModels(home, {
   fake: { provider: 'openai-compatible', baseUrl: 'https://api.test/v1', model: 'mock-1', apiKey: 'СЕКРЕТ-КЛЮЧ-ПРОВИДЕРА' },
 });
 writeFileSync(join(home, '.env'), 'TOKEN=секрет-токен-serve\n');
-writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Хозяин', role: 'босс' }, null, 2) + '\n');
+writeFileSync(join(home, 'user.json'), JSON.stringify({ name: 'Хозяин' }, null, 2) + '\n');
 // интерфейс — на исходном русском (скаффолд по умолчанию даёт ui:"en")
 writeFileSync(join(home, 'settings.json'), JSON.stringify({ ui: 'ru', width: 100, model: { id: 'mock' } }, null, 2) + '\n');
 

@@ -29,7 +29,7 @@ export interface FeedItem { ts: number; kind: 'notice' | 'error'; text: string }
 export const feed = reactive<FeedItem[]>([]);
 /** Открытая реплика стрима (между turn_header и turn_end). */
 export const streaming = reactive({
-  open: false, id: '', name: '', role: '', emoji: '🤖', color: '', text: '',
+  open: false, id: '', name: '', emoji: '🤖', color: '', text: '',
 });
 const busyMap = reactive(new Map<string, string>());
 export const busyLabel = computed(() => [...busyMap.values()].at(-1) ?? '');
@@ -174,13 +174,12 @@ function finalizeStreaming(): void {
     messages.push({
       authorId: streaming.id,
       authorName: streaming.name,
-      authorRole: streaming.role || undefined,
       text: streaming.text,
       ts: Date.now(),
     });
   }
   streaming.open = false;
-  streaming.id = ''; streaming.name = ''; streaming.role = '';
+  streaming.id = ''; streaming.name = '';
   streaming.emoji = '🤖'; streaming.color = ''; streaming.text = '';
 }
 
@@ -215,11 +214,10 @@ function dispatchEvent(type: string, msg: Record<string, unknown>): void {
     }
     case 'turn_header': {
       finalizeStreaming();
-      const a = (msg.agent ?? {}) as { id?: string; name?: string; role?: string; emoji?: string; color?: string };
+      const a = (msg.agent ?? {}) as { id?: string; name?: string; emoji?: string; color?: string };
       streaming.open = true;
       streaming.id = a.id ?? '';
       streaming.name = a.name ?? '';
-      streaming.role = a.role ?? '';
       streaming.emoji = a.emoji ?? '🤖';
       streaming.color = a.color ?? '';
       streaming.text = '';

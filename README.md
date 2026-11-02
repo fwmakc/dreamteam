@@ -5,7 +5,7 @@
 **English** · [Русский](README.ru.md) · [中文](README.zh.md)
 
 You don't talk to a single AI here, but to a virtual team: every member has their own
-name, role, personality and text color. Your message goes to the moderator-orchestrator,
+name, description, personality and text color. Your message goes to the moderator-orchestrator,
 who decides which team members should answer (usually 1–3 people, not everyone at once).
 The agents see each other's remarks, argue and build on each other's ideas. You can
 address a specific member with `@name`. Every conversation is saved.
@@ -114,8 +114,8 @@ If there is no home (`~/.dreamteam`), the wizard asks, in order:
 3. **API key** — the input is hidden (not displayed and not written to the terminal
    log); the key is saved right into the model card in `models/`
    (the `"apiKey"` field) and picked up immediately.
-4. **How to introduce you to the team** — name, role, a couple of words (can be
-   skipped).
+4. **How to introduce you to the team** — a name and a couple of words about
+   yourself (can be skipped).
 
 Then the home is created with minimal files and clear starter notes: a starting
 team of five members (an analyst, a secretary, a developer, a designer, a writer)
@@ -134,7 +134,7 @@ your remarks are addressed to it, no `@` needed.
 
 ```
 You > bring in Gleb and Marina
-  ✓ Gleb (id "gleb", role "Head of architecture and code") added to the team
+  ✓ Gleb (id "gleb") added to the team
   💾 Gleb joined the chat.
 You > enable shell and files for Gleb
   ✓ gleb: tool "shell" enabled
@@ -331,9 +331,9 @@ There are no aliases or short forms: one name — one operation.
 | `import <file.zip>` | `/import dt-home-….zip` | unfold a home from an archive (with keys): settings/profile/memory/schedule are replaced, projects and conversations merge by id; asks for confirmation |
 | `settings.export` | `/settings export` | settings without projects: settings.json, the profile, the manager and the models with keys |
 | `settings.import <file.zip>` | `/settings import dt-settings-….zip` | replace settings/profile/manager/models (projects untouched); asks for confirmation |
-| `agents.list` | `/agents` | the team roster: ids, roles, tools, who is in the chat |
-| `agent.new <id> [field=value…]` | `/agent new yurist name=Yurist role=law` | a new member (the name defaults to the id) |
-| `agent.update <id> field=value…` | `/agent update yurist role=sourcream model.temperature=0.4 vision=glm` | edit: name= role= emoji= color= description= prompt= temperature= workspace= and the nested model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=, plus vision= image= (a model id from `models/`; empty — remove the reference) |
+| `agents.list` | `/agents` | the team roster: ids, descriptions, tools, who is in the chat |
+| `agent.new <id> [field=value…]` | `/agent new yurist name=Yurist description=law` | a new member (the name defaults to the id) |
+| `agent.update <id> field=value…` | `/agent update yurist description=sourcream model.temperature=0.4 vision=glm` | edit: name= emoji= color= description= prompt= workspace= and the nested model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=, plus vision= image= (a model id from `models/`; empty — remove the reference) |
 | `agent.delete <id…>` | `/agent delete yurist, keks` | delete members: a comma- or space-separated list |
 | `agent.tools <id>` | `/agent tools yurist` | which tools are enabled and with what settings |
 | `agent.tool add <id> <tool…>` | `/agent tool add yurist files shell` | enable tools (several at once): built-ins (the full list — `/tools`) or a custom one from tools/ |
@@ -349,7 +349,7 @@ There are no aliases or short forms: one name — one operation.
 | `model.get <id>` | `/model get glm` | the full card JSON — every field of the provider's contract (what the web form edits) |
 | `model.delete <id…>` | `/model delete glm spare` | delete models (several at once); the main one can't be deleted — `/settings update model.id=other` first |
 | `profile.show` | `/profile` | how the team sees you (user.json) |
-| `profile.update field=value…` | `/profile update name=Alexey role=founder about=brief` | fields: name, role, about |
+| `profile.update field=value…` | `/profile update name=Alexey about=brief` | fields: name, about |
 | `memory.show [id\|shared]` | `/memory gleb`, `/memory shared` | what a member remembers; no argument — an overview; `shared` — the team's shared memory |
 | `projects.list` | `/projects` | the home's project registry: ids and working folders, the current one marked |
 | `project.new <id> [folder]` | `/project new shop .` | create a project in the home and open it; the working folder is created if missing |
@@ -411,7 +411,7 @@ and `/session agent add` shows its syntax and the ids.
 
 The same for mentions: type `@` in the middle of a message — a popup with the
 members of the current chat and `@session` opens below the input line (each with
-their role). Typing filters the list, **up/down arrows** move the selection
+their description). Typing filters the list, **up/down arrows** move the selection
 (wrapping around), **Enter** or **Tab** insert the selected name, **Esc** closes
 the popup leaving the typed `@fragment` as is. Case doesn't matter, and neither
 does the Russian "ye"/"yo" letter distinction. After `@session` and a space, session
@@ -1238,8 +1238,8 @@ By default the members see the conversation partner simply as "User". So that th
 team knows who you are and how to address you, introduce yourself:
 
 ```
-You > /profile update name=Alexey role=startup founder about=values brevity
-  Noted: you are Alexey (startup founder). The team now knows who you are.
+You > /profile update name=Alexey about=values brevity
+  Noted: you are Alexey. The team now knows who you are.
 ```
 
 - The name goes into all the system prompts ("Your conversation partner is
@@ -1249,7 +1249,7 @@ You > /profile update name=Alexey role=startup founder about=values brevity
   (picked up without a restart); the wizard fills it in at first launch:
 
 ```json
-{ "name": "Alexey", "role": "startup founder", "about": "values brevity" }
+{ "name": "Alexey", "about": "values brevity" }
 ```
 
 ## Team memory: relationships, tasks and other conversations
@@ -1320,7 +1320,7 @@ conversation"); and later it can always be summoned:
 
 ```
 You > @manager, add analyst Ruslan to the team, let him work on claude
-You > @manager give Gleb the lead developer role and temperature 0.3
+You > @manager make Gleb the lead developer and set temperature 0.3
 You > @manager bring Katya into this chat
 You > @manager show the sessions and open the second one
 You > @manager enable the git tool for Pasha and allow him commit
@@ -1377,10 +1377,10 @@ It is configured in `~/.dreamteam/manager.json` (the file is required, like
 manager has its own model (from `manager.json`) — changed with
 `/manager update model.id=…`.
 
-## Custom roles and your own API
+## Custom agents and your own API
 
 **Change the team** — edit `~/.dreamteam/agents/` (saved on the fly): the
-`id`, `name`, `emoji`, `role`, `description`, `color`
+`id`, `name`, `emoji`, `description`, `color`
 (red/green/yellow/blue/magenta/cyan/white/gray), `prompt` (persona) fields,
 optionally `model` (an id string or an object with `temperature`) and
 `temperature`; access to real actions — `tools`,

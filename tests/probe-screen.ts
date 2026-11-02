@@ -385,7 +385,7 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
 
 // --- ui: чистые хелперы вывода (цвета отключаются вне TTY — сверяем с picocolors) ---
 {
-  const gleb: Agent = { id: 'gleb_cyber', name: 'Глеб', emoji: '🧠', color: 'cyan', role: 'архитектор', prompt: '' };
+  const gleb: Agent = { id: 'gleb_cyber', name: 'Глеб', emoji: '🧠', color: 'cyan', prompt: '' };
   check('ui: colorFn известного цвета = picocolors', colorFn('cyan')('x') === pc.cyan('x'));
   check('ui: colorFn в верхнем регистре — тоже', colorFn('RED')('x') === pc.red('x'));
   check('ui: colorFn неизвестного — без цвета', colorFn('кривой')('x') === 'x' && colorFn()('x') === 'x');
@@ -394,11 +394,11 @@ check('width: эмодзи = 2', visibleWidth('🎯') === 2);
   check('ui: agentHeader окрашен цветом агента', agentHeader(gleb) === colorFn('cyan')('[🧠 Глеб]'));
 
   check(
-    'ui: rosterLine — имя, роль, описание',
-    stripAnsi(rosterLine({ ...gleb, description: 'делает каркас' })) === '  🧠 Глеб — архитектор: делает каркас',
+    'ui: rosterLine — имя и описание',
+    stripAnsi(rosterLine({ ...gleb, description: 'делает каркас' })) === '  🧠 Глеб — делает каркас',
     stripAnsi(rosterLine({ ...gleb, description: 'делает каркас' })),
   );
-  check('ui: rosterLine без описания — без двоеточия', stripAnsi(rosterLine({ ...gleb, description: undefined })) === '  🧠 Глеб — архитектор');
+  check('ui: rosterLine без описания — только имя', stripAnsi(rosterLine({ ...gleb, description: undefined })) === '  🧠 Глеб');
 
   check('ui: fmtK — до тысячи как есть', fmtK(0) === '0' && fmtK(999) === '999');
   check('ui: fmtK — тысячи округляются', fmtK(1000) === '1k' && fmtK(1049) === '1k' && fmtK(127400) === '127k');

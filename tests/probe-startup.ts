@@ -42,12 +42,12 @@ mkdirSync(join(home, 'models'), { recursive: true });
 j('models/mock.json', { provider: 'mock' });
 j('models/mock-images.json', { provider: 'mock-images' });
 j('settings.json', { width: 100, margin: 2, screen: true, runTimeoutMs: 180000, maxOutputChars: 4000, model: { id: 'mock' } });
-j('user.json', { name: 'Босс', role: 'руководитель команды', about: '' });
+j('user.json', { name: 'Босс', about: '' });
 // менеджер и команда — вещь машины: в доме, на mock-моделях
 j('manager.json', { model: { id: 'mock' }, name: 'Менеджер', emoji: '🛎', color: 'yellow', temperature: 0.2 });
 mkdirSync(join(home, 'agents'), { recursive: true });
-j('agents/gleb_cyber.json', { id: 'gleb_cyber', name: 'Глеб', emoji: '🧠', color: 'cyan', role: 'Главный по архитектуре и коду', prompt: 'Ты Глеб.', model: 'mock' });
-j('agents/katya_uiux.json', { id: 'katya_uiux', name: 'Катя', emoji: '🎨', color: 'magenta', role: 'Арт-директор и UI/UX', prompt: 'Ты Катя.', model: 'mock' });
+j('agents/gleb_cyber.json', { id: 'gleb_cyber', name: 'Глеб', emoji: '🧠', color: 'cyan', prompt: 'Ты Глеб.', model: 'mock' });
+j('agents/katya_uiux.json', { id: 'katya_uiux', name: 'Катя', emoji: '🎨', color: 'magenta', prompt: 'Ты Катя.', model: 'mock' });
   // прошлый разговор с историей: хвост в панели, «Продолжаю разговор», @Глеб в попапе.
   // Сообщений много: панель должна иметь запас выше вьюпорта для PgUp (индикатор растёт).
 {
@@ -58,10 +58,9 @@ j('agents/katya_uiux.json', { id: 'katya_uiux', name: 'Катя', emoji: '🎨',
   const s = store.create();
   s.title = 'Прошлый разговор';
   let ts = Date.now() - 600_000;
-  const msg = (authorId: string, authorName: string, text: string, role?: string): ChatMessage => ({
+  const msg = (authorId: string, authorName: string, text: string): ChatMessage => ({
     authorId,
     authorName,
-    authorRole: role,
     text,
     ts: (ts += 30_000),
   });
@@ -69,8 +68,8 @@ j('agents/katya_uiux.json', { id: 'katya_uiux', name: 'Катя', emoji: '🎨',
   for (let i = 1; i <= 16; i++) history.push(msg('user', 'Босс', `рабочая реплика ${i} — прогоняем сборку, смотрим логи`));
   history.push(
     msg('user', 'Босс', 'привет, команда'),
-    msg('gleb_cyber', 'Глеб', 'Привет! Продолжаю разговор: серваки на месте, можно работать :)', 'Главный по архитектуре и коду'),
-    msg('katya_uiux', 'Катя', 'И вам привет ^_^', 'Арт-директор и UI/UX'),
+    msg('gleb_cyber', 'Глеб', 'Привет! Продолжаю разговор: серваки на месте, можно работать :)'),
+    msg('katya_uiux', 'Катя', 'И вам привет ^_^'),
   );
   s.messages = history;
   store.save(s);

@@ -7,6 +7,150 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
+## [0.0.17] — 2026-11-02
+
+### Breaking
+
+- **`role` is gone everywhere — again.** The agent field was removed in 0.0.7
+  and quietly came back with the card-schema forms; `description` already
+  covers the job, and the duplicated field leaked everywhere (the roster,
+  prompts, completions, the GUI sidebar) or sat empty on every new card (the
+  «участник» default). The field is out of the `Agent` type, the card schema,
+  `team.add`/`team.update`, the manager's actions, the serve snapshot (now
+  `description`) and the GUI form. The default prompt of a name-only
+  `team.add` becomes `Ты — <name>.`; the rosters show `id — name: description`;
+  the @-mention hint shows the description. Existing cards drop the legacy
+  `role` key on their next write, same lazy migration as `temperature`.
+- **The user profile is `name` + `about` now; `authorRole` is gone from
+  messages.** The profile's own `role` (`/profile`, `user.json`, the
+  `profile.update` rpc, the GUI settings form, the header tooltip) duplicated
+  what `about` says better, and per-message `authorRole` badges (`ChatMessage`,
+  the serve snapshot, the GUI message head, transcripts, chronicles, memory
+  labels) repeated the same stale line under every reply. Old `user.json`
+  files with `role` are read fine (the key is ignored) and rewritten without
+  it on the next profile update; old sessions keep their text — the stored
+  `authorRole` is simply not shown anymore. LLM wire roles
+  (`system`/`user`/`assistant`) are, of course, untouched — that is the chat
+  API's own addressing field, not ours.
+
+### Fixed
+
+- **A saved manual model reference opens empty.** The agent form built the
+  JSON text for a reference with parameters (`fieldsFromSchema` put the
+  pretty JSON into the field), but `openForm` copied every form field except
+  `json` — so reopening an agent whose «Модель» was
+  `{"id": "glm", "temperature": 0.7}` showed the «вручную (JSON)…» mode with
+  a blank textarea, as if nothing had been saved (the reference itself was
+  on disk all along; plain `{"id": …}` was unaffected — the selector
+  restores it by id). The copy now carries `json` through, and the same fix
+  covers «Модель зрения» and «Модель генерации изображений».
+
+### Changed
+
+- **Temperature now lives only in the model reference.** An agent card used
+  to carry two temperature fields — «Температура» and «Температура модели» —
+  and the distinction was false: `buildRequest` sent
+  `agent.temperature ?? 0.7` on every call, so `model.temperature` (the
+  documented per-agent override of the model card) never took effect — the
+  scaffold's analyst ran at 0.7, not at its declared 0.3. The request now
+  sends `agent.model.temperature`; when it is absent, the documented chain
+  applies (model card ← settings.model ← the agent's reference) down to the
+  provider's own default, with no hidden 0.7. The manager keeps its explicit
+  top-level temperature (it is always set, so reference params could never
+  reach its requests anyway).
+
+- **Legacy cards migrate on read.** A top-level `temperature` in
+  `agents/<id>.json` folds into `model.temperature` when the reference does
+  not carry one; the file is rewritten in the new shape on the next edit.
+  `team.add` and `team.update` fold the legacy field the same way, so
+  manager actions stay compatible.
+
+- **Model references are validated loudly.** `checkModelRef` rejects unknown
+  keys (allowed: `id`, `temperature`, `maxTokens`, `thinking`, `reasoning`)
+  and wrong value types — at load, in manager actions and in the
+  operations. `agent new`/`agent update` no longer accept a flat
+  `temperature=` (the error names `model.temperature=`); `/manager update`
+  accepts only `model.id` — the rest of the manager's reference was dead and
+  is now refused with a hint to edit the model card.
+
+- **The agent card GUI has one «Модель» control instead of a field group.**
+  Empty — the home's main model; a selector of the model cards; or
+  «вручную (JSON)…», which opens a monospace textarea for the whole
+  reference object (`{"id": …, "temperature": …}` — `id` may be omitted,
+  leaving a params-only override of the main model). The `model.*` field
+  groups are gone; the en/zh dictionaries follow.
+
+- **Agent tools are edited as one JSON map.** The agent card GUI field
+  «Тулы через запятую (есть: …)» only listed names and could add new ones —
+  no settings, no removal. It is now a schema field, the same object
+  textarea as the rest of the cards: `{"files": {}, "look": {"…settings…"}}`,
+  replaced wholesale (`{}` clears everything, empty keeps things unchanged,
+  `{}`/`null` as a tool's value means default settings). The backend's
+  `team.update`/`agent.update` gained a validated `tools` field (shape is
+  the canonical `normalizeAgentTools`; arrays and non-objects are rejected
+  loudly), so the manager can set tool maps too.
+
+- **The model references get the same treatment.** «Модель зрения» and
+  «Модель генерации изображений» in the agent card are now the same
+  three-mode control as «Модель» — selector or manual JSON («id» is
+  required there: a reference must name its model; empty keeps things
+  unchanged; a group holding a manual JSON unfolds itself). Image
+  generation models joined the GUI sidebar's model list with a «картинки»
+  tag: a click opens their card for editing (the backend's `model.get`
+  answers for image cards too — image statuses now carry the card), they
+  have no «make main» and no usage statistics.
+
+- **The «не настроен» statuses say it once.** The provider factories'
+  notes no longer spell out where the note came from and where to go —
+  «в карточке провайдера «gigachat» нет "apiKey" — … в карточку
+  models/gigachat.json» shrinks to «нет "apiKey" — впиши ключ из кабинета»,
+  since the note is shown on that very card (the GUI sub-line, the tooltip,
+  the TUI status). In the GUI sidebar the filled/empty circle markers gave
+  way to ✓/⚠ in the ok/warning colors; a broken card's sub-line shows only
+  the reason instead of «mock · reason», and the ◉ vision marker got a
+  margin so it no longer sticks to the model id.
+
+- **Multi-line fields behave in the modal forms.** Enter inside a textarea
+  used to close the whole window: the keydown bubbled to the modal root,
+  whose `enter` handler submits the form — and Shift+Enter submitted too,
+  since the modifier does not look at shift. Both modal textareas now stop
+  the Enter keydown at themselves, so the key inserts a newline and the
+  form is submitted by the button; Enter in the single-line inputs still
+  submits as before. JSON fields («Тулы», the manual model reference, the
+  `extra` dictionary on a model card) render in monospace, while prose
+  fields («Промпт») keep the UI font; the empty prompt field shows a
+  placeholder («от первого лица: кто ты, чем занимаешься, как отвечаешь»),
+  and object fields on a model card get a `{"поле": "значение"}` hint
+  instead of an empty box.
+
+### Added
+
+- **Every sidebar section has its own filter.** «Проекты» and «Расписание»
+  keep a small input row under the header (projects match name and path,
+  the hosts rows included; scheduled tasks match their text; Esc in the
+  input first clears the text, then hides the row). «Сессии», «Агенты» and
+  «Модели» open a filter modal from the ▽ button in the header instead —
+  one window, three buttons: «Применить» commits the draft and closes,
+  «Отмена» closes without touching the applied filter, «Очистить» resets
+  the fields and applies right away (the list updates live, the window
+  stays open); Esc in the window acts like «Отмена», Enter like
+  «Применить». Fields per section: sessions — a title substring plus
+  inclusive date ranges for «Создан» and «Последнее сообщение»; agents — a
+  name substring, a tools substring (across the agent's tool names) and a
+  «в чате»/«не в чате» selector; models — an id substring, a provider
+  selector (the registry adapters from the snapshot), a
+  «обычная»/«изображение» type selector and a vision «есть»/«нет»
+  selector. The ▽ is lit in the accent color while a filter is applied —
+  even with the window closed — so a filtered-down list never comes as a
+  surprise; an empty result shows a «нет совпадений» line.
+
+- `setAdapter(name, factory)` in the provider registry — a small test hook
+  that lets probes substitute a built-in adapter. probe-manager-flow now
+  scripts the `mock` adapter itself, so the scripted LLM also covers model
+  instances rebuilt for a reference's overrides — paths a card-level patch
+  never reached; the probe caught exactly that blind spot while migrating
+  katya's legacy temperature.
+
 ## [0.0.16] — 2026-11-02
 
 ### Fixed

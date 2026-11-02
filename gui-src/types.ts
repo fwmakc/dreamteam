@@ -3,7 +3,6 @@
 export interface ChatMessage {
   authorId: string;
   authorName: string;
-  authorRole?: string;
   text: string;
   ts: number;
   /** файлы, прикреплённые к реплике (имена в inbox проекта) — только у пользователя */
@@ -37,11 +36,10 @@ export interface SessionMeta {
 export interface AgentInfo {
   id: string;
   name: string;
-  role?: string;
+  description?: string;
   emoji?: string;
   color?: string;
   model?: string;
-  temperature?: number;
   prompt?: string;
   tools?: string[];
   inChat: boolean;
@@ -72,6 +70,8 @@ export interface ModelInfo {
   id: string;
   kind: string;
   model?: string;
+  /** адаптер из карточки (имя файла в реестре провайдеров) */
+  provider?: string;
   baseUrl?: string;
   ok: boolean;
   note?: string;
@@ -82,6 +82,8 @@ export interface ModelInfo {
   quota?: ProviderQuota;
   isDefault: boolean;
   isManager: boolean;
+  /** image-модель (генерация картинок): клик — карточка, основной быть не может */
+  img?: boolean;
 }
 
 export interface ProjectHost {
@@ -166,7 +168,7 @@ export interface LanguageInfo {
 export interface FieldSpec {
   /** Путь значения в карточке: «name», «model.temperature» */
   path: string;
-  type: 'string' | 'text' | 'number' | 'boolean' | 'object' | 'enum' | 'password';
+  type: 'string' | 'text' | 'number' | 'boolean' | 'object' | 'enum' | 'password' | 'model';
   /** Метка поля — русский ключ, переводится словарём ui.strings */
   label: string;
   /** Варианты для enum */
@@ -192,10 +194,10 @@ export interface StateSnapshot {
   team: AgentInfo[];
   manager: { name: string; emoji: string; color: string; model?: string; temperature?: number };
   models: ModelInfo[];
-  images: { id: string; ok: boolean; note?: string }[];
+  images: { id: string; ok: boolean; note?: string; kind?: string; model?: string; provider?: string }[];
   /** все имена провайдеров (встроенные + кастомные) — селектор в новой модели */
   providers?: string[];
-  profile: { name: string; role?: string; about?: string };
+  profile: { name: string; about?: string };
   projects: ProjectInfo[];
   /** текущий проект (id = папка в projects/ дома); null — не выбран */
   project?: { id: string; name: string; path: string } | null;
@@ -225,7 +227,7 @@ export type WsEvent =
   | { type: 'auth_failed' }
   | { type: 'notice'; text: string }
   | { type: 'error'; text: string }
-  | { type: 'turn_header'; agent: { id: string; name: string; role?: string; emoji?: string; color?: string } }
+  | { type: 'turn_header'; agent: { id: string; name: string; emoji?: string; color?: string } }
   | { type: 'busy'; id: string; label: string }
   | { type: 'busy_end'; id: string }
   | { type: 'delta'; text: string }

@@ -25,7 +25,7 @@ export function agentHeader(agent: Agent): string {
 
 export function rosterLine(agent: Agent): string {
   const c = colorFn(agent.color);
-  return `  ${c(`${agent.emoji} ${agent.name}`)} — ${agent.role}${agent.description ? `: ${agent.description}` : ''}`;
+  return `  ${c(`${agent.emoji} ${agent.name}`)}${agent.description ? ` — ${agent.description}` : ''}`;
 }
 
 /** Тысячи — «128k», меньше тысячи — как есть (индикатор контекста). */

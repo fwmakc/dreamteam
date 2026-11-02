@@ -63,7 +63,7 @@ const { contractOf } = await import('../src/providers/registry.js');
 {
   const names = Object.keys(CARD_SCHEMAS).sort();
   check('состав статики: agent, project, session (модель — динамическая)', JSON.stringify(names) === JSON.stringify(['agent', 'project', 'session']), names.join(', '));
-  check('agent: 15 полей', CARD_SCHEMAS.agent.fields.length === 15, String(CARD_SCHEMAS.agent.fields.length));
+  check('agent: 10 полей', CARD_SCHEMAS.agent.fields.length === 10, String(CARD_SCHEMAS.agent.fields.length));
   const all = Object.values(CARD_SCHEMAS).flatMap((s) => s.fields.map((f) => `${s.entity}.${f.path}`));
   check('пути без дублей', new Set(all).size === all.length, all.join(', '));
   const labels = Object.values(CARD_SCHEMAS).flatMap((s) => s.fields.map((f) => f.label));
@@ -162,6 +162,8 @@ function typeOk(spec: { path: string; type: string; values?: readonly string[] }
   if (spec.type === 'enum') return typeof v === 'string' && (spec.values ?? []).includes(v);
   if (spec.type === 'boolean') return typeof v === 'boolean';
   if (spec.type === 'object') return typeof v === 'object' && v !== null;
+  // ссылка на модель: id строкой или объект-переопределение
+  if (spec.type === 'model') return typeof v === 'string' || (typeof v === 'object' && v !== null);
   return typeof v === 'string';
 }
 
@@ -173,8 +175,8 @@ function typeOk(spec: { path: string; type: string; values?: readonly string[] }
   const agentSpecs = CARD_SCHEMAS.agent.fields;
   check(`агент «${a.id}»: все пути схемы читаются с типом`, agentSpecs.every((s) => typeOk(s, a)), agentSpecs.filter((s) => !typeOk(s, a)).map((s) => s.path).join(', '));
   check(
-    'агент: скаляры непусты (имя/эмодзи/цвет/роль/промпт)',
-    ['name', 'emoji', 'color', 'role', 'prompt'].every((p) => String(get(a, p) ?? '').length > 0),
+    'агент: скаляры непусты (имя/эмодзи/цвет/промпт)',
+    ['name', 'emoji', 'color', 'prompt'].every((p) => String(get(a, p) ?? '').length > 0),
   );
 
   const st = stateSnapshot(app, engine) as { schemas?: typeof CARD_SCHEMAS; project?: { path: string } | null };

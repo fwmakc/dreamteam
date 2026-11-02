@@ -69,7 +69,7 @@ function label(m: ChatMessage, userName: string): string {
     ? userName
     : m.authorId === 'session-ref'
       ? `Конспект разговора «${m.authorName}»`
-      : `${m.authorName} (${m.authorRole ?? 'участник'})`;
+      : m.authorName;
   return `${who}: ${m.text}`;
 }
 
@@ -133,7 +133,7 @@ export async function reflectSessionMemory(
   if (provider.kind === 'mock') {
     return { task: base.task, towardUser: base.towardUser, ties: base.ties };
   }
-  const roster = team.map((a) => `- ${a.id} — ${a.name}, ${a.role}`).join('\n');
+  const roster = team.map((a) => `- ${a.id} — ${a.name}${a.description ? `: ${a.description}` : ''}`).join('\n');
   const currentJson = JSON.stringify(
     { task: base.task ?? '', towardUser: base.towardUser ?? '', ties: base.ties ?? {} },
     null, 1,

@@ -4,7 +4,6 @@
  */
 export interface UserProfile {
   name: string;
-  role?: string;
   about?: string;
 }
 
@@ -80,15 +79,14 @@ export interface Agent {
   id: string;
   name: string;
   emoji: string;
-  role: string;
   description?: string;
   /** Цвет текста в консоли: red|green|yellow|blue|magenta|cyan|white|gray */
   color: string;
   /** Персона агента — системный промпт */
   prompt: string;
-  /** Модель агента — ссылка на карточку models/ дома (пусто → settings.model) */
+  /** Модель агента — ссылка на карточку models/ дома (пусто → settings.model);
+   *  параметры (temperature, maxTokens…) здесь — переопределение карточки модели */
   model?: ModelRef;
-  temperature?: number;
   /** Инструменты-карточки {"shell": {…} или null} (поле tools в agents.json) */
   tools?: AgentTools;
   /** Доступ к серверам hosts.json (поле projects в agents.json) — префикс «project:» в блоках */
@@ -108,7 +106,6 @@ export interface ChatMessage {
   /** 'user' или id агента */
   authorId: string;
   authorName: string;
-  authorRole?: string;
   text: string;
   ts: number;
   /** файлы, прикреплённые к реплике (имена в inbox проекта) — только у пользователя */
@@ -215,7 +212,6 @@ export interface ManagerUpdateFields {
   name?: string;
   emoji?: string;
   color?: string;
-  role?: string;
   description?: string;
   prompt?: string;
   /** id модели строкой или объект-ссылка */
@@ -224,7 +220,8 @@ export interface ManagerUpdateFields {
   vision?: string | ModelRef;
   /** Image-модель агента: id строкой или ссылка; пустая строка — убрать */
   image?: string | ModelRef;
-  temperature?: number;
+  /** Карта тулов целиком: {"тул": {…настройки…}}; {} или null — убрать все */
+  tools?: AgentTools;
   /** Подпапка рабочей папки или абсолютный путь — блоки без префикса */
   workspace?: string;
 }
@@ -235,11 +232,11 @@ export type ManagerAction =
       op: 'team.add';
       id: string;
       name: string;
-      role?: string;
       prompt?: string;
       emoji?: string;
       color?: string;
       description?: string;
+      /** Легаси: переносится в model.temperature (температура — параметр ссылки на модель) */
       temperature?: number;
       model?: ModelRef;
       tools?: AgentTools;

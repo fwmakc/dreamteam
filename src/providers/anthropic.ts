@@ -44,7 +44,7 @@ export const anthropicFactory: ProviderFactory = (
   const apiKey = config.apiKey ? String(config.apiKey) : undefined;
   if (!apiKey) {
     throw new ConfigurationError(
-      `в карточке провайдера «${id}» нет "apiKey" — впиши ключ из кабинета в карточку models/${id}.json`,
+      `нет "apiKey" — впиши ключ из кабинета`,
     );
   }
   const model = String(config.model ?? 'claude-sonnet-4-5');

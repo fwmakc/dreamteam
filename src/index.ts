@@ -308,7 +308,7 @@ let completionCache: {
   at: number;
   sessions: { id: string; title: string }[];
   agentIds: string[];
-  chat: { id: string; name: string; role?: string }[];
+  chat: { id: string; name: string; description?: string }[];
 } | null = null;
 
 function refreshCompletionCache(): void {
@@ -316,12 +316,12 @@ function refreshCompletionCache(): void {
   if (completionCache && now - completionCache.at < 1000) return;
   const sessions = appRef?.store ? appRef.store.list().map((s) => ({ id: s.id, title: s.title })) : [];
   let agentIds: string[] = [];
-  let chat: { id: string; name: string; role?: string }[] = [];
+  let chat: { id: string; name: string; description?: string }[] = [];
   try {
     const agents = loadTeam(AGENTS_DIR);
     agentIds = agents.map((a) => a.id);
     // всплывашка @упоминаний предлагает только позванных в текущий чат
-    if (appRef?.session) chat = chatTeam(appRef.session, agents).map((a) => ({ id: a.id, name: a.name, role: a.role }));
+    if (appRef?.session) chat = chatTeam(appRef.session, agents).map((a) => ({ id: a.id, name: a.name, description: a.description }));
   } catch {
     // без agents.json дополняем без имён
   }
@@ -647,7 +647,7 @@ function replaySession(session: Session): void {
       ? t('Вы')
       : m.authorId === 'tool'
         ? t('⚙ инструменты')
-        : `${m.authorName} (${m.authorRole})`;
+        : m.authorName;
     const brief = m.text.length > 120 ? m.text.slice(0, 120) + '…' : m.text;
     console.log(pc.dim(`    ${who}: ${brief.replace(/\n+/g, ' ')}`));
   }

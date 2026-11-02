@@ -20,10 +20,156 @@ const currentSessionId = computed(() => snapshot.session?.id ?? '');
 const team = computed(() => (snapshot.team ?? []) as AgentInfo[]);
 const teamError = computed(() => snapshot.teamError ?? null);
 const models = computed(() => (snapshot.models ?? []) as ModelInfo[]);
+/** image-модели (генерация картинок): в общем списке сайдбара, но с меткой
+ *  и своим кликом (карточка вместо «сделать основной») */
+const imageModels = computed<ModelInfo[]>(() =>
+  ((snapshot.images ?? []) as { id: string; ok: boolean; note?: string; kind?: string; model?: string; provider?: string }[]).map((m) => ({
+    id: m.id, kind: m.kind ?? 'unconfigured', model: m.model, provider: m.provider, ok: m.ok, note: m.note,
+    img: true, isDefault: false, isManager: false,
+  })),
+);
 const projects = computed(() => (snapshot.projects ?? []) as ProjectInfo[]);
 const currentProject = computed(() => snapshot.project);
 const knownProjects = computed(() => (snapshot.knownProjects ?? []) as ProjectRecordInfo[]);
 const scheduleTasks = computed(() => (snapshot.scheduleTasks ?? []) as ScheduleTaskInfo[]);
+
+// ── фильтры секций сайдбара: у проектов/расписания — строка ввода в секции;
+// у сессий/агентов/моделей — модальное окно («Применить»/«Отмена» закрывают,
+// «Очистить» чистит и сразу применяет, не закрывая). Значок ▽ горит акцентом,
+// пока фильтр секции задан ──
+const sideFilter = reactive({
+  projects: { open: false, text: '' },
+  sessions: { open: false, text: '' },
+  team: { open: false, text: '' },
+  models: { open: false, text: '' },
+  schedule: { open: false, text: '' },
+} as Record<'projects' | 'sessions' | 'team' | 'models' | 'schedule', { open: boolean; text: string }>);
+/** Применённые поля модальных фильтров (то, что реально режет список). */
+const sideExt = reactive({
+  sessions: { createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '' },
+  team: { tools: '', chat: '' },
+  models: { provider: '', kind: '', vision: '' },
+});
+function sideTextOn(key: 'sessions' | 'team' | 'models'): boolean {
+  return sideFilter[key].text.trim().length > 0;
+}
+function sideOn(key: keyof typeof sideFilter): boolean {
+  if (key === 'sessions') {
+    const e = sideExt.sessions;
+    return sideTextOn('sessions') || Boolean(e.createdFrom || e.createdTo || e.updatedFrom || e.updatedTo);
+  }
+  if (key === 'team') {
+    const e = sideExt.team;
+    return sideTextOn('team') || Boolean(e.tools.trim() || e.chat);
+  }
+  if (key === 'models') {
+    const e = sideExt.models;
+    return sideTextOn('models') || Boolean(e.provider || e.kind || e.vision);
+  }
+  return sideFilter[key].text.trim().length > 0;
+}
+function sideMatch(key: keyof typeof sideFilter, hay: string): boolean {
+  const q = sideFilter[key].text.trim().toLowerCase();
+  return !q || hay.toLowerCase().includes(q);
+}
+function sideFilterToggle(key: keyof typeof sideFilter): void {
+  // у трёх секций фильтр живёт в модалке, у остальных — строка в секции
+  if (key === 'sessions' || key === 'team' || key === 'models') openFilterModal(key);
+  else sideFilter[key].open = !sideFilter[key].open;
+}
+function sideFilterEsc(key: keyof typeof sideFilter): void {
+  // Esc в строке: сначала стереть текст, потом спрять строку
+  if (sideFilter[key].text) sideFilter[key].text = '';
+  else sideFilter[key].open = false;
+}
+/** Попадание времени (epoch ms) в диапазон дат 'YYYY-MM-DD' (границы включительно, пусто — без ограничения). */
+function dateHit(ts: number, from: string, to: string): boolean {
+  if (from && ts < new Date(`${from}T00:00:00`).getTime()) return false;
+  if (to && ts > new Date(`${to}T23:59:59.999`).getTime()) return false;
+  return true;
+}
+
+// ── модалка фильтров: черновик — копия применённого на момент открытия;
+// «Отмена» бросает черновик, «Применить» записывает его и закрывает,
+// «Очистить» чистит и сразу применяет (окно остаётся открытым) ──
+const filterModal = reactive({
+  show: false,
+  sec: 'sessions' as 'sessions' | 'team' | 'models',
+  sessions: { text: '', createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '' },
+  team: { text: '', tools: '', chat: '' },
+  models: { text: '', provider: '', kind: '', vision: '' },
+});
+const filterBox = ref<HTMLElement | null>(null);
+function openFilterModal(sec: 'sessions' | 'team' | 'models'): void {
+  filterModal.sec = sec;
+  Object.assign(filterModal.sessions, { text: sideFilter.sessions.text, ...sideExt.sessions });
+  Object.assign(filterModal.team, { text: sideFilter.team.text, ...sideExt.team });
+  Object.assign(filterModal.models, { text: sideFilter.models.text, ...sideExt.models });
+  filterModal.show = true;
+  nextTick(() => filterBox.value?.querySelector<HTMLElement>('input, select')?.focus());
+}
+function commitFilterDraft(): void {
+  const s = filterModal.sessions, t = filterModal.team, m = filterModal.models;
+  sideFilter.sessions.text = s.text;
+  Object.assign(sideExt.sessions, { createdFrom: s.createdFrom, createdTo: s.createdTo, updatedFrom: s.updatedFrom, updatedTo: s.updatedTo });
+  sideFilter.team.text = t.text;
+  Object.assign(sideExt.team, { tools: t.tools, chat: t.chat });
+  sideFilter.models.text = m.text;
+  Object.assign(sideExt.models, { provider: m.provider, kind: m.kind, vision: m.vision });
+}
+function applyFilter(): void {
+  commitFilterDraft();
+  filterModal.show = false;
+}
+function cancelFilter(): void {
+  filterModal.show = false;
+}
+function clearFilter(): void {
+  Object.assign(filterModal.sessions, { text: '', createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '' });
+  Object.assign(filterModal.team, { text: '', tools: '', chat: '' });
+  Object.assign(filterModal.models, { text: '', provider: '', kind: '', vision: '' });
+  commitFilterDraft();
+  nextTick(() => filterBox.value?.querySelector<HTMLElement>('input, select')?.focus());
+}
+
+/** Отфильтрованные списки. Сессии — название + диапазоны дат; агенты — имя,
+ *  тулы и «в чате»; модели — id, провайдер, тип и vision. */
+const sessionsView = computed(() =>
+  sessions.value.filter((s) => sideMatch('sessions', s.title)
+    && dateHit(s.createdAt, sideExt.sessions.createdFrom, sideExt.sessions.createdTo)
+    && dateHit(s.updatedAt, sideExt.sessions.updatedFrom, sideExt.sessions.updatedTo)),
+);
+const teamView = computed(() => team.value.filter((a) => {
+  if (!sideMatch('team', a.name)) return false;
+  const e = sideExt.team;
+  const q = e.tools.trim().toLowerCase();
+  if (q && !a.tools?.some((tl) => tl.toLowerCase().includes(q))) return false;
+  if (e.chat === 'in' && !a.inChat) return false;
+  if (e.chat === 'out' && a.inChat) return false;
+  return true;
+}));
+const modelsView = computed(() =>
+  [...models.value, ...imageModels.value].filter((p) => {
+    if (!sideMatch('models', p.id)) return false;
+    const e = sideExt.models;
+    if (e.provider && p.provider !== e.provider) return false;
+    if (e.kind === 'chat' && p.img) return false;
+    if (e.kind === 'image' && !p.img) return false;
+    if (e.vision === 'yes' && !p.vision) return false;
+    if (e.vision === 'no' && p.vision) return false;
+    return true;
+  }),
+);
+const scheduleView = computed(() => scheduleTasks.value.filter((t) => sideMatch('schedule', `${t.message} ${t.intervalMinutes}`)));
+const knownProjectsView = computed(() =>
+  knownProjects.value.filter((k) => k.name !== currentProject.value?.id && sideMatch('projects', `${k.name} ${k.path}`)),
+);
+const projectHostsView = computed(() =>
+  projects.value
+    .flatMap((p) => (p.hosts ?? []).map((h) => ({ p, h })))
+    .filter((ph) => sideMatch('projects', `${ph.p.id} ${ph.h.name} ${ph.h.host}`)),
+);
+
 const manager = computed(() => snapshot.manager);
 const commands = computed(() => (snapshot.completion?.operations ?? []) as OpHint[]);
 const autoMode = computed(() => Boolean(snapshot.auto?.mode));
@@ -388,7 +534,7 @@ function ctxTeam(e: MouseEvent, a: AgentInfo): void {
 function ctxModel(e: MouseEvent, p: ModelInfo): void {
   const items: CtxItem[] = [
     { label: tr('Изменить'), fn: () => openModelSettings(p) },
-    { label: tr('Статистика'), fn: () => modelUsageReport(p.id) },
+    ...(!p.img ? [{ label: tr('Статистика'), fn: () => modelUsageReport(p.id) }] : []),
   ];
   if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => delModel(p) });
   openCtx(e, items);
@@ -420,6 +566,8 @@ type FormField = {
   desc?: string;
   /** Сворачиваемая группа: поля без группы — верхний уровень формы */
   group?: string;
+  /** Тип model: текст JSON-переопределения (селектор хранится в value) */
+  json?: string;
 };
 const modal = reactive({
   show: false, title: '', error: '',
@@ -455,12 +603,17 @@ function openForm(title: string, fields: FormField[], onSave: (v: Record<string,
   modal.fields = fields.map((f) => ({
     key: f.key, label: f.label, value: f.value ?? '', placeholder: f.placeholder,
     type: f.type, values: f.values, optionLabels: f.optionLabels, desc: f.desc, group: f.group,
+    // текст JSON-переопределения (тип model): без него ручной режим открывается пустым —
+    // ссылка с параметрами в селектор не ложится, показывать нечего, кроме этого поля
+    json: f.json ?? '',
   }));
   modal.error = '';
   modal.onSave = onSave;
   modal.settingsActions = opts?.settingsActions ?? false;
   modalCollapsed.clear();
-  for (const f of modal.fields) if (f.group) modalCollapsed.add(f.group); // группы по умолчанию свёрнуты
+  // группы по умолчанию свёрнуты; но группа с JSON-режимом ссылки разворачивается —
+  // иначе включённый вручную JSON не виден
+  for (const f of modal.fields) if (f.group && !(f.type === 'model' && f.value === '__json__')) modalCollapsed.add(f.group);
   modal.show = true;
   nextTick(() => modalBox.value?.querySelector<HTMLElement>('input, textarea, select')?.focus());
 }
@@ -578,7 +731,11 @@ function submitForm(): void {
   if (!modal.onSave) return;
   const values: Record<string, string> = {};
   // v-model на input[type=number] кладёт в value число (looseToNumber) — возвращаем строку
-  for (const f of modal.fields) values[f.key] = String(f.value ?? '').trim();
+  for (const f of modal.fields) {
+    values[f.key] = String(f.value ?? '').trim();
+    // контрол модели: JSON-режим едет отдельным ключом «<path>.json»
+    if (f.type === 'model') values[`${f.key}.json`] = String(f.json ?? '');
+  }
   try {
     modal.onSave(values);
     closeForm();
@@ -599,22 +756,58 @@ function getPath(obj: unknown, path: string): string {
   }
   return v == null ? '' : String(v);
 }
+/** Сырое значение по пути (object-поля показываем как JSON, не строкой) */
+function getRaw(obj: unknown, path: string): unknown {
+  let v: unknown = obj;
+  for (const part of path.split('.')) {
+    if (v == null || typeof v !== 'object') return undefined;
+    v = (v as Record<string, unknown>)[part];
+  }
+  return v;
+}
 /** Поля формы по готовой схеме; значения — из текущей карточки по путям;
  *  desc — описание из контракта (подпись под контролем); groupOf раскладывает
  *  поля по сворачиваемым группам. */
 function fieldsFromSchema(schema: CardSchema, current: unknown,
   groupOf?: (path: string) => string | undefined): FormField[] {
-  return schema.fields.map((f) => ({
-    key: f.path, label: tr(f.label), value: getPath(current, f.path),
-    type: f.type, values: f.values ? [...f.values] : undefined,
-    placeholder: f.placeholder ? tr(f.placeholder) : undefined,
-    desc: f.desc ? tr(f.desc) : undefined,
-    group: groupOf?.(f.path),
-  }));
+  return schema.fields.map((f) => {
+    // тип model: селектор («» = по умолчанию, id карточки, «__json__» = вручную);
+    // ссылки без параметров показываем селектором, с параметрами — JSON-режимом
+    if (f.type === 'model') {
+      const v = (current ?? {}) as Record<string, unknown>;
+      // корень ссылки: «model» — или «vision»/«image» у вложенных vision.id/image.id
+      const ref = v[f.path.split('.')[0]];
+      const extras = ref && typeof ref === 'object' && !Array.isArray(ref)
+        ? Object.keys(ref as object).filter((k) => k !== 'id')
+        : [];
+      const pretty = ref == null || typeof ref !== 'object'
+        ? (ref == null ? '' : JSON.stringify({ id: String(ref) }, null, 2))
+        : JSON.stringify(ref, null, 2);
+      return {
+        key: f.path, label: tr(f.label),
+        value: extras.length > 0 ? '__json__' : String((ref as { id?: string } | undefined)?.id ?? ''),
+        json: pretty,
+        type: f.type,
+        placeholder: f.placeholder ? tr(f.placeholder) : undefined,
+        desc: f.desc ? tr(f.desc) : undefined,
+        group: groupOf?.(f.path),
+      };
+    }
+    const raw = getRaw(current, f.path);
+    const value = f.type === 'object' && raw != null && typeof raw === 'object' && !Array.isArray(raw)
+      ? JSON.stringify(raw, null, 2) // карта тулов и иже — читаемым JSON, не «[object Object]»
+      : getPath(current, f.path);
+    return {
+      key: f.path, label: tr(f.label), value,
+      type: f.type, values: f.values ? [...f.values] : undefined,
+      placeholder: f.placeholder ? tr(f.placeholder) : undefined,
+      desc: f.desc ? tr(f.desc) : undefined,
+      group: groupOf?.(f.path),
+    };
+  });
 }
 /** Группы формы агента: ссылки на модели — сворачиваемые секции. */
 function agentGroupOf(path: string): string | undefined {
-  if (path.startsWith('model.')) return tr('Модель');
   if (path.startsWith('vision.')) return tr('Модель зрения');
   if (path.startsWith('image.')) return tr('Модель генерации изображений');
   return undefined;
@@ -629,22 +822,36 @@ function modelGroupOf(path: string): string | undefined {
 function modelOption(m: ModelInfo): string {
   return `${m.id} — ${m.model ?? m.kind}${m.vision ? ' ◉' : ''}`;
 }
-/** Селекторы вместо текстового ввода у ссылок агента: model.id — все модели
- *  (встроенные и кастомные), vision.id — только зрячие, image.id — image-
- *  модели; пустое значение = «не менять» (форма пустое не шлёт). */
+/** Ссылки на модели — один контрол (тип model): селектор + «вручную (JSON)…».
+ *  Варианты собирает сюда GUI: сама модель — все карточки (пусто = основная
+ *  модель дома), vision.id — только зрячие, image.id — image-модели
+ *  (пусто = «не менять»: форма пустое не шлёт). */
 function withModelSelects(fields: FormField[]): FormField[] {
-  const keep = tr('— не менять —');
+  const manual = tr('вручную (JSON)…');
   return fields.map((f) => {
-    if (f.key === 'model.id') {
-      return { ...f, type: 'enum' as const, values: ['', ...models.value.map((m) => m.id)], optionLabels: [keep, ...models.value.map(modelOption)] };
+    if (f.type !== 'model') return f;
+    if (f.key === 'model') {
+      return {
+        ...f,
+        values: ['', ...models.value.map((m) => m.id), '__json__'],
+        optionLabels: [tr('— по умолчанию (основная модель дома) —'), ...models.value.map(modelOption), manual],
+      };
     }
     if (f.key === 'vision.id') {
       const vis = models.value.filter((m) => m.vision);
-      return { ...f, type: 'enum' as const, values: ['', ...vis.map((m) => m.id)], optionLabels: [keep, ...vis.map((m) => `${m.id} — ${m.model ?? m.kind}`)] };
+      return {
+        ...f,
+        values: ['', ...vis.map((m) => m.id), '__json__'],
+        optionLabels: [tr('— не менять —'), ...vis.map((m) => `${m.id} — ${m.model ?? m.kind}`), manual],
+      };
     }
     if (f.key === 'image.id') {
       const imgs = (snapshot.images ?? []) as { id: string; ok: boolean }[];
-      return { ...f, type: 'enum' as const, values: ['', ...imgs.map((m) => m.id)], optionLabels: [keep, ...imgs.map((m) => `${m.id}${m.ok ? '' : ' ⚠'}`)] };
+      return {
+        ...f,
+        values: ['', ...imgs.map((m) => m.id), '__json__'],
+        optionLabels: [tr('— не менять —'), ...imgs.map((m) => `${m.id}${m.ok ? '' : ' ⚠'}`), manual],
+      };
     }
     return f;
   });
@@ -660,6 +867,7 @@ function schemaFields(entity: string, current: unknown,
 function fieldsFromForm(schema: CardSchema, values: Record<string, string>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of schema.fields) {
+    if (f.type === 'model') continue; // контрол ссылки целиком — разбирает вызывающий
     const raw = (values[f.path] ?? '').trim();
     if (!raw) continue;
     if (f.type === 'boolean') {
@@ -703,7 +911,7 @@ function openAgentCreate(): void {
   openForm(tr('Новый агент'), [
     { key: 'id', label: tr('id (латиница, цифры, ./-/_)') },
     { key: 'name', label: tr('Имя') },
-    { key: 'role', label: tr('Роль (можно пропустить)') },
+    { key: 'description', label: tr('Описание (можно пропустить)') },
   ], (v) => rpcReport(rpc('agent.new', v)));
 }
 async function openAgentSettings(a: AgentInfo): Promise<void> {
@@ -720,20 +928,65 @@ async function openAgentSettings(a: AgentInfo): Promise<void> {
   }
   openForm(tr('Настройки агента {name}', { name: a.name }), [
     ...withModelSelects(schemaFields('agent', card, agentGroupOf)),
-    { key: 'tools', label: tr('Тулы через запятую (есть: {list})', { list: (a.tools ?? []).join(', ') || tr('нет') }), type: 'text' },
   ], (v) => {
     const fields = fieldsFromForm(schema, v);
-    // model.* шлём целиком — мердж правок с текущей ссылкой (её прочие поля не теряются)
-    const model = { ...((card.model as Record<string, unknown>) ?? {}), ...((fields.model as Record<string, unknown>) ?? {}) };
-    delete fields.model;
-    if (Object.keys(model).length > 0) fields.model = model;
-    if (Object.keys(fields).length > 0) rpcReport(rpc('agent.update', { id: a.id, fields }));
-    // новые тулы выдаём по одному (отзыв — /agent tool delete или словом менеджеру)
-    const have = new Set(a.tools ?? []);
-    for (const tool of (v.tools ?? '').split(',').map((t) => t.trim()).filter(Boolean)) {
-      if (have.has(tool.toLowerCase())) continue;
-      rpcReport(rpc('agent.tool.add', { agent: a.id, tool }));
+    // модель — один контрол: '' → сброс к умолчаниям; id → {"id": …}; '__json__' →
+    // JSON-объект целиком (пустой текст — тоже сброс); null сервер понимает как «убрать»
+    const mode = String(v['model'] ?? '');
+    const jsonText = String(v['model.json'] ?? '').trim();
+    const same = (obj: unknown) => JSON.stringify(obj ?? {}) === JSON.stringify(card.model ?? {});
+    if (mode === '__json__') {
+      if (jsonText) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(jsonText);
+        } catch {
+          throw new Error(tr('поле «Модель»: жду JSON-объект'));
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error(tr('поле «Модель»: жду JSON-объект'));
+        }
+        if (!same(parsed)) fields.model = parsed;
+      } else if (card.model !== undefined) {
+        fields.model = null;
+      }
+    } else if (mode === '') {
+      if (card.model !== undefined) fields.model = null;
+    } else if (!same({ id: mode })) {
+      fields.model = { id: mode };
     }
+    // зрение и картинки — тот же контрол: '' — не менять; id → {"id": …};
+    // '__json__' → объект целиком (пустой текст — убрать ссылку; без "id" —
+    // ошибка: ссылка обязана назвать модель, параметров «в никуда» не бывает)
+    for (const key of ['vision', 'image'] as const) {
+      const cur = card[key];
+      const mode = String(v[`${key}.id`] ?? '');
+      const jsonText = String(v[`${key}.id.json`] ?? '').trim();
+      const bad = key === 'vision'
+        ? tr('поле «Модель зрения»: жду JSON-объект с "id"')
+        : tr('поле «Модель генерации изображений»: жду JSON-объект с "id"');
+      const same = (obj: unknown) => JSON.stringify(obj ?? {}) === JSON.stringify(cur ?? {});
+      if (mode === '__json__') {
+        if (jsonText) {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(jsonText);
+          } catch {
+            throw new Error(bad);
+          }
+          const id = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? (parsed as { id?: unknown }).id
+            : undefined;
+          if (typeof id !== 'string' || !id.trim()) throw new Error(bad);
+          if (!same(parsed)) fields[key] = parsed;
+        } else if (cur !== undefined) {
+          fields[key] = ''; // сервер: пустая строка — убрать ссылку
+        }
+      } else if (mode && !same({ id: mode })) {
+        fields[key] = { id: mode };
+      }
+    }
+    if (Object.keys(fields).length > 0) rpcReport(rpc('agent.update', { id: a.id, fields }));
   });
 }
 function agentDelete(a: AgentInfo): void {
@@ -771,6 +1024,11 @@ function setModel(p: ModelInfo): void {
   // «сделать текущей» — поле владельца: settings.update model.id=…
   rpc('settings.update', { patch: { model: { id: p.id } } })
     .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
+}
+/** Клик по модели в списке: обычная — «сделать основной», image-модель — карточка. */
+function clickModel(p: ModelInfo): void {
+  if (p.img) openModelSettings(p);
+  else setModel(p);
 }
 function delModel(p: ModelInfo): void {
   if (!roundActive.value) modelDelete(p);
@@ -828,7 +1086,6 @@ function openUserProfileForm(): void {
   if (!p) return;
   openForm(tr('Пользователь'), [
     { key: 'name', label: tr('Имя'), value: p.name ?? '' },
-    { key: 'role', label: tr('Роль'), value: p.role ?? '' },
     { key: 'about', label: tr('О себе'), value: p.about ?? '' },
   ], (v) => rpcReport(rpc('profile.update', v)));
 }
@@ -1308,7 +1565,7 @@ function mentionItems(d: CompletionData): HintItem[] {
   return [
     { label: d.managerName, hint: tr('менеджер переговорки'), insert: d.managerName + ' ' },
     ...d.team.filter((a) => a.inChat)
-      .map((a) => ({ label: a.name, hint: a.role, insert: a.name + ' ' })),
+      .map((a) => ({ label: a.name, hint: a.description, insert: a.name + ' ' })),
     { label: 'session', hint: tr('конспект другого разговора'), insert: 'session ' },
   ];
 }
@@ -1511,7 +1768,7 @@ onMounted(connectWs);
     <span
       v-if="profile?.name"
       class="badge clickable"
-      :title="`${profile.name}${profile.role ? ` · ${profile.role}` : ''} — ${tr('клик: настройки')}`"
+      :title="`${profile.name} — ${tr('клик: настройки')}`"
       @click="openUserProfileForm()"
     >👤 {{ profile.name }}</span>
     <span
@@ -1563,8 +1820,12 @@ onMounted(connectWs);
         <div class="side-head" @click="toggleSec('projects')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
           <span class="sec-name">{{ tr('Проекты') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('projects') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('projects')">▽</button>
           <button class="sec-add" :title="tr('Новый проект')" @click.stop="newProjectForm">📁＋</button>
           <button class="sec-add" :title="tr('Открыть проект (имя или папка)')" @click.stop="openProjectForm">📂</button>
+        </div>
+        <div v-if="sideFilter.projects.open" class="sec-frow" @click.stop>
+          <input v-model="sideFilter.projects.text" :placeholder="tr('фильтр: имя или путь')" @keydown.esc="sideFilterEsc('projects')">
         </div>
         <div class="sec-btns">
           <button :title="tr('Экспорт текущего проекта в zip (project.json и разговоры)')" @click="exportProject">⬇ {{ tr('проект') }}</button>
@@ -1580,7 +1841,7 @@ onMounted(connectWs);
             <span>📁 {{ currentProject?.name ?? tr('не выбран — выберите или создайте') }}</span><span class="meta">{{ currentProject?.path }}</span>
           </li>
           <li
-            v-for="p in knownProjects.filter((k) => k.name !== currentProject?.id)"
+            v-for="p in knownProjectsView"
             :key="p.name"
             class="proj-row"
             :title="p.path + ' — ' + tr('переключиться · правая кнопка — удалить из дома')"
@@ -1590,7 +1851,7 @@ onMounted(connectWs);
             <span>{{ p.name }}</span><span class="meta">{{ p.path }}</span>
           </li>
           <li
-            v-for="ph in projects.flatMap((p) => (p.hosts ?? []).map((h) => ({ p, h })))"
+            v-for="ph in projectHostsView"
             :key="ph.p.id + ':' + ph.h.name"
             title="✕ — удалить сервер · ＋ — добавить сервер · правая кнопка — удалить"
             @contextmenu.prevent="ctxHost($event, ph.p, ph.h)"
@@ -1606,6 +1867,7 @@ onMounted(connectWs);
         <div class="side-head" @click="toggleSec('sessions')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
           <span class="sec-name">{{ tr('Сессии') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('sessions') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('sessions')">▽</button>
           <button class="sec-add" :title="tr('Новый разговор')" @click.stop="newSession">＋</button>
         </div>
         <div class="sec-btns">
@@ -1614,7 +1876,7 @@ onMounted(connectWs);
         </div>
         <ul id="sessions">
           <li
-            v-for="s in sessions"
+            v-for="s in sessionsView"
             :key="s.id"
             :class="{ active: s.id === currentSessionId }"
             :title="`${s.title}\nid: ${s.id}\n${tr('сообщений:')} ${s.count}\n${tr('создан:')} ${fmtDate(s.createdAt)}\n${tr('последнее сообщение:')} ${fmtDate(s.updatedAt)}`"
@@ -1632,6 +1894,7 @@ onMounted(connectWs);
               @click.stop="deleteSession(s.id, s.title)"
             >✕</span>
           </li>
+          <li v-if="sideOn('sessions') && !sessionsView.length" class="no-match">{{ tr('нет совпадений') }}</li>
         </ul>
       </section>
 
@@ -1639,12 +1902,13 @@ onMounted(connectWs);
         <div class="side-head" @click="toggleSec('team')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
           <span class="sec-name">{{ tr('Агенты') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('team') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('team')">▽</button>
           <button class="sec-add" :title="tr('Новый агент')" @click.stop="openAgentCreate">＋</button>
         </div>
         <div v-if="teamError" class="errline side-err">agents.json: {{ teamError }}</div>
         <ul id="team">
           <li
-            v-for="a in team"
+            v-for="a in teamView"
             :key="a.id"
             :title="`${a.inChat ? tr('Вывести из чата') : tr('Позвать в чат')} · ${tr('правая кнопка — изменить/удалить')}`"
             @click="toggleChat(a)"
@@ -1655,10 +1919,11 @@ onMounted(connectWs);
                 <span>{{ a.emoji }} {{ a.name }}</span>
                 <span class="tag" :class="{ in: a.inChat }">{{ a.inChat ? tr('в чате') : '＋ ' + tr('чат') }}</span>
               </div>
-              <div class="sub">{{ a.role ?? '' }}</div>
+              <div class="sub">{{ a.description ?? '' }}</div>
             </div>
             <span class="del" :title="tr('Удалить агента')" @click.stop="delAgent(a)">✕</span>
           </li>
+          <li v-if="sideOn('team') && !teamView.length" class="no-match">{{ tr('нет совпадений') }}</li>
         </ul>
       </section>
 
@@ -1666,28 +1931,33 @@ onMounted(connectWs);
         <div class="side-head" @click="toggleSec('models')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
           <span class="sec-name">{{ tr('Модели') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('models') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('models')">▽</button>
           <button class="sec-add" :title="tr('Новая модель')" @click.stop="modelCreate">＋</button>
         </div>
         <ul id="models">
           <li
-            v-for="p in models"
+            v-for="p in modelsView"
             :key="p.id"
-            :title="(p.isDefault ? tr('Модель по умолчанию') : tr('Сделать основной (для агентов)'))
-              + (p.isDefault ? '' : ` · ${tr('клик — сделать основным')} · ${tr('правая кнопка — изменить/удалить')}`)
-              + (p.vision ? ` · ${tr('◉ зрение')}` : '')
-              + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)"
-            @click="setModel(p)"
+            :title="p.img
+              ? tr('клик — изменить карточку · правая кнопка — изменить/удалить') + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)
+              : (p.isDefault ? tr('Модель по умолчанию') : tr('Сделать основным (для агентов)'))
+                + (p.isDefault ? '' : ` · ${tr('клик — сделать основным')} · ${tr('правая кнопка — изменить/удалить')}`)
+                + (p.vision ? ` · ${tr('◉ зрение')}` : '')
+                + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)"
+            @click="clickModel(p)"
             @contextmenu.prevent="ctxModel($event, p)"
           >
             <div class="content">
               <div class="sess-main">
-                <span>{{ p.ok ? '●' : '○' }} {{ p.id }}<template v-if="p.vision"> <span class="vision">◉</span></template></span>
+                <span><span :class="p.ok ? 'st-ok' : 'st-warn'">{{ p.ok ? '✓' : '⚠' }}</span> {{ p.id }}<template v-if="p.vision"><span class="vision">◉</span></template></span>
                 <span v-if="p.isDefault" class="tag in">{{ tr('основная') }}</span>
+                <span v-if="p.img" class="tag img">{{ tr('картинки') }}</span>
               </div>
-              <div class="sub">{{ p.model ?? p.kind ?? '' }}{{ p.ok ? '' : ` · ${p.note ?? ''}` }}</div>
+              <div class="sub">{{ p.ok ? (p.model ?? p.kind ?? '') : (p.note ?? '') }}</div>
             </div>
             <span v-if="!p.isDefault" class="del" :title="tr('Удалить модель')" @click.stop="delModel(p)">✕</span>
           </li>
+          <li v-if="sideOn('models') && !modelsView.length" class="no-match">{{ tr('нет совпадений') }}</li>
         </ul>
       </section>
 
@@ -1695,14 +1965,18 @@ onMounted(connectWs);
         <div class="side-head" @click="toggleSec('schedule')">
           <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
           <span class="sec-name">{{ tr('Расписание') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('schedule') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('schedule')">▽</button>
           <button class="sec-add" :title="tr('Новая задача')" @click.stop="openScheduleForm(true)">＋</button>
+        </div>
+        <div v-if="sideFilter.schedule.open" class="sec-frow" @click.stop>
+          <input v-model="sideFilter.schedule.text" :placeholder="tr('фильтр: текст задачи')" @keydown.esc="sideFilterEsc('schedule')">
         </div>
         <ul id="schedule-list">
           <li class="static" :title="tr('Добавить задачу по расписанию')" @click="openScheduleForm(false)">
             <span class="tag">＋ {{ tr('задача') }}</span>
           </li>
           <li
-            v-for="t in scheduleTasks"
+            v-for="t in scheduleView"
             :key="t.id"
             :title="`${t.message} — ${tr('каждые {n} мин', { n: t.intervalMinutes })} · ${tr('клик — пауза/пуск')} · ${tr('правая кнопка — удалить')}`"
             @click="scheduleToggle(t)"
@@ -1713,6 +1987,7 @@ onMounted(connectWs);
             <span>{{ t.message.slice(0, 40) }}</span>
             <span class="del" :title="tr('Удалить задачу')" @click.stop="scheduleDelete(t)">✕</span>
           </li>
+          <li v-if="sideOn('schedule') && !scheduleView.length" class="no-match">{{ tr('нет совпадений') }}</li>
         </ul>
       </section>
 
@@ -1756,7 +2031,7 @@ onMounted(connectWs);
             </div>
             <div v-else class="msg" :data-key="it.key">
               <div class="head" :style="{ color: colorByAuthor(it.msg) }">
-                {{ it.msg.authorName }} <span v-if="it.msg.authorRole" class="role">{{ it.msg.authorRole }}</span>
+                {{ it.msg.authorName }}
               </div>
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
               <div class="txt" v-html="formatText(it.msg.text)"></div>
@@ -1769,7 +2044,6 @@ onMounted(connectWs);
           <div v-if="streaming.open" class="msg">
             <div class="head" :style="{ color: colorOf(streaming.color) }">
               {{ streaming.emoji }} {{ streaming.name }}
-              <span v-if="streaming.role" class="role">{{ streaming.role }}</span>
             </div>
             <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
             <div class="txt" v-html="formatText(streaming.text)"></div>
@@ -1904,7 +2178,28 @@ onMounted(connectWs);
           ><span class="sec-toggle">▾</span> {{ sec.title }}</button>
           <div v-for="f in sec.fields" :key="f.key" class="fld" :class="{ 'fld-chk': f.type === 'boolean' }">
             <label>{{ f.label }}</label>
-            <textarea v-if="f.type === 'text' || f.type === 'object'" v-model="f.value" :placeholder="f.placeholder" rows="4"></textarea>
+            <!-- enter.stop — перенос строки в textarea, а не submit формы (enter с root) -->
+            <textarea
+              v-if="f.type === 'text' || f.type === 'object'"
+              v-model="f.value"
+              :class="{ mono: f.type === 'object' }"
+              :placeholder="f.placeholder"
+              rows="4"
+              @keydown.enter.stop
+            ></textarea>
+            <template v-else-if="f.type === 'model'">
+              <select v-model="f.value">
+                <option v-for="(ov, i) in f.values" :key="ov" :value="ov">{{ f.optionLabels?.[i] ?? ov }}</option>
+              </select>
+              <textarea
+                v-if="f.value === '__json__'"
+                v-model="f.json"
+                class="mono"
+                rows="6"
+                placeholder='{"id": "модель", "temperature": 0.3}'
+                @keydown.enter.stop
+              ></textarea>
+            </template>
             <input v-else-if="f.type === 'boolean'" type="checkbox" class="chk" :checked="f.value === 'true'" @change="setBool(f, $event)">
             <select v-else-if="f.type === 'enum'" v-model="f.value">
               <option v-for="(v, i) in f.values" :key="v" :value="v">{{ f.optionLabels?.[i] ?? v }}</option>
@@ -1934,6 +2229,68 @@ onMounted(connectWs);
       <div v-for="(l, i) in report.lines" :key="i" class="repline" :class="{ 'repline-gap': l === '' }">{{ l }}</div>
       <div class="row">
         <button @click="closeReport">{{ tr('Закрыть') }}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── фильтры сайдбара (сессии/агенты/модели): «Применить» и «Отмена» ────── -->
+  <!-- ── закрывают окно, «Очистить» чистит и применяет на живом списке ─────── -->
+  <div v-if="filterModal.show" id="modal" @keydown.esc="cancelFilter" @keydown.enter.prevent="applyFilter">
+    <div class="modal-box" ref="filterBox">
+      <h2>{{ tr('Фильтры') }}</h2>
+      <template v-if="filterModal.sec === 'sessions'">
+        <div class="fld"><label>{{ tr('Название') }}</label><input v-model="filterModal.sessions.text"></div>
+        <div class="fld">
+          <label>{{ tr('Создан') }}</label>
+          <div class="range"><input type="date" v-model="filterModal.sessions.createdFrom"><span>—</span><input type="date" v-model="filterModal.sessions.createdTo"></div>
+        </div>
+        <div class="fld">
+          <label>{{ tr('Последнее сообщение') }}</label>
+          <div class="range"><input type="date" v-model="filterModal.sessions.updatedFrom"><span>—</span><input type="date" v-model="filterModal.sessions.updatedTo"></div>
+        </div>
+      </template>
+      <template v-else-if="filterModal.sec === 'team'">
+        <div class="fld"><label>{{ tr('Имя') }}</label><input v-model="filterModal.team.text"></div>
+        <div class="fld"><label>{{ tr('Тулы') }}</label><input v-model="filterModal.team.tools" placeholder="shell, files…"></div>
+        <div class="fld">
+          <label>{{ tr('В чате') }}</label>
+          <select v-model="filterModal.team.chat">
+            <option value="">{{ tr('любой') }}</option>
+            <option value="in">{{ tr('в чате') }}</option>
+            <option value="out">{{ tr('не в чате') }}</option>
+          </select>
+        </div>
+      </template>
+      <template v-else>
+        <div class="fld"><label>id</label><input v-model="filterModal.models.text"></div>
+        <div class="fld">
+          <label>{{ tr('Провайдер') }}</label>
+          <select v-model="filterModal.models.provider">
+            <option value="">{{ tr('любой') }}</option>
+            <option v-for="p in snapshot.providers ?? []" :key="p" :value="p">{{ p }}</option>
+          </select>
+        </div>
+        <div class="fld">
+          <label>{{ tr('Тип') }}</label>
+          <select v-model="filterModal.models.kind">
+            <option value="">{{ tr('любой') }}</option>
+            <option value="chat">{{ tr('обычная') }}</option>
+            <option value="image">{{ tr('изображение') }}</option>
+          </select>
+        </div>
+        <div class="fld">
+          <label>vision</label>
+          <select v-model="filterModal.models.vision">
+            <option value="">{{ tr('любой') }}</option>
+            <option value="yes">{{ tr('есть') }}</option>
+            <option value="no">{{ tr('нет') }}</option>
+          </select>
+        </div>
+      </template>
+      <div class="row">
+        <button @click="applyFilter">{{ tr('Применить') }}</button>
+        <button @click="clearFilter">{{ tr('Очистить') }}</button>
+        <button @click="cancelFilter">{{ tr('Отмена') }}</button>
       </div>
     </div>
   </div>

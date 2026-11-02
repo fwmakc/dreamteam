@@ -13,7 +13,7 @@ export interface CompletionContext {
   /** id агентов команды — адресация в командах только по id */
   agentIds(): string[];
   /** Участники текущего чата — их предлагает всплывашка @упоминаний */
-  chatAgents(): { id: string; name: string; role?: string }[];
+  chatAgents(): { id: string; name: string; description?: string }[];
   /** Модели из models/ дома — для /model update|delete и model.id=. */
   modelIds(): string[];
   /** Имя менеджера переговорки (~/.dreamteam/manager.json) — первый пункт всплывашки @ */
@@ -386,7 +386,7 @@ const MENTION_MAX_WIDTH = 52;
 function mentionItems(ctx: CompletionContext): MentionItem[] {
   return [
     { label: ctx.managerName(), hint: t('менеджер переговорки') },
-    ...ctx.chatAgents().map((a) => ({ label: a.name, hint: a.role })),
+    ...ctx.chatAgents().map((a) => ({ label: a.name, hint: a.description })),
     { label: SESSION_ITEM.label, hint: t('конспект другого разговора') },
   ];
 }

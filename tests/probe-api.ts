@@ -284,11 +284,11 @@ const client = await makeClient(handle.port);
     check('ws: /exit — только терминал', Boolean(tui));
     await client.waitState(sExit + 1);
 
-    client.send({ type: 'command', text: '/profile update name=Иванов role=инженер' });
+    client.send({ type: 'command', text: '/profile update name=Иванов about=инженер' });
     const stMe = await client.next(
       (m) => m.type === 'state' && (m.state as { profile: { name: string } }).profile.name === 'Иванов',
     );
-    check('ws: /profile update меняет профиль в state', ((stMe.state as { profile: { role?: string } }).profile.role) === 'инженер');
+    check('ws: /profile update меняет профиль в state', ((stMe.state as { profile: { about?: string } }).profile.about) === 'инженер');
 
     // user_message с `/…` исполняется так же (перехват в ядре)
     client.send({ type: 'user_message', text: '/models' });
@@ -342,7 +342,7 @@ const client = await makeClient(handle.port);
   );
 
   // rpc: user_set — профиль через форму настроек (обе оболочки ходят rpc-методом)
-  client.send({ type: 'rpc', id: 'r9', method: 'profile.update', args: { name: 'Профиль', role: 'тест' } });
+  client.send({ type: 'rpc', id: 'r9', method: 'profile.update', args: { name: 'Профиль', about: 'тест' } });
   const us = await client.next((m) => m.type === 'rpc_result' && m.id === 'r9');
   check('rpc: profile.update — профиль обновлён', String((us.result as { text: string }).text).includes('Профиль'));
   // то же клиентским сообщением (канал без rpc) — и вернуть профиль как был
@@ -429,7 +429,7 @@ const client = await makeClient(handle.port);
     const meta = (st.sessions as Record<string, unknown>[])[0];
     check('state: разговор в списке — id/title/createdAt/updatedAt/count', Boolean(meta) && ['count', 'createdAt', 'id', 'title', 'updatedAt'].every((k) => k in meta!));
     const team = st.team as Record<string, unknown>[];
-    check('state: участник — id/name/role/emoji/color/inChat', team.length > 0 && ['color', 'emoji', 'id', 'inChat', 'name', 'role'].every((k) => k in team[0]));
+    check('state: участник — id/name/emoji/color/inChat', team.length > 0 && ['color', 'emoji', 'id', 'inChat', 'name'].every((k) => k in team[0]));
     const mgr = st.manager as Record<string, unknown>;
     check('state: менеджер — name/emoji/color/model', Boolean(mgr) && ['color', 'emoji', 'model', 'name'].every((k) => k in mgr));
     const prov = (st.models as Record<string, unknown>[])[0];
@@ -583,7 +583,7 @@ const client = await makeClient(handle.port);
   // --- УПРАВЛЕНИЕ ЧЕРЕЗ КОМАНДЫ WS: /agent, /project ---
   {
     const sAg = client.stateCount();
-    client.send({ type: 'command', text: '/agent new api_guy name=Аписька role=тестировщик' });
+    client.send({ type: 'command', text: '/agent new api_guy name=Аписька description=тестировщик' });
     const addA = await client.next((m) => m.type === 'notice' && String(m.text).includes('api_guy'));
     check('ws: /agent new — отчёт', Boolean(addA));
     await client.waitState(sAg + 1);
@@ -684,9 +684,9 @@ const client = await makeClient(handle.port);
     const noAgent = await rpcErr('agent.get', { id: 'нет-такого' });
     check('rpc: agent.get мимо — честная ошибка', noAgent.includes('нет агента'), noAgent);
 
-    await rpc('agent.update', { id: 'test_probe', fields: { role: 'инженер-проб' } });
-    const card = JSON.parse(readFileSync(join(home, 'agents', 'test_probe.json'), 'utf8')) as { role?: string };
-    check('rpc: agent.update — роль в карточке', card.role === 'инженер-проб', card.role);
+    await rpc('agent.update', { id: 'test_probe', fields: { description: 'инженер-проб' } });
+    const card = JSON.parse(readFileSync(join(home, 'agents', 'test_probe.json'), 'utf8')) as { description?: string };
+    check('rpc: agent.update — описание в карточке', card.description === 'инженер-проб', card.description);
 
     await rpc('agent.tool.add', { agent: 'test_probe', tool: 'docs' });
     const tools1 = await rpc('agent.tools', { id: 'test_probe' });
@@ -774,7 +774,7 @@ const client = await makeClient(handle.port);
     check('rpc: снимок проекта — бот с флагом токена', prj.messengers.some((b) => b.key === 'telegram' && b.hasToken), JSON.stringify(prj.messengers));
 
     // агент: создать и удалить rpc-ом
-    const an = await rpc('agent.new', { id: 'rpc_guy', name: 'Рпц', role: 'гость' });
+    const an = await rpc('agent.new', { id: 'rpc_guy', name: 'Рпц', description: 'гость' });
     check('rpc: agent.new — карточка создана', String(an.text).includes('rpc_guy'), String(an.text));
     const ad = await rpc('agent.delete', { id: 'rpc_guy' });
     check('rpc: agent.delete — карточка удалена', String(ad.text).includes('rpc_guy'), String(ad.text));
@@ -1043,7 +1043,7 @@ const client = await makeClient(handle.port);
     const wireWs = { readyState: 1, send: (d: string) => wire.push(d), on: () => {} } as unknown as WebSocket;
     const live = new ServerPresenter();
     live.addClient(wireWs);
-    const who = { id: 'a1', name: 'Ася', emoji: '🐵', color: 'cyan', role: 'тестировщица' };
+    const who = { id: 'a1', name: 'Ася', emoji: '🐵', color: 'cyan' };
     live.notice('заметка');
     live.error('беда');
     live.turnHeader(who);

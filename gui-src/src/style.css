@@ -102,12 +102,22 @@
   font: inherit;
 }
 .modal-box .fld textarea { resize: vertical; }
+/* пара дат «с — по» в модалке фильтров */
+.modal-box .fld .range { display: flex; gap: 6px; align-items: center; }
+.modal-box .fld .range input { width: auto; flex: 1; min-width: 0; }
+.modal-box .fld .range span { color: var(--dim); }
+/* JSON-переопределение модели: моноширинно, как код */
+.modal-box .fld textarea.mono { font: 12px/1.5 Consolas, monospace; }
 /* булево поле — чекбокс вместо инпута на всю ширину */
 .modal-box .fld.fld-chk input.chk {
   width: 15px; height: 15px; padding: 0; margin: 2px 0 0; accent-color: var(--accent, #4a9eff); cursor: pointer;
 }
-/* зрячая модель в сайдбаре — ◉ рядом с id */
-.vision { color: var(--accent, #4a9eff); }
+/* зрячая модель в сайдбаре — ◉ рядом с id (с отступом, не слипается) */
+.vision { color: var(--accent, #4a9eff); margin-left: 5px; }
+/* статус модели: ✓ собралась, ⚠ не настроена — фиксированной ширины, id в столбик */
+.st-ok, .st-warn { display: inline-block; min-width: 14px; }
+.st-ok { color: var(--ok); }
+.st-warn { color: var(--warn); }
 .modal-box .row { display: flex; gap: 8px; margin-top: 14px; }
 .confirm-subject { color: var(--dim); margin: 0; font-size: 13px; }
 
@@ -277,7 +287,7 @@
   display: inline-block;
 }
 .side-sec.collapsed .sec-toggle { transform: rotate(-90deg); }
-.side-sec.collapsed ul, .side-sec.collapsed .sec-btns { display: none; }
+.side-sec.collapsed ul, .side-sec.collapsed .sec-btns, .side-sec.collapsed .sec-frow { display: none; }
 
 html, body {
   margin: 0;
@@ -359,7 +369,7 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 #sb-resize:hover, #sb-resize:active { background: var(--accent); opacity: 0.4; }
 #sidebar section { margin-bottom: 18px; }
 .side-sec { margin-bottom: 14px; }
-.side-sec.collapsed ul, .side-sec.collapsed .sec-btns { display: none; }
+.side-sec.collapsed ul, .side-sec.collapsed .sec-btns, .side-sec.collapsed .sec-frow { display: none; }
 .side-sec.collapsed .sec-toggle { transform: rotate(-90deg); }
 .sec-toggle {
   cursor: pointer;
@@ -388,6 +398,23 @@ button.bad { border-color: var(--bad); color: var(--bad); }
   padding: 0 2px;
 }
 .side-head button:hover { color: var(--accent); }
+/* фильтр секции: ▽ горит акцентом, пока фильтр задан (даже при спрятанной строке) */
+.side-head .sec-filter.on { color: var(--accent); }
+/* строка ввода фильтра под шапкой секции */
+.sec-frow { margin-bottom: 6px; }
+.sec-frow input {
+  width: 100%;
+  font-size: 12px;
+  padding: 3px 7px;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.sec-frow input:focus { outline: none; border-color: var(--accent); }
+/* «нет совпадений» — пустой результат активного фильтра */
+#sidebar li.no-match { color: var(--dim); font-style: italic; cursor: default; }
+#sidebar li.no-match:hover { background: none; }
 .sec-btns { display: flex; gap: 4px; margin-bottom: 6px; flex-wrap: wrap; }
 .sec-btns button {
   font-size: 11px;
@@ -473,6 +500,8 @@ button.bad { border-color: var(--bad); color: var(--bad); }
   color: var(--dim);
 }
 #sidebar .tag.in { color: var(--ok); border-color: var(--ok); }
+/* image-модель в списке моделей — метка «картинки» акцентным */
+#sidebar .tag.img { color: var(--accent); border-color: var(--accent); }
 
 #chatwrap {
   flex: 1;
@@ -557,7 +586,6 @@ button.bad { border-color: var(--bad); color: var(--bad); }
 .msg hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
 .msg .txt a { color: var(--accent); text-decoration: underline; }
 .msg .txt img { max-width: 100%; }
-.msg .head .role { font-weight: 400; color: var(--dim); font-size: 12px; }
 
 .errline { color: var(--bad); margin-bottom: 10px; white-space: pre-wrap; }
 

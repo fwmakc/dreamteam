@@ -13,14 +13,13 @@ import type {
   ModelRef,
   SessionMeta,
 } from './types.js';
-import { loadTeam, MENTION_TRIGGERS } from './agents.js';
+import { loadTeam, checkModelRef, MENTION_TRIGGERS } from './agents.js';
 import { readAccount, type MailAccount } from './mail.js';
 import { isAgentId, isRecordId, isToolId } from './ids.js';
 import { agentToolIds, BUILTIN_TOOL_DESCS, BUILTIN_TOOL_IDS, normalizeAgentTools } from './tools-api.js';
 import { t, tf } from './i18n.js';
 
 export const MANAGER_ID = 'manager';
-export const MANAGER_ROLE = 'менеджер переговорки';
 
 const MANAGER_COLORS = new Set(['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'gray']);
 const AGENT_COLORS = MANAGER_COLORS;
@@ -123,7 +122,6 @@ export function managerAsAgent(cfg: ManagerConfig): Agent {
     name: cfg.name,
     emoji: cfg.emoji,
     color: cfg.color,
-    role: MANAGER_ROLE,
     prompt: MANAGER_PROMPT,
   };
 }
@@ -151,8 +149,8 @@ export const MANAGER_PROMPT =
   'Формат ответа: сначала короткий текст для человека, затем строго один JSON-объект:\n' +
   '{"say":"текст для человека","actions":[...действия...]}\n' +
   'Действия:\n' +
-  '- {"op":"team.add","id":"логин-латиницей","name":"Имя","description":"чем занимается, одной фразой","prompt":"системный промпт от первого лица","emoji":"🎯","color":"blue","temperature":0.5,"tools":{"shell":{},"files":null}} — tools: объект-карточки, имя тула → настройки (объект или null = по умолчанию); модель наследуется (переопределить можно полем "model":"id-модели")\n' +
-  '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","vision":"...","image":"...","temperature":0.3,"name":"...","emoji":"...","color":"..."}}\n' +
+  '- {"op":"team.add","id":"логин-латиницей","name":"Имя","description":"чем занимается, одной фразой","prompt":"системный промпт от первого лица","emoji":"🎯","color":"blue","model":"id-модели","tools":{"shell":{},"files":null}} — tools: объект-карточки, имя тула → настройки (объект или null = по умолчанию); model: id из «Модели дома» (не указан — основная; параметры — объектом: "model":{"temperature":0.3})\n' +
+  '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","vision":"...","image":"...","name":"...","emoji":"...","color":"..."}}\n' +
   '- {"op":"chat.add","who":"id"} / {"op":"chat.remove","who":"id"} — позвать или вывести из текущего чата\n' +
   '- {"op":"session.list"} — показать разговоры; {"op":"session.open","id":"20261027-143052"} — открыть по id; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","id":"20261027-143052"} — удалить по id (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (имя — по краткому содержанию)\n' +
   '- {"op":"agent.tool.add","agent":"id","tool":"files","card":{"allow":["git *"]}} — включить тул агенту; card можно опустить; {"op":"agent.tool.update",…} — обновить карточку; {"op":"agent.tool.delete","agent":"id","tool":"files"} — выключить. Встроенные: ' +
@@ -201,7 +199,7 @@ export function managerStateInput(ctx: ManagerContext): string {
       const tools = agentToolIds(a);
       return (
         `- ${a.id} — ${a.name}${a.description ? ` (${a.description})` : ''}, модель: ${a.model?.id ?? 'основная'}` +
-        (a.temperature != null ? `, temp ${a.temperature}` : '') +
+        (a.model?.temperature != null ? `, temp ${a.model.temperature}` : '') +
         (tools.length > 0 ? `; тулы: ${tools.join(', ')}` : '; тулов нет')
       );
     })
@@ -354,7 +352,6 @@ export function parseManagerReply(text: string): ManagerReply {
 export interface ManagerNewAgent {
   id: string;
   name: string;
-  role?: string;
   prompt?: string;
   emoji?: string;
   color?: string;
@@ -369,13 +366,12 @@ const UPDATABLE_FIELDS = new Set([
   'name',
   'emoji',
   'color',
-  'role',
   'description',
   'prompt',
   'model',
   'vision',
   'image',
-  'temperature',
+  'tools',
   'workspace',
 ]);
 
@@ -389,6 +385,9 @@ function readAgentFile(dir: string, id: string): Record<string, unknown> {
 /** Запись карточки агента: tmp → валидация loadTeam(dir) → rename. Ошибка — файл не тронут. */
 function writeAgentFile(dir: string, id: string, card: Record<string, unknown>): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  // легаси: роль агента убрана — при первой записи карточка от неё чистится,
+  // как соседнее легаси-temperature
+  delete card.role;
   const path = join(dir, `${id}.json`);
   const tmp = `${path}.tmp`;
   const forCheck = { id, ...card };
@@ -425,7 +424,6 @@ export function addTeamAgent(dir: string, data: ManagerNewAgent, models: Readonl
   if (!isAgentId(id)) throw new Error(`неверный id «${data.id}» — нужна латиница, цифры, точка, «-» и «_»`);
   if (!name) throw new Error('не указано имя участника (name)');
   if (agentPathExists(dir, id)) throw new Error(`участник с id «${id}» уже есть`);
-  const role = typeof data.role === 'string' && data.role.trim() ? data.role.trim() : 'участник';
   const card: Record<string, unknown> = {
     name,
     emoji: typeof data.emoji === 'string' && data.emoji.trim() ? data.emoji.trim() : '🤖',
@@ -436,20 +434,24 @@ export function addTeamAgent(dir: string, data: ManagerNewAgent, models: Readonl
     prompt:
       typeof data.prompt === 'string' && data.prompt.trim()
         ? data.prompt.trim()
-        : `Ты — ${name}, ${role}.`,
+        : `Ты — ${name}.`,
   };
   if (typeof data.description === 'string' && data.description.trim()) card.description = data.description.trim();
-  if (typeof data.temperature === 'number' && Number.isFinite(data.temperature)) card.temperature = data.temperature;
   if (data.model !== undefined && (typeof data.model === 'string' ? data.model.trim() : true)) {
-    const ref = normalizeModelRef(data.model);
-    if (ref.id) {
-      requireModel(models, ref.id);
-      card.model = ref;
-    }
+    const ref = { ...normalizeModelRef(data.model) };
+    checkModelRef(`агент ${id}: model`, ref);
+    // id необязателен: {"temperature": 0.3} — переопределение на основной модели
+    if (ref.id !== undefined) requireModel(models, String(ref.id).trim());
+    card.model = ref;
+  }
+  // легаси от менеджера: температура — параметр ссылки на модель, а не агента
+  if (typeof data.temperature === 'number' && Number.isFinite(data.temperature)) {
+    const ref = (card.model ?? {}) as ModelRef;
+    if (ref.temperature === undefined) card.model = { ...ref, temperature: data.temperature };
   }
   if (data.tools !== undefined) card.tools = normalizeAgentTools(id, data.tools);
   writeAgentFile(dir, id, card);
-  return tf('✓ {name} (id «{id}», роль «{role}») добавлен в команду', { name, id, role });
+  return tf('✓ {name} (id «{id}») добавлен в команду', { name, id });
 }
 
 /** Импорт: вливает входящих агентов по id — новых добавляет, совпавших не трогает. */
@@ -482,17 +484,35 @@ export function updateTeamAgent(dir: string, id: string, fields: ManagerUpdateFi
   const changes: string[] = [];
   for (const [key, value] of Object.entries(fields ?? {})) {
     if (!UPDATABLE_FIELDS.has(key)) continue;
-    if (key === 'temperature') {
-      if (typeof value !== 'number' || !Number.isFinite(value)) continue;
-      card.temperature = value;
-      changes.push(`temperature=${value}`);
-    } else if (key === 'model') {
-      if (value === undefined || value === null) continue;
-      const ref = normalizeModelRef(value as string | ModelRef);
-      if (!ref.id || !ref.id.trim()) continue;
-      requireModel(models, ref.id.trim());
-      card.model = ref;
-      changes.push(`model="${ref.id.trim()}"`);
+    if (key === 'model') {
+      if (value === undefined) continue;
+      // null / пустая строка / пустой объект — убрать ссылку: всё по умолчаниям
+      // карточки модели; легаси-поле temperature верхнего уровня уходит вместе
+      const clear =
+        value === null ||
+        (typeof value === 'string' && !value.trim()) ||
+        (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as object).length === 0);
+      if (clear) {
+        if (card.model === undefined && card.temperature === undefined) continue;
+        delete card.model;
+        delete card.temperature;
+        changes.push('-model');
+      } else {
+        const ref = normalizeModelRef(value as string | ModelRef);
+        checkModelRef('model', ref);
+        if (ref.id !== undefined) requireModel(models, String(ref.id).trim());
+        // легаси: температура жила верхним полем — переносим в ссылку
+        if (ref.temperature === undefined && typeof card.temperature === 'number') {
+          ref.temperature = card.temperature;
+        }
+        delete card.temperature;
+        card.model = ref;
+        // в отчёте — и переопределения параметров, не только id
+        changes.push(ref.id ? `model="${String(ref.id).trim()}"` : 'model');
+        for (const [k, v] of Object.entries(ref)) {
+          if (k !== 'id' && v !== undefined) changes.push(`${k}=${v}`);
+        }
+      }
     } else if (key === 'vision' || key === 'image') {
       // пустая строка — убрать ссылку (вернуть модели по умолчанию)
       if (typeof value === 'string' && !value.trim()) {
@@ -507,6 +527,19 @@ export function updateTeamAgent(dir: string, id: string, fields: ManagerUpdateFi
       requireModel(models, ref.id.trim());
       card[key] = ref;
       changes.push(`${key}="${ref.id.trim()}"`);
+    } else if (key === 'tools') {
+      // карта карточек целиком — что в JSON, то и в карточке (не дополнение);
+      // null или {} — убрать все тулы. Форму валидирует normalizeAgentTools
+      if (value === undefined) continue;
+      const tools = value === null ? undefined : normalizeAgentTools(fid, value);
+      if (tools === undefined) {
+        if (card.tools === undefined) continue;
+        delete card.tools;
+        changes.push('-tools');
+      } else {
+        card.tools = tools;
+        changes.push(`tools: ${Object.keys(tools).join(', ')}`);
+      }
     } else if (typeof value === 'string' && value.trim()) {
       card[key] = value.trim();
       changes.push(`${key}="${value.trim()}"`);

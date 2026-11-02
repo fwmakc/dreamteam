@@ -72,7 +72,7 @@ export class SessionStore {
         ? '**Вы**'
         : m.authorId === 'session-ref'
           ? `*📎 Приложение — конспект разговора «${m.authorName}»*`
-          : `**${m.authorName}** (${m.authorRole ?? 'участник'})`;
+          : `**${m.authorName}**`;
       lines.push(`${who} · ${time(m.ts)}`, '');
       lines.push(m.text.replace(/\r/g, ''), '');
       lines.push('---', '');

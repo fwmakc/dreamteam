@@ -76,7 +76,7 @@ function mockPlan(input: PlanInput, cap = 2): Turn[] {
 
 async function llmPlan(input: PlanInput): Promise<Turn[]> {
   const roster = input.team
-    .map((a) => `- ${a.id} — ${a.name}, ${a.role}${a.description ? `: ${a.description}` : ''}`)
+    .map((a) => `- ${a.id} — ${a.name}${a.description ? `: ${a.description}` : ''}`)
     .join('\n');
   const recent = input.history
     .slice(-HISTORY_LIMIT)

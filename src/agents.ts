@@ -44,16 +44,24 @@ export function loadTeam(dir: string): Agent[] {
     if (a.id !== undefined && String(a.id) !== id) {
       throw new Error(`${path}: id в карточке «${a.id}» не совпадает с именем файла «${id}»`);
     }
+    const model = parseModelRef(`агент ${id}`, a.model);
+    // легаси-поле temperature верхнего уровня: параметр ссылки, а не агента —
+    // при чтении переносим в model.temperature (файл перепишется при первой правке)
+    const rawTemp = (raw as { temperature?: unknown }).temperature;
+    const legacyTemp = typeof rawTemp === 'number' ? rawTemp : undefined;
     agents.push({
       id,
       name: String(a.name),
       emoji: String(a.emoji ?? '🤖'),
-      role: String(a.role ?? 'участник'),
       description: a.description ? String(a.description) : undefined,
       color: String(a.color ?? 'white'),
       prompt: String(a.prompt),
-      model: parseModelRef(`агент ${id}`, a.model),
-      temperature: typeof a.temperature === 'number' ? a.temperature : undefined,
+      model:
+        model && model.temperature !== undefined
+          ? model
+          : legacyTemp === undefined
+            ? model
+            : { ...(model ?? {}), temperature: legacyTemp },
       tools: normalizeAgentTools(id, a.tools),
       projects: Array.isArray(a.projects) ? a.projects.map(String) : undefined,
       workspace: typeof a.workspace === 'string' && a.workspace.trim() ? a.workspace.trim() : undefined,
@@ -62,6 +70,27 @@ export function loadTeam(dir: string): Agent[] {
     });
   }
   return agents;
+}
+
+/** Параметры ссылки на модель, которые переопределяют карточку models/. */
+const MODEL_REF_KEYS = new Set(['id', 'temperature', 'maxTokens', 'thinking', 'reasoning'] as const);
+
+/** Ключи и типы ссылки: неизвестное имя или не тот тип — громко, до запроса к API. */
+export function checkModelRef(where: string, ref: ModelRef): void {
+  for (const [k, v] of Object.entries(ref)) {
+    if (!MODEL_REF_KEYS.has(k as keyof ModelRef)) {
+      throw new Error(`${where}: «${k}» не знаю — можно: ${[...MODEL_REF_KEYS].join(', ')}`);
+    }
+    if ((k === 'temperature' || k === 'maxTokens') && (typeof v !== 'number' || !Number.isFinite(v))) {
+      throw new Error(`${where}: "${k}" — число`);
+    }
+    if (k === 'id' && v !== undefined && (typeof v !== 'string' || !v.trim())) {
+      throw new Error(`${where}: "id" — непустая строка (id карточки из models/)`);
+    }
+    if ((k === 'thinking' || k === 'reasoning') && v !== undefined && typeof v !== 'string') {
+      throw new Error(`${where}: "${k}" — строка`);
+    }
+  }
 }
 
 /** Ссылка на модель в карточке: id строкой или объект {id?, …}; форма — только такая. */
@@ -76,6 +105,7 @@ function parseModelRef(where: string, raw: unknown): ModelRef | undefined {
     if (ref.id !== undefined && (typeof ref.id !== 'string' || !ref.id.trim())) {
       throw new Error(`${where}: "model.id" — непустая строка (id карточки из models/)`);
     }
+    checkModelRef(where, ref);
     return ref;
   }
   throw new Error(`${where}: "model" — id строкой или объект {"id": "…", "temperature": …}`);
@@ -102,9 +132,8 @@ export function loadUserProfile(file: string): UserProfile {
   try {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<UserProfile>;
     const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : 'Пользователь';
-    const role = typeof raw.role === 'string' && raw.role.trim() ? raw.role.trim() : undefined;
     const about = typeof raw.about === 'string' && raw.about.trim() ? raw.about.trim() : undefined;
-    return { name, role, about };
+    return { name, about };
   } catch {
     return { name: 'Пользователь' };
   }

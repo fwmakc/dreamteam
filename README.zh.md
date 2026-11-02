@@ -6,7 +6,7 @@
 
 [English](README.md) · [Русский](README.ru.md) · **中文**
 
-在这里，你面对的不是单个 AI，而是一支虚拟团队：每个成员都有自己的名字、角色、性格和文字颜色。你的消息发给主持人-协调者，由它决定由哪些成员回答（通常 1–3 人，而不是全员一起）。智能体们看得见彼此的发言，会争论、会互相接续思路。可以用 `@名字` 点名特定成员。每场谈话都会保存。
+在这里，你面对的不是单个 AI，而是一支虚拟团队：每个成员都有自己的名字、描述、性格和文字颜色。你的消息发给主持人-协调者，由它决定由哪些成员回答（通常 1–3 人，而不是全员一起）。智能体们看得见彼此的发言，会争论、会互相接续思路。可以用 `@名字` 点名特定成员。每场谈话都会保存。
 
 两套外壳，一个内核：终端 TUI 和本地网页 GUI（`dreamteam serve`）。
 
@@ -62,7 +62,7 @@ dreamteam serve .            # 网页外壳直接带着当前文件夹的项目
 1. **界面语言** —— 第一个问题，向导本身已经会用它：开箱即用 `ru`、`en`、`zh`，加上来自 `~/.dreamteam/lang/<id>.json` 的自定义语言（见“设置”）。之后用 `/settings update ui=<id>` 更改。
 2. **服务商** —— 从适配器列表选择（`mock` 无需密钥即可试用）。
 3. **API 密钥** —— 输入隐藏（不显示、也不进终端日志）；密钥直接保存到 `models/` 的模型卡片里（`"apiKey"` 字段）并立即生效。
-4. **如何向团队介绍你** —— 名字、角色、几句介绍（可跳过）。
+4. **如何向团队介绍你** —— 名字和几句自我介绍（可跳过）。
 
 之后创建家目录，附带最小文件和清晰的初始说明：五人初始团队（分析师、秘书、开发者、设计师、文案）和运行在所选服务商上的经理，外加自定义语言的 `lang/` 架子。名单在 `agents/` 里编辑，或通过与经理对话编辑。项目在启动时不被选择 —— 应用诚实地以无项目状态启动，第一个 `/project new` 就会打开对话。重复运行向导不会破坏任何东西：已存在的文件原样保留。在非交互模式（管道）下向导会诚实地拒绝运行 —— 设置需要真实终端。
 
@@ -72,7 +72,7 @@ dreamteam serve .            # 网页外壳直接带着当前文件夹的项目
 
 ```
 You > bring in Gleb and Marina
-  ✓ Gleb (id "gleb", role "Head of architecture and code") added to the team
+  ✓ Gleb (id "gleb") added to the team
   💾 Gleb joined the chat.
 You > enable shell and files for Gleb
   ✓ gleb: tool "shell" enabled
@@ -211,9 +211,9 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `import <file>` | `/import dt-home-….zip` | 从归档展开家目录（含密钥）：设置/资料/记忆/日程被替换，项目和谈话按 id 并入；需确认 |
 | `settings.export` | `/settings export` | 不含项目的设置：settings.json、个人资料、经理和带密钥的模型 |
 | `settings.import <file>` | `/settings import dt-settings-….zip` | 替换设置/资料/经理/模型（项目不动）；需确认 |
-| `agents.list` | `/agents` | 团队名单：id、角色、工具、谁在聊天 |
-| `agent.new <id> [field=value…]` | `/agent new lawyer name=律师 role=法律` | 新成员（默认名字 = id） |
-| `agent.update <id> field=value…` | `/agent update lawyer role=法律 model.temperature=0.4 vision=glm` | 编辑：name= role= emoji= color= description= prompt= temperature= workspace= 及嵌套的 model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=，另有 vision= image=（`models/` 中的模型 id；留空 —— 移除引用） |
+| `agents.list` | `/agents` | 团队名单：id、描述、工具、谁在聊天 |
+| `agent.new <id> [field=value…]` | `/agent new lawyer name=律师 description=法律` | 新成员（默认名字 = id） |
+| `agent.update <id> field=value…` | `/agent update lawyer description=法律 model.temperature=0.4 vision=glm` | 编辑：name= emoji= color= description= prompt= workspace= 及嵌套的 model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=，另有 vision= image=（`models/` 中的模型 id；留空 —— 移除引用） |
 | `agent.delete <id…>` | `/agent delete lawyer, keks` | 删除成员：逗号或空格分隔的列表 |
 | `agent.tools <id>` | `/agent tools lawyer` | 启用了哪些工具、什么设置 |
 | `agent.tool add <id> <tool…>` | `/agent tool add lawyer files shell` | 启用工具（可多个）：内置的（完整列表 — `/tools`）或 tools/ 里自定义的 |
@@ -229,7 +229,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `model.get <id>` | `/model get glm` | 整张卡片 JSON —— 提供方契约的全部字段（网页表单编辑的内容） |
 | `model.delete <id…>` | `/model delete glm spare` | 删除模型（可多个）；默认的删不掉 —— 先 `/settings update model.id=别的` |
 | `profile.show` | `/profile` | 团队如何看你（user.json） |
-| `profile.update field=value…` | `/profile update name=阿辽沙 role=创业者 about=重视简短` | 字段：name、role、about |
+| `profile.update field=value…` | `/profile update name=阿辽沙 about=重视简短` | 字段：name、about |
 | `memory.show [id\|shared]` | `/memory gleb`、`/memory shared` | 某成员记得什么；不带参数 —— 总览；`shared` — 共享记忆 |
 | `projects.list` | `/projects` | 家目录的项目注册表：id 和工作文件夹，当前标注 |
 | `project.new <id> [folder]` | `/project new shop .` | 在家目录创建项目并打开；工作文件夹不存在则创建 |
@@ -271,7 +271,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 
 **命令提示。** 以 `/` 开头输入 —— 输入行下方出现命令列表（每条带简短说明）；随着输入过滤。**Tab** 补全命令，带参数的命令还会提示并补全参数：`/session open` 和 `/session delete` 提示会话 id（带标题），`/session agent add` 和 `/agent update` 提示成员 id，`/usage` 和 `/model update` 提示模型 id，`/memory` 提示 `id|shared`。三词命令（`/session agent`、`/agent tool`、`/project mail|host|messenger`）也认识自己的子动词：`/session agent ` 之后提示 `add` 和 `delete`，`/session agent add` 会显示语法和成员 id。
 
-@提及同理：在消息中间输入 `@` —— 输入行下方弹出当前聊天成员和 `@session` 的面板（各带角色）。输入即过滤，**上下方向键**移动选择（循环），**Enter** 或 **Tab** 插入选中名字，**Esc** 关闭面板并保留已输入的 `@片段`。大小写无关，俄语 е/ё 也不区分。`@session` 后加空格会提示带标题的会话 id。
+@提及同理：在消息中间输入 `@` —— 输入行下方弹出当前聊天成员和 `@session` 的面板（各带描述）。输入即过滤，**上下方向键**移动选择（循环），**Enter** 或 **Tab** 插入选中名字，**Esc** 关闭面板并保留已输入的 `@片段`。大小写无关，俄语 е/ё 也不区分。`@session` 后加空格会提示带标题的会话 id。
 
 **`!` 是 `@` 的完全同义词**（任何键盘布局、任何语言下都是 Shift+1）：`!Katya, look at the mockup`、`!manager, bring Gleb in`、`!session 20261027-143052` —— 一切照旧，包括提示面板。
 
@@ -633,15 +633,15 @@ mock 模式下整个循环无需模型即可工作：`mock` 按模板描述图�
 默认成员只把对话者看作“User”。为了让团队知道你是谁、怎么称呼你，请自我介绍：
 
 ```
-You > /profile update name=Alexey role=startup founder about=values brevity and specifics
-  Noted: you are Alexey (startup founder). The team now knows who you are.
+You > /profile update name=Alexey about=values brevity and specifics
+  Noted: you are Alexey. The team now knows who you are.
 ```
 
 - 名字进入所有系统提示词（“你的对话者是 Alexey…”）、上下文里你消息的签名（“Alexey: …”）以及主持人处 — 智能体开始用名字称呼你。
 - 资料保存在 `~/.dreamteam/user.json`，也可以手动编辑（无需重启即生效）；向导在首次启动时填写：
 
 ```json
-{ "name": "Alexey", "role": "startup founder", "about": "values brevity" }
+{ "name": "Alexey", "about": "values brevity" }
 ```
 
 ## 团队记忆：关系、任务与其他谈话
@@ -686,7 +686,7 @@ You > what do we do next? @session 20261027-143052     ← straight by id from /
 
 ```
 You > @manager, add analyst Ruslan to the team, let him work on claude
-You > @manager give Gleb the lead developer role and temperature 0.3
+You > @manager make Gleb the lead developer and set temperature 0.3
 You > @manager bring Katya into this chat
 You > @manager show the sessions and open the second one
 You > @manager enable the git tool for Pasha and allow him commit
@@ -724,9 +724,9 @@ You > @manager add the router server — admin@192.168.1.1
 
 `/settings update model.id=…` 更换的是**智能体**的主力模型；经理有自己的模型（来自 `manager.json`）— 由 `/manager update model.id=…` 更改。
 
-## 自定义角色与自己的 API
+## 自定义智能体与自己的 API
 
-**更换团队** — 编辑 `~/.dreamteam/agents/`（即时生效）：字段 `id`、`name`、`emoji`、`role`、`description`、`color`（red/green/yellow/blue/magenta/cyan/white/gray）、`prompt`（人设），可选 `model`（模型 id 字符串或带 temperature 的对象）和 `temperature`；真实动作的权限 — `tools`、`projects`、`workspace`，眼睛和双手 — `vision` 和 `image`（见“工具”与“视觉与图片”）。`model` 字段只能是 `models/` 里存在的 id：`/agent new|update` 命令、网页外壳和经理都会拒绝陌生的 id 并给出可用列表，而不是把垃圾写进配置。
+**更换团队** — 编辑 `~/.dreamteam/agents/`（即时生效）：字段 `id`、`name`、`emoji`、`description`、`color`（red/green/yellow/blue/magenta/cyan/white/gray）、`prompt`（人设），可选 `model`（模型 id 字符串或带 temperature 的对象）和 `temperature`；真实动作的权限 — `tools`、`projects`、`workspace`，眼睛和双手 — `vision` 和 `image`（见“工具”与“视觉与图片”）。`model` 字段只能是 `models/` 里存在的 id：`/agent new|update` 命令、网页外壳和经理都会拒绝陌生的 id 并给出可用列表，而不是把垃圾写进配置。
 
 **接入新 API — 一个文件，无需 fork。** 把适配器放进家目录的架子
 `~/.dreamteam/models/`：文件名即适配器 id，`models/` 里的模型卡片用 `"provider": "<id>"` 引用它。架子在首次启动时创建；代码在启动时加载 — 文件损坏或与内置适配器（含 image-）重名，都会在启动时给出明确错误：

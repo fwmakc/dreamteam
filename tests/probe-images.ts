@@ -232,7 +232,7 @@ async function startStub(): Promise<{ server: Server; port: number; captured: Ca
   {
     const { default: imageFactory } = await import('../src/tools/image/image.js');
     const { makeCtx } = await import('./tool-ctx.js');
-    const artist: Agent = { id: 'hudozhnik', name: 'Художник', emoji: '🎨', color: 'magenta', prompt: 'рисуй', role: 'тест' };
+    const artist: Agent = { id: 'hudozhnik', name: 'Художник', emoji: '🎨', color: 'magenta', prompt: 'рисуй' };
     const runCtx = makeCtx(root, root);
     const tool = imageFactory({}, { cfg, agent: artist, tctx });
     check('тул: check всегда allow — пишет только в images/', tool.check('') === 'allow', String(tool.check('')));

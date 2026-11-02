@@ -44,7 +44,7 @@ export const zaiCodingPlanFactory: ProviderFactory = (
   const apiKey = config.apiKey ? String(config.apiKey).trim() : '';
   if (!apiKey) {
     throw new ConfigurationError(
-      `в карточке провайдера «${id}» нет "apiKey" — впиши ключ Z.ai coding plan в карточку models/${id}.json`,
+      `нет "apiKey" — впиши ключ Z.ai coding plan`,
     );
   }
   const monitorUrl = String(config.monitorUrl ?? DEFAULT_MONITOR_BASE).replace(/\/+$/, '');
