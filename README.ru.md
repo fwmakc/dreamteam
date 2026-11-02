@@ -1426,10 +1426,11 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
   GUI с экспортом/импортом). `probe-web` держит сайт-заглушку на локальном
   http-сервере — цепочка больше не ходит в интернет.
 - `npm run probe:e2e` — те же зоны под настоящим псевдо-TTY Windows (ConPTY):
-  что реально доходит до приложения (`probe-input`) и отрисованный экран
-  через мини-эмулятор VT (`probe-startup`: старт без проекта, `/project open`
-  с прошлым разговором, история в панели, колесо/PgUp/мышь/выделение).
-  Сам ставит и удаляет node-pty.
+  мастер первого запуска от и до (`probe-wizard-pty`: пикер языка отвечает
+  стрелками, создаётся mock-модель, стартует TUI), что реально доходит до
+  приложения (`probe-input`) и отрисованный экран через мини-эмулятор VT
+  (`probe-startup`: старт без проекта, `/project open` с прошлым разговором,
+  история в панели, колесо/PgUp/мышь/выделение). Сам ставит и удаляет node-pty.
 - `npm run probe:tui` — полный прогон приложения в псевдо-TTY: старт без
   проекта → `/project new` → приветствие консьержа, `team.add`,
   `chat.add`, раунд с инструментами, `/agents`, выход — всё на mock-провайдере
@@ -1546,7 +1547,8 @@ dreamteam/
 │                             #   для конвертаций тула docs — см. docker/README.md
 ├── tests/                    # пробники: probe-screen, probe-editor, probe-manager,
 │   ├── …                     #   probe-manager-flow, probe-project, probe-tools,
-│   │                         #   probe-wizard, probe-input, probe-startup,
+│   │                         #   probe-wizard, probe-wizard-pty, probe-input,
+│   │                         #   probe-startup,
 │   │                         #   probe-tui, probe-api, probe-commands, probe-docs,
 │   │                         #   probe-ocr, probe-web, probe-mail,
 │   │                         #   probe-messengers + vt

@@ -39,6 +39,7 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm i --no-save node-pty
+      - run: npx tsx tests/probe-wizard-pty.ts
       - run: npx tsx tests/probe-input.ts
       - run: npx tsx tests/probe-startup.ts
       - run: npx tsx tests/probe-tui.ts

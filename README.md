@@ -1476,7 +1476,9 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   surface with export/import). `probe-web` serves its fixture site from a
   local http server — the chain never touches the internet.
 - `npm run probe:e2e` — the same zones under a real pseudo-TTY on Windows
-  (ConPTY): what actually reaches the app (`probe-input`) and the rendered screen
+  (ConPTY): the first-run wizard end to end (`probe-wizard-pty`: the language
+  picker answers arrow keys, a mock model is created, the TUI starts), what
+  actually reaches the app (`probe-input`) and the rendered screen
   through a mini VT emulator (`probe-startup`: starting without a project,
   `/project open` with a past conversation, history in the panel,
   wheel/PgUp/mouse/selection). It installs and removes node-pty itself.
@@ -1601,7 +1603,8 @@ dreamteam/
 │                             #   for the docs tool's conversions — see docker/README.md
 ├── tests/                    # probes: probe-screen, probe-editor, probe-manager,
 │   ├── …                     #   probe-manager-flow, probe-project, probe-tools,
-│   │                         #   probe-wizard, probe-input, probe-startup,
+│   │                         #   probe-wizard, probe-wizard-pty, probe-input,
+│   │                         #   probe-startup,
 │   │                         #   probe-tui, probe-api, probe-commands, probe-docs,
 │   │                         #   probe-ocr, probe-web, probe-mail,
 │   │                         #   probe-messengers + vt

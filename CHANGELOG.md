@@ -7,6 +7,29 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
+## [0.0.16] — 2026-11-02
+
+### Fixed
+
+- **First-run setup no longer exits the moment a key is pressed.** The
+  wizard's list picker (interface language, model, provider type) relied
+  on `keypress` events after closing its readline interface; in current
+  Node nothing reads stdin then and re-subscribing to `keypress` is a
+  no-op, so the event loop drained and the process exited silently with
+  code 0 — arrows and Enter did nothing. The picker now keeps a live
+  readline interface alive while the list is on screen (its keyboard
+  echo goes into a pocket, like `askSecret`), so keys actually arrive.
+
+### Added
+
+- `probe-wizard-pty` (e2e, ConPTY): drives the first-run wizard in a
+  real pseudo-terminal over an empty temp home — draws the picker,
+  survives ↓, completes with the mock provider, starts the TUI, and
+  checks the resulting home (language, model card, token, manager).
+  Wired into `npm run probe:e2e` and the Windows e2e CI job; before it,
+  no probe exercised the wizard's terminal branch, which is how the bug
+  above shipped.
+
 ## [0.0.15] — 2026-11-02
 
 ### Added

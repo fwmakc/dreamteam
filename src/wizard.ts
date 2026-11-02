@@ -68,8 +68,19 @@ function makeAsk(io: WizardIo) {
     io.output.write(`\n  ${title}\n`);
     const realTty = io.isTTY && (io.input as { isTTY?: unknown }).isTTY === true;
     if (realTty && items.length > 1) {
-      rl.close(); // на время списка клавиатура принадлежит только пикеру
+      rl.close(); // прежняя строка ввода закрыта — её клавиатура у пикера
+      // Клавиатуру пикера держит живой интерфейс: после close() stdin никто
+      // не читает, а повторный emitKeypressEvents — no-op (декодер потока уже
+      // поставлен), поэтому голая подписка на 'keypress' клавиш не получает —
+      // цикл событий пустеет и приложение молча выходит. Эхо клавиш пикера —
+      // в кармане (как у askSecret): на экран попадает только рисунок списка.
+      const pocket = new PassThrough();
+      pocket.resume();
+      const picker = createInterface({ input: io.input, output: pocket, terminal: true });
       io.output.write(pc.dim(`  ${t('выбор: стрелки ↑/↓, PgUp/PgDn, Home/End, Enter')}\n`));
+      const stream = io.input as Readable & { setRawMode?: (m: boolean) => void; isRaw?: boolean };
+      const wasRaw = stream.isRaw === true;
+      stream.setRawMode?.(true);
       const sel = await new Promise<number>((resolve) => {
         let cur = Math.min(Math.max(def, 0), items.length - 1);
         let drawn = 0;
@@ -81,13 +92,10 @@ function makeAsk(io: WizardIo) {
           drawn = items.length;
         };
         draw();
-        const stream = io.input as Readable & { setRawMode?: (m: boolean) => void; isRaw?: boolean };
-        const wasRaw = stream.isRaw === true;
-        stream.setRawMode?.(true);
         const onKey = (_s: string, key?: { name?: string; ctrl?: boolean }): void => {
           const k = key?.name ?? '';
           if (key?.ctrl && k === 'c') {
-            cleanup();
+            io.input.removeListener('keypress', onKey);
             process.exit(130); // в сыром режиме Ctrl+C не приходит SIGINT'ом — выходим сами
           }
           if (k === 'up') cur = Math.max(0, cur - 1);
@@ -97,19 +105,17 @@ function makeAsk(io: WizardIo) {
           else if (k === 'home') cur = 0;
           else if (k === 'end') cur = items.length - 1;
           else if (k === 'return' || k === 'enter') {
-            cleanup();
+            io.input.removeListener('keypress', onKey);
             resolve(cur);
             return;
           } else return;
           draw();
         };
-        const cleanup = (): void => {
-          io.input.removeListener('keypress', onKey);
-          stream.setRawMode?.(wasRaw);
-        };
         io.input.on('keypress', onKey);
       });
-      reopen();
+      picker.close(); // помпу пикера долой; raw close мог сбросить — вернём сами
+      reopen(); // свежая строка ввода для следующих вопросов
+      stream.setRawMode?.(wasRaw);
       return sel;
     }
     for (;;) {
