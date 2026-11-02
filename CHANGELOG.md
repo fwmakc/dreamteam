@@ -57,8 +57,58 @@ compatibility is promised across earlier versions.
   of the `npm run probe` chain (`api`, `schemas`, `data`, `toolloop`,
   `frugal`) are back in; `probe-memory` is wired in too (it was written
   but never ran anywhere); `check-readme` and `i18n-diff` run as CI steps.
+- **The web chat copies, quotes and replies.** Every inline `code` and
+  fenced block grows a ⧉ button (markdown-it renderer overrides, clicks
+  delegated on the chat container, ✓/✗ flash for a second; the clipboard
+  API falls back to a hidden `textarea` + `execCommand` on non-secure LAN
+  contexts). Every message gets an action row: ⧉ copies the raw markdown
+  (attachment markers stripped from user messages), ↩ composes a reply —
+  the last text selection inside that message (tracked via
+  `selectionchange`) or else the whole message goes into a fenced block
+  (the fence grows to four backticks when the quote itself contains a
+  triple-backtick fence), an agent gets a `!Name ` mention (the engine
+  matches name or id), a user message is quoted without one; the prefix between them is the
+  new `quotePrefix` setting («Сообщение для цитирования», default
+  «Вы пишете:», validated like `autoMessage`), and after composing, the
+  focus moves to the input with the cursor at the end.
+- **Card forms speak human.** `FieldSpec` gains `desc`, and the contract
+  descriptions move under the controls while the labels become proper
+  names from a `FIELD_TITLES` map («Ключ API», «Модель (имя у API)»,
+  «Адрес мониторинга квот», «Размышления GLM», «Зрение»…) — the vision
+  flag was always in the cards but had no name of its own, which is why
+  the manager never found it. `check-i18n` now harvests
+  `label:`/`placeholder:`/`desc:` literals plus the `FIELD_TITLES`
+  values on top of `tr()`. «Модель картинок (id из models/)» is renamed
+  to «Модель генерации изображений (id из models/)».
+- **Selects instead of free text where the repo knows the answers.**
+  The agent form picks `model.id` from every card in `models/`
+  (labelled with the API name, ◉ for the ones that see images),
+  `vision.id` from the vision-capable subset and `image.id` from the
+  image cards (⚠ marks the unconfigured); `provider` becomes an enum
+  both in `modelCardSchema` and in the model-creation form, fed by the
+  exported `providerIds()` (built-in kinds plus user adapters) that the
+  state snapshot now carries as `providers`. Switching the provider of
+  an existing model still re-validates on save rather than re-reading
+  the form mid-edit.
+- **Modal forms are grouped and collapsible.** The agent editor splits
+  into «Модель», «Модель зрения» and «Модель генерации изображений»
+  sections; the model editor gathers the contract tail into
+  «Расширенные настройки»; groups start collapsed and a click on the
+  header toggles them.
+- **The sidebar says «Агенты».** The section formerly titled «Команда»
+  («Team») is renamed — the input placeholder follows («Напишите
+  агентам…»); the TUI keeps «Команда» only as the shell-command
+  confirmation title, where the en/zh translations are fixed to
+  Command/命令 accordingly.
 
 ### Fixed
+
+- **A model card that fails to build keeps its config.** The failure
+  slots in `loadModels` and `instantiateModel` now carry the card
+  alongside the mock stand-in, so the GUI opens the real contract for a
+  broken model — exactly the form needed to enter the missing `apiKey`.
+  Before, the card came back empty and the schema was the mock one,
+  making the broken provider unreachable from the editor.
 
 - `card-schema`: secret fields (`apiKey`, `clientSecret`) are typed
   `password` again and a provider without a contract gets the universal
