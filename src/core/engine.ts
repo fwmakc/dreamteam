@@ -1146,8 +1146,9 @@ export class Engine {
     return registered + this.applyProjectSwitch(config.id, announce);
   }
 
-  /** project.new: создать проект (+ рабочую папку, если задана) и открыть его. */
-  newProject(name: string, pathRaw: string | null, announce = true): string {
+  /** project.new: создать проект (+ рабочую папку, если задана) и открыть его;
+   *  без имени id берётся из папки, без папки — штамп как у разговоров. */
+  newProject(name: string | null, pathRaw: string | null, announce = true): string {
     const cfg = projects.createProject(name, pathRaw);
     return tf('✓ Проект «{id}» создал (данные — в доме, projects/{id}/)\n', { id: cfg.id }) + this.applyProjectSwitch(cfg.id, announce);
   }
@@ -1191,7 +1192,7 @@ export class Engine {
     const raw = arg.trim().replace(/^["']|["']$/g, '');
     if (!raw) throw new Error(t('укажите проект: /project delete <id|путь> (список — /projects)'));
     const found = projects.listProjects().find(
-      (p) => p.id.toLowerCase() === raw.toLowerCase() || (p.path && resolve(p.path) === resolve(raw)),
+      (p) => p.id.toLowerCase() === raw.toLowerCase() || (p.path && resolve(p.path) === resolve(projects.expandHome(raw))),
     );
     if (!found) throw new Error(tf('проекта «{raw}» нет — см. /projects', { raw }));
     return found.id;

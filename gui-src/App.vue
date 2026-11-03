@@ -727,6 +727,49 @@ function modelUsageReport(id: string): void {
 function setBool(f: { value?: string }, ev: Event): void {
   f.value = (ev.target as HTMLInputElement).checked ? 'true' : 'false';
 }
+
+// ── Tab в текстарее модалки: отступ как в редакторе, а не перевод фокуса ─────
+const TA_INDENT = '  ';
+/** Tab — отступ (с многострочным выделением — всем строкам), Shift+Tab —
+ *  снять уровень отступа; фокус браузером не переводится (.prevent в шаблоне). */
+function taTab(ev: KeyboardEvent): void {
+  const ta = ev.target as HTMLTextAreaElement;
+  const v = ta.value;
+  const a = ta.selectionStart;
+  const b = ta.selectionEnd;
+  const multiline = v.slice(a, b).includes('\n');
+  const ls = v.lastIndexOf('\n', a - 1) + 1;
+  let le = v.indexOf('\n', b);
+  if (le === -1) le = v.length;
+  if (!ev.shiftKey) {
+    if (multiline) {
+      const block = v.slice(ls, le);
+      const indented = block.replace(/(^|\n)(?=.)/g, (m) => m + TA_INDENT);
+      taReplace(ta, ls, le, indented);
+      ta.setSelectionRange(ls + TA_INDENT.length, ls + indented.length);
+    } else {
+      taReplace(ta, a, b, TA_INDENT);
+    }
+    return;
+  }
+  const block = v.slice(ls, le);
+  const dedented = block.replace(/(^|\n)(\t| {1,2})/g, '$1');
+  if (dedented === block) return; // снимать нечего — но фокус всё равно не уходит
+  taReplace(ta, ls, le, dedented);
+  const removedBefore = v.slice(ls, a).replace(/(^|\n)(\t| {1,2})/g, '$1').length;
+  const delta = block.length - dedented.length;
+  ta.setSelectionRange(ls + removedBefore, Math.max(ls, b - delta));
+}
+/** Замена диапазона с input-событием (v-model): execCommand сохраняет Ctrl+Z. */
+function taReplace(ta: HTMLTextAreaElement, start: number, end: number, text: string): void {
+  ta.setSelectionRange(start, end);
+  if (!document.execCommand('insertText', false, text)) {
+    ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
+    const pos = start + text.length;
+    ta.setSelectionRange(pos, pos);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
 function submitForm(): void {
   if (!modal.onSave) return;
   const values: Record<string, string> = {};
@@ -1115,17 +1158,21 @@ function openProjectForm(): void {
     if (path) rpcReport(rpc('project.open', { path }));
   });
 }
-/** Новый проект: дом создаст projects/<id>/ и откроет его. */
+/** Новый проект: id можно оставить пустым (из папки или штамп как у разговоров). */
 function newProjectForm(): void {
   if (roundActive.value) return;
-  openForm(tr('Новый проект'), [
-    { key: 'id', label: tr('id проекта (без пробелов)') },
-    { key: 'path', label: tr('Рабочая папка (создастся, если нет — можно пропустить)') },
-  ], (v) => {
-    const id = String(v.id ?? '').trim();
-    if (!id) return;
-    rpcReport(rpc('project.new', { id, path: String(v.path ?? '').trim() || undefined }));
-  });
+  projNew.id = '';
+  projNew.path = '';
+  dirBrowse.open = false;
+  projNew.show = true;
+  nextTick(() => newProjBox.value?.querySelector<HTMLElement>('input')?.focus());
+}
+function createProjectNew(): void {
+  if (!projNew.show) return;
+  const id = projNew.id.trim();
+  const path = projNew.path.trim();
+  projNew.show = false;
+  rpcReport(rpc('project.new', { id: id || undefined, path: path || undefined }));
 }
 function switchProject(p: ProjectRecordInfo): void {
   if (roundActive.value) return;
@@ -1134,40 +1181,52 @@ function switchProject(p: ProjectRecordInfo): void {
 }
 // ── настройки текущего проекта: имя, рабочая папка (браузер путей), ──────────
 // ── серверы/ящики/боты; реестры живут в снапшоте (сервер маскирует секреты) ──
-const projSettings = reactive({
-  show: false, name: '', path: '',
-  browse: false, browsePath: '', browseParent: null as string | null,
-  browseDirs: [] as { name: string; path: string }[], browseDrives: [] as string[],
-  browseError: '',
+const projSettings = reactive({ show: false, name: '', path: '' });
+/** Новый проект: свой диалог с тем же браузером путей. */
+const projNew = reactive({ show: false, id: '', path: '' });
+const newProjBox = ref<HTMLElement | null>(null);
+/** Браузер папок сервера (fs.dirs) — общий для настроек проекта и нового проекта. */
+const dirBrowse = reactive({
+  open: false, path: '', parent: null as string | null,
+  dirs: [] as { name: string; path: string }[], drives: [] as string[],
+  error: '',
 });
+let dirBrowseTarget: ((p: string) => void) | null = null;
+function browseOpen(target: (p: string) => void, start?: string): void {
+  dirBrowseTarget = target;
+  browseTo(start);
+}
 /** Реестры текущего проекта из снапшота (сервер отдаёт один элемент — текущий). */
 const curReg = computed(() => projects.value.find((p) => p.id === currentProject.value?.id));
 function openProjectSettings(): void {
   if (roundActive.value || !currentProject.value) return;
   projSettings.name = currentProject.value.name;
   projSettings.path = currentProject.value.path;
-  projSettings.browse = false;
-  projSettings.browseError = '';
+  dirBrowse.open = false;
   projSettings.show = true;
 }
 /** Листинг каталога с сервера (fs.dirs); без path — домашний каталог пользователя. */
 function browseTo(path?: string): void {
-  projSettings.browseError = '';
+  dirBrowse.error = '';
   rpc<DirListing>('fs.dirs', path ? { path } : {})
     .then((r) => {
-      projSettings.browsePath = r.path;
-      projSettings.browseParent = r.parent;
-      projSettings.browseDirs = r.dirs;
-      projSettings.browseDrives = r.drives;
-      projSettings.browse = true;
+      dirBrowse.path = r.path;
+      dirBrowse.parent = r.parent;
+      dirBrowse.dirs = r.dirs;
+      dirBrowse.drives = r.drives;
+      dirBrowse.open = true;
     })
     .catch((err: Error) => {
-      projSettings.browseError = err.message;
-      projSettings.browse = true;
+      dirBrowse.error = err.message;
+      dirBrowse.open = true;
     });
 }
-function browseUp(): void { if (projSettings.browseParent) void browseTo(projSettings.browseParent); }
-function browsePick(): void { projSettings.path = projSettings.browsePath; projSettings.browse = false; }
+function browseUp(): void { if (dirBrowse.parent) void browseTo(dirBrowse.parent); }
+function browsePick(): void {
+  const picked = dirBrowse.path;
+  dirBrowse.open = false;
+  dirBrowseTarget?.(picked);
+}
 function saveProjectSettings(): void {
   const cur = currentProject.value;
   if (!cur) return;
@@ -1512,9 +1571,50 @@ function autosize(): void {
   // под лимитом скролла не место: округление scrollHeight даёт лишний пиксель
   el.style.overflowY = el.value && el.scrollHeight > max ? 'auto' : 'hidden';
 }
+
+// ── история отправленных: ↑/↓ на краю ввода, как в TUI (editor.ts) ───────────
+const sentHistory: string[] = [];
+let histIdx: number | null = null;
+let histDraft = '';
+/** Запись при отправке: как набрано; пустые и подряд-дубли не пишутся. */
+function histRecord(text: string): void {
+  if (!text.trim() || sentHistory[sentHistory.length - 1] === text) return;
+  sentHistory.push(text);
+}
+function histSet(text: string): void {
+  draft.value = text;
+  hideHints();
+  autosize();
+  nextTick(() => {
+    const el = inputEl.value;
+    if (el) el.setSelectionRange(el.value.length, el.value.length);
+  });
+}
+function histPrev(): void {
+  if (histIdx === null) {
+    histDraft = draft.value;
+    histIdx = sentHistory.length;
+  }
+  if (histIdx > 0) {
+    histIdx--;
+    histSet(sentHistory[histIdx]);
+  }
+}
+function histNext(): void {
+  if (histIdx === null) return;
+  histIdx++;
+  if (histIdx >= sentHistory.length) {
+    histIdx = null;
+    histSet(histDraft);
+  } else {
+    histSet(sentHistory[histIdx]);
+  }
+}
 function sendUserMessage(): void {
   const text = draft.value.trim();
   if ((!text && stagedFiles.value.length === 0) || roundActive.value || !authed.value) return;
+  histRecord(draft.value);
+  histIdx = null;
   draft.value = '';
   autosize();
   hideHints();
@@ -1748,6 +1848,23 @@ function onInputKey(e: KeyboardEvent): void {
       e.preventDefault();
       applyHintItem(hint.items[hint.sel]);
       return;
+    }
+  }
+  // ↑/↓ на краю ввода — история отправленных; внутри многострочного текста
+  // стрелки ходят по строкам (дефолт браузера), как в TUI (editor.ts)
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    const el = inputEl.value;
+    if (!el) return;
+    const a = el.selectionStart;
+    const b = el.selectionEnd;
+    const atFirst = draft.value.lastIndexOf('\n', a - 1) === -1;
+    const atLast = draft.value.indexOf('\n', b) === -1;
+    if (e.key === 'ArrowUp' && atFirst && sentHistory.length > 0) {
+      e.preventDefault();
+      histPrev();
+    } else if (e.key === 'ArrowDown' && atLast && histIdx !== null) {
+      e.preventDefault();
+      histNext();
     }
   }
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -2126,7 +2243,7 @@ onMounted(connectWs);
           ref="inputEl"
           v-model="draft"
           rows="2"
-          :placeholder="tr('Напишите агентам… (Enter — отправить, Shift+Enter — новая строка, @имя — участнику, /help — команды)')"
+          :placeholder="tr('Напишите агентам… (Enter — отправить, Shift+Enter — новая строка, ↑/↓ — история, @имя — участнику, /help — команды)')"
           @keydown="onInputKey"
           @input="autosize(); updateHints()"
           @click="updateHints"
@@ -2178,7 +2295,8 @@ onMounted(connectWs);
           ><span class="sec-toggle">▾</span> {{ sec.title }}</button>
           <div v-for="f in sec.fields" :key="f.key" class="fld" :class="{ 'fld-chk': f.type === 'boolean' }">
             <label>{{ f.label }}</label>
-            <!-- enter.stop — перенос строки в textarea, а не submit формы (enter с root) -->
+            <!-- enter.stop — перенос строки в textarea, а не submit формы (enter с root);
+                 tab.prevent+taTab — отступ, а не перевод фокуса -->
             <textarea
               v-if="f.type === 'text' || f.type === 'object'"
               v-model="f.value"
@@ -2186,6 +2304,7 @@ onMounted(connectWs);
               :placeholder="f.placeholder"
               rows="4"
               @keydown.enter.stop
+              @keydown.tab.prevent="taTab"
             ></textarea>
             <template v-else-if="f.type === 'model'">
               <select v-model="f.value">
@@ -2198,6 +2317,7 @@ onMounted(connectWs);
                 rows="6"
                 placeholder='{"id": "модель", "temperature": 0.3}'
                 @keydown.enter.stop
+                @keydown.tab.prevent="taTab"
               ></textarea>
             </template>
             <input v-else-if="f.type === 'boolean'" type="checkbox" class="chk" :checked="f.value === 'true'" @change="setBool(f, $event)">
@@ -2295,6 +2415,48 @@ onMounted(connectWs);
     </div>
   </div>
 
+  <!-- ── новый проект: id можно оставить пустым (из папки или штамп), ──────── -->
+  <!-- ── рабочая папка — через браузер папок сервера (как в настройках) ────── -->
+  <div v-if="projNew.show" id="projnew" @keydown.esc="projNew.show = false">
+    <div class="modal-box proj-box" ref="newProjBox">
+      <h2>{{ tr('Новый проект') }}</h2>
+
+      <div class="fld"><label>{{ tr('id проекта (можно пропустить — из папки или штамп)') }}</label><input v-model="projNew.id"></div>
+      <div class="fld">
+        <label>{{ tr('Рабочая папка (можно пропустить — данные будут в доме)') }}</label>
+        <div class="pathline">
+          <input v-model="projNew.path">
+          <button :title="tr('Обзор папок компьютера')" @click="browseOpen((p) => (projNew.path = p), projNew.path || undefined)">📂</button>
+        </div>
+      </div>
+
+      <div v-if="dirBrowse.open" id="dirbrowse">
+        <div class="dirnav">
+          <button :title="tr('Домашний каталог')" @click="browseTo()">🏠</button>
+          <button :disabled="!dirBrowse.parent" :title="tr('На уровень выше')" @click="browseUp">↑</button>
+          <span class="meta">{{ dirBrowse.path }}</span>
+        </div>
+        <div v-if="dirBrowse.drives.length" class="dirdrives">
+          <button v-for="d in dirBrowse.drives" :key="d" @click="browseTo(d)">{{ d }}</button>
+        </div>
+        <div v-if="dirBrowse.error" class="errline">{{ dirBrowse.error }}</div>
+        <ul v-else class="dirlist">
+          <li v-for="d in dirBrowse.dirs" :key="d.path" @click="browseTo(d.path)">📁 {{ d.name }}</li>
+          <li v-if="!dirBrowse.dirs.length" class="reg-empty">{{ tr('подпапок нет') }}</li>
+        </ul>
+        <div class="row">
+          <button @click="browsePick">{{ tr('Выбрать эту папку') }}</button>
+          <button @click="dirBrowse.open = false">{{ tr('Скрыть обзор') }}</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <button @click="createProjectNew">{{ tr('Создать') }}</button>
+        <button @click="projNew.show = false">{{ tr('Отмена') }}</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── настройки проекта: имя, рабочая папка (браузер путей с сервера), ──── -->
   <!-- ── серверы/ящики/боты; секреты в списке замаскированы (🔑 = задан) ──── -->
   <div v-if="projSettings.show" id="projdlg" @keydown.esc="projSettings.show = false">
@@ -2306,27 +2468,27 @@ onMounted(connectWs);
         <label>{{ tr('Рабочая папка') }}</label>
         <div class="pathline">
           <input v-model="projSettings.path">
-          <button :title="tr('Обзор папок компьютера')" @click="browseTo(projSettings.path || undefined)">📂</button>
+          <button :title="tr('Обзор папок компьютера')" @click="browseOpen((p) => (projSettings.path = p), projSettings.path || undefined)">📂</button>
         </div>
       </div>
 
-      <div v-if="projSettings.browse" id="dirbrowse">
+      <div v-if="dirBrowse.open" id="dirbrowse">
         <div class="dirnav">
           <button :title="tr('Домашний каталог')" @click="browseTo()">🏠</button>
-          <button :disabled="!projSettings.browseParent" :title="tr('На уровень выше')" @click="browseUp">↑</button>
-          <span class="meta">{{ projSettings.browsePath }}</span>
+          <button :disabled="!dirBrowse.parent" :title="tr('На уровень выше')" @click="browseUp">↑</button>
+          <span class="meta">{{ dirBrowse.path }}</span>
         </div>
-        <div v-if="projSettings.browseDrives.length" class="dirdrives">
-          <button v-for="d in projSettings.browseDrives" :key="d" @click="browseTo(d)">{{ d }}</button>
+        <div v-if="dirBrowse.drives.length" class="dirdrives">
+          <button v-for="d in dirBrowse.drives" :key="d" @click="browseTo(d)">{{ d }}</button>
         </div>
-        <div v-if="projSettings.browseError" class="errline">{{ projSettings.browseError }}</div>
+        <div v-if="dirBrowse.error" class="errline">{{ dirBrowse.error }}</div>
         <ul v-else class="dirlist">
-          <li v-for="d in projSettings.browseDirs" :key="d.path" @click="browseTo(d.path)">📁 {{ d.name }}</li>
-          <li v-if="!projSettings.browseDirs.length" class="reg-empty">{{ tr('подпапок нет') }}</li>
+          <li v-for="d in dirBrowse.dirs" :key="d.path" @click="browseTo(d.path)">📁 {{ d.name }}</li>
+          <li v-if="!dirBrowse.dirs.length" class="reg-empty">{{ tr('подпапок нет') }}</li>
         </ul>
         <div class="row">
           <button @click="browsePick">{{ tr('Выбрать эту папку') }}</button>
-          <button @click="projSettings.browse = false">{{ tr('Скрыть обзор') }}</button>
+          <button @click="dirBrowse.open = false">{{ tr('Скрыть обзор') }}</button>
         </div>
       </div>
 

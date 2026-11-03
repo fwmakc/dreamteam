@@ -17,6 +17,9 @@
  *  - менеджер: действие project.open — реплика сохраняется в СТАРЫЙ разговор,
  *    смена применяется после (pendingSwitches); мусорный путь — ✗ без смены;
  *  - подсказки: projectNames из папок дома в completion (/project open <Tab>);
+ *  - проект без id: createProject(null, …) — имя из папки или штамп как у
+ *    разговоров; «~» в путях — дом пользователя ОС; Tab-пути (pathCandidates
+ *    как cd в шелле + dirOptions в контексте подсказок);
  *  - serve (WS): rpc project.list/new/open/delete/update, поля
  *    state.project/knownProjects, смена командой «/project open …» — паритет
  *    TUI и GUI.
@@ -25,8 +28,8 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { writeModels } from './models.js';
-import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { tmpdir, homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
 import type { LLMProvider, StreamRequest } from '../src/types.js';
 import type { Presenter, SpeakerRef, TurnSink } from '../src/core/presenter.js';
@@ -156,8 +159,22 @@ const projects = await import('../src/core/projects.js');
   try { projects.resolveProjectTarget('  ', base); } catch (e) { threw = (e as Error).message; }
   check('резолв: пустой аргумент — подсказка', threw.includes('/project open'), threw);
 
+  // ── createProject без id: имя из папки, штамп, тильда ───────────────────────
+  const autoWs = join(base, 'auto ws');
+  check('auto-id: createProject(null, папка) — id из имени', projects.createProject(null, autoWs).id === 'auto-ws');
+  check('auto-id: та же папка снова — суффикс «-2»', projects.createProject(null, autoWs).id === 'auto-ws-2');
+  const stamped = projects.createProject(null, null);
+  check('auto-id: без всего — штамп как у разговоров', /^\d{8}-\d{6}(-\d+)?$/.test(stamped.id), stamped.id);
+  check('auto-id: штамп без рабочей папки', stamped.path === undefined);
+  check('тильда: «~» — дом пользователя ОС', projects.expandHome('~') === homedir());
+  check('тильда: «~/x» — внутрь дома пользователя', projects.expandHome('~/x') === join(homedir(), 'x'));
+  check(
+    'тильда: checkWorkspacePath раскрывает ~ (ничего не создаёт)',
+    projects.checkWorkspacePath('~/probe-нет-на-диске') === resolve(join(homedir(), 'probe-нет-на-диске')),
+  );
+
   // приберём тестовые проекты — фаза 3 живёт в чистом доме
-  for (const id of ['maker', 'p2', 'p2x', 'my-work', 'fresh-dir']) projects.removeProject(id, '');
+  for (const id of ['maker', 'p2', 'p2x', 'my-work', 'fresh-dir', 'auto-ws', 'auto-ws-2', stamped.id]) projects.removeProject(id, '');
   rmSync(join(home, 'projects', 'broken'), { recursive: true, force: true });
   check('уборка: реестр пуст', projects.listProjects().length === 0);
 }
@@ -199,7 +216,7 @@ const { bootstrapApp } = await import('../src/core/bootstrap.js');
 const { Engine } = await import('../src/core/engine.js');
 const { runOperationText } = await import('../src/core/operations.js');
 const { MANAGER_ID, parseManagerReply } = await import('../src/manager.js');
-const { makeCompleter, hintRowsFor } = await import('../src/completion.js');
+const { makeCompleter, hintRowsFor, pathCandidates } = await import('../src/completion.js');
 
 const { app } = await bootstrapApp();
 const engine = new Engine(app, stub);
@@ -397,6 +414,81 @@ const alphaSessionId = app.session?.id ?? '';
     r.actions.length === 1 && (r.actions[0] as { path: string }).path === 'ok',
     JSON.stringify(r.actions),
   );
+}
+
+// ═══ 3b. проект без id командой, тильда в команде, Tab-пути ═══════════════════
+{
+  // одноарг: путь — id выводится из папки, проект открывается
+  const dir = join(base, 'cmd-dir');
+  const rep = (await run(`/project new ${dir}`))[0] ?? '';
+  check('new <путь>: отчёт ✓ с выведенным id', rep.includes('✓') && rep.includes('cmd-dir'), rep);
+  check(
+    'new <путь>: проект открыт, рабочая папка создана',
+    paths.PROJECT_DIR === join(home, 'projects', 'cmd-dir') && paths.WORKSPACE === dir && existsSync(dir),
+  );
+
+  // путь с пробелами: лексер режет по пробелам — операция склеивает хвост обратно
+  const spaced = join(base, 'моя папка');
+  const rep2 = (await run(`/project new ${spaced}`))[0] ?? '';
+  check('new <путь с пробелами>: склеен, id «моя-папка»', rep2.includes('✓') && rep2.includes('моя-папка') && paths.WORKSPACE === spaced, rep2);
+
+  // без всего: штамп как у разговоров
+  const rep3 = (await run('/project new'))[0] ?? '';
+  const id3 = basename(paths.PROJECT_DIR);
+  check('new без аргументов: штамп-имя, отчёт ✓', /^\d{8}-\d{6}(-\d+)?$/.test(id3) && rep3.includes('✓'), `${id3} | ${rep3}`);
+
+  // явный id на занятое имя — прежняя ошибка с подсказкой open
+  const busy = (await run('/project new beta'))[0] ?? '';
+  check('new <занятый id>: ✗ с подсказкой open', busy.startsWith('✗') && busy.includes('/project open'), busy);
+
+  // Tab-пути: контекст с dirOptions — как completionCtx() в index.ts
+  const ctxDir = {
+    sessions: () => [],
+    agentIds: () => [],
+    chatAgents: () => [],
+    modelIds: () => [],
+    managerName: () => 'Менеджер',
+    projectNames: () => projects.listProjects().map((p) => p.id),
+    dirOptions: (frag: string) => pathCandidates(frag, () => ['cmd-dir', 'beta-заметки'], base, homedir()),
+  };
+  // id — свободная форма; папка — вторая позиция, однозначный фрагмент дополняется
+  const [hitsC] = makeCompleter(ctxDir)('/project new x c');
+  check('Tab: /project new x c — дополняет папку', Array.isArray(hitsC) && hitsC[0] === 'cmd-dir/', JSON.stringify(hitsC));
+  // имя проекта и путь в одном пуле: первый Tab — общий префикс, второй — путь
+  const [hitsOpen] = makeCompleter(ctxDir)('/project open be');
+  check('Tab: /project open be — общий префикс «beta»', Array.isArray(hitsOpen) && hitsOpen[0] === 'beta', JSON.stringify(hitsOpen));
+  const [hitsOpen2] = makeCompleter(ctxDir)('/project open beta');
+  check('Tab: /project open beta — следующий Tab даёт путь', Array.isArray(hitsOpen2) && hitsOpen2[0] === 'beta-заметки/', JSON.stringify(hitsOpen2));
+  const rowsNew = hintRowsFor('/project new x ', ctxDir) ?? [];
+  check(
+    'панель: /project new x <Tab> — папки в подсказке',
+    rowsNew.some((r) => r.includes('cmd-dir')) && rowsNew.some((r) => r.includes('beta-заметки')),
+    JSON.stringify(rowsNew),
+  );
+  const rowsOpen = hintRowsFor('/project open ', ctxDir) ?? [];
+  check('панель: /project open — имена проектов', rowsOpen.some((r) => r.includes('beta')), JSON.stringify(rowsOpen));
+
+  // pathCandidates — чистая функция: голова/хвост, ~, разделители, скрытые
+  const list = (d: string): string[] => {
+    const n = d.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, '').replace(/\/+$/, '');
+    if (n === '/home/u') return ['Docs', 'Apps', '.cache'];
+    if (n === '/home/u/Docs') return ['Reports'];
+    return [];
+  };
+  const eq = (a: string[], b: string[]): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+  check('pathCandidates: ~ + хвост фильтрует', eq(pathCandidates('~/Do', list, '/x', '/home/u'), ['~/Docs/']));
+  check('pathCandidates: ~/ — видимые по алфавиту', eq(pathCandidates('~/', list, '/x', '/home/u'), ['~/Apps/', '~/Docs/']));
+  check('pathCandidates: скрытые — только с точки', eq(pathCandidates('~/.', list, '/x', '/home/u'), ['~/.cache/']));
+  check('pathCandidates: углубление в папку', eq(pathCandidates('~/Docs/', list, '/x', '/home/u'), ['~/Docs/Reports/']));
+  check('pathCandidates: относительная голова от cwd', eq(pathCandidates('Do', list, '/home/u', '/home/u'), ['Docs/']));
+  check('pathCandidates: обратные разделители сохраняются', eq(pathCandidates('C:\\home\\u\\Do', list, '/x', '/home/u'), ['C:\\home\\u\\Docs\\']));
+  if (process.platform === 'win32') {
+    check('pathCandidates: регистр не важен (win32)', eq(pathCandidates('~/do', list, '/x', '/home/u'), ['~/Docs/']));
+  }
+
+  // возвращаемся в delta и убираем тестовые проекты — serve-фаза ждёт delta
+  await run('/project open delta');
+  for (const id of ['cmd-dir', 'моя-папка', id3]) projects.removeProject(id, '');
 }
 
 // ═══ 4. serve: rpc и state через WS ═══════════════════════════════════════════

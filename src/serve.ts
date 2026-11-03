@@ -1,7 +1,9 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse, type Server as HttpServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, normalize, resolve } from 'node:path';
+import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
@@ -66,8 +68,9 @@ import { localeId, localeDict, applyLocale, knownLanguages, t } from './i18n.js'
 
 /**
  * Локальный API поверх ядра: `dreamteam serve` поднимает HTTP+WS на
- * 127.0.0.1:8080 (PORT/HOST, можно в ~/.dreamteam/.env) и раздаёт
- * собранную веб-оболочку из gui-dist/. Ядро общается с клиентами
+ * 127.0.0.1:8080 (PORT/HOST, SSL_CERT+SSL_KEY — https; всё можно
+ * в ~/.dreamteam/.env) и раздаёт собранную веб-оболочку из gui-dist/.
+ * Ядро общается с клиентами
  * только через ServerPresenter (тот же интерфейс Presenter, что и у
  * терминала) — никакого второго ядра нет.
  *
@@ -345,9 +348,57 @@ const MIME: Record<string, string> = {
  */
 const GUI_DIR = fileURLToPath(new URL('../gui-dist/', import.meta.url));
 
+/**
+ * HTTPS — по желанию: SSL_CERT и SSL_KEY в ~/.dreamteam/.env указывают файлы
+ * сертификата и ключа (годится самоподписный); обоих нет — обычный http.
+ * Один без второго — почти наверняка опечатка: отказ до поднятия сервера,
+ * а не молчаливый http вместо ожидавшегося https.
+ */
+export function tlsFromEnv(env: NodeJS.ProcessEnv = process.env): { cert?: Buffer; key?: Buffer; error?: string } {
+  const certPath = String(env.SSL_CERT ?? '').trim();
+  const keyPath = String(env.SSL_KEY ?? '').trim();
+  if (!certPath && !keyPath) return {};
+  if (!certPath || !keyPath) {
+    return { error: `SSL_CERT и SSL_KEY задаются парой — сейчас ${certPath ? 'есть только SSL_CERT' : 'есть только SSL_KEY'}` };
+  }
+  try {
+    return { cert: readFileSync(certPath), key: readFileSync(keyPath) };
+  } catch (err) {
+    return { error: `не удалось прочитать сертификат/ключ (SSL_CERT=${certPath}, SSL_KEY=${keyPath}): ${err instanceof Error ? err.message : err}` };
+  }
+}
+
+/**
+ * Адреса для баннера serve. 0.0.0.0/:: в HOST — «слушаем все интерфейсы»:
+ * сам такой адрес браузер открыть не может, поэтому локальная ссылка всегда
+ * на 127.0.0.1, а в lan — реальные адреса машины в сети, по которым сервер
+ * ищут с других устройств (петлевые и IPv6 не шумят в списке).
+ */
+export function serveUrls(
+  host: string,
+  port: number,
+  tls: boolean,
+  nets: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
+): { local: string; lan: string[] } {
+  const scheme = tls ? 'https' : 'http';
+  const all = host === '0.0.0.0' || host === '::';
+  const local = `${scheme}://${all ? '127.0.0.1' : host === '::1' ? '[::1]' : host}:${port}`;
+  const lan = all
+    ? [...new Set(
+        Object.values(nets)
+          .flat()
+          .filter((n): n is NetworkInterfaceInfo => n !== undefined && !n.internal && n.family === 'IPv4')
+          .map((n) => `${scheme}://${n.address}:${port}`),
+      )]
+    : [];
+  return { local, lan };
+}
+
 export interface ServeHandle {
   port: number;
   host: string;
+  /** https включён (SSL_CERT+SSL_KEY) — баннер и ссылки идут на https://. */
+  tls: boolean;
   /** Токен доступа (пусто — сервер без авторизации). */
   authToken: string;
   close(): Promise<void>;
@@ -473,7 +524,14 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
     presenter.broadcast({ type: 'schedule', tasks: loadSchedule(DT_HOME) });
   };
 
-  const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  // https по желанию; кривая полукастройка — отказ здесь, до поднятия сервера
+  const tls = tlsFromEnv();
+  if (tls.error) throw new Error(tls.error);
+  const listen = tls.cert
+    ? (handler: (req: IncomingMessage, res: ServerResponse) => void): HttpServer =>
+        createHttpsServer({ cert: tls.cert, key: tls.key }, handler)
+    : createServer;
+  const httpServer = listen(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (url.pathname === '/health') {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -952,9 +1010,9 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         };
       case 'project.new': {
         // новый проект: дом создаёт projects/<id>/ и открывает его (папка
-        // рабочей области создаётся, если её нет)
-        const id = String(args.id ?? args.name ?? '').trim();
-        if (!id) throw new Error('project.new: жду id проекта (id)');
+        // рабочей области создаётся, если её нет); без id — имя из папки
+        // или штамп как у разговоров
+        const id = String(args.id ?? args.name ?? '').trim() || null;
         const path = args.path ? String(args.path) : null;
         let report = '';
         await runRound(async () => {
@@ -1193,6 +1251,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   return {
     port: realPort,
     host,
+    tls: Boolean(tls.cert),
     /** Токен доступа (пусто — сервер без авторизации): баннер и ссылка с ?token= */
     authToken,
     close(): Promise<void> {
@@ -1216,18 +1275,21 @@ const entry = (process.argv[1] ?? '').replace(/\\/g, '/');
 if (process.env.DT_SERVE === '1' || entry.endsWith('/src/serve.ts')) {
   const openFlag = process.argv.slice(2).includes('--open');
   startServe()
-    .then(({ port, host, authToken }) => {
-      // HOST=0.0.0.0 — браузеру и человеку нужен конкретный адрес
-      const base = `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`;
-      const net = host === '127.0.0.1'
+    .then(({ port, host, tls, authToken }) => {
+      // 0.0.0.0 в HOST — «все интерфейсы»: локальная ссылка остаётся на
+      // 127.0.0.1, а строка «в сети» называет реальные адреса машины —
+      // по ним сервер и открывают с других устройств
+      const { local, lan } = serveUrls(host, port, tls);
+      const net = host === '127.0.0.1' || host === '::1'
         ? 'только локально'
         : authToken
           ? 'ОТКРЫТО В СЕТЬ — доступ по токену'
           : 'ОТКРЫТО В СЕТЬ — авторизации нет';
       console.log(pc.dim(t('\n  режим: Server')));
-      console.log(pc.dim(`  API поднято: ${base} (WS — /ws) · dreamteam v${APP_VERSION} · ${net} · Ctrl+C — останов`));
-      if (authToken) console.log(pc.dim(`  открыть с токеном: ${base}/?token=${authToken}`));
-      if (openFlag) openBrowser(authToken ? `${base}/?token=${authToken}` : `${base}/`);
+      console.log(pc.dim(`  API поднято: ${local} (WS — /ws) · dreamteam v${APP_VERSION} · ${net} · Ctrl+C — останов`));
+      if (lan.length > 0) console.log(pc.dim(`  в сети: ${lan.join(', ')}`));
+      if (authToken) console.log(pc.dim(`  открыть с токеном: ${local}/?token=${authToken}`));
+      if (openFlag) openBrowser(authToken ? `${local}/?token=${authToken}` : `${local}/`);
     })
     .catch((err) => {
       console.error(pc.red(`Фатальная ошибка: ${err instanceof Error ? err.stack ?? err.message : err}`));

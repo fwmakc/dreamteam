@@ -53,6 +53,7 @@ import { agentToolIds, BUILTIN_TOOL_IDS } from '../tools-api.js';
 import { t, tf, applyLocale } from '../i18n.js';
 import { AGENTS_DIR, DT_HOME, MANAGER_FILE, MODELS_DIR, PROJECTS_DIR, PROJECT_DIR, PROJECT_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
 import { listProjects } from './projects.js';
+import { looksLikePath } from '../cli-project.js';
 import { loadSettings } from '../settings.js';
 import { chatTeam, isSessionRef, requireProject, requireSession, type App, type Engine } from './engine.js';
 import { loadSchedule, saveSchedule } from './schedule.js';
@@ -75,8 +76,8 @@ export interface OpArg {
   /** Как зовём аргумент в подсказках: «id», «файл.zip»… */
   name: string;
   required: boolean;
-  /** Уточнение для панели подсказок (что подставлять: id, файлы…) */
-  hint?: 'sessions' | 'agents' | 'chat' | 'models' | 'projects' | 'schedule';
+  /** Уточнение для панели подсказок (что подставлять: id, файлы, папки…) */
+  hint?: 'sessions' | 'agents' | 'chat' | 'models' | 'projects' | 'schedule' | 'path';
 }
 
 export interface OpSpec {
@@ -1147,16 +1148,21 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'project.new',
     args: [
-      { name: 'id', required: true },
-      { name: 'папка', required: false },
+      { name: 'id', required: false },
+      { name: 'папка', required: false, hint: 'path' },
     ],
     title: 'новый проект',
-    help: 'создаёт и открывает; папка создаётся, если её нет',
+    help: 'создаёт и открывает; без id — имя из папки или штамп как у разговоров; папка создаётся, если её нет',
     run: async (engine, rest) => {
-      const id = rest[0];
-      if (!id) return [t('Синтаксис: /project new <id> [папка] — id без пробелов; рабочая папка создаётся, если её нет')];
-      const dir = rest.length > 1 ? rest.slice(1).join(' ') : null;
-      return [engine.newProject(id, dir, false)];
+      if (rest.length === 0) return [engine.newProject(null, null)];
+      const pathy = (a: string) => looksLikePath(a) || a.startsWith('~');
+      try {
+        // первый токен — путь: лексер режет по пробелам, склеиваем хвост обратно
+        if (pathy(rest[0])) return [engine.newProject(null, rest.join(' '))];
+        return [engine.newProject(rest[0], rest.length > 1 ? rest.slice(1).join(' ') : null, false)];
+      } catch (err) {
+        return [`✗ ${err instanceof Error ? err.message : err}`];
+      }
     },
   },
   {

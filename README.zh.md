@@ -49,7 +49,7 @@ dreamteam serve .            # 网页外壳直接带着当前文件夹的项目
 | **home** | `~/.dreamteam` | 所有全局内容：模型卡片（`models/`）、设置（`settings.json`）、你的资料（`user.json`）、**整个团队** —— 智能体（`agents/`）、经理（`manager.json`）、工具（`tools/`）、日程（`schedule.json`）、共享记忆（`memory.json`），以及项目文件夹（`projects/`）：项目注册表就是这些文件夹本身，没有单独的列表。团队模拟器属于机器：配置一次，任何项目通用 |
 | **project** | `~/.dreamteam/projects/<id>/` | 这个项目的全部内容：`project.json`（工作文件夹 `"path"`、服务器 `"hosts"`、邮件 `"mails"`、机器人 `"messengers"` —— 项目机密，绝不放进智能体卡片）和谈话（`sessions/`、`transcripts/`）。智能体的工作文件写入项目的工作文件夹；应用的附属内容 —— 人发来的附件（`inbox/`）、邮件附件（`mail/`）、生成的图片（`images/`）与导出归档 —— 也放在这里，家目录里的项目文件夹 |
 
-工具的工作文件夹是 project.json 里的 `"path"`：创建项目时指定（`/project new <id> [文件夹]`，文件夹不存在则创建），之后可用 `/project update path=<文件夹>` 更改。家目录内部禁止作为工作文件夹 —— 那里是模型密钥和设置。通常它是你启动应用所在的 git 仓库：团队直接为它干活，无需在任何地方配置路径。
+工具的工作文件夹是 project.json 里的 `"path"`：创建项目时指定（`/project new <id> [文件夹]` — id 可省略：取自文件夹名或类似会话的时间戳 20261103-142530；文件夹不存在则创建；`~` 表示系统用户主目录），之后可用 `/project update path=<文件夹>` 更改。家目录内部禁止作为工作文件夹 —— 那里是模型密钥和设置。通常它是你启动应用所在的 git 仓库：团队直接为它干活，无需在任何地方配置路径。
 
 可以不退出应用切换项目：`/project open <id或路径>` 更换工作文件夹、谈话列表和项目机密 —— 团队、模型和共享记忆跟着你走。陌生文件夹自动注册（id 即文件夹名）。总览：`/projects`，重命名 —— `/project update name=<新名字>`，遗忘 —— `/project delete <id或路径…>`（当前的先 `/project close`；工作文件夹不受影响）。网页外壳里有“项目”面板：点条目切换，“＋”按钮（带路径字段的表单）创建新项目。也可以请经理切换项目。
 
@@ -89,7 +89,7 @@ You > alright Gleb, look at the structure and propose a refactoring plan
 ### 工作方式
 
 - **模型密钥** —— 直接放在 `~/.dreamteam/models/` 的模型卡片里（`"apiKey"` 字段；GigaChat 也可以改用 `"clientId"`/`"clientSecret"` 对）。
-- **serve 设置** —— `~/.dreamteam/.env`（`TOKEN`、`PORT`、`HOST`；项目文件夹里的 `.env` 刻意不读 —— 变量只有单一来源）。这些是具体机器的设置：不会进入 `/export` 归档。向导在新机器上首次启动时会创建 `.env`；经 `/import` 迁移来的家目录不带该文件 —— 没有它 serve 只是监听 `127.0.0.1`；要外部访问，就按包里的样例（`scaffold/home/env.example`）创建 `.env` 并填入 `TOKEN`（见“外部访问”）。
+- **serve 设置** —— `~/.dreamteam/.env`（`TOKEN`、`PORT`、`HOST`、`SSL_CERT`/`SSL_KEY`；项目文件夹里的 `.env` 刻意不读 —— 变量只有单一来源）。这些是具体机器的设置：不会进入 `/export` 归档。向导在新机器上首次启动时会创建 `.env`；经 `/import` 迁移来的家目录不带该文件 —— 没有它 serve 只是监听 `127.0.0.1`；要外部访问，就按包里的样例（`scaffold/home/env.example`）创建 `.env` 并填入 `TOKEN`（见“外部访问”）。
 - **API 描述** —— 同一个 `models/`：哪个适配器、URL、模型和密钥。
 - 应用通过统一的 `LLMProvider` 接口与 LLM 通信（`src/providers/types.ts`）。具体协议藏在适配器里：
 
@@ -232,7 +232,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 | `profile.update field=value…` | `/profile update name=阿辽沙 about=重视简短` | 字段：name、about |
 | `memory.show [id\|shared]` | `/memory gleb`、`/memory shared` | 某成员记得什么；不带参数 —— 总览；`shared` — 共享记忆 |
 | `projects.list` | `/projects` | 家目录的项目注册表：id 和工作文件夹，当前标注 |
-| `project.new <id> [folder]` | `/project new shop .` | 在家目录创建项目并打开；工作文件夹不存在则创建 |
+| `project.new [id] [folder]` | `/project new shop .`、`/project new .` | 在家目录创建项目并打开；不带 id 则取文件夹名（“my work” → `my-work`）或 20261103-142530 式时间戳；工作文件夹不存在则创建；`~` 是系统用户主目录；Tab 补全文件夹 |
 | `project.open <id\|path>` | `/project open ../other` | 切换项目；陌生文件夹自动注册 |
 | `project.close` | `/project close` | 无项目状态：谈话已保存，如同刚启动 |
 | `project.delete <id\|path…>` | `/project delete old, older` | 从家目录删除项目（整个 projects/<id>/，连同谈话）；可多个；工作文件夹不动；当前的不能这样删 |
@@ -269,7 +269,7 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 
 **会话命名。** 名字取自第一条消息，第一次回答之后经理会为会话起个简短标题（基于首条消息）。随时可以重命名：`/session update title=<新名字>` —— 或者请经理：“给这场谈话起个名字” —— 它会用简短摘要，如果会话还没压缩过，就用第一条和最后一条消息。
 
-**命令提示。** 以 `/` 开头输入 —— 输入行下方出现命令列表（每条带简短说明）；随着输入过滤。**Tab** 补全命令，带参数的命令还会提示并补全参数：`/session open` 和 `/session delete` 提示会话 id（带标题），`/session agent add` 和 `/agent update` 提示成员 id，`/usage` 和 `/model update` 提示模型 id，`/memory` 提示 `id|shared`。三词命令（`/session agent`、`/agent tool`、`/project mail|host|messenger`）也认识自己的子动词：`/session agent ` 之后提示 `add` 和 `delete`，`/session agent add` 会显示语法和成员 id。
+**命令提示。** 以 `/` 开头输入 —— 输入行下方出现命令列表（每条带简短说明）；随着输入过滤。**Tab** 补全命令，带参数的命令还会提示并补全参数：`/session open` 和 `/session delete` 提示会话 id（带标题），`/session agent add` 和 `/agent update` 提示成员 id，`/usage` 和 `/model update` 提示模型 id，`/memory` 提示 `id|shared`。三词命令（`/session agent`、`/agent tool`、`/project mail|host|messenger`）也认识自己的子动词：`/session agent ` 之后提示 `add` 和 `delete`，`/session agent add` 会显示语法和成员 id。路径像 shell 里的 `cd`：`/project new` 和 `/project open` 提示文件夹（第一个 Tab 插入公共前缀，再按深入补全），`~` 是系统用户主目录，隐藏文件夹只在以点号开头输入时出现。
 
 @提及同理：在消息中间输入 `@` —— 输入行下方弹出当前聊天成员和 `@session` 的面板（各带描述）。输入即过滤，**上下方向键**移动选择（循环），**Enter** 或 **Tab** 插入选中名字，**Esc** 关闭面板并保留已输入的 `@片段`。大小写无关，俄语 е/ё 也不区分。`@session` 后加空格会提示带标题的会话 id。
 
@@ -291,7 +291,7 @@ dreamteam serve --open  # + 在浏览器中打开网页外壳
 dreamteam serve .       # 直接带着当前文件夹的项目
 ```
 
-本地服务器启动：`http://127.0.0.1:8080` 提供 `gui-dist/` 的网页外壳（由 `gui-src/` 构建的 Vue 应用，`npm run build:gui` 构建）并通过 WebSocket 与之通信。默认只监听 127.0.0.1 —— 机器外部看不到服务器。端口和地址由 `PORT` 和 `HOST` 变量设置 —— 可以放进 `~/.dreamteam/.env`：全局重装和切换项目后设置仍在。**注意：** `HOST=0.0.0.0` 会把服务器暴露到网络 —— API 没有鉴权，只在自己的网络里这样做。谈话、团队和配置与终端共享 `--open` 标志让 serve 自己打开浏览器；首次启动时向导会提议在桌面创建「Dream Team」快捷方式 — 它运行的就是这条命令（Windows、Linux、macOS 上行为一致）。：可以在 TUI 工作，再到浏览器继续。
+本地服务器启动：`http://127.0.0.1:8080` 提供 `gui-dist/` 的网页外壳（由 `gui-src/` 构建的 Vue 应用，`npm run build:gui` 构建）并通过 WebSocket 与之通信。默认只监听 127.0.0.1 —— 机器外部看不到服务器。端口和地址由 `PORT` 和 `HOST` 变量设置 —— 可以放进 `~/.dreamteam/.env`：全局重装和切换项目后设置仍在。**注意：** `HOST=0.0.0.0` 会把服务器暴露到网络 —— API 没有鉴权，只在自己的网络里这样做；此时启动横幅会在本地链接旁边打印机器的真实局域网地址（“в сети: http://192.168.…”）—— 从其他设备打开的就是这些链接。谈话、团队和配置与终端共享 `--open` 标志让 serve 自己打开浏览器；首次启动时向导会提议在桌面创建「Dream Team」快捷方式 — 它运行的就是这条命令（Windows、Linux、macOS 上行为一致）。：可以在 TUI 工作，再到浏览器继续。
 
 - 左侧 —— 谈话（点击切换，“＋”新建）、团队名单（点击成员召唤/请出聊天）、模型（点击设为智能体的默认）和项目（点击切换项目，区块旁的“＋”—— 带路径字段的表单）；当前项目右键打开「项目设置…」：名称、工作文件夹（在内置文件夹浏览器中选择）以及服务器、邮箱和机器人登记表 —— 添加、修改和删除；密钥不会发送到浏览器，只显示“已设置”标记；
 - 网页界面没有双击：右键条目打开“编辑”和“删除”菜单（谈话多一项“重命名”）；删除总要经过“确定删除这条记录？”确认 —— “是”/“否”；
@@ -310,9 +310,9 @@ dreamteam serve .       # 直接带着当前文件夹的项目
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
-`serve` 启动时会打印带令牌的现成链接（`http://地址/?token=…`），`dreamteam serve --open` 直接打开它：网页外壳从地址中取令牌、存进浏览器并从地址栏抹去 —— 无需手动输入。没有链接时，外壳会问一次令牌并记在浏览器里；顶栏的**退出登录**按钮在该设备上忘记令牌。令牌是“服务器密码”级别的访问：智能体拥有 shell 和文件，所以只应在 HTTPS（带证书的代理）后或自己的 VPN 内暴露。
+`serve` 启动时会打印带令牌的现成链接（`http://地址/?token=…`），`dreamteam serve --open` 直接打开它：网页外壳从地址中取令牌、存进浏览器并从地址栏抹去 —— 无需手动输入。没有链接时，外壳会问一次令牌并记在浏览器里；顶栏的**退出登录**按钮在该设备上忘记令牌。令牌是“服务器密码”级别的访问：智能体拥有 shell 和文件，所以只应在 HTTPS 后或自己的 VPN 内暴露。serve 自己就能提供 HTTPS：在 `~/.dreamteam/.env` 里把 `SSL_CERT` 和 `SSL_KEY` 指到证书和密钥文件（自签名证书也行，浏览器只会警告一次），服务器就以 `https://…` 启动；网页外壳自己切换到 `wss`。只设其中一个变量会拒绝启动并给出明确原因。不设置时，带证书、在 serve 前面终结 TLS 的代理同样好用。
 
-终端斜杠命令在网页外壳里通过同一个输入框工作：以 `/` 开头的文本作为命令进入内核（不会画成用户气泡），报告留在聊天下方的日志里 —— 只有命令报告和错误进日志，聊天事件在统一时间线里。自动补全与终端相同：`@` 打开提及面板（经理、聊天成员、session —— 方向键/Tab/Enter/Esc），`/` 显示带说明和参数提示的命令列表，Tab 补全。提示字典由内核随 state 快照下发。
+终端斜杠命令在网页外壳里通过同一个输入框工作：以 `/` 开头的文本作为命令进入内核（不会画成用户气泡），报告留在聊天下方的日志里 —— 只有命令报告和错误进日志，聊天事件在统一时间线里。自动补全与终端相同：`@` 打开提及面板（经理、聊天成员、session —— 方向键/Tab/Enter/Esc），`/` 显示带说明和参数提示的命令列表，Tab 补全。在输入边缘按 **↑/↓** 可以像终端一样翻看已发送的消息（第一次 ↑ 会保留正在输入的内容，↓ 越过最新一条可取回草稿）。提示字典由内核随 state 快照下发。
 
 两套外壳一个内核：服务器（`src/serve.ts`）是 `src/core/engine.ts` 之上的第二个 Presenter —— 网页版没有单独的“大脑”。协议是 WebSocket `/ws` 上的 JSON（事件与 rpc 全列表见 serve.ts 文件头），因此你可以用自己的外壳替换网页版。
 
@@ -759,7 +759,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 
 项目由 `tests/` 里的探针检查 — 不用测试框架，每个文件直接运行并对每项检查打印 `ok`/`FAIL`。所有探针都是密封的：真实数据不被触碰，家目录重定向到临时文件夹（`DT_HOME`）。
 
-- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `agent.tool.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。更新的探针以同样的方式覆盖内部机制：`probe-ids`（标识符掩码的边界）、`probe-sse`（SSE 工具集与密钥校验）、`probe-schedule`（日程文件、serve 计时器与真实引擎上的 `/schedule` 操作）、`probe-memory`（词数预算、反思、日志轮转、stub 上的 LLM 合并）、`probe-images`（mock 画师、本地 stub 上的 openai-images 传输、工具运行）、`probe-gigachat`（本地 HTTPS stub 上的完整传输，自带证书）、`probe-frugal`（LLM 主持人的计划）、`probe-shortcut`（替换平台来覆盖 linux/mac 分支）、`probe-tools`/`probe-commands`/`probe-mail`/`probe-api` 的补充（工具小抄、@提及弹窗、邮件助手、GUI rpc 表面含导入导出）。`probe-web` 的桩站跑在本地 http 服务器上 —— 探针链不再触碰互联网。
+- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `agent.tool.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、无 id 创建（文件夹名或时间戳）、波浪线表示系统主目录、Tab 路径补全、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。更新的探针以同样的方式覆盖内部机制：`probe-ids`（标识符掩码的边界）、`probe-sse`（SSE 工具集与密钥校验）、`probe-schedule`（日程文件、serve 计时器与真实引擎上的 `/schedule` 操作）、`probe-memory`（词数预算、反思、日志轮转、stub 上的 LLM 合并）、`probe-images`（mock 画师、本地 stub 上的 openai-images 传输、工具运行）、`probe-gigachat`（本地 HTTPS stub 上的完整传输，自带证书）、`probe-frugal`（LLM 主持人的计划）、`probe-shortcut`（替换平台来覆盖 linux/mac 分支）、`probe-tools`/`probe-commands`/`probe-mail`/`probe-api` 的补充（工具小抄、@提及弹窗、邮件助手、GUI rpc 表面含导入导出）。`probe-web` 的桩站跑在本地 http 服务器上 —— 探针链不再触碰互联网。
 - `npm run probe:e2e` — Windows 真实伪终端（ConPTY）下的同样区域：首次启动向导全程（`probe-wizard-pty`：语言选择器响应方向键、创建 mock 模型、TUI 启动）、真正到达应用的东西（`probe-input`）与经迷你 VT 仿真器的渲染屏幕（`probe-startup`：无项目启动、打开带旧谈话的项目、面板中的历史、滚轮/PgUp/鼠标/选择）。它自行安装并移除 node-pty。
 - `npm run probe:tui` — 伪终端里完整跑一遍应用：无项目启动 → `/project new` → 礼宾经理问候、`team.add`、`chat.add`、带工具的一轮、`/agents`、退出 — 全在 mock 服务商和临时文件夹上进行。`probe:scenario-tui` —— 同一场景，每步之后还校验磁盘上的文件（会话、agents/、导出归档）。
 - `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui-dist/ 静态资源、快照中的无项目启动、WS 礼宾场景（`project.open` → 问候、发言、经对话的 team.add）、rpc（`project.open`、`sessions.list`、`session.agent.add/delete`、`settings.update`（带模型校验）、`session.new` 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。
@@ -784,7 +784,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 ├── lang/                     # 自定义界面语言：lang/<id>.json
 ├── tools/                    # 自定义工具：tools/name.ts → 工具 "name"
 ├── bin/                      # 快速启动脚本（桌面快捷方式）
-├── .env                      # serve 设置：TOKEN、PORT、HOST（属于机器的东西）
+├── .env                      # serve 设置：TOKEN、PORT、HOST、SSL_CERT/SSL_KEY（属于机器的东西）
 ├── cache/                    # 本地缓存（ocr 的 tesseract 模型）
 └── projects/                 # 项目注册表 = 文件夹本身（projects/<id>/）
     └── <id>/

@@ -80,8 +80,10 @@ The app is global (like any CLI), but its data is split into layers:
 | **project** | `~/.dreamteam/projects/<id>/` | EVERYTHING about this specific project: `project.json` (the working folder `"path"`, servers `"hosts"`, mail `"mails"`, bots `"messengers"` — project secrets, never in agent cards) and the conversations (`sessions/`, `transcripts/`). The agents' work files go into the project's working folder; the app's payloads — the person's attachments (`inbox/`), mail attachments (`mail/`), generated images (`images/`) and the export archives — land here too, in the project folder |
 
 The tools' working folder is the `"path"` field of project.json: you set it when
-creating the project (`/project new <id> [folder]` — the folder is created if it
-doesn't exist) and change it later (`/project update path=<folder>`). A path inside the
+creating the project (`/project new <id> [folder]` — the id may be omitted: the
+name comes from the folder, or a session-style stamp like 20261103-142530; the
+folder is created if it doesn't exist; `~` means your OS home) and change it later
+(`/project update path=<folder>`). A path inside the
 home is forbidden — that's where the model keys and settings live. Usually it is
 the git repository you launched the app from: the team works on it, nothing to
 configure anywhere.
@@ -158,7 +160,8 @@ exist in its protocol.
 - **Model keys** — right in the model card in `~/.dreamteam/models/`
   (the `"apiKey"` field; for GigaChat you can set a `"clientId"`/`"clientSecret"`
   pair instead).
-- **serve settings** — `~/.dreamteam/.env` (`TOKEN`, `PORT`, `HOST`; the `.env`
+- **serve settings** — `~/.dreamteam/.env` (`TOKEN`, `PORT`, `HOST`,
+  `SSL_CERT`/`SSL_KEY`; the `.env`
   in a project folder is deliberately not read — there is a single source of
   variables). These are settings of a specific machine: they are not included in
   the `/export` archive. The wizard creates `.env` on first launch on a fresh
@@ -352,7 +355,7 @@ There are no aliases or short forms: one name — one operation.
 | `profile.update field=value…` | `/profile update name=Alexey about=brief` | fields: name, about |
 | `memory.show [id\|shared]` | `/memory gleb`, `/memory shared` | what a member remembers; no argument — an overview; `shared` — the team's shared memory |
 | `projects.list` | `/projects` | the home's project registry: ids and working folders, the current one marked |
-| `project.new <id> [folder]` | `/project new shop .` | create a project in the home and open it; the working folder is created if missing |
+| `project.new [id] [folder]` | `/project new shop .`, `/project new .` | create a project in the home and open it; without an id the name comes from the folder (`my work` → `my-work`) or a stamp like 20261103-142530; the folder is created if missing; `~` is the OS home; Tab completes folders |
 | `project.open <id\|path>` | `/project open ../other` | switch project; an unknown folder registers itself |
 | `project.close` | `/project close` | stay without a project: conversations are kept, the state is like after a launch |
 | `project.delete <id\|path…>` | `/project delete old, older` | delete projects from the home (projects/<id>/ whole, with conversations); several at once; the working folder is untouched; the current one can't be deleted |
@@ -407,7 +410,10 @@ completes them too: session ids (with titles) for `/session open` and
 model ids for `/usage` and `/model update`, `id|shared` for `/memory`. Three-word
 commands (`/session agent`, `/agent tool`, `/project mail|host|messenger`) know
 their sub-verbs too: after `/session agent ` the panel offers `add` and `delete`,
-and `/session agent add` shows its syntax and the ids.
+and `/session agent add` shows its syntax and the ids. Paths work like `cd` in a
+shell: `/project new` and `/project open` offer folders (Tab inserts the common
+prefix first, the next Tab completes deeper), `~` is the OS home, hidden folders
+appear only when typed with a dot.
 
 The same for mentions: type `@` in the middle of a message — a popup with the
 members of the current chat and `@session` opens below the input line (each with
@@ -468,7 +474,9 @@ listens on 127.0.0.1 only — the server is not visible from outside the machine
 The port and address are set by the `PORT` and `HOST` variables — you can put them
 in `~/.dreamteam/.env`: the settings will survive a global reinstall and a project
 switch. **Careful:** `HOST=0.0.0.0` exposes the server to the network — the API has
-no authentication, so only do this on your own network. Conversations, the team
+no authentication, so only do this on your own network. The startup banner then
+also prints the machine's real LAN addresses next to the localhost one — those
+are the URLs to open from other devices. Conversations, the team
 and the configs are shared with the terminal The `--open` flag makes serve open the browser itself; at first launch the wizard offers to create a desktop shortcut («Dream Team») that runs exactly this command (works on Windows, Linux and macOS).: you can work in the TUI and continue
 in the browser.
 
@@ -534,7 +542,13 @@ stores it in the browser and strips it from the URL bar — nothing to type. Wit
 the link, the shell asks for the token once and remembers it in the browser;
 the **Log out** button in the header forgets the token on that device. The token is
 "server password"-level access: the agents have shell and files, so expose it only
-behind HTTPS (a proxy with a certificate) or inside your own VPN.
+behind HTTPS or inside your own VPN. HTTPS can be served right by serve itself:
+point the `SSL_CERT` and `SSL_KEY` variables in `~/.dreamteam/.env` at the
+certificate and key files (a self-signed certificate works — the browser warns
+about it once) and the server comes up on `https://…`; the web shell switches to
+`wss` on its own. A half-set pair (one variable without the other) refuses to
+start with a clear error. Without them a TLS-terminating proxy with a
+certificate works just as well.
 
 The terminal slash commands work in the web shell through the same input: text
 with `/` goes to the core as a command (and is not drawn as a user bubble), reports
@@ -542,7 +556,9 @@ stay in the log under the chat — only command reports and errors land there, c
 events live in the general chronology. Autocompletion is like in the terminal:
 `@` opens the mentions popup (the manager, chat members, session —
 arrows/Tab/Enter/Esc), `/` shows the command list with descriptions and argument
-hints, Tab completes. The hint dictionary is delivered by the core in the state
+hints, Tab completes. **↑/↓** on the input edge recall the sent messages, like in
+the terminal (the first ↑ keeps what you were typing, ↓ past the newest entry
+brings it back). The hint dictionary is delivered by the core in the state
 snapshot.
 
 One core for both shells: the server (`src/serve.ts`) is a second Presenter over
@@ -1445,9 +1461,10 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   the core, interception without history records, `/agents`/`/projects` control),
   projects in the home (`probe-project`: folder-projects instead of a registry
   file, the "no project" state at startup, `/project new/open/close/delete/update`,
-  a working folder can't be inside the home, switching the core with session and
-  secrets isolation, the manager's `project.open`, the web shell's rpc and
-  state, autocompletion), four-level import-export (`probe-transfer`: the whole
+  creating without an id — folder name or a stamp, `~` as the OS home, Tab path
+  completion, a working folder can't be inside the home, switching the core with
+  session and secrets isolation, the manager's `project.open`, the web shell's
+  rpc and state, autocompletion), four-level import-export (`probe-transfer`: the whole
   home, settings only, one project with conversations, one conversation —
   card keys inside, .env not transferred, merging by id,
   zip-slip blocked, cancellation via
@@ -1523,7 +1540,7 @@ The package installs globally, the data lives in two layers next to you:
 ├── lang/                     # custom UI languages: lang/<id>.json
 ├── tools/                    # custom tools: tools/name.ts → the "name" tool
 ├── bin/                      # quick-launch scripts (desktop shortcut)
-├── .env                      # serve settings: TOKEN, PORT, HOST (a thing of the machine)
+├── .env                      # serve settings: TOKEN, PORT, HOST, SSL_CERT/SSL_KEY (a thing of the machine)
 ├── cache/                    # local caches (tesseract models for ocr)
 └── projects/                 # the registry of projects = the folders themselves (projects/<id>/)
     └── <id>/

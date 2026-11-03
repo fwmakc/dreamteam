@@ -12,6 +12,9 @@
  *    применение), отказы на чужих архивах;
  *  - http: /api/upload без открытого проекта — 404; сервер с TOKEN —
  *    авторизация первым сообщением, проект из аргументов запуска;
+ *  - TLS и баннер: serveUrls (0.0.0.0 → адреса сети), tlsFromEnv (пара,
+ *    полунастройка, битый путь), настоящий https-сервер на фикстурных
+ *    сертификатах — /health по https;
  *  - ServerPresenter: вопрос без клиентов — сразу отказ, ответ клиента —
  *    подтверждение, выбор разговора, таймаут-отказ.
  *
@@ -22,7 +25,7 @@
  */
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
 import { rmTemp } from './rm-tmp.js';
 import { writeModels } from './models.js';
@@ -997,6 +1000,73 @@ const client = await makeClient(handle.port);
   c1.close();
   await secured.close();
   delete process.env.TOKEN;
+}
+
+// --- TLS и баннер: serveUrls (чистая, сеть подсовываем фейковую) и https
+// через SSL_CERT/SSL_KEY — реальные сертификаты из фикстур GigaChat-пробы ---
+{
+  const { serveUrls, tlsFromEnv } = await import('../src/serve.js');
+  const { get } = await import('node:https');
+  const { fileURLToPath } = await import('node:url');
+  const here = dirname(fileURLToPath(import.meta.url));
+  const certFile = join(here, 'fixtures', 'gigachat-test-cert.pem');
+  const keyFile = join(here, 'fixtures', 'gigachat-test-key.pem');
+
+  const fakeNets = {
+    lo: [{ address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', mac: '00:00:00:00:00:00', internal: true }],
+    eth: [
+      { address: '192.168.1.5', netmask: '255.255.255.0', family: 'IPv4', mac: 'aa:bb:cc:dd:ee:01', internal: false },
+      { address: 'fe80::1', netmask: 'ffff:ffff:ffff:ffff::', family: 'IPv6', mac: 'aa:bb:cc:dd:ee:01', internal: false, scopeid: 3 },
+    ],
+    vtun: [{ address: '10.8.0.2', netmask: '255.255.255.0', family: 'IPv4', mac: 'aa:bb:cc:dd:ee:02', internal: false }],
+  } as unknown as NodeJS.Dict<import('node:os').NetworkInterfaceInfo[]>;
+
+  const all = serveUrls('0.0.0.0', 8080, false, fakeNets);
+  check(
+    'serveUrls: 0.0.0.0 — локальная на 127.0.0.1, lan — адреса сети без петли и IPv6',
+    all.local === 'http://127.0.0.1:8080' && all.lan.length === 2 && all.lan.includes('http://192.168.1.5:8080') && all.lan.includes('http://10.8.0.2:8080'),
+    JSON.stringify(all),
+  );
+  const onlyLocal = serveUrls('127.0.0.1', 8080, false, fakeNets);
+  check('serveUrls: 127.0.0.1 — адрес как есть, lan пуст', onlyLocal.local === 'http://127.0.0.1:8080' && onlyLocal.lan.length === 0, JSON.stringify(onlyLocal));
+  const secured = serveUrls('0.0.0.0', 8443, true, fakeNets);
+  check(
+    'serveUrls: tls — схема https и в локальной, и в lan',
+    secured.local === 'https://127.0.0.1:8443' && secured.lan.every((u) => u.startsWith('https://')),
+    JSON.stringify(secured),
+  );
+
+  check('tlsFromEnv: пусто — нет ошибки и нет сертификата', !tlsFromEnv({}).error && !tlsFromEnv({}).cert);
+  const half = tlsFromEnv({ SSL_CERT: certFile });
+  check('tlsFromEnv: один без второго — отказ зовёт оба имени', Boolean(half.error) && half.error!.includes('SSL_CERT') && half.error!.includes('SSL_KEY'), half.error);
+  const unreadable = tlsFromEnv({ SSL_CERT: join(here, 'no-such.pem'), SSL_KEY: keyFile });
+  check('tlsFromEnv: битый путь — отказ с именами файлов', Boolean(unreadable.error) && unreadable.error!.includes('SSL_CERT'), unreadable.error);
+  const good = tlsFromEnv({ SSL_CERT: certFile, SSL_KEY: keyFile });
+  check('tlsFromEnv: пара фикстур — читается в Buffer', !good.error && good.cert instanceof Buffer && good.key instanceof Buffer);
+
+  process.env.SSL_CERT = certFile;
+  process.env.SSL_KEY = keyFile;
+  const tlsHandle = await startServe({ port: 0 });
+  check('serve: SSL_CERT+SSL_KEY — сервер поднялся на https', tlsHandle.tls === true);
+  const body = await new Promise<string>((resolve, reject) => {
+    get({ host: '127.0.0.1', port: tlsHandle.port, path: '/health', rejectUnauthorized: false }, (r) => {
+      let s = '';
+      r.on('data', (d) => (s += d));
+      r.on('end', () => resolve(s));
+    }).on('error', reject);
+  });
+  check('serve: https /health отвечает ok (самоподписный принят)', (JSON.parse(body) as { ok: boolean }).ok === true, body);
+  await tlsHandle.close();
+  delete process.env.SSL_CERT;
+  delete process.env.SSL_KEY;
+
+  process.env.SSL_CERT = certFile; // без SSL_KEY
+  const refused = await startServe({ port: 0 }).then(
+    () => null,
+    (err: unknown) => String(err instanceof Error ? err.message : err),
+  );
+  check('serve: полунастройка TLS — отказ до поднятия', Boolean(refused) && refused!.includes('SSL_CERT') && refused!.includes('SSL_KEY'), refused ?? undefined);
+  delete process.env.SSL_CERT;
 }
 
 // --- ServerPresenter отдельно: вопросы и таймауты ---

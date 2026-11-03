@@ -7,6 +7,81 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
+## [0.0.18] — 2026-11-03
+
+### Added
+
+- **Native HTTPS for `dreamteam serve`.** The `SSL_CERT` and `SSL_KEY`
+  variables in `~/.dreamteam/.env` point at the certificate and key files
+  (a self-signed certificate works — the browser warns about it once); the
+  server then comes up on `https://…`, the banner and the tokenized link use
+  the `https` scheme, and the web shell switches to `wss` on its own (it
+  already derives the protocol from the page URL). A half-set pair (one
+  variable without the other, an unreadable file) refuses to start with a
+  clear error instead of silently serving plain http.
+- **The serve banner prints real network addresses under `HOST=0.0.0.0`.**
+  The server always did listen on all interfaces (that is what «ОТКРЫТО
+  В СЕТЬ» said), but the printed link stayed `http://127.0.0.1:…` because
+  the all-interfaces address itself is not browsable — it looked like the
+  env had not been picked up. Now the localhost link keeps pointing at
+  `127.0.0.1` and a new «в сети: …» line names the machine's IPv4 addresses
+  in the network: the URLs to open from other devices. The terminal's
+  «dreamteam serve → …» hint shows `127.0.0.1` instead of a raw `0.0.0.0`
+  too.
+- **Projects can be created without an id.** `/project new` with no arguments
+  stamps a session-style id (20261103-142530, a «-2» suffix on a collision);
+  `/project new <folder>` — an argument that looks like a path (separators,
+  `.`, `..`, `~`) — derives the id from the folder name («my work» →
+  `my-work`) and creates the folder; the same rpc `project.new` (id is now
+  optional) backs the GUI dialog, where both fields are optional too. An
+  explicitly typed id that is already taken keeps its «уже есть — /project
+  open» error; derived names get the suffix instead. A path argument split by
+  the whitespace lexer is glued back together, and a failed creation answers
+  with a «✗ …» line (like `project.delete`) instead of crashing the command.
+- **Folder browsing for the paths in the GUI.** The new-project dialog got
+  the 📂 directory browser (the project-settings one, now shared state and
+  markup — drives, «up», pick) so the working folder no longer has to be
+  typed blind.
+- **Tab completes paths — like `cd` in a shell.** The operation manifest has
+  a `'path'` hint backed by `dirOptions` in the completion context (a live
+  `readdir` in the TUI): `/project new [id] <Tab>`, `/project open <Tab>`
+  and the panel offer directories — «~» resolves to the OS home, relative
+  heads go from the current folder, hidden folders appear only when typed
+  with a dot, the first Tab inserts the common prefix and the next completes
+  deeper. The pure planner `pathCandidates` is unit-checked in
+  `probe-project` (heads, separators, hidden, case).
+- **Tab indents in the GUI modal textareas — like in an editor.** All the
+  multiline fields of the dialogs (the agent-tools JSON card, the manual
+  model references, the object fields, the prompts) take `Tab` as a two-space
+  indent and `Shift+Tab` as removing one level (a tab character or up to two
+  spaces per line; with a multiline selection — every line at once, the
+  common editor behavior). The browser's default focus jump is gone; the
+  native undo (Ctrl+Z) keeps working, and the caret follows the text it
+  sits behind. The chat input keeps its Tab completion — the change touches
+  only the textareas inside modals.
+- **↑/↓ recall sent messages in the web shell.** The GUI input had no
+  message history at all (the TUI's editor has had it since the beginning):
+  pressing ArrowUp on an empty input did nothing. Now `ArrowUp` on the input
+  edge steps back through the sent texts (the user's own lines and `/`
+  commands — as typed, empty and consecutive-duplicate lines are not
+  recorded), `ArrowDown` steps forward, and the ↓ past the newest entry
+  restores what was being typed when history was entered. Inside a
+  multiline draft the arrows still move the caret line by line — history
+  triggers only at the first/last line, exactly like in the terminal. The
+  session-only history matches the TUI (nothing is persisted), the @-popup
+  keeps priority for the arrows, and the input placeholder now mentions
+  «↑/↓ — история».
+
+### Fixed
+
+- **`~` in a project path is the user's OS home.** The project-layer
+  resolvers (`checkWorkspacePath`, `resolveProjectTarget`, the manager's
+  `projectIdByArg`) treated the tilde as a plain folder name next to the
+  current directory, so `/project open ~/work` looked for
+  `./~/work`. Now `/project open ~/…`, `/project new id ~/…`,
+  `/project update path=~/…` and the GUI path field all expand against
+  `os.homedir()` (a bare `~` too).
+
 ## [0.0.17] — 2026-11-02
 
 ### Breaking

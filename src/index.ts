@@ -2,12 +2,14 @@ import { createInterface } from 'node:readline/promises';
 import { spawn } from 'node:child_process';
 import { format } from 'node:util';
 import { basename } from 'node:path';
+import { readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import pc from 'picocolors';
 import { loadTeam } from './agents.js';
 import { managerAsAgent } from './manager.js';
 import { agentToolIds } from './tools-api.js';
 import { loadToolsConfig, type ToolsConfig } from './actions.js';
-import { HintPanel, MentionPicker, hintRowsFor, makeCompleter, type CompletionContext } from './completion.js';
+import { HintPanel, MentionPicker, hintRowsFor, makeCompleter, pathCandidates, type CompletionContext } from './completion.js';
 import { OPERATIONS, operationArgs, operationCommand } from './core/operations.js';
 import { listProjects } from './core/projects.js';
 import { Editor } from './editor.js';
@@ -105,12 +107,15 @@ const refreshHints = (): void => {
 };
 
 /** Веб-оболочка — отдельный запуск; адрес из тех же PORT/HOST, что читает serve
- *  (лениво: .env дома грузится уже после импорта модуля). */
-const serveHint = (): string =>
-  pc.dim(tf('  Веб-оболочка: dreamteam serve → http://{host}:{port}', {
-    host: process.env.HOST || '127.0.0.1',
+ *  (лениво: .env дома грузится уже после импорта модуля). 0.0.0.0 в подсказке
+ *  показываем как 127.0.0.1 — «все интерфейсы» браузер открыть не может. */
+const serveHint = (): string => {
+  const host = process.env.HOST || '127.0.0.1';
+  return pc.dim(tf('  Веб-оболочка: dreamteam serve → http://{host}:{port}', {
+    host: host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host,
     port: process.env.PORT || '8080',
   }));
+};
 
 /** Таймер «Скопировано» в строке статуса, чтобы не висел вечно */
 let statusTimer: NodeJS.Timeout | null = null;
@@ -354,6 +359,19 @@ function completionCtx(): CompletionContext {
       } catch {
         return [];
       }
+    },
+    // Tab как cd в шелле: разбор фрагмента в pathCandidates (см. completion),
+    // здесь — живой lister: только папки каталога; нет папки/прав — пусто
+    dirOptions(fragment: string): string[] {
+      return pathCandidates(fragment, (dir) => {
+        try {
+          return readdirSync(dir, { withFileTypes: true })
+            .filter((e) => e.isDirectory())
+            .map((e) => e.name);
+        } catch {
+          return [];
+        }
+      }, process.cwd(), homedir());
     },
   };
 }

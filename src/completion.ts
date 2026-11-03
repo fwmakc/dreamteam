@@ -1,4 +1,5 @@
 import pc from 'picocolors';
+import { isAbsolute, resolve } from 'node:path';
 import { OPERATIONS, extraHints, findOperation, operationCommand, operationArgs, type OpHint, type OpSpec } from './core/operations.js';
 import { t, tf } from './i18n.js';
 
@@ -21,6 +22,9 @@ export interface CompletionContext {
   /** Имена проектов дома (папки в projects/) — для /project open|delete.
    *  Опционально: старые вызовы и пробы без дома подсказывать не обязаны. */
   projectNames?(): string[];
+  /** Папки каталога по фрагменту пути — Tab как cd в шелле («~/Dev», «C:\пап»).
+   *  Опционально: у кого нет доступа к диску, подсказывать не обязан. */
+  dirOptions?(fragment: string): string[];
 }
 
 function commonPrefix(items: string[]): string {
@@ -63,6 +67,38 @@ function commandOptions(fragment: string): string[] {
 
 const lastToken = (rest: string): string => (/(\S*)$/.exec(rest))![1];
 
+/**
+ * Кандидаты пути для Tab как cd в шелле: голова фрагмента (до разделителя)
+ * разбирается на каталог — «~» это дом пользователя, относительная голова —
+ * от текущего каталога, — хвост работает фильтром по имени (скрытые папки
+ * показываются, только если набрано с точки). Кандидат повторяет голову
+ * фрагмента + имя папки + разделитель головы — следующий Tab углубляется.
+ * Lister отдаёт папки каталога: живой — readdirSync в index.ts, в пробах —
+ * фейк. lister сам ловит свои ошибки (нет папки — пустой список).
+ */
+export function pathCandidates(
+  fragment: string,
+  list: (dir: string) => string[],
+  cwd: string,
+  home: string,
+): string[] {
+  const idx = Math.max(fragment.lastIndexOf('/'), fragment.lastIndexOf('\\'));
+  const head = idx >= 0 ? fragment.slice(0, idx + 1) : '';
+  const base = idx >= 0 ? fragment.slice(idx + 1) : fragment;
+  const dir = head.startsWith('~')
+    ? (head.length <= 2 ? home : resolve(home, head.slice(2)))
+    : isAbsolute(head)
+      ? head
+      : resolve(cwd, head);
+  const lower = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s);
+  const nb = lower(base);
+  return list(dir)
+    .filter((name) => (nb.startsWith('.') || !name.startsWith('.')) && lower(name).startsWith(nb))
+    .sort((a, b) => (lower(a) < lower(b) ? -1 : 1))
+    .slice(0, 40)
+    .map((name) => head + name + (head.endsWith('\\') ? '\\' : '/'));
+}
+
 const verbsOf = (group: string): string[] =>
   [...new Set(OPERATIONS.filter((o) => o.name.startsWith(group + '.') && !o.implicit).map((o) => o.name.split('.')[1]))];
 
@@ -91,7 +127,7 @@ function resolveCommand(parts: string[]): { op: OpSpec; cmdWords: number } | nul
 }
 
 /** Значения аргумента по подсказке манифеста; [] — подсказывать нечего, null — операция неизвестна. */
-function argValues(op: OpSpec, argPos: number, ctx: CompletionContext): string[] | null {
+function argValues(op: OpSpec, argPos: number, ctx: CompletionContext, fragment: string): string[] | null {
   const arg = op.args?.[Math.min(argPos, (op.args?.length ?? 1) - 1)];
   if (!arg) return [];
   switch (arg.hint) {
@@ -103,8 +139,11 @@ function argValues(op: OpSpec, argPos: number, ctx: CompletionContext): string[]
       return ctx.chatAgents().map((a) => a.id);
     case 'models':
       return ctx.modelIds();
+    case 'path':
+      return ctx.dirOptions?.(fragment) ?? [];
     case 'projects':
-      return ctx.projectNames?.() ?? [];
+      // id|путь: имена из дома плюс папки диска по набранному фрагменту
+      return [...(ctx.projectNames?.() ?? []), ...(ctx.dirOptions?.(fragment) ?? [])];
     default:
       return [];
   }
@@ -114,13 +153,14 @@ function argValues(op: OpSpec, argPos: number, ctx: CompletionContext): string[]
 function argOptions(body: string, ctx: CompletionContext): string[] | null {
   const parts = body.trim().split(/\s+/).filter(Boolean);
   const trailing = /\s$/.test(body);
+  const fragment = trailing ? '' : parts[parts.length - 1] ?? '';
   const group = (parts[0] ?? '').toLowerCase();
   const verbs = verbsOf(group);
   const implicitOp = OPERATIONS.find((o) => o.name.startsWith(group + '.') && o.implicit);
 
   // '/group ' — глаголы явных операций; у обзорных групп сразу их аргумент
   if (parts.length === 1 && trailing) {
-    if (implicitOp && verbs.length === 0) return argValues(implicitOp, 0, ctx) ?? [];
+    if (implicitOp && verbs.length === 0) return argValues(implicitOp, 0, ctx, '') ?? [];
     return verbs.map((v) => v + ' ');
   }
   // '/group ве' — завершаем глагол; точный глагол с подглаголами (session agent) не дотягиваем до соседнего
@@ -142,7 +182,7 @@ function argOptions(body: string, ctx: CompletionContext): string[] | null {
   const resolved = resolveCommand(parts);
   if (!resolved) return null;
   const typed = parts.length - resolved.cmdWords + (trailing ? 1 : 0);
-  return argValues(resolved.op, Math.max(0, typed - 1), ctx);
+  return argValues(resolved.op, Math.max(0, typed - 1), ctx, fragment);
 }
 
 /** Completer для readline: операции, их аргументы, @упоминания, номера разговоров. */
@@ -256,7 +296,7 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
 
   // после группы: глаголы или аргументы обзорной операции
   if (parts.length === 1 && trailing) {
-    if (implicitOp && verbs.length === 0) return [usageRow(implicitOp), ...valueRows(implicitOp, 0, ctx)];
+    if (implicitOp && verbs.length === 0) return [usageRow(implicitOp), ...valueRows(implicitOp, 0, ctx, '')];
     return [
       pc.dim(tf('  /{group} <{verb}>:', { group, verb: t('глагол') })),
       pc.dim('    ' + verbs.slice(0, PANEL_MAX).join('   ')),
@@ -303,11 +343,11 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
   const resolved = resolveCommand(parts);
   if (!resolved) return [pc.dim(t('  нет такой команды — см. /help'))];
   const argPos = Math.max(0, parts.length - resolved.cmdWords + (trailing ? 1 : 0) - 1);
-  return [usageRow(resolved.op), ...valueRows(resolved.op, argPos, ctx)];
+  return [usageRow(resolved.op), ...valueRows(resolved.op, argPos, ctx, trailing ? '' : parts[parts.length - 1] ?? '')];
 }
 
 /** Живые значения аргумента (номера, имена, id) — для панели. */
-function valueRows(op: OpSpec, argPos: number, ctx: CompletionContext): string[] {
+function valueRows(op: OpSpec, argPos: number, ctx: CompletionContext, fragment: string): string[] {
   const arg = op.args?.[Math.min(argPos, (op.args?.length ?? 1) - 1)];
   if (!arg) return [];
   const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
@@ -317,6 +357,7 @@ function valueRows(op: OpSpec, argPos: number, ctx: CompletionContext): string[]
   else if (arg.hint === 'chat') values = ctx.chatAgents().map((a) => a.id);
   else if (arg.hint === 'models') values = ctx.modelIds();
   else if (arg.hint === 'projects') values = ctx.projectNames?.() ?? [];
+  else if (arg.hint === 'path') values = ctx.dirOptions?.(fragment) ?? [];
   if (values === null) return [];
   return [
     `  ${operationCommand(op)} ${pc.dim(operationArgs(op))}:`,

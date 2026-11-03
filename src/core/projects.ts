@@ -5,6 +5,7 @@
  * Отдельного файла-реестра нет: список проектов = readdir.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve, sep } from 'node:path';
 import { t, tf } from '../i18n.js';
 import { DT_HOME, PROJECTS_DIR } from '../paths.js';
@@ -121,9 +122,20 @@ export function sanitizeProjectId(raw: string): string {
   return cleaned || 'project';
 }
 
+/**
+ * «~» в пути проекта — домашняя папка пользователя ОС (как в шелле), не дом
+ * приложения: resolve иначе понял бы её как обычное имя папки рядом с cwd.
+ */
+export function expandHome(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed === '~') return homedir();
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) return join(homedir(), trimmed.slice(2));
+  return trimmed;
+}
+
 /** Рабочая папка не может лежать в доме: файловые тулы добрались бы до ключей моделей. */
 export function checkWorkspacePath(raw: string): string {
-  const abs = resolve(raw);
+  const abs = resolve(expandHome(raw));
   const home = resolve(DT_HOME);
   if (abs === home || abs.startsWith(home + sep)) {
     throw new Error(t('рабочая папка не может быть внутри дома приложения — там ключи моделей и настройки'));
@@ -131,10 +143,8 @@ export function checkWorkspacePath(raw: string): string {
   return abs;
 }
 
-function writeNewProject(id: string, pathRaw: string | null): ProjectConfig {
-  let path: string | undefined;
-  if (pathRaw) {
-    path = checkWorkspacePath(pathRaw);
+function writeNewProject(id: string, path: string | null): ProjectConfig {
+  if (path) {
     if (!existsSync(path)) mkdirSync(path, { recursive: true });
     else if (!statSync(path).isDirectory()) throw new Error(tf('«{path}» — не папка', { path }));
   }
@@ -144,22 +154,47 @@ function writeNewProject(id: string, pathRaw: string | null): ProjectConfig {
   return cfg;
 }
 
-/** project.new: новый проект; рабочая папка создаётся, если её нет. */
-export function createProject(idRaw: string, pathRaw: string | null): ProjectConfig {
-  const id = validateProjectId(idRaw);
-  if (existsSync(join(PROJECTS_DIR, id))) {
-    throw new Error(tf('проект «{id}» уже есть — /project open {id}', { id }));
+/** Свободное имя проекта: база занята — суффикс «-2», «-3»… */
+function freeProjectId(base: string): string {
+  let id = base;
+  for (let n = 2; existsSync(join(PROJECTS_DIR, id)); n++) id = `${base}-${n}`;
+  return id;
+}
+
+/** Авто-id проекта — штамп как у разговоров: 20261103-142530; занят — суффикс. */
+function autoProjectId(): string {
+  const now = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  const base =
+    `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}` +
+    `-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  return freeProjectId(base);
+}
+
+/**
+ * project.new: новый проект; рабочая папка создаётся, если её нет.
+ * Без id имя берётся из папки (как при открытии незнакомой), совсем без
+ * всего — штамп года-месяца-дня-часа-минуты-секунды. Явный id, занятый в
+ * доме, — ошибка (подсказка открыть), выведенные сами имена — суффикс «-2».
+ */
+export function createProject(idRaw: string | null, pathRaw: string | null): ProjectConfig {
+  if (idRaw !== null) {
+    const explicit = validateProjectId(idRaw);
+    if (existsSync(join(PROJECTS_DIR, explicit))) {
+      throw new Error(tf('проект «{id}» уже есть — /project open {id}', { id: explicit }));
+    }
+    return writeNewProject(explicit, pathRaw ? checkWorkspacePath(pathRaw) : null);
   }
-  return writeNewProject(id, pathRaw);
+  const path = pathRaw ? checkWorkspacePath(pathRaw) : null;
+  const base = path ? sanitizeProjectId(basename(path)) : autoProjectId();
+  return writeNewProject(freeProjectId(base), path);
 }
 
 /** Авто-регистрация открытой папки: id из имени папки, коллизия → суффикс «-2». */
 export function registerWorkspace(ws: string): ProjectConfig {
   const path = checkWorkspacePath(ws);
   const base = sanitizeProjectId(basename(path));
-  let id = base;
-  for (let n = 2; existsSync(join(PROJECTS_DIR, id)); n++) id = `${base}-${n}`;
-  return writeNewProject(id, path);
+  return writeNewProject(freeProjectId(base), path);
 }
 
 /** Удалить проект из дома (projects/<id>/ целиком); рабочая папка не трогается. */
@@ -207,8 +242,8 @@ export function resolveProjectTarget(arg: string, from: string): ProjectTarget {
   const raw = arg.trim().replace(/^["']|["']$/g, '');
   if (!raw) throw new Error(t('укажите проект: /project open <id|путь> (список — /projects)'));
   const projects = listProjects();
-  if (isAbsolute(raw) || raw === '.' || raw === '..' || raw.includes('/') || raw.includes('\\')) {
-    const path = resolve(from, raw);
+  if (isAbsolute(raw) || raw === '.' || raw === '..' || raw.startsWith('~') || raw.includes('/') || raw.includes('\\')) {
+    const path = resolve(from, expandHome(raw));
     if (!existsSync(path) || !statSync(path).isDirectory()) {
       throw new Error(tf('нет папки «{raw}» — укажите путь или имя из /projects', { raw }));
     }
