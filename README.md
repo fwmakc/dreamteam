@@ -1539,10 +1539,15 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   `probe-ids` (identifier masks at their edges), `probe-sse` (the SSE
   toolkit and key validation), `probe-schedule` (the schedule file, the
   serve ticker and the `/schedule` operations on a live engine), `probe-bg`
-  (the background-task dispatcher: spawn and exit codes, timeout, tree kill,
-  log capping at 2 MB, bg.json persistence, delivery guarantee, task adoption
-  after a restart, check-minute pings, an end-to-end run with the ```bg``` tool
-  and a service-message delivery), `probe-goal` (the goal: ```goal done|failed```
+  (the background-task dispatcher: spawn and exit codes, timeout, killing a
+  real process tree, log capping at 2 MB, bg.json persistence and dirty
+  inputs, delivery order, the full adoption cycle after a restart — lost,
+  kill and timeout of an adopted task — check-minute pings with the
+  "log has stalled" alarm, alive printing versus hung, tool rights and
+  block-body introspection over live tasks, an end-to-end hung-task cycle —
+  ping, the model kills it with a ```bg``` kill block and restarts to fix
+  the cause — plus a fake ```goal done``` inside a bg note not closing the
+  goal), `probe-goal` (the goal: ```goal done|failed```
   verdicts, the continuation-round budget, auto-approval of questions, auto.on
   as a text-less goal, the manager's goal.set/goal.cancel, resuming the goal
   with a fresh engine, the `/goal …` operations),

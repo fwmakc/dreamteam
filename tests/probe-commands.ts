@@ -562,6 +562,64 @@ const threw = async (line: string): Promise<string> => {
   check('bg kill: статус killed на диске', killed, JSON.stringify(bgList().map((t) => `${t.id}:${t.status}`)));
   await run(engine, `/bg delete ${id2}`);
 
+  // опции run: timeout=/check= попадают в задачу (bg.json)
+  lines = await run(engine, '/bg run timeout=1m check=2 title=опционная node -e "setTimeout(()=>{},8000)"');
+  const opt = bgList().find((t) => t.title === 'опционная');
+  check('bg run: timeout=1m → timeoutMs 60_000, check=2 → checkMinutes',
+    opt?.timeoutMs === 60_000 && opt?.checkMinutes === 2, JSON.stringify(bgList().map((t) => [t.title, t.timeoutMs, t.checkMinutes])));
+
+  // log неизвестного id — «(лог недоступен)»
+  lines = await run(engine, '/bg log bg-нет-такого-0000');
+  check('bg log: неизвестный id — «(лог недоступен)»', lines[0] === '(лог недоступен)', JSON.stringify(lines));
+
+  // failed-задача: строка списка с кодом выхода и «поставил: вы»
+  lines = await run(engine, '/bg run title=аварийная node -e "process.exit(3)"');
+  const boom = bgList().find((t) => t.title === 'аварийная');
+  let boomFailed = false;
+  for (let i = 0; i < 50 && !boomFailed; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    boomFailed = bgList().some((t) => t.id === boom?.id && t.status === 'failed');
+  }
+  lines = await run(engine, '/bg');
+  check('bg: failed — «код 3» и «поставил: вы»',
+    lines.some((l) => l.includes(boom!.id) && l.includes('код 3') && l.includes('поставил: вы')), JSON.stringify(lines));
+  await run(engine, `/bg delete ${boom!.id}`);
+
+  // «all»: подложенная задача чужого разговора видна в all и НЕ видна в обычном списке
+  const { PROJECT_DIR } = await import('../src/paths.js');
+  const { bgFile } = await import('../src/core/bg.js');
+  const nowTs = Date.now();
+  const foreign = {
+    id: 'bg-foreign-aaaa', dir: PROJECT_DIR, sessionId: 'чужой-разговор', by: 'user',
+    title: 'заложенная', command: 'echo x', status: 'done', exitCode: 0,
+    startedAt: nowTs - 5000, endedAt: nowTs - 4000, checkMinutes: 0,
+    lastCheckAt: nowTs, lastOutputAt: nowTs, logBytes: 0,
+  };
+  writeFileSync(bgFile(), JSON.stringify([foreign], null, 2));
+  lines = await run(engine, '/bg');
+  check('bg: чужой разговор не попал в список текущего',
+    lines.some((l) => l.includes('опционная')) && !lines.some((l) => l.includes('bg-foreign-aaaa')), JSON.stringify(lines));
+  lines = await run(engine, '/bg all');
+  check('bg all: «Фоновые задачи проекта» с заложенной чужой',
+    lines[0]?.includes('проекта') === true && lines.some((l) => l.includes('bg-foreign-aaaa')), JSON.stringify(lines));
+  lines = await run(engine, '/bg delete bg-foreign-aaaa');
+  check('bg delete: заложенная удалена', lines[0]?.includes('✓ удалена') ?? false, JSON.stringify(lines));
+
+  // kill двух задач одной командой
+  lines = await run(engine, '/bg run title=стоп-два node -e "setTimeout(()=>{},8000)"');
+  const stop2 = bgList().find((t) => t.title === 'стоп-два');
+  lines = await run(engine, `/bg kill ${opt!.id} ${stop2!.id}`);
+  check('bg kill: два id одной командой — два отчёта',
+    lines.length === 2 && lines[0]!.includes(opt!.id) && lines[1]!.includes(stop2!.id), JSON.stringify(lines));
+  let bothKilled = false;
+  for (let i = 0; i < 50 && !bothKilled; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    bothKilled = bgList().some((t) => t.id === opt!.id && t.status === 'killed')
+      && bgList().some((t) => t.id === stop2!.id && t.status === 'killed');
+  }
+  check('bg kill: оба остановлены (killed на диске)', bothKilled, JSON.stringify(bgList().map((t) => `${t.id}:${t.status}`)));
+  await run(engine, `/bg delete ${opt!.id} ${stop2!.id}`);
+
   // (после /auto on|off выше в сессии уже есть goal-запись — «цели нет» тут не бывает)
   lines = await run(engine, '/goal status');
   check('goal status: строка состояния с 🎯', lines[0]?.includes('🎯') ?? false, JSON.stringify(lines));

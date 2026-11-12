@@ -8,6 +8,10 @@
  *    проекта, серверы/почта/боты проекта, авто-режим, fs.dirs, session.update/
  *    close, schedule.toggle мимо, manager.update; снимок проекта с хостами,
  *    ящиками (пароль — только флагом) и ботами;
+ *  - фоновые задачи по rpc: bg.run без разговора — отказ, timeoutMinutes →
+ *    timeoutMs, края bg.log (неизвестный id, зажим lines), bg.kill/bg.delete с
+ *    WS-рассылкой 'bg', чужая доставка — накопленное уведомление приезжает
+ *    репликой authorId 'bg' при session.open;
  *  - экспорт четырёх уровней и импорт с живым подтверждением (отмена и
  *    применение), отказы на чужих архивах;
  *  - http: /api/upload без открытого проекта — 404; сервер с TOKEN —
@@ -200,6 +204,12 @@ const client = await makeClient(handle.port);
   );
   check('ws: нет agents/ — без ошибки в state', st0.teamError == null);
   check('ws: модель mock — основная', (st0.models ?? []).some((p) => p.id === 'mock' && p.isDefault));
+
+  // bg.run без открытого разговора — честный отказ: уведомлению о завершении
+  // некуда доставляться
+  client.send({ type: 'rpc', id: 'b0', method: 'bg.run', args: { command: 'echo x' } });
+  const b0err = await client.next((m) => m.type === 'rpc_error' && m.id === 'b0');
+  check('rpc: bg.run без разговора — «нужен открытый разговор»', String(b0err.error).includes('нужен открытый разговор'), String(b0err.error));
 
   // открываем проект rpc-ом — тем же ходом, что и GUI (папка не была
   // зарегистрирована — авто-регистрация; пустой разговор создаётся сам)
@@ -405,6 +415,76 @@ const client = await makeClient(handle.port);
   client.send({ type: 'rpc', id: 'b4', method: 'bg.delete', args: { id: bgTask.id } });
   const bd = await client.next((m) => m.type === 'rpc_result' && m.id === 'b4');
   check('rpc: bg.delete — удалена', String((bd.result as { text: string }).text).includes('✓ удалена'), JSON.stringify(bd.result));
+
+  // rpc: края bg.log — неизвестный id и зажим lines (99999 → 2000, не падает)
+  client.send({ type: 'rpc', id: 'b5', method: 'bg.log', args: { id: 'bg-nope-0000' } });
+  const b5log = await client.next((m) => m.type === 'rpc_result' && m.id === 'b5');
+  check('rpc: bg.log неизвестного id — «(лог недоступен)»', String((b5log.result as { text: string }).text) === '(лог недоступен)', JSON.stringify(b5log.result));
+  client.send({ type: 'rpc', id: 'b6', method: 'bg.log', args: { id: bgTask.id, lines: 99999 } });
+  const b6log = await client.next((m) => m.type === 'rpc_result' && m.id === 'b6');
+  check('rpc: bg.log lines=99999 — зажим без ошибки', b6log.type === 'rpc_result' && typeof (b6log.result as { text?: string }).text === 'string', JSON.stringify(b6log).slice(0, 160));
+
+  // rpc: bg.run с таймаутом в минутах → timeoutMs в мс
+  client.send({ type: 'rpc', id: 'b7', method: 'bg.run', args: { command: 'node -e "setTimeout(()=>{},60000)"', title: 'долгая-api', timeoutMinutes: 1 } });
+  const b7run = await client.next((m) => m.type === 'rpc_result' && m.id === 'b7');
+  const longTask = (b7run.result as { task: { id: string; timeoutMs?: number; status: string } }).task;
+  check('rpc: bg.run timeoutMinutes=1 — timeoutMs 60_000', longTask.id.startsWith('bg-') && longTask.status === 'running' && longTask.timeoutMs === 60_000, JSON.stringify(b7run.result));
+
+  // rpc: bg.kill — WS-рассылка 'bg' и killed на диске
+  client.send({ type: 'rpc', id: 'b8', method: 'bg.kill', args: { id: longTask.id } });
+  const b8kill = await client.next((m) => m.type === 'rpc_result' && m.id === 'b8');
+  check('rpc: bg.kill — отчёт об остановке', String((b8kill.result as { text: string }).text).includes('останавливаю'), JSON.stringify(b8kill.result));
+  await client.next((m) => m.type === 'bg' && (m.tasks as { id: string }[]).some((t) => t.id === longTask.id));
+  let killedOnDisk = false;
+  for (let i = 0; i < 50 && !killedOnDisk; i++) {
+    await wait(100);
+    client.send({ type: 'rpc', id: `bk${i}`, method: 'bg.list' });
+    const bkl = await client.next((m) => m.type === 'rpc_result' && m.id === `bk${i}`);
+    killedOnDisk = (bkl.result as { tasks: { id: string; status: string }[] }).tasks.some((t) => t.id === longTask.id && t.status === 'killed');
+  }
+  check('rpc: bg.kill — статус killed на диске', killedOnDisk, JSON.stringify(longTask.id));
+
+  // rpc: чужая доставка — уведомление копится, пока разговор закрыт, и
+  // доставляется при session.open (реплика authorId 'bg')
+  client.send({ type: 'rpc', id: 'sq1', method: 'state' });
+  const sq1 = await client.next((m) => m.type === 'rpc_result' && m.id === 'sq1');
+  const mainSid = ((sq1.result as { session: { id: string } }).session).id;
+  client.send({ type: 'rpc', id: 'sn1', method: 'session.new' });
+  await client.next((m) => m.type === 'rpc_result' && m.id === 'sn1'); // переключились в свежий разговор
+  client.send({ type: 'rpc', id: 'so1', method: 'session.open', args: { id: mainSid } });
+  const so1 = await client.next((m) => m.type === 'rpc_result' && m.id === 'so1');
+  check('rpc: session.open — вернулись в главный разговор', (so1.result as { ok: boolean }).ok === true, JSON.stringify(so1.result));
+  let delivered = false;
+  let deliveredText = '';
+  for (let i = 0; i < 100 && !delivered; i++) {
+    await wait(100);
+    client.send({ type: 'rpc', id: `sp${i}`, method: 'state' });
+    const sp = await client.next((m) => m.type === 'rpc_result' && m.id === `sp${i}`);
+    const msgs = ((sp.result as { session?: { messages?: { authorId: string; text: string }[] } }).session?.messages) ?? [];
+    const bgMsg = msgs.find((m) => m.authorId === 'bg');
+    if (bgMsg) {
+      delivered = true;
+      deliveredText = bgMsg.text;
+    }
+  }
+  check('rpc: чужая доставка — session.open привёз реплику bg «остановлена вручную»',
+    delivered && deliveredText.includes('остановлена вручную'), deliveredText.slice(0, 160) || 'реплики bg нет');
+
+  // rpc: bg.delete долгой — WS-рассылка 'bg' уже без удалённой (старые
+  // события от запуска/kill выгрызаем, ждём broadcast именно удаления)
+  client.send({ type: 'rpc', id: 'b9', method: 'bg.delete', args: { id: longTask.id } });
+  const b9del = await client.next((m) => m.type === 'rpc_result' && m.id === 'b9');
+  check('rpc: bg.delete долгой после kill — удалена', String((b9del.result as { text: string }).text).includes('✓ удалена'), JSON.stringify(b9del.result));
+  let absent = false;
+  try {
+    for (let i = 0; i < 10 && !absent; i++) {
+      const ev = await client.next((m) => m.type === 'bg', 5000);
+      absent = !(ev as { tasks: { id: string }[] }).tasks.some((t) => t.id === longTask.id);
+    }
+  } catch {
+    // рассылка не пришла — absent останется false
+  }
+  check('ws: bg.delete — рассылка без удалённой задачи', absent, JSON.stringify(client.raw().filter((m) => m.type === 'bg')).slice(0, 200));
 
   // rpc: цель — goal.set/status/cancel (край: без текста — rpc_error)
   client.send({ type: 'rpc', id: 'g0', method: 'goal.set', args: {} });
