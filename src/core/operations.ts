@@ -57,6 +57,7 @@ import { looksLikePath } from '../cli-project.js';
 import { loadSettings } from '../settings.js';
 import { chatTeam, isSessionRef, requireProject, requireSession, type App, type Engine } from './engine.js';
 import { loadSchedule, saveSchedule } from './schedule.js';
+import { bgDelete, bgInfo, bgKill, bgList, bgLog, formatBgDuration, parseBgSpawn, spawnBg } from './bg.js';
 import {
   applyHomeImport,
   applyProjectImport,
@@ -77,7 +78,7 @@ export interface OpArg {
   name: string;
   required: boolean;
   /** Уточнение для панели подсказок (что подставлять: id, файлы, папки…) */
-  hint?: 'sessions' | 'agents' | 'chat' | 'models' | 'projects' | 'schedule' | 'path';
+  hint?: 'sessions' | 'agents' | 'chat' | 'models' | 'projects' | 'schedule' | 'path' | 'bg';
 }
 
 export interface OpSpec {
@@ -296,6 +297,19 @@ function sessionAgentsText(engine: Engine): string[] {
 /** id из хвоста команды: через пробел или запятую, без пустых и повторов. */
 function expandIds(rest: string[]): string[] {
   return [...new Set(rest.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean))];
+}
+
+/** Строка списка фоновой задачи: статусы для человека (тул рендерит свой вид агенту). */
+function bgTaskLine(task: ReturnType<typeof bgInfo>): string {
+  const emoji =
+    task.status === 'running' ? '⏳' : task.status === 'done' ? '✅' : task.status === 'failed' ? '❌' : task.status === 'timeout' ? '⏱' : task.status === 'killed' ? '⛔' : '❓';
+  const dur = formatBgDuration((task.endedAt ?? Date.now()) - task.startedAt);
+  const who = task.by === 'user' ? t('вы') : task.by;
+  const extra =
+    task.status === 'running'
+      ? `${emoji} идёт ${dur}${task.pid ? `, pid ${task.pid}` : ''}`
+      : `${emoji} ${task.status}, ${dur}${task.exitCode !== undefined ? `, код ${task.exitCode}` : ''}`;
+  return `${task.id} «${task.title}» — ${extra} (поставил: ${who})`;
 }
 
 /** /session agent add|delete <id…|all>: событие чата пишется репликой менеджера. */
@@ -1529,6 +1543,118 @@ export const OPERATIONS: OpSpec[] = [
       if (missing > 0) lines.push(tf('Не нашёл: {n} (список — /schedule)', { n: missing }));
       return lines;
     },
+  },
+
+  // фоновые задачи (диспетчер bg.ts): процессы под супервизией приложения
+  {
+    name: 'bg.list', implicit: true, needsProject: true,
+    args: [{ name: 'all', required: false }],
+    title: 'фоновые задачи',
+    help: 'текущего разговора; «all» — все задачи проекта',
+    run: async (_engine, rest) => {
+      const all = (rest[0] ?? '').trim().toLowerCase() === 'all';
+      const tasks = bgList();
+      const mine = all ? tasks : tasks.filter((t2) => t2.sessionId === requireSession(_engine.app).session.id);
+      if (mine.length === 0) {
+        return [t('Фоновых задач нет — /bg run <команда> или блок ```bg в ответе агента')];
+      }
+      return [
+        all ? t('Фоновые задачи проекта:') : t('Фоновые задачи этого разговора:'),
+        ...mine.map(bgTaskLine),
+      ];
+    },
+  },
+  {
+    name: 'bg.run', needsProject: true, needsSession: true,
+    args: [{ name: 'команда…', required: true }],
+    title: 'запустить команду фоном',
+    help: 'опции перед командой: timeout=30m check=5 title=сборка',
+    run: async (_engine, rest) => {
+      if (rest.length === 0) return [t('Синтаксис: /bg run [timeout=30m] [check=5] [title=…] <команда…>')];
+      const parsed = parseBgSpawn(rest.join(' '));
+      if (!parsed.command) return [t('Синтаксис: /bg run [timeout=30m] [check=5] [title=…] <команда…>')];
+      const task = spawnBg({
+        sessionId: requireSession(_engine.app).session.id,
+        by: 'user',
+        command: parsed.command,
+        title: parsed.title,
+        timeoutMs: parsed.timeoutMs,
+        checkMinutes: parsed.checkMinutes,
+      });
+      return [bgTaskLine(task), t('Завершение придёт в этот разговор; лог — /bg log ' + task.id)];
+    },
+  },
+  {
+    name: 'bg.log', needsProject: true,
+    args: [
+      { name: 'id', required: true, hint: 'bg' },
+      { name: 'строк', required: false },
+    ],
+    title: 'лог фоновой задачи',
+    help: 'хвост вывода (по умолчанию 40 строк)',
+    run: async (_engine, rest) => {
+      const id = rest[0] ?? '';
+      if (!id) return [t('Синтаксис: /bg log <id> [строк] — список: /bg')];
+      const lines = Math.max(1, Math.min(2000, Number.parseInt(rest[1] ?? '', 10) || 40));
+      return [bgLog(id, lines)];
+    },
+  },
+  {
+    name: 'bg.kill', needsProject: true,
+    args: [{ name: 'id…', required: true, hint: 'bg' }],
+    title: 'остановить фоновую задачу',
+    help: 'процесс и его дерево; можно несколько',
+    run: async (_engine, rest) => {
+      if (rest.length === 0) return [t('Синтаксис: /bg kill <id…> — список: /bg')];
+      return rest.map((id) => bgKill(id));
+    },
+  },
+  {
+    name: 'bg.delete', needsProject: true,
+    args: [{ name: 'id…', required: true, hint: 'bg' }],
+    title: 'удалить завершённую задачу',
+    help: 'из списка и лог с диска; running — нельзя',
+    run: async (_engine, rest) => {
+      if (rest.length === 0) return [t('Синтаксис: /bg delete <id…> — список: /bg')];
+      return rest.map((id) => bgDelete(id));
+    },
+  },
+
+  // цель (Session.goal): крутить разговор, пока модель не отчитается
+  {
+    name: 'goal.status', implicit: true, needsProject: true, needsSession: true,
+    title: 'состояние цели',
+    help: 'текст, бюджет раундов, итог',
+    run: async (engine) => engine.goalStatusLines(),
+  },
+  {
+    name: 'goal.set', needsProject: true, needsSession: true,
+    args: [
+      { name: 'текст…', required: true },
+      { name: 'раунды', required: false },
+    ],
+    title: 'задать цель',
+    help: 'раунды продолжаются, пока модель не ответит ```goal done|failed; бюджет по умолчанию из настроек',
+    run: async (engine, rest) => {
+      if (rest.length === 0) return [t('Синтаксис: /goal set <текст…> [раунды]')];
+      const last = Number.parseInt(rest[rest.length - 1]!, 10);
+      const rounds = Number.isInteger(last) && last > 0 ? last : loadSettings(SETTINGS_FILE, 0).goalMaxRounds;
+      const text = (Number.isInteger(last) && last > 0 ? rest.slice(0, -1) : rest).join(' ').trim();
+      if (!text) return [t('Синтаксис: /goal set <текст…> [раунды]')];
+      return [engine.setGoal(text, rounds)];
+    },
+  },
+  {
+    name: 'goal.done', needsProject: true, needsSession: true,
+    title: 'цель достигнута (вручную)',
+    help: 'вы сами проверили итог — цикл останавливается',
+    run: async (engine) => [engine.finishGoal('done', 'подтверждено пользователем')],
+  },
+  {
+    name: 'goal.cancel', needsProject: true, needsSession: true,
+    title: 'снять цель',
+    help: 'раунды больше не продолжаются',
+    run: async (engine) => [engine.cancelGoal()],
   },
 
   {

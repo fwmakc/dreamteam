@@ -161,6 +161,7 @@ export const MANAGER_PROMPT =
    '- {"op":"mail.add","name":"ящик","user":"робот@corp.ru","password":"пароль-приложения","imap":"imap.corp.ru","smtp":"smtp.corp.ru","smtpPort":587} — ящик в mails.json (tlsNoVerify — опционально)\n' +
   '- {"op":"mail.remove","name":"ящик"}; {"op":"messenger.add","key":"telegram","token":"123456:ABC…"} / {"op":"messenger.remove","key":"max"} — токены ботов в messengers.json (key: telegram|max)\n' +
   '- {"op":"model.update","id":"main","fields":{"vision":true}} — править карточку модели (vision, maxTokens, temperature…; булевы и числа — настоящими true/false/числами); {"op":"model.new","id":"новая","fields":{"provider":"openai-compatible","model":"…","baseUrl":"…","apiKey":"…","vision":true}} — новая карточка (provider обязателен); {"op":"model.delete","id":"…"} — удалить карточку (основная, служебная и менеджерская защищены). Какие есть — блок «Модели дома»\n' +
+  '- {"op":"goal.set","text":"чего достичь","maxRounds":12} — задать цель: раунды продолжаются, пока цель не решится (бюджет опционален); {"op":"goal.cancel"} — снять цель\n' +
   'Делай только те действия, о которых попросили. Если изменение не требуется — ответь одним текстом, без JSON.';
 
 export interface ManagerContext {
@@ -267,6 +268,8 @@ const MANAGER_OPS = new Set([
   'model.new',
   'model.update',
   'model.delete',
+  'goal.set',
+  'goal.cancel',
 ]);
 
 function isManagerAction(a: unknown): a is ManagerAction {
@@ -319,6 +322,10 @@ function isManagerAction(a: unknown): a is ManagerAction {
       );
     case 'model.delete':
       return typeof o.id === 'string' && !!o.id.trim();
+    case 'goal.set':
+      return typeof o.text === 'string' && !!o.text.trim();
+    case 'goal.cancel':
+      return true;
     default:
       return true; // session.list, session.new — обязательных полей нет
   }

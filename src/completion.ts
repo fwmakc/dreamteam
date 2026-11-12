@@ -25,6 +25,9 @@ export interface CompletionContext {
   /** Папки каталога по фрагменту пути — Tab как cd в шелле («~/Dev», «C:\пап»).
    *  Опционально: у кого нет доступа к диску, подсказывать не обязан. */
   dirOptions?(fragment: string): string[];
+  /** id фоновых задач проекта (свежие сверху) — для /bg log|kill|delete.
+   *  Опционально: пробы и старые вызовы подсказывать не обязаны. */
+  bgIds?(): string[];
 }
 
 function commonPrefix(items: string[]): string {
@@ -144,6 +147,8 @@ function argValues(op: OpSpec, argPos: number, ctx: CompletionContext, fragment:
     case 'projects':
       // id|путь: имена из дома плюс папки диска по набранному фрагменту
       return [...(ctx.projectNames?.() ?? []), ...(ctx.dirOptions?.(fragment) ?? [])];
+    case 'bg':
+      return ctx.bgIds?.() ?? [];
     default:
       return [];
   }
@@ -358,6 +363,7 @@ function valueRows(op: OpSpec, argPos: number, ctx: CompletionContext, fragment:
   else if (arg.hint === 'models') values = ctx.modelIds();
   else if (arg.hint === 'projects') values = ctx.projectNames?.() ?? [];
   else if (arg.hint === 'path') values = ctx.dirOptions?.(fragment) ?? [];
+  else if (arg.hint === 'bg') values = ctx.bgIds?.() ?? [];
   if (values === null) return [];
   return [
     `  ${operationCommand(op)} ${pc.dim(operationArgs(op))}:`,

@@ -19,6 +19,7 @@ import { AGENTS_DIR, APP_VERSION, DT_HOME, PROJECT_DIR, PROJECT_FILE, SETTINGS_F
 import { agentHeader, colorFn, ctxBar, printDim, printError, quotaBar, rosterLine, setOutputSink, setSpinnerRenderer, Spinner } from './ui.js';
 // ядро: раунды, менеджер, инструменты, память — общение только через Presenter
 import { Engine, chatTeam, isSessionRef, type App } from './core/engine.js';
+import { bgBoot, bgDrain, bgTick } from './core/bg.js';
 import { cachedQuota, fetchQuota } from './core/quota.js';
 import { loadSettings } from './settings.js';
 import { cliProjectArgs, parseCliProject } from './cli-project.js';
@@ -525,7 +526,9 @@ function messageRows(m: ChatMessage, team: Agent[]): string[] {
       ? pc.dim(t('⚙ инструменты'))
       : isSessionRef(m)
         ? pc.dim(tf('📎 разговор «{title}»', { title: m.authorName }))
-        : colorFn(agent?.color)(`${agent?.emoji ?? '🤖'} ${m.authorName}`);
+        : m.authorId === 'bg' || m.authorId === 'goal'
+          ? pc.dim(m.authorName)
+          : colorFn(agent?.color)(`${agent?.emoji ?? '🤖'} ${m.authorName}`);
   const rows = [`  ${who} ${pc.dim(`· ${fmtTime(m.ts)}`)}`];
   for (const line of m.text.split('\n')) rows.push('  ' + line);
   return rows;
@@ -801,6 +804,27 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // фоновые задачи в TUI: фонового цикла событий нет, поэтому таймер только
+  // показывает уведомления (заметками), а полные раунды ядра (реплики 'bg',
+  // команда реагирует) сгоняем перед следующей отправкой пользователя
+  const pendingBg: { sessionId: string; text: string }[] = [];
+  if (PROJECT_DIR) bgBoot(PROJECT_DIR);
+  const bgTimer = setInterval(() => {
+    if (abortActiveRound) return; // идёт ход — не влезаем в вывод
+    const sid = app.session?.id;
+    if (!sid) return;
+    try {
+      const notes = [...bgDrain(sid), ...bgTick().filter((n) => n.sessionId === sid)];
+      for (const n of notes) {
+        pendingBg.push({ sessionId: n.sessionId, text: n.text });
+        printDim('\n' + n.text.split('\n')[0] + t('  — подробнее перед следующей отправкой'));
+      }
+    } catch {
+      // супервизия не роняет TUI
+    }
+  }, 3_000);
+  bgTimer.unref();
+
   // Управляемый экран: альтернативный буфер, зоны чата/подсказок/ввода и свой
   // редактор строки. В пайпе (не TTY) — прежний readline-режим ниже.
   if (ui.screen && process.stdout.isTTY && process.stdin.isTTY) {
@@ -1069,6 +1093,29 @@ async function main(): Promise<void> {
         screen.reseed(historyRows(app.session.messages));
       }
     };
+    // фоновые уведомления, накопившиеся за ожидание ввода: раунды ядра перед
+    // репликой пользователя — команда видит их в истории и реагирует.
+    // Уведомления чужих разговоров остаются ждать своей сессии.
+    if (pendingBg.length > 0 && !line.startsWith('/')) {
+      const sid = app.session?.id ?? '';
+      const due = pendingBg.filter((p) => p.sessionId === sid);
+      for (let i = pendingBg.length - 1; i >= 0; i--) {
+        if (pendingBg[i]!.sessionId === sid) pendingBg.splice(i, 1);
+      }
+      if (due.length > 0) {
+        const acBg = new AbortController();
+        abortActiveRound = () => acBg.abort();
+        try {
+          for (const p of due) await engine.deliverBgNote(p.text, acBg.signal);
+          reseedIfSwitched();
+        } catch (err) {
+          printError(tf('ошибка: {err}', { err: err instanceof Error ? err.message : String(err) }));
+        } finally {
+          abortActiveRound = null;
+        }
+        if (acBg.signal.aborted) continue;
+      }
+    }
     try {
       if (line.startsWith('/')) {
         const verdict = runCommand(engine, line);
@@ -1092,6 +1139,13 @@ async function main(): Promise<void> {
         if (line.startsWith('/')) {
           reseedIfSwitched();
           await greetIfEmpty();
+        }
+        // /goal set задал цель — первый продолжающий раунд сразу (как в тикере
+        // serve), а не после следующей реплики руководителя
+        const g = engine.goalState();
+        if (line.startsWith('/') && g?.status === 'active' && g.text) {
+          await engine.startGoalRound(ac.signal);
+          reseedIfSwitched();
         }
       } finally {
         abortActiveRound = null;

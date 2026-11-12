@@ -1,0 +1,4 @@
+{
+  "allow": ["pwd", "ls", "cat", "head", "tail", "grep", "find", "tree", "wc", "file", "stat", "du", "df", "which", "whoami", "hostname", "date", "echo", "printf"],
+  "allowWin32": ["cd", "dir", "type", "findstr", "find", "where", "tree", "echo", "hostname", "whoami"]
+}

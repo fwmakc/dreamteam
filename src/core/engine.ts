@@ -94,6 +94,7 @@ import type {
   TeamMemory,
   ToolSpec,
   UserProfile,
+  GoalState,
 } from '../types.js';
 import type { Presenter, SpeakerRef } from './presenter.js';
 import { t, tf, conversationLanguage } from '../i18n.js';
@@ -134,6 +135,15 @@ const TOOL_FOLLOW_FOCUS =
 const MAX_TOOL_ITERATIONS = 16;
 
 /** Приложение — конспект другого разговора, подшитый в текущий через @session */
+/** Кто входит в раунд: пользователь, фоновая задача (уведомление) или цель. */
+type RoundAs = 'user' | 'bg' | 'goal';
+
+/** Реплика служебного автора (bg/goal): текст приходит готовым, рендер — служебный. */
+const ROUND_AUTHORS: Record<Exclude<RoundAs, 'user'>, string> = {
+  bg: '⚙ фоновая задача',
+  goal: '🎯 цель',
+};
+
 export function isSessionRef(m: ChatMessage): boolean {
   return m.authorId === 'session-ref';
 }
@@ -256,7 +266,8 @@ export class Engine {
    *  каждый раунд и перед приветствием менеджера (как профиль). */
   private language = 'русский';
 
-  /** Автономный режим: вопросы человеку решаются сами, раунды продолжаются. */
+  /** Автономный режим: вопросы человеку решаются сами, раунды продолжаются.
+   *  Это же авто-режим без текста цели: персистентная копия — session.goal. */
   autoMode = false;
   /** Сколько автоматических ходов осталось до остановки (лимит безопасности). */
   autoLeft = 0;
@@ -264,11 +275,115 @@ export class Engine {
   setAutoMode(on: boolean, turns: number): void {
     this.autoMode = on;
     this.autoLeft = on ? turns : 0;
+    // цель без текста — персистентная копия авто-режима: переживает рестарт,
+    // serve-тикер возобновит её. /auto off снимает только такую цель;
+    // цель с текстом выключается отдельно (/goal cancel).
+    try {
+      const { session, store } = requireProject(this.app);
+      const g = session.goal;
+      if (on) {
+        session.goal = { maxRounds: turns, roundsDone: 0, startedAt: Date.now(), status: 'active' };
+      } else if (g?.status === 'active' && !g.text) {
+        g.status = 'cancelled';
+      } else {
+        return;
+      }
+      store.save(session);
+    } catch {
+      // нет проекта/разговора — синхронизировать нечего
+    }
   }
   /** Автоответ на текстовые вопросы агентов (из settings.json). */
   private autoMessage = 'Решите вопрос на своё усмотрение.';
   /** Максимальное число отвечающих за раунд (0 — без ограничения; из settings.json). */
   private maxTurns = 3;
+
+  // ── цель (Session.goal): крутить, пока модель не отчитается ─────────────
+
+  /** Активная цель разговора (для снапшота serve и операций). */
+  goalState(): GoalState | undefined {
+    try {
+      return requireProject(this.app).session.goal;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Задать цель: раунды продолжаются, пока модель не отчитается блоком
+   *  ```goal done|failed или не кончится бюджет. /goal set, менеджер goal.set. */
+  setGoal(text: string, maxRounds: number): string {
+    const { session, store } = requireProject(this.app);
+    const rounds = Math.max(1, Math.min(200, Math.floor(maxRounds) || 1));
+    session.goal = { text, maxRounds: rounds, roundsDone: 0, startedAt: Date.now(), status: 'active' };
+    store.save(session);
+    return `🎯 Цель задана (бюджет: ${rounds} раундов-продолжений): ${text.slice(0, 120)}${text.length > 120 ? '…' : ''}`;
+  }
+
+  /** Снимает активную цель (пользователем: /goal cancel). */
+  cancelGoal(): string {
+    const { session, store } = requireProject(this.app);
+    const g = session.goal;
+    if (g?.status !== 'active') return 'активной цели нет';
+    g.status = 'cancelled';
+    store.save(session);
+    return '🎯 Цель снята — раунды больше не продолжаются';
+  }
+
+  /** Отчитывается о цели вручную (/goal done — «я сам всё проверил»). */
+  finishGoal(status: 'done' | 'failed' | 'budget', result?: string): string {
+    const { session, store } = requireProject(this.app);
+    const g = session.goal;
+    if (g?.status !== 'active') return 'активной цели нет';
+    g.status = status;
+    if (result) g.result = result;
+    store.save(session);
+    if (status === 'budget') {
+      return `🎯 Бюджет цели исчерпан (${g.roundsDone} из ${g.maxRounds} раундов). Продолжить: /goal set «тот же текст»`;
+    }
+    return status === 'done' ? `🎯 Цель достигнута${result ? `: ${result}` : ''}` : `🎯 Цель не достигнута${result ? `: ${result}` : ''}`;
+  }
+
+  /** Строки /goal status: состояние цели для человека. */
+  goalStatusLines(): string[] {
+    const g = this.goalState();
+    if (!g) return ['цели нет — задать: /goal set <текст> [раунды]'];
+    const head =
+      g.status === 'active'
+        ? `🎯 цель активна (раундов ${g.roundsDone}/${g.maxRounds})`
+        : `🎯 цель: ${g.status}`;
+    const lines = [head];
+    if (g.text) lines.push(`  текст: ${g.text}`);
+    if (g.result) lines.push(`  итог: ${g.result}`);
+    return lines;
+  }
+
+  /** Целевой промпт — сообщение, которым продолжается цикл после ответа команды. */
+  private goalContinueText(g: GoalState): string {
+    return (
+      `🎯 Цель: ${g.text}\n\n` +
+      'Продолжай работу над целью. Если цель полностью достигнута — ответь блоком ```goal done, ' +
+      'в теле — итог: что сделано и как проверено. Если цель недостижима (ошибка, тупик, нужен человек) — ' +
+      'блоком ```goal failed с причиной. Пока не готов — работай и рассказывай, что делаешь.'
+    );
+  }
+
+  /**
+   * Отчёт модели о цели в репликах раунда (после индекса before): блок
+   * ```goal done|failed — однострочный («```goal done Сборка зелёная»)
+   * или многострочный (тело блока — итог). Только у активной цели с текстом.
+   */
+  private goalVerdictSince(before: number): { status: 'done' | 'failed'; result?: string } | null {
+    const g = this.goalState();
+    if (g?.status !== 'active' || !g.text) return null;
+    for (const m of this.session.messages.slice(before)) {
+      if (['user', 'tool', 'bg', 'goal', 'session-ref'].includes(m.authorId)) continue;
+      const m1 = /```goal[ \t]+(done|failed)[ \t]+([^\n`]*)/.exec(m.text);
+      if (m1) return { status: m1[1] as 'done' | 'failed', result: m1[2]?.trim() || undefined };
+      const m2 = /```goal[ \t]+(done|failed)[ \t]*\n([\s\S]*?)```/.exec(m.text);
+      if (m2) return { status: m2[1] as 'done' | 'failed', result: m2[2]?.trim() || undefined };
+    }
+    return null;
+  }
 
   constructor(
     public app: App,
@@ -430,10 +545,13 @@ export class Engine {
         const isMine = m.authorId === agent.id;
         const isUser = m.authorId === 'user';
         const isTool = m.authorId === 'tool';
+        // служебные ходы (фоновые уведомления, цель) не сворачиваются никогда:
+        // пропущенное «задача упала» стоит дороже экономии контекста
+        const isService = m.authorId === 'bg' || m.authorId === 'goal';
         const addressed = MENTION_TRIGGERS.some((p) =>
           norm(m.text).includes(p + norm(agent.name)) || norm(m.text).includes(p + agent.id),
         );
-        if (isTail || isMine || isUser || isTool || addressed || isSessionRef(m)) return m;
+        if (isTail || isMine || isUser || isTool || isService || addressed || isSessionRef(m)) return m;
         const preview = m.text.slice(0, 80).replace(/\n/g, ' ');
         return { ...m, text: `(${preview}${m.text.length > 80 ? '…' : ''})` };
       });
@@ -455,6 +573,10 @@ export class Engine {
         messages.push({ role: 'user', content: `${user.name}: ${m.text}` });
       } else if (m.authorId === 'tool') {
         messages.push({ role: 'user', content: `${TOOL_RESULT_HEADER}\n${m.text}` });
+      } else if (m.authorId === 'bg' || m.authorId === 'goal') {
+        // служебные ходы приходят с самодостаточным текстом («[⚙ фоновая задача
+        // …]», «🎯 Цель: …») — уходят как есть, без автора-человека
+        messages.push({ role: 'user', content: m.text });
       } else {
         messages.push({
           role: 'user',
@@ -638,27 +760,97 @@ export class Engine {
       return;
     }
 
-    // автономный режим: после ответа команды авто-сообщение запускает новый
-    // раунд, пока не кончатся ходы (лимит) или авто-режим не выключат
-    let current = text;
-    let turns = 0;
-    let firstRound = true; // прикреплённые файлы едут с настоящей репликой, не с auto-сообщением
+    // автономность и цель — в общем цикле раундов: продолжения, бюджет, отчёт
+    await this.roundsLoop(text, 'user', files, team, signal);
+  }
+
+  /**
+   * Цикл раундов с продолжениями. После ответа команды цикл продолжается
+   * авто-сообщением (авто-режим — реплика от пользователя, как раньше) или
+   * целевым промптом (цель — реплика authorId 'goal') — пока не кончатся
+   * ходы/бюджет, не придёт отчёт модели ```goal done|failed или автономность
+   * не снимут (/auto off, /goal cancel). Отчёт ищем в репликах каждого раунда:
+   * любые агенты, включая продолжения после тулов. Тем же входом живут и
+   * служебные ходы: возобновление цели после рестарта (as 'goal') и доставка
+   * фоновых уведомлений (as 'bg').
+   */
+  private async roundsLoop(
+    initial: string,
+    initialAs: RoundAs,
+    files: string[],
+    team: Agent[],
+    signal: AbortSignal,
+  ): Promise<void> {
+    let current: string | null = initial;
+    let currentAs: RoundAs = initialAs;
     while (current !== null) {
-      await this.runRound(current, team, signal, firstRound ? files : []);
-      firstRound = false;
-      if (!this.autoMode || this.autoLeft <= 0 || signal.aborted) {
-        if (this.autoMode && this.autoLeft <= 0 && this.autoMode) {
-          this.autoMode = false;
+      const before = this.session.messages.length;
+      await this.runRound(current, team, signal, currentAs === 'user' ? files : [], currentAs);
+      if (signal.aborted) break;
+      const verdict = this.goalVerdictSince(before);
+      if (verdict) {
+        this.presenter.notice('  ' + this.finishGoal(verdict.status, verdict.result));
+        break;
+      }
+      const g = this.session.goal;
+      if (g?.status === 'active' && g.text) {
+        if (g.roundsDone >= g.maxRounds) {
+          this.presenter.notice('  ' + this.finishGoal('budget'));
+          break;
+        }
+        g.roundsDone++;
+        this.store.save(this.session);
+        current = this.goalContinueText(g);
+        currentAs = 'goal';
+        continue;
+      }
+      if (!this.autoMode || this.autoLeft <= 0) {
+        if (this.autoMode && this.autoLeft <= 0) {
+          this.setAutoMode(false, 0);
           this.presenter.notice(t('  🤖 автономный режим завершён: лимит ходов исчерпан (/auto on — включить снова)'));
         }
         break;
       }
       this.autoLeft--;
+      if (g?.status === 'active' && !g.text) {
+        g.roundsDone++;
+        this.store.save(this.session);
+      }
       current = this.autoMessage;
+      currentAs = 'user';
     }
   }
 
-  private async runRound(text: string, fullTeam: Agent[], signal: AbortSignal, files: string[] = []): Promise<void> {
+  /**
+   * Служебный ход от подсистемы фоновых задач: уведомление попадает в разговор
+   * как реплика authorId 'bg', команда реагирует; активная цель после этого
+   * продолжается как обычно (roundsLoop).
+   */
+  async deliverBgNote(text: string, signal: AbortSignal): Promise<void> {
+    const team = this.team();
+    await this.roundsLoop(text, 'bg', [], team, signal);
+  }
+
+  /**
+   * Служебный ход цели (as 'goal'): начать или продолжить цикл прямо сейчас —
+   * первый ввод после /goal set и возобновление после рестарта (serve-тикер).
+   * Неактивная цель — тихий no-op.
+   */
+  async startGoalRound(signal: AbortSignal): Promise<void> {
+    const g = this.goalState();
+    if (g?.status !== 'active') return;
+    const input = g.text ? this.goalContinueText(g) : this.autoMessage;
+    const team = this.team();
+    await this.roundsLoop(input, 'goal', [], team, signal);
+  }
+
+  private async runRound(
+    text: string,
+    fullTeam: Agent[],
+    signal: AbortSignal,
+    files: string[] = [],
+    as: RoundAs = 'user',
+  ): Promise<void> {
     const { session, store } = requireProject(this.app);
     // профиль читаем каждый раунд: правки config/user.json подхватываются на лету
     const profile = loadUserProfile(USER_FILE);
@@ -674,24 +866,27 @@ export class Engine {
     // в чате отвечают только позванные (старые чаты без списка — вся команда)
     const team = chatTeam(session, fullTeam);
 
-    // @session — приложить конспект другого разговора (можно несколько, "@session 2" — сразу номер)
+    // @session — приложить конспект другого разговора (можно несколько, "@session 2" — сразу номер);
+    // служебные ходы (bg/goal) идут с готовым текстом, конспекты к ним не приделываются
     const attachments: ChatMessage[] = [];
     const usedIds = new Set<string>();
     let cleaned = text;
-    const refRegex = /[@!]session(?:\s+(\d+))?/gi;
-    for (const match of text.matchAll(refRegex)) {
-      const picked = await this.pickSession(match[1]);
-      if (!picked || picked.id === session.id || usedIds.has(picked.id)) continue;
-      usedIds.add(picked.id);
-      const digest = await this.getSessionDigest(picked, signal, profile.name);
-      if (!digest) continue;
-      attachments.push({
-        authorId: 'session-ref',
-        authorName: picked.title,
-        text: digest,
-        ts: Date.now(),
-      });
-      cleaned = cleaned.replace(match[0], ' ');
+    if (as === 'user') {
+      const refRegex = /[@!]session(?:\s+(\d+))?/gi;
+      for (const match of text.matchAll(refRegex)) {
+        const picked = await this.pickSession(match[1]);
+        if (!picked || picked.id === session.id || usedIds.has(picked.id)) continue;
+        usedIds.add(picked.id);
+        const digest = await this.getSessionDigest(picked, signal, profile.name);
+        if (!digest) continue;
+        attachments.push({
+          authorId: 'session-ref',
+          authorName: picked.title,
+          text: digest,
+          ts: Date.now(),
+        });
+        cleaned = cleaned.replace(match[0], ' ');
+      }
     }
     if (signal.aborted) return;
     // подчищаем следы @session, но не трогаем переносы строк (многострочные сообщения)
@@ -705,11 +900,14 @@ export class Engine {
 
     const userText = cleaned || (attachments.length > 0 ? 'Ознакомься с приложенным конспектом' : '');
     if (!userText) return;
-    const userMsg: ChatMessage = { authorId: 'user', authorName: 'Вы', text: userText, ts: Date.now() };
+    const userMsg: ChatMessage =
+      as === 'user'
+        ? { authorId: 'user', authorName: 'Вы', text: userText, ts: Date.now() }
+        : { authorId: as, authorName: ROUND_AUTHORS[as], text: userText, ts: Date.now() };
     // метки [имя] в тексте остаются (агенты ищут файлы в inbox по ним), список — рядом
     if (files.length) userMsg.attachments = files;
     session.messages.push(userMsg);
-    if (session.title === 'Новый разговор') {
+    if (as === 'user' && session.title === 'Новый разговор') {
       const flat = userText.replace(/\s+/g, ' ');
       session.title = flat.slice(0, 42) + (flat.length > 42 ? '…' : '');
       // у живого менеджера спрашиваем имя по первому сообщению; в mock-режиме
@@ -724,7 +922,9 @@ export class Engine {
     // @менеджер — конфигурация переговорки через разговор: состав команды,
     // состав чата, разговоры. Другого пути менять agents.json в приложении нет.
     // Чат «только менеджер» (новый разговор): все реплики — ему, без модератора.
-    if (team.length === 0 || managerMentioned(text, this.app.mgr)) {
+    // Служебные ходы менеджера не зовут: bg-уведомление или цель — не просьба
+    // перекроить команду.
+    if (team.length === 0 || (as === 'user' && managerMentioned(text, this.app.mgr))) {
       await this.managerTurn(text, fullTeam, profile, signal);
       return;
     }
@@ -1094,6 +1294,15 @@ export class Engine {
       }
       case 'session.delete':
         return this.deleteSessionById(String(action.id ?? ''));
+      case 'goal.set': {
+        // тот же дефолт бюджета, что у /goal set: настройка goalMaxRounds
+        const rounds = typeof action.maxRounds === 'number' && Number.isInteger(action.maxRounds) && action.maxRounds > 0
+          ? action.maxRounds
+          : loadSettings(SETTINGS_FILE, 0).goalMaxRounds;
+        return this.setGoal(String(action.text), rounds);
+      }
+      case 'goal.cancel':
+        return this.cancelGoal();
     }
   }
 
@@ -1494,7 +1703,7 @@ export class Engine {
 
   /** Карточки → экземпляры Tool для агента (пересобирается на каждый раунд). */
   private toolsetFor(agent: Agent, cfg: ToolsConfig, signal: AbortSignal): Map<string, Tool> {
-    return buildToolset(agent, cfg, this.toolContext(), signal, this.userTools, this.userToolCards);
+    return buildToolset(agent, cfg, this.toolContext(), signal, this.userTools, this.userToolCards, this.session.id);
   }
 
   /** Мосты к хосту для тулов: рабочая папка, полный конвейер shell, http и живой вопрос. */
@@ -1629,9 +1838,11 @@ export class Engine {
           continue;
         }
         if (verdict === 'ask') {
-          // автономный режим: вопросы решаются сами (на усмотрение агентов)
+          // автономный ход (авто-режим или активная цель): вопросы решаются сами
           if (this.autoMode) {
             results.push(`🤖 автономно: разрешаю ${describeAction(action)}`);
+          } else if (this.session.goal?.status === 'active') {
+            results.push(`🎯 цель: разрешаю ${describeAction(action)}`);
           } else {
             const ok = await this.presenter.confirm({ label: toolLabelOf(action), desc: describeAction(action), who: agent });
             if (!ok) {

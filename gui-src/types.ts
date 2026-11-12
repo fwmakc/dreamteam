@@ -146,6 +146,41 @@ export interface ScheduleTaskInfo {
   enabled: boolean;
 }
 
+/** Фоновая задача проекта (bg.json ядра) — секция «Фоновые» сайдбара */
+export interface BgTaskInfo {
+  id: string;
+  sessionId: string;
+  /** Кто поставил: 'user' или id агента */
+  by: string;
+  title: string;
+  command: string;
+  status: 'running' | 'done' | 'failed' | 'timeout' | 'killed' | 'lost';
+  pid?: number;
+  startedAt: number;
+  endedAt?: number;
+  exitCode?: number;
+  /** Таймаут, мс; 0/undefined — без таймаута */
+  timeoutMs?: number;
+  /** Период напоминаний, минут; 0 — выключены */
+  checkMinutes: number;
+  logBytes: number;
+  truncated?: boolean;
+  notified?: boolean;
+  error?: string;
+  adopted?: boolean;
+}
+
+/** Цель текущего разговора (Session.goal ядра) — чип 🎯 и форма «Цель» */
+export interface GoalInfo {
+  /** undefined — авто-режим без детекции завершения */
+  text?: string;
+  maxRounds: number;
+  roundsDone: number;
+  startedAt: number;
+  status: 'active' | 'done' | 'failed' | 'budget' | 'cancelled';
+  result?: string;
+}
+
 /** Подсказка операции из манифеста (operations.ts) — для панели команд GUI */
 export interface OpHint {
   /** Каноническая команда: '/session open' или обзорная '/sessions' */
@@ -204,7 +239,7 @@ export interface StateSnapshot {
   /** проекты дома — клик = переключение (rpc project.open) */
   knownProjects?: ProjectRecordInfo[];
   auto: { mode: boolean; left: number };
-  settings: { width: number; language?: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string; quotePrefix?: string; maxInputRows: number; compressThreshold: number };
+  settings: { width: number; language?: string; margin: number; screen: boolean; runTimeoutMs: number; maxOutputChars: number; autoMessage: string; quotePrefix?: string; maxInputRows: number; compressThreshold: number; goalMaxRounds?: number; bgCheckMinutes?: number; bgTimeoutMinutes?: number };
   completion: { operations: OpHint[] };
   /** схемы карточек: формы «Изменить» (агент/модель/разговор/проект) рендерятся из них */
   schemas?: Record<string, CardSchema>;
@@ -213,6 +248,10 @@ export interface StateSnapshot {
   ui?: { id: string; strings: Record<string, string>; languages?: LanguageInfo[] };
   /** кэш последнего события schedule (в снапшот state не входит) */
   scheduleTasks?: ScheduleTaskInfo[];
+  /** кэш последнего события bg (в снапшот state входит) */
+  bgTasks?: BgTaskInfo[];
+  /** цель текущего разговора — чип 🎯 в статус-баре и кнопка «Цель» */
+  goal?: GoalInfo;
   /** память команды: общая и «из других разговоров» по участникам */
   memory?: { shared: string; agents: Record<string, { otherChats?: string }> };
 }
@@ -242,6 +281,7 @@ export type WsEvent =
   | { type: 'settings'; settings: StateSnapshot['settings'] }
   | { type: 'manager'; manager: StateSnapshot['manager'] }
   | { type: 'schedule'; tasks: ScheduleTaskInfo[] }
+  | { type: 'bg'; tasks: BgTaskInfo[] }
   | { type: 'rpc_result'; id: string; result: unknown }
   | { type: 'rpc_error'; id: string; error: string };
 

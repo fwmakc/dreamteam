@@ -62,6 +62,7 @@ import {
   settingsEntries,
 } from './core/transfer.js';
 import { dueTasks, loadSchedule, saveSchedule, type ScheduleTask } from './core/schedule.js';
+import { bgBoot, bgDelete, bgDrain, bgInfo, bgKill, bgList, bgLog, bgTick, spawnBg, type BgTaskInfo, type BgNote } from './core/bg.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, ModelRef, Session } from './types.js';
 import { localeId, localeDict, applyLocale, knownLanguages, t } from './i18n.js';
@@ -77,7 +78,7 @@ import { localeId, localeDict, applyLocale, knownLanguages, t } from './i18n.js'
  * Протокол (WS /ws, JSON-строки):
  *  сервер → клиент: state, notice, error, turn_header, busy, busy_end,
  *    delta, turn_end, say, tool_results, attachment, confirm, choose_session,
- *    session_opened, export_data, rpc_result, rpc_error;
+ *    session_opened, export_data, rpc_result, rpc_error, bg {tasks};
  *  клиент → сервер: hello, user_message, command, abort, confirm_response,
  *    choose_response, export_home | export_settings | export_project |
  *    export_session, import_home | import_settings | import_project |
@@ -89,7 +90,8 @@ import { localeId, localeDict, applyLocale, knownLanguages, t } from './i18n.js'
  *    project.list/new/open/close/delete/update, project.host.add/update/delete,
  *    project.mail.add/update/delete, project.messenger.add/update/delete,
  *    profile.update, settings.show/update, manager.show/update,
- *    schedule.list/add/delete/toggle; сервисные вне манифеста: state,
+ *    schedule.list/add/delete/toggle, bg.list/run/log/kill/delete,
+ *    goal.set/status/done/cancel; сервисные вне манифеста: state,
  *    fs.dirs (подпапки каталога — браузер путей для форм GUI).
  *
  * `command` — текст `/…`: ядро исполняет те же команды, что и терминал
@@ -193,6 +195,11 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
     project: projectId ? { id: projectId, name: projectId, path: WORKSPACE } : null,
     knownProjects: listProjects().map((p) => ({ name: p.id, path: p.path ?? '', lastOpened: p.lastOpened ?? p.createdAt })),
     auto: engine ? { mode: engine.autoMode, left: engine.autoLeft } : { mode: false, left: 0 },
+    // цель (Session.goal): активный цикл — чип 🎯 n/N и кнопка «Цель» в GUI
+    goal: engine?.goalState() ?? undefined,
+    // фоновые задачи открытого проекта: секция «Фоновые» сайдбара; живой пуш —
+    // WS-событие {type:'bg', tasks} (rpc bg.list — тот же список по запросу)
+    bgTasks: bgList().map(bgInfo),
     // словарь автодополнения: имена команд — из ядра; остальные данные
     // (разговоры, команда, состав чата, провайдеры, имя менеджера) выводятся
     // клиентом из остальных полей этого же снапшота
@@ -418,23 +425,30 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   // заметки движка уходят клиентам WS (на старте их ещё нет) — строку проекта
   // показываем и в консоль, рядом с адресом API
   if (PROJECT_DIR) console.log(pc.dim(`  Проект: ${basename(PROJECT_DIR)}${WORKSPACE ? ` · ${WORKSPACE}` : ''}`));
+  // фоновые задачи проекта: долить с диска, переусыновить живые процессы,
+  // недоставленные финалы вернуть в очередь (доставка — тикером)
+  if (PROJECT_DIR) bgBoot(PROJECT_DIR);
 
   let activeAbort: (() => void) | null = null;
   // раунды выстраиваются в очередь: команды и сообщения никогда не «наезжают»
   // друг на друга, а отказ «подождите» не нужен ни скриптам, ни оболочке
   let roundChain: Promise<void> = Promise.resolve();
+  // идёт ли сейчас ход (или в очереди): цель возобновляется только на простое
+  let roundsInFlight = 0;
 
   /** Раунд под одним AbortController; в конце — свежий state всем клиентам. */
   const runRound = (work: (signal: AbortSignal) => Promise<void>): Promise<void> => {
     const run = roundChain.then(async () => {
       const ac = new AbortController();
       activeAbort = () => ac.abort();
+      roundsInFlight++;
       try {
         await work(ac.signal);
       } catch (err) {
         presenter.error(`ошибка: ${err instanceof Error ? err.message : err}`);
       } finally {
         activeAbort = null;
+        roundsInFlight--;
         broadcastState();
       }
     });
@@ -447,6 +461,22 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   const scheduleTimer = setInterval(() => {
     for (const task of dueTasks(loadSchedule(DT_HOME), Date.now(), nextDue)) {
       void runRound((signal) => engine.handleMessage(task.message, signal));
+    }
+    // фоновые задачи: таймауты, пинги, переусыновлённые; финалы — раундами ядра
+    // (реплика authorId 'bg'), уведомления чужих разговоров ждут открытия сессии
+    try {
+      const sid = app.session?.id;
+      const notes: BgNote[] = [...(sid ? bgDrain(sid) : []), ...(sid ? bgTick().filter((n) => n.sessionId === sid) : [])];
+      if (notes.length > 0) {
+        for (const n of notes) void runRound((signal) => engine.deliverBgNote(n.text, signal));
+        broadcastBg();
+      }
+    } catch {
+      // супервизия фоновой задачи не роняет тикер
+    }
+    // активная цель на простое (рестарт, прерванный Esc ход): продолжаем
+    if (engine.goalState()?.status === 'active' && roundsInFlight === 0) {
+      void runRound((signal) => engine.startGoalRound(signal));
     }
   }, 60_000);
 
@@ -523,6 +553,13 @@ export async function startServe(opts: { port?: number } = {}): Promise<ServeHan
   const broadcastSchedule = (): void => {
     presenter.broadcast({ type: 'schedule', tasks: loadSchedule(DT_HOME) });
   };
+
+  /** Пуш списка фоновой задачи проекта (изменился после run/kill/delete/boot). */
+  const broadcastBg = (): void => {
+    presenter.broadcast({ type: 'bg', tasks: bgTasksOf() });
+  };
+
+  const bgTasksOf = (): BgTaskInfo[] => bgList().map(bgInfo);
 
   // https по желанию; кривая полукастройка — отказ здесь, до поднятия сервера
   const tls = tlsFromEnv();
@@ -844,6 +881,9 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         engine.openSessionById(id);
         // состав чата зависит от разговора: после переключения всем нужен свежий state
         broadcastState();
+        // финальные уведомления фоновой задачи этого разговора, накопившиеся,
+        // пока он был закрыт, — раундами ядра (реплики authorId 'bg')
+        for (const n of bgDrain(id)) void runRound((signal) => engine.deliverBgNote(n.text, signal));
         return { ok: true };
       }
       case 'session.new': {
@@ -1031,6 +1071,9 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         await runRound(async () => {
           report = engine.switchProject(arg, false);
         });
+        // фон нового проекта: долить задачи, переусыновить процессы
+        if (PROJECT_DIR) bgBoot(PROJECT_DIR);
+        broadcastBg();
         await welcomeIfEmpty();
         return { text: report };
       }
@@ -1205,6 +1248,58 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         if (task) { task.enabled = !task.enabled; saveSchedule(DT_HOME, tasks); }
         broadcastSchedule();
         return { tasks };
+      }
+      // фоновые задачи: тот же диспетчер, что у тула ```bg и /bg
+      case 'bg.list':
+        return { tasks: bgTasksOf() };
+      case 'bg.log':
+        return { text: bgLog(String(args.id ?? ''), Math.max(1, Math.min(2000, Number(args.lines ?? 40) || 40))) };
+      case 'bg.run': {
+        if (!app.session) throw new Error('bg.run: нужен открытый разговор — некуда доставить уведомление о завершении');
+        const timeoutMs = typeof args.timeoutMs === 'number' ? args.timeoutMs : typeof args.timeoutMinutes === 'number' ? args.timeoutMinutes * 60_000 : undefined;
+        const task = spawnBg({
+          sessionId: app.session.id,
+          by: 'user',
+          command: String(args.command ?? '').trim(),
+          title: args.title ? String(args.title) : undefined,
+          timeoutMs,
+          checkMinutes: typeof args.checkMinutes === 'number' ? args.checkMinutes : undefined,
+        });
+        broadcastBg();
+        return { task: bgInfo(task) };
+      }
+      case 'bg.kill': {
+        const text = bgKill(String(args.id ?? ''));
+        broadcastBg();
+        return { text };
+      }
+      case 'bg.delete': {
+        const text = bgDelete(String(args.id ?? ''));
+        broadcastBg();
+        return { text };
+      }
+      // цель: цикл «крутить, пока не решит» (Session.goal)
+      case 'goal.set': {
+        const text = String(args.text ?? '').trim();
+        if (!text) throw new Error('goal.set: жду текст цели');
+        const maxRounds = Number(args.maxRounds ?? loadSettings(SETTINGS_FILE, 0).goalMaxRounds);
+        const report = engine.setGoal(text, maxRounds);
+        broadcastState();
+        // цель стартует сразу, если ход сейчас не идёт (иначе подхватит текущий цикл)
+        if (roundsInFlight === 0) void runRound((signal) => engine.startGoalRound(signal));
+        return { text: report };
+      }
+      case 'goal.status':
+        return { goal: engine.goalState() };
+      case 'goal.done': {
+        const report = engine.finishGoal('done', args.result ? String(args.result) : 'подтверждено пользователем');
+        broadcastState();
+        return { text: report };
+      }
+      case 'goal.cancel': {
+        const report = engine.cancelGoal();
+        broadcastState();
+        return { text: report };
       }
       default:
         throw new Error(`неизвестный rpc-метод «${method}»`);

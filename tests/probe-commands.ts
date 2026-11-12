@@ -519,6 +519,68 @@ const threw = async (line: string): Promise<string> => {
   check('auto off: выключен', lines[0]?.includes('выключен') ?? false);
 }
 
+// ── фоновые задачи (/bg) и цель (/goal) ──────────────────────────────────────
+{
+  const { bgList } = await import('../src/core/bg.js');
+
+  let lines = await run(engine, '/bg');
+  check('bg: пустой список — подсказка', lines[0]?.includes('Фоновых задач нет') ?? false, JSON.stringify(lines));
+
+  lines = await run(engine, '/bg run title=проба node -e "console.log(\'проба-лог\');setTimeout(()=>{},300)"');
+  check(
+    'bg run: строка с id и подсказкой лога',
+    lines[0]?.includes('⏳') === true && lines[0]?.includes('«проба»') === true && lines[1]?.includes('/bg log bg-') === true,
+    JSON.stringify(lines),
+  );
+  const id = bgList().find((t) => t.sessionId === app.session!.id)?.id ?? '';
+  check('bg run: задача в bg.json проекта', id.startsWith('bg-'), `id=${id}`);
+
+  // короткий сон (300 мс) — дожидаемся финализации: и лог, и статус на диске
+  await new Promise((r) => setTimeout(r, 1500));
+  lines = await run(engine, `/bg log ${id} 5`);
+  check('bg log: хвост вывода команды', lines.some((l) => l.includes('проба-лог')), JSON.stringify(lines));
+  lines = await run(engine, '/bg');
+  check('bg: завершённая задача — ✅ в списке', lines.some((l) => l.includes(id) && l.includes('✅')), JSON.stringify(lines));
+  lines = await run(engine, `/bg kill ${id}`);
+  check('bg kill: завершённую не трогаем — вежливо', lines[0]?.includes('уже завершилась') ?? false, JSON.stringify(lines));
+  lines = await run(engine, `/bg delete ${id}`);
+  check('bg delete: завершённая удаляется', lines[0]?.includes('✓ удалена') ?? false, JSON.stringify(lines));
+
+  // долгая задача: running нельзя удалить, kill ставит ⛔
+  lines = await run(engine, '/bg run title=долгая node -e "setTimeout(()=>{},8000)"');
+  const id2 = bgList().find((t) => t.status === 'running')?.id ?? '';
+  check('bg run: долгая запущена', id2.startsWith('bg-'), `id=${id2}`);
+  lines = await run(engine, `/bg delete ${id2}`);
+  check('bg delete: running удалить нельзя', lines[0]?.includes('ещё выполняется') ?? false, JSON.stringify(lines));
+  lines = await run(engine, `/bg kill ${id2}`);
+  check('bg kill: отчёт об остановке', lines[0]?.includes(id2) ?? false, JSON.stringify(lines));
+  let killed = false;
+  for (let i = 0; i < 50 && !killed; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    killed = bgList().some((t) => t.id === id2 && t.status === 'killed');
+  }
+  check('bg kill: статус killed на диске', killed, JSON.stringify(bgList().map((t) => `${t.id}:${t.status}`)));
+  await run(engine, `/bg delete ${id2}`);
+
+  // (после /auto on|off выше в сессии уже есть goal-запись — «цели нет» тут не бывает)
+  lines = await run(engine, '/goal status');
+  check('goal status: строка состояния с 🎯', lines[0]?.includes('🎯') ?? false, JSON.stringify(lines));
+  lines = await run(engine, '/goal set пробная цель 4');
+  check('goal set: отчёт с бюджетом', lines[0]?.includes('Цель задана') && lines[0]?.includes('4'), JSON.stringify(lines));
+  const g = engine.goalState();
+  check('goal set: цель в сессии — текст и бюджет', g?.status === 'active' && g.text === 'пробная цель' && g.maxRounds === 4, JSON.stringify(g));
+  lines = await run(engine, '/goal status');
+  const joined = lines.join(' ');
+  check('goal status: 🎯, текст и счётчик 0/4', joined.includes('🎯') && joined.includes('пробная цель') && joined.includes('0/4'), JSON.stringify(lines));
+  lines = await run(engine, '/goal done');
+  check('goal done: закрыта вручную', engine.goalState()?.status === 'done' && engine.goalState()?.result === 'подтверждено пользователем', JSON.stringify(engine.goalState()));
+  await run(engine, '/goal set вторая 2');
+  lines = await run(engine, '/goal cancel');
+  check('goal cancel: снята', engine.goalState()?.status === 'cancelled', JSON.stringify(engine.goalState()));
+  lines = await run(engine, '/goal set');
+  check('goal set: без аргументов — синтаксис', lines[0]?.includes('Синтаксис') ?? false, JSON.stringify(lines));
+}
+
 // ── края: старые имена умерли, свой тул, неизвестная, терминальная ──────────
 {
   // свой тул: достаточно файла tools/<id>.ts — включается командой

@@ -97,7 +97,7 @@ export type ToolConfig = Record<string, unknown>;
 export type ToolFactory = (config: ToolConfig) => Tool;
 
 /** Встроенные тулы: их имена нельзя занимать файлами в tools/ */
-export const BUILTIN_TOOL_IDS = ['files', 'shell', 'git', 'arch', 'ssh', 'look', 'image', 'docs', 'ocr', 'web', 'mail', 'telegram', 'max'] as const;
+export const BUILTIN_TOOL_IDS = ['files', 'shell', 'git', 'arch', 'ssh', 'look', 'image', 'docs', 'ocr', 'web', 'mail', 'telegram', 'max', 'bg'] as const;
 
 /**
  * Короткие описания встроенных тулов — реестр для контекста менеджера.
@@ -118,6 +118,7 @@ export const BUILTIN_TOOL_DESCS: Readonly<Record<(typeof BUILTIN_TOOL_IDS)[numbe
   mail: 'почта проекта: list/find/read/send по ящикам из mails',
   telegram: 'бот Telegram: чаты, входящие, отправка сообщений и файлов',
   max: 'бот MAX: чаты, входящие, отправка сообщений и файлов',
+  bg: 'фоновые задачи: запуск команды под супервизией, список, лог, остановка',
 };
 
 /** id тула: имя файла в tools/ или встроенный — маска в src/ids.ts. */
@@ -478,6 +479,8 @@ export interface BuiltinDeps {
   agent: Agent;
   tctx: ToolContext;
   signal?: AbortSignal;
+  /** Активный разговор (для тулов, ведущих свою историю: bg) */
+  sessionId?: string;
 }
 
 /** Фабрика встроенного тула: карточка агента + мосты к коду исполнения. */

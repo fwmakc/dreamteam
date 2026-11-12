@@ -630,8 +630,10 @@ export function resolveToolPath(cwd: string, p: string): string | null {
   const first = p.replaceAll('\\', '/').split('/')[0]!;
   if (!(PROJECT_SUBDIRS as readonly string[]).includes(first)) return safePath(cwd, p);
   return safePath(projectStoreBase(), p);
-}function killTree(child: ChildProcess): void {
-  // shell:true порождает cmd.exe -> сама команда; убиваем всё дерево
+}
+
+/** Убивает дерево процесса: shell:true порождает cmd.exe → сама команда. */
+export function killTree(child: ChildProcess): void {
   if (process.platform === 'win32' && child.pid) {
     spawn('taskkill', ['/T', '/F', '/PID', String(child.pid)], { stdio: 'ignore' });
   } else {

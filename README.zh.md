@@ -258,7 +258,13 @@ dreamteam 的 GigaChat 还说原生 function calling：智能体的工具以 `fu
 | `schedule.list` | `/schedule` | serve 自动按间隔运行的任务 |
 | `schedule.add <task> [minutes]` | `/schedule add "晨会" 60` | 新任务；间隔默认 10 分钟 |
 | `schedule.toggle <id…>` / `schedule.delete <id…>` | `/schedule toggle task-… task-…` | 暂停/恢复与删除任务：可多个 |
-| `auto.on [N]` / `auto.off` | `/auto on 5`、`/auto off` | 自主模式：智能体自行决定，最多 N 步 |
+| `bg.list` | `/bg` | 本谈话的后台任务；`all` —— 整个项目 |
+| `bg.run <命令…>` | `/bg run timeout=30m check=5 title=构建 npm test` | 命令在应用监督下运行；命令前可带选项（超时、提醒周期、名称）；回复即时（「已启动：id=…」） |
+| `bg.log <id> [行数]` | `/bg log bg-… 100` | 任务日志尾部（默认 40 行） |
+| `bg.kill <id…>` / `bg.delete <id…>` | `/bg kill bg-…`、`/bg delete bg-…` | 停止运行中的 / 删除已结束的任务及其日志 |
+| `goal.set <文本…> [轮数]` | `/goal set 「发布版本」 12` | 目标：智能体持续跑轮，直到报告 ```goal done\|failed；续跑轮数预算默认取自设置 |
+| `goal.status` / `goal.done` / `goal.cancel` | `/goal status`、`/goal done`、`/goal cancel` | 目标状态（文本、预算、结果）；手动标记完成；取消目标 |
+| `auto.on [N]` / `auto.off` | `/auto on 5`、`/auto off` | 自主模式：智能体自行决定，最多 N 步（内部 —— 无文本的目标） |
 | `usage.show [模型 id]` | `/usage`、`/usage glm` | token 用量：输入/输出/缓存累计；带 id —— 仅该模型；结尾是上下文行（「上下文：34 112 / 128 000（27%）」），窗口已知时显示 |
 | `settings.show` | `/settings` | 当前设置 |
 | `settings.update field=value…` | `/settings update maxTurns=2 model.id=glm` | 设置（自下一轮生效）；嵌套：model.id、serviceModel.id、model.temperature |
@@ -397,6 +403,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 - `files` — 智能体可以创建和覆盖文件；
 - `shell` — 智能体可以通过**系统 shell** 在这台电脑上运行命令：Windows 上是 cmd.exe（`dir`、`type`、`findstr`），Linux/macOS 上是 `/bin/sh`（`ls`、`cat`、`grep`）。智能体的速查表里明确写明所处环境，因此不会在 Windows 下写 bash 命令。Git 有单独的工具；
+- `bg` — **后台任务**（``bg timeout=30m check=5 title=构建 <命令>``，块体做内省：`list`、`log bg-… [行数]`、`kill bg-…`）：命令交给应用监督并即时回复「已启动：id=…」—— 智能体继续工作，无论结果如何（成功、失败、超时、停止），谈话里都会出现服务消息；每 check 分钟一次「还在跑」提醒，附日志尾部。启动规则与 `shell` 相同（只读静默，其余 —— 提问；目标与自主模式下自行应答）；
 - `git` — 仓库工作作为独立工具（``git status``、``git commit -m "…"``），不走本地 shell：只读 —— 静默放行，改写 —— 按卡片规则或提问（仓库由卡片的 `"repo"` 字段固定，否则是项目工作文件夹）；
 - `arch` — **zip / tar / tar.gz** 归档，不依赖外部程序 —— 纯 Node，Windows 和 Linux 表现一致（``arch pack out.zip src/``、``arch unpack archive.zip``、``arch list archive.zip``）。防护：拒绝 zip-slip 和归档内符号链接；按卡片限制条目数与总大小（`maxEntries`、`maxTotalBytes`）防归档炸弹；机密（`.env`、密钥）永不打包。刻意不支持 rar/7z；
 - `ssh` — 智能体可以在**已配置的服务器**上运行命令（见下文），无需本地控制台：`"tools": { "files": {}, "ssh": null }` —— 而且这种智能体的 `run` 块会被自动拒绝；
@@ -728,6 +735,8 @@ You > @manager add the router server — admin@192.168.1.1
 
 `/settings update model.id=…` 更换的是**智能体**的主力模型；经理有自己的模型（来自 `manager.json`）— 由 `/manager update model.id=…` 更改。
 
+**目标与后台任务：团队工作到做完为止。** `/goal set 「文本」 [轮数]`（网页外壳的「🎯 目标」按钮）把谈话变成循环：每轮结束后应用检查团队是否用 ```goal done <结果>``` 代码块（或 ```goal failed``` —— 「走不通，需要人」）做了汇报；没有的话，应用自己把续跑消息送进谈话，如此往复，直到出现裁定或续跑轮数预算耗尽（默认取自设置的 `goalMaxRounds`）。目标能挺过重启；`/goal status` 显示文本、计数与结果；目标激活期间，确认类问题由应用自行应答。`/auto on N` 是同一机制的无文本版：N 步，每步以设置的自动消息（`autoMessage`）续跑。另有长时间命令：`/bg run timeout=30m check=5 title=构建 <命令>`（`bg` 工具，```bg``` 块）即时回复「已启动：id=…」，应用则把进程置于监督之下：日志在 `projects/<id>/bglogs/`，超时即杀，每 check 分钟提醒一次（「还在跑，日志已 N 分钟没长」），送达有保证 —— 无论结果如何，谈话里都会出现「⚙ 后台任务」服务消息，团队接着干。任务列表、日志、停止与删除 —— `/bg`，网页外壳里还有侧栏「后台」区块与实时日志。
+
 ## 自定义智能体与自己的 API
 
 **更换团队** — 编辑 `~/.dreamteam/agents/`（即时生效）：字段 `id`、`name`、`emoji`、`description`、`color`（red/green/yellow/blue/magenta/cyan/white/gray）、`prompt`（人设），可选 `model`（模型 id 字符串或带 temperature 的对象）和 `temperature`；真实动作的权限 — `tools`、`projects`、`workspace`，眼睛和双手 — `vision` 和 `image`（见“工具”与“视觉与图片”）。`model` 字段只能是 `models/` 里存在的 id：`/agent new|update` 命令、网页外壳和经理都会拒绝陌生的 id 并给出可用列表，而不是把垃圾写进配置。
@@ -763,7 +772,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 
 项目由 `tests/` 里的探针检查 — 不用测试框架，每个文件直接运行并对每项检查打印 `ok`/`FAIL`。所有探针都是密封的：真实数据不被触碰，家目录重定向到临时文件夹（`DT_HOME`）。
 
-- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `agent.tool.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、无 id 创建（文件夹名或时间戳）、波浪线表示系统主目录、Tab 路径补全、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。更新的探针以同样的方式覆盖内部机制：`probe-ids`（标识符掩码的边界）、`probe-sse`（SSE 工具集与密钥校验）、`probe-schedule`（日程文件、serve 计时器与真实引擎上的 `/schedule` 操作）、`probe-memory`（词数预算、反思、日志轮转、stub 上的 LLM 合并）、`probe-images`（mock 画师、本地 stub 上的 openai-images 传输、工具运行）、`probe-gigachat`（本地 HTTPS stub 上的完整传输，自带证书；含原生 function calling 桥：请求里的 specs、function_call 答复转工具块、历史的「块 → 结果」对转回原生角色）、`probe-frugal`（LLM 主持人的计划）、`probe-shortcut`（替换平台来覆盖 linux/mac 分支）、`probe-tools`/`probe-commands`/`probe-mail`/`probe-api` 的补充（工具小抄、@提及弹窗、邮件助手、GUI rpc 表面含导入导出）。`probe-web` 的桩站跑在本地 http 服务器上 —— 探针链不再触碰互联网。
+- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `agent.tool.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、无 id 创建（文件夹名或时间戳）、波浪线表示系统主目录、Tab 路径补全、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。更新的探针以同样的方式覆盖内部机制：`probe-ids`（标识符掩码的边界）、`probe-sse`（SSE 工具集与密钥校验）、`probe-schedule`（日程文件、serve 计时器与真实引擎上的 `/schedule` 操作）、`probe-bg`（后台任务调度器：启动与退出码、超时、树杀、日志 2 MB 截断、bg.json 持久化、送达保证、重启后的任务收养、check 分钟 ping、带 ```bg``` 工具与服务消息送达的端到端）、`probe-goal`（目标：```goal done|failed``` 裁定、续跑轮数预算、问题自动应答、auto.on 即无文本目标、经理的 goal.set/goal.cancel、新引擎恢复目标、`/goal …` 操作）、`probe-memory`（词数预算、反思、日志轮转、stub 上的 LLM 合并）、`probe-images`（mock 画师、本地 stub 上的 openai-images 传输、工具运行）、`probe-gigachat`（本地 HTTPS stub 上的完整传输，自带证书；含原生 function calling 桥：请求里的 specs、function_call 答复转工具块、历史的「块 → 结果」对转回原生角色）、`probe-frugal`（LLM 主持人的计划）、`probe-shortcut`（替换平台来覆盖 linux/mac 分支）、`probe-tools`/`probe-commands`/`probe-mail`/`probe-api` 的补充（工具小抄、@提及弹窗、邮件助手、GUI rpc 表面含导入导出）。`probe-web` 的桩站跑在本地 http 服务器上 —— 探针链不再触碰互联网。
 - `npm run probe:e2e` — Windows 真实伪终端（ConPTY）下的同样区域：首次启动向导全程（`probe-wizard-pty`：语言选择器响应方向键、创建 mock 模型、TUI 启动）、真正到达应用的东西（`probe-input`）与经迷你 VT 仿真器的渲染屏幕（`probe-startup`：无项目启动、打开带旧谈话的项目、面板中的历史、滚轮/PgUp/鼠标/选择）。它自行安装并移除 node-pty。
 - `npm run probe:tui` — 伪终端里完整跑一遍应用：无项目启动 → `/project new` → 礼宾经理问候、`team.add`、`chat.add`、带工具的一轮、`/agents`、退出 — 全在 mock 服务商和临时文件夹上进行。`probe:scenario-tui` —— 同一场景，每步之后还校验磁盘上的文件（会话、agents/、导出归档）。
 - `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui-dist/ 静态资源、快照中的无项目启动、WS 礼宾场景（`project.open` → 问候、发言、经对话的 team.add）、rpc（`project.open`、`sessions.list`、`session.agent.add/delete`、`settings.update`（带模型校验）、`session.new` 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。

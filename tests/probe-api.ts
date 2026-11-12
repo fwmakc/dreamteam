@@ -380,6 +380,62 @@ const client = await makeClient(handle.port);
   const sd = await client.next((m) => m.type === 'rpc_result' && m.id === 'r12');
   check('rpc: schedule_delete — задача удалена', (sd.result as { tasks: unknown[] }).tasks.length === 0);
 
+  // rpc: фоновые задачи — bg.run + рассылка 'bg' + bg.list/log/delete
+  client.send({ type: 'rpc', id: 'b1', method: 'bg.run', args: { command: `node -e "console.log('проба-api')"`, title: 'проба' } });
+  const br = await client.next((m) => m.type === 'rpc_result' && m.id === 'b1');
+  const bgTask = (br.result as { task: { id: string; status: string; title: string; by: string } }).task;
+  check(
+    'rpc: bg.run — задача запущена (running, by user)',
+    bgTask.id.startsWith('bg-') && bgTask.status === 'running' && bgTask.by === 'user' && bgTask.title === 'проба',
+    JSON.stringify(br.result),
+  );
+  const bgEv = await client.next((m) => m.type === 'bg' && (m.tasks as { id: string }[]).some((t) => t.id === bgTask.id));
+  check(
+    'ws: событие bg — задача в рассылке',
+    Array.isArray((bgEv as { tasks?: unknown[] }).tasks) && (bgEv as { tasks: { id: string }[] }).tasks.some((t) => t.id === bgTask.id && (t as { status?: string }).status === 'running'),
+    JSON.stringify(bgEv).slice(0, 200),
+  );
+  await wait(1500); // финализация короткой команды
+  client.send({ type: 'rpc', id: 'b2', method: 'bg.list' });
+  const bl = await client.next((m) => m.type === 'rpc_result' && m.id === 'b2');
+  check('rpc: bg.list — задача завершена', (bl.result as { tasks: { id: string; status: string }[] }).tasks.some((t) => t.id === bgTask.id && t.status === 'done'), JSON.stringify(bl.result));
+  client.send({ type: 'rpc', id: 'b3', method: 'bg.log', args: { id: bgTask.id, lines: 10 } });
+  const blog = await client.next((m) => m.type === 'rpc_result' && m.id === 'b3');
+  check('rpc: bg.log — хвост вывода', String((blog.result as { text: string }).text).includes('проба-api'), JSON.stringify(blog.result));
+  client.send({ type: 'rpc', id: 'b4', method: 'bg.delete', args: { id: bgTask.id } });
+  const bd = await client.next((m) => m.type === 'rpc_result' && m.id === 'b4');
+  check('rpc: bg.delete — удалена', String((bd.result as { text: string }).text).includes('✓ удалена'), JSON.stringify(bd.result));
+
+  // rpc: цель — goal.set/status/cancel (край: без текста — rpc_error)
+  client.send({ type: 'rpc', id: 'g0', method: 'goal.set', args: {} });
+  const gerr = await client.next((m) => m.type === 'rpc_error' && m.id === 'g0');
+  check('rpc: goal.set без текста — rpc_error', String(gerr.error).includes('жду текст'), String(gerr.error));
+  client.send({ type: 'rpc', id: 'g1', method: 'goal.set', args: { text: 'цель из rpc', maxRounds: 2 } });
+  const gs = await client.next((m) => m.type === 'rpc_result' && m.id === 'g1');
+  check('rpc: goal.set — отчёт «Цель задана»', String((gs.result as { text: string }).text).includes('Цель задана'), JSON.stringify(gs.result));
+  // goal.set сразу стартует раунд (mock отвечает заготовками, поссловно);
+  // цель докручивает раунды-продолжения до бюджета — опрашиваем статус
+  let gstate: { status: string; text?: string; maxRounds?: number } | undefined;
+  for (let i = 0; i < 60; i++) {
+    await wait(500);
+    client.send({ type: 'rpc', id: `g2-${i}`, method: 'goal.status' });
+    const gst = await client.next((m) => m.type === 'rpc_result' && m.id === `g2-${i}`);
+    gstate = (gst.result as { goal?: { status: string; text?: string; maxRounds?: number } }).goal;
+    if (gstate && gstate.status !== 'active') break;
+  }
+  check(
+    'rpc: goal.status — цель с текстом, докрутилась до бюджета',
+    Boolean(gstate) && gstate!.status === 'budget' && gstate!.text === 'цель из rpc' && gstate!.maxRounds === 2,
+    JSON.stringify(gstate),
+  );
+  // отмена — на свежей активной цели (предыдущая уже в бюджете): ставить и
+  // снимать подряд, фоновый раунд после снятия тихо завершается
+  client.send({ type: 'rpc', id: 'g4', method: 'goal.set', args: { text: 'цель на отмену', maxRounds: 1 } });
+  await client.next((m) => m.type === 'rpc_result' && m.id === 'g4');
+  client.send({ type: 'rpc', id: 'g3', method: 'goal.cancel' });
+  const gc = await client.next((m) => m.type === 'rpc_result' && m.id === 'g3');
+  check('rpc: goal.cancel — снята', String((gc.result as { text: string }).text).includes('Цель снята'), JSON.stringify(gc.result));
+
   // rpc: ошибки — честные сообщения
   client.send({ type: 'rpc', id: 'r5', method: 'settings.update', args: { patch: { model: { id: 'nope' } } } });
   const err1 = await client.next((m) => m.type === 'rpc_error' && m.id === 'r5');
@@ -415,8 +471,9 @@ const client = await makeClient(handle.port);
     check(
       'state: ключи верхнего уровня',
       JSON.stringify(Object.keys(st).sort()) ===
-        JSON.stringify(['auto', 'completion', 'images', 'knownProjects', 'manager', 'memory', 'models', 'profile', 'project', 'projects', 'providers', 'schemas', 'session', 'sessions', 'settings', 'team', 'teamError', 'ui']),
+        JSON.stringify(['auto', 'bgTasks', 'completion', 'goal', 'images', 'knownProjects', 'manager', 'memory', 'models', 'profile', 'project', 'projects', 'providers', 'schemas', 'session', 'sessions', 'settings', 'team', 'teamError', 'ui']),
     );
+    check('state: цель и фоновые в снапшоте', Array.isArray(st.bgTasks), JSON.stringify([st.goal, st.bgTasks]));
     const providers = st.providers as unknown[] | undefined;
     check('state: providers — имена провайдеров (селектор в GUI)', Array.isArray(providers) && providers.includes('mock') && providers.every((p) => typeof p === 'string'), JSON.stringify(providers));
     const models = st.models as { id?: string; kind?: string; ok?: boolean; isDefault?: boolean }[] | undefined;

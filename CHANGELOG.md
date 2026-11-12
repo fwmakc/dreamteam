@@ -7,6 +7,70 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
+## [0.0.20] — 2026-11-12
+
+### Added
+
+- **Background tasks (`bg`) — long-running commands under the app's
+  supervision.** A new built-in tool and a command family: the agent writes a
+  ```bg block (or the user types `/bg run timeout=30m check=5 title=build
+  <command>`) — the command starts under supervision (spawned via the system
+  shell, its output piped into the app) and the tool replies instantly
+  («Запущено: id=bg-…»), so the agent carries on instead of blocking on a long
+  build. When the process ends — success, crash, timeout or a manual stop — the
+  app itself posts a service message into the conversation («⚙ фоновая задача …»,
+  authorId `bg`), and the model sees the outcome in the next round without
+  polling; delivery is guaranteed (finalization is try/caught with persistence
+  first, a `notified` flag survives restarts, a 10-second force-finalize
+  backstop). Every task keeps a log in `projects/<id>/bglogs/<id>.log` (capped
+  at 2 MB — the head is cut off with a marker once the cap is hit); `check=5`
+  pings the conversation every N minutes while the task runs («идёт, лог не рос
+  M мин») so an infinite loop or a dead process never waits forever; `timeout=30m`
+  kills the whole process tree at the deadline. Introspection is the block body:
+  `list`, `log bg-… [lines]`, `kill bg-…`; launch rules mirror `shell`
+  (read-only silently, the rest asks — under a goal or in autonomous mode it
+  settles itself). Everything is visible: `/bg` lists the tasks (⏳✅❌⏱⛔
+  statuses, durations, pids), and the web shell got a «Фоновые» sidebar section
+  with a live log modal, stop/delete buttons and a right-click menu. Tasks
+  persist in `projects/<id>/bg.json` and survive a restart: live pids are
+  adopted (their exit code is reported as unknown), dead ones are marked `lost`
+  and reported. Serve delivers notes round-style as they arrive (the same minute
+  ticker also runs timeouts, pings and re-adoption); the terminal queues them
+  and flushes before your next message. rpc surface: `bg.list/run/log/kill/delete`;
+  WS event `{type: "bg", tasks}`; the snapshot carries `bgTasks`; tasks you run
+  yourself (`by: "user"`) need no agent at all. Settings: `bgCheckMinutes`
+  (default 5), `bgTimeoutMinutes` (0 — none).
+
+- **Goals (`goal`) — «keep working until it's solved».** A goal is the evolution
+  of the autonomous mode: `/goal set «текст» [раунды]` (the GUI «🎯 Цель»
+  button) sets `Session.goal` — text plus a budget of continuation rounds
+  (default from the new `goalMaxRounds` setting, 12) — and the engine loops:
+  after each round it scans the round's new messages for a ```goal done <result>```
+  or ```goal failed <reason>``` verdict block (single-line or multi-line body);
+  no verdict — the continuation prompt goes into the conversation as a «🎯»
+  message (authorId `goal`), and so on until a verdict, the budget (status
+  `budget` + a hint to re-set the goal) or a manual `/goal done|cancel`. While a
+  goal is active, confirmation questions settle themselves («🎯 цель: разрешаю»)
+  — the same self-approval the autonomous mode had. The goal is persistent and
+  survives a restart: serve's ticker resumes an active goal whenever no round is
+  in flight, and the terminal kicks the first continuation round right after
+  `/goal set`. `/auto on N` keeps working exactly as before and is now
+  implemented as a text-less goal (continuations use the settings' `autoMessage`,
+  the goal ends `cancelled` when the moves run out) — old scripts and rpc calls
+  don't notice. The manager can set and cancel goals itself (new manager ops
+  `goal.set`/`goal.cancel` with validation and prompt docs). The web shell: the
+  «🤖 Авто» button became «🎯 Цель» — a form for the goal text and the budget
+  (an empty text = the old autonomous mode), an active-goal chip «🎯 n/N» in the
+  status bar, and goal service messages render as system lines. rpc:
+  `goal.set/status/done/cancel` (plus the kept `auto.on/off` wrappers).
+
+### Changed
+
+- The GUI status-bar button «🤖 Авто» is now «🎯 Цель» (a form with an optional
+  goal text; an empty text keeps the legacy autonomous behavior). `/auto on|off`
+  and rpc `auto.on|off` behave exactly as before — under the hood they drive the
+  same `Session.goal` loop, so `/goal status` and the chip work for them too.
+
 ## [0.0.19] — 2026-11-12
 
 ### Added

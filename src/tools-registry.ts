@@ -36,6 +36,7 @@ import webTool from './tools/web/web.js';
 import mailTool from './tools/mail/mail.js';
 import telegramTool from './tools/telegram/telegram.js';
 import maxTool from './tools/max/max.js';
+import bgTool from './tools/bg/bg.js';
 import type { Agent } from './types.js';
 
 const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
@@ -52,6 +53,7 @@ const BUILTIN_FACTORIES: Record<string, BuiltinFactory> = {
   mail: mailTool,
   telegram: telegramTool,
   max: maxTool,
+  bg: bgTool,
 };
 
 /** Проверяет, что объект правда тул; иначе — внятная ошибка с именем тула. */
@@ -157,6 +159,7 @@ export function buildToolset(
   signal: AbortSignal | undefined,
   userTools: Map<string, ToolFactory>,
   houseCards: Map<string, ToolConfig> = new Map(),
+  sessionId?: string,
 ): Map<string, Tool> {
   const set = new Map<string, Tool>();
   const makeBuiltin = (id: string): BuiltinFactory | undefined => BUILTIN_FACTORIES[id];
@@ -170,7 +173,7 @@ export function buildToolset(
       if ((id === 'look' || id === 'image') && config.model && typeof config.model === 'object') {
         effectiveAgent = { ...agent, [id]: config.model };
       }
-      set.set(id, validateInstance(id, `встроенный тул ${id}`, factory(config, { cfg, agent: effectiveAgent, tctx, signal })));
+      set.set(id, validateInstance(id, `встроенный тул ${id}`, factory(config, { cfg, agent: effectiveAgent, tctx, signal, sessionId })));
       continue;
     }
     const userFactory = userTools.get(id);

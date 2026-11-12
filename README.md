@@ -397,7 +397,13 @@ There are no aliases or short forms: one name — one operation.
 | `schedule.list` | `/schedule` | the tasks serve runs by itself |
 | `schedule.add <task> [minutes]` | `/schedule add "standup" 60` | a new task; the default interval is 10 minutes |
 | `schedule.toggle <id…>` / `schedule.delete <id…>` | `/schedule toggle task-… task-…` | pause and delete tasks: several at once |
-| `auto.on [N]` / `auto.off` | `/auto on 5`, `/auto off` | autonomous mode: the agents decide on their own for up to N turns |
+| `bg.list` | `/bg` | the session's background tasks; `all` — the whole project |
+| `bg.run <command…>` | `/bg run timeout=30m check=5 title=build npm test` | a command under the app's supervision; options before the command (timeout, ping period, title); the reply is instant ("Started: id=…") |
+| `bg.log <id> [lines]` | `/bg log bg-… 100` | the task's log tail (40 lines by default) |
+| `bg.kill <id…>` / `bg.delete <id…>` | `/bg kill bg-…`, `/bg delete bg-…` | stop a running task / remove a finished one with its log |
+| `goal.set <text…> [rounds]` | `/goal set "ship the release" 12` | a goal: the agents keep working rounds until they report ```goal done\|failed; the continuation-round budget defaults to the settings |
+| `goal.status` / `goal.done` / `goal.cancel` | `/goal status`, `/goal done`, `/goal cancel` | the goal's state (text, budget, result); mark it reached by hand; cancel it |
+| `auto.on [N]` / `auto.off` | `/auto on 5`, `/auto off` | autonomous mode: the agents decide on their own for up to N turns (inside — a goal without text) |
 | `usage.show [model id]` | `/usage`, `/usage glm` | token spend: input/output/cache cumulative; with an id — only that model; the tail is the context line ("Context: 34 112 of 128 000 (27%)") when the window is known |
 | `settings.show` | `/settings` | the current settings |
 | `settings.update field=value…` | `/settings update maxTurns=2 model.id=glm` | settings (take effect from the next round); nested: model.id, serviceModel.id, model.temperature |
@@ -412,6 +418,25 @@ member's model, `/manager update model.id=…` — the manager's model.
 
 Commands are part of the core: in the web shell the same set works through the same
 input (or via the panel buttons), the terminal only adds colored views.
+
+**A goal and background tasks: the team works until it's done.** `/goal set "text"
+[rounds]` (the "🎯 Goal" button in the web shell) turns the conversation into a
+loop: after each round the app checks whether the team reported with a ```goal done
+<result>``` block (or ```goal failed``` — "dead end, need a human"); if not, a
+continuation message goes into the conversation by itself, and so on until a
+verdict or the continuation-round budget is spent (default from the settings,
+`goalMaxRounds`). The goal survives a restart; `/goal status` shows the text,
+the counter and the result; confirmation questions while a goal is active are
+settled by themselves. `/auto on N` is the same mechanics without text: N turns
+continued with the settings' auto-reply (`autoMessage`). Separately —
+long-running commands: `/bg run timeout=30m check=5 title=build <command>`
+(the `bg` tool, a ```bg``` block) replies instantly ("Started: id=…"), and the
+app keeps the process supervised: the log in `projects/<id>/bglogs/`, a timeout
+kill, pings every check minutes ("still running, the log hasn't grown for N
+min"), a delivery guarantee — whatever the outcome, a "⚙ background task"
+service message arrives in the conversation and the team carries on. The task
+list, logs, stopping and removal — `/bg`, and in the web shell also the
+"Background" sidebar section with a live log.
 
 When launched, the app continues the last conversation; if the last conversation is
 empty (or it's the very first launch) — the manager greets you itself.
@@ -763,6 +788,14 @@ settings):
   (`ls`, `cat`, `grep`). The agent is told explicitly in its cheat sheet which
   environment it's in, so it doesn't write bash commands under Windows. Git gets
   a separate tool;
+- `bg` — **background tasks** (``bg timeout=30m check=5 title=build <command>```,
+  introspection with the block body: `list`, `log bg-… [lines]`, `kill bg-…`):
+  the command goes under the app's supervision and replies instantly "Started:
+  id=…" — the agent carries on, and whatever the outcome (success, failure,
+  timeout, stop) a service message arrives in the conversation; every check
+  minutes a "still running" ping with the log tail. Launch rules — same as
+  `shell` (read-only silently, the rest — a question; under a goal or in
+  autonomous mode it's settled by itself);
 - `git` — repository work as a separate tool (``git status``, ``git commit -m "…"``)
   without a local shell: read-only — silently, mutating — per the card or a
   question (the repository is pinned by the `"repo"` card field, otherwise — the
@@ -1505,7 +1538,14 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   switching). Newer probes cover the inner machinery the same way:
   `probe-ids` (identifier masks at their edges), `probe-sse` (the SSE
   toolkit and key validation), `probe-schedule` (the schedule file, the
-  serve ticker and the `/schedule` operations on a live engine),
+  serve ticker and the `/schedule` operations on a live engine), `probe-bg`
+  (the background-task dispatcher: spawn and exit codes, timeout, tree kill,
+  log capping at 2 MB, bg.json persistence, delivery guarantee, task adoption
+  after a restart, check-minute pings, an end-to-end run with the ```bg``` tool
+  and a service-message delivery), `probe-goal` (the goal: ```goal done|failed```
+  verdicts, the continuation-round budget, auto-approval of questions, auto.on
+  as a text-less goal, the manager's goal.set/goal.cancel, resuming the goal
+  with a fresh engine, the `/goal …` operations),
   `probe-memory` (word budgets, reflection, log rotation, LLM merges on a
   stub), `probe-images` (the mock painter, the openai-images transport on a
   local stub, the tool run), `probe-gigachat` (the full transport on a

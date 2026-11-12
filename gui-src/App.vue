@@ -2,7 +2,7 @@
 import MarkdownIt from 'markdown-it';
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue';
 import type {
-  AgentInfo, CardSchema, ChatMessage, DirListing, FieldSpec, MailInfo, MessengerInfo, OpHint,
+  AgentInfo, BgTaskInfo, CardSchema, ChatMessage, DirListing, FieldSpec, GoalInfo, MailInfo, MessengerInfo, OpHint,
   ProjectHost, ProjectInfo, ProjectRecordInfo, ModelInfo, ScheduleTaskInfo, SessionMeta,
   SessionUsage, LanguageInfo,
 } from './types';
@@ -32,6 +32,8 @@ const projects = computed(() => (snapshot.projects ?? []) as ProjectInfo[]);
 const currentProject = computed(() => snapshot.project);
 const knownProjects = computed(() => (snapshot.knownProjects ?? []) as ProjectRecordInfo[]);
 const scheduleTasks = computed(() => (snapshot.scheduleTasks ?? []) as ScheduleTaskInfo[]);
+const bgTasks = computed(() => (snapshot.bgTasks ?? []) as BgTaskInfo[]);
+const goal = computed(() => snapshot.goal as GoalInfo | undefined);
 
 // ── фильтры секций сайдбара: у проектов/расписания — строка ввода в секции;
 // у сессий/агентов/моделей — модальное окно («Применить»/«Отмена» закрывают,
@@ -43,7 +45,8 @@ const sideFilter = reactive({
   team: { open: false, text: '' },
   models: { open: false, text: '' },
   schedule: { open: false, text: '' },
-} as Record<'projects' | 'sessions' | 'team' | 'models' | 'schedule', { open: boolean; text: string }>);
+  bg: { open: false, text: '' },
+} as Record<'projects' | 'sessions' | 'team' | 'models' | 'schedule' | 'bg', { open: boolean; text: string }>);
 /** Применённые поля модальных фильтров (то, что реально режет список). */
 const sideExt = reactive({
   sessions: { createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '' },
@@ -161,6 +164,7 @@ const modelsView = computed(() =>
   }),
 );
 const scheduleView = computed(() => scheduleTasks.value.filter((t) => sideMatch('schedule', `${t.message} ${t.intervalMinutes}`)));
+const bgView = computed(() => bgTasks.value.filter((t) => sideMatch('bg', `${t.title} ${t.command} ${t.status}`)));
 const knownProjectsView = computed(() =>
   knownProjects.value.filter((k) => k.name !== currentProject.value?.id && sideMatch('projects', `${k.name} ${k.path}`)),
 );
@@ -172,8 +176,6 @@ const projectHostsView = computed(() =>
 
 const manager = computed(() => snapshot.manager);
 const commands = computed(() => (snapshot.completion?.operations ?? []) as OpHint[]);
-const autoMode = computed(() => Boolean(snapshot.auto?.mode));
-const autoLeft = computed(() => snapshot.auto?.left ?? 0);
 const statusVisible = computed(() => roundActive.value || busyCount.value > 0);
 const busyText = computed(() => busyLabel.value || (roundActive.value ? tr('раунд идёт…') : ''));
 
@@ -574,6 +576,8 @@ const modal = reactive({
   fields: [] as FormField[],
   onSave: null as null | ((v: Record<string, string>) => void),
   settingsActions: false,
+  /** Доп. кнопки в ряду «Сохранить/Отмена» (например «Отменить цель») */
+  extra: [] as { label: string; fn: () => void }[],
 });
 /** Свёрнутые группы текущей формы (пересобираются при каждом открытии). */
 const modalCollapsed = reactive(new Set<string>());
@@ -598,7 +602,7 @@ const modalSections = computed<ModalSection[]>(() => {
 });
 const modalBox = ref<HTMLElement | null>(null);
 function openForm(title: string, fields: FormField[], onSave: (v: Record<string, string>) => void,
-  opts?: { settingsActions?: boolean }): void {
+  opts?: { settingsActions?: boolean; extra?: { label: string; fn: () => void }[] }): void {
   modal.title = title;
   modal.fields = fields.map((f) => ({
     key: f.key, label: f.label, value: f.value ?? '', placeholder: f.placeholder,
@@ -610,6 +614,7 @@ function openForm(title: string, fields: FormField[], onSave: (v: Record<string,
   modal.error = '';
   modal.onSave = onSave;
   modal.settingsActions = opts?.settingsActions ?? false;
+  modal.extra = opts?.extra ?? [];
   modalCollapsed.clear();
   // группы по умолчанию свёрнуты; но группа с JSON-режимом ссылки разворачивается —
   // иначе включённый вручную JSON не виден
@@ -617,9 +622,14 @@ function openForm(title: string, fields: FormField[], onSave: (v: Record<string,
   modal.show = true;
   nextTick(() => modalBox.value?.querySelector<HTMLElement>('input, textarea, select')?.focus());
 }
+function runModalExtra(b: { label: string; fn: () => void }): void {
+  closeForm();
+  b.fn();
+}
 function closeForm(): void {
   modal.show = false;
   modal.onSave = null;
+  modal.extra = [];
 }
 
 // ── отчёт по токенам: ПКМ «Статистика» у разговора или модели ───────────────
@@ -1386,6 +1396,110 @@ function scheduleDelete(t: ScheduleTaskInfo): void {
     rpc('schedule.delete', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`)));
 }
 
+// ── фоновые задачи (bg.json проекта, диспетчер ядра) ─────────────────────────
+const BG_STATUS_EMOJI: Record<BgTaskInfo['status'], string> = {
+  running: '⏳', done: '✅', failed: '❌', timeout: '⏱', killed: '⛔', lost: '❓',
+};
+/** Длительность человеческим языком: 90с → «1м 30с», 2ч → «2ч 0м». */
+function bgDur(from: number, to?: number): string {
+  let s = Math.max(0, Math.round(((to ?? Date.now()) - from) / 1000));
+  const h = Math.floor(s / 3600);
+  s -= h * 3600;
+  const m = Math.floor(s / 60);
+  s -= m * 60;
+  return (h ? `${h}ч ` : '') + (h || m ? `${m}м ` : '') + `${s}с`;
+}
+function bgLine(t: BgTaskInfo): string {
+  const tail = t.status === 'running'
+    ? `⏳ ${tr('идёт {dur}', { dur: bgDur(t.startedAt) })}`
+    : `${BG_STATUS_EMOJI[t.status]} ${t.status}, ${bgDur(t.startedAt, t.endedAt)}${t.exitCode !== undefined ? `, ${tr('код {n}', { n: t.exitCode })}` : ''}`;
+  return `${t.title || t.command.slice(0, 60)} — ${tail}`;
+}
+function openBgForm(): void {
+  if (roundActive.value) return;
+  openForm(tr('Фоновая задача'), [
+    { key: 'command', label: tr('Команда (под супервизией: лог, таймаут, остановка)'), placeholder: 'npm run build' },
+    { key: 'title', label: tr('Название'), placeholder: tr('по умолчанию — первая строка команды') },
+    { key: 'timeoutMinutes', label: tr('Таймаут, минут (0 — без таймаута)'), value: '0' },
+    { key: 'checkMinutes', label: tr('Напоминать каждые N минут (0 — выключить)'), value: String(snapshot.settings?.bgCheckMinutes ?? 5) },
+  ], (v) => {
+    if (!v.command.trim()) throw new Error(tr('Жду команду'));
+    const tm = Number(v.timeoutMinutes);
+    const cm = Number(v.checkMinutes);
+    rpcReport(rpc('bg.run', {
+      command: v.command.trim(),
+      title: v.title.trim() || undefined,
+      timeoutMinutes: Number.isFinite(tm) && tm > 0 ? tm : undefined,
+      checkMinutes: Number.isFinite(cm) && cm !== (snapshot.settings?.bgCheckMinutes ?? 5) ? cm : undefined,
+    }));
+  });
+}
+/** Модалка лога: пока открыта — опрос rpc bg.log раз в 1.5с (задача дописывает). */
+const bgLogModal = reactive({ show: false, id: '', title: '', text: '' });
+let bgLogTimer: ReturnType<typeof setInterval> | null = null;
+function openBgLog(id: string): void {
+  const t = bgTasks.value.find((x) => x.id === id);
+  bgLogModal.id = id;
+  bgLogModal.title = t?.title || id;
+  bgLogModal.text = tr('загрузка…');
+  bgLogModal.show = true;
+  const pull = (): void => {
+    rpc<{ text: string }>('bg.log', { id, lines: 400 })
+      .then((r) => { if (bgLogModal.show) bgLogModal.text = r.text; })
+      .catch(() => { /* закрытие/смена проекта — окно закроет watcher */ });
+  };
+  pull();
+  if (bgLogTimer) clearInterval(bgLogTimer);
+  bgLogTimer = setInterval(pull, 1500);
+}
+function closeBgLog(): void {
+  bgLogModal.show = false;
+}
+watch(() => bgLogModal.show, (open) => {
+  if (!open && bgLogTimer) {
+    clearInterval(bgLogTimer);
+    bgLogTimer = null;
+  }
+});
+function bgStop(t: BgTaskInfo): void {
+  rpcReport(rpc('bg.kill', { id: t.id }));
+}
+function bgDelete(t: BgTaskInfo): void {
+  askDelete(tr('фоновую задачу «{title}»', { title: t.title || t.id }), () =>
+    rpcReport(rpc('bg.delete', { id: t.id })));
+}
+function ctxBg(e: MouseEvent, t: BgTaskInfo): void {
+  openCtx(e, [
+    { label: tr('Лог'), fn: () => openBgLog(t.id) },
+    ...(t.status === 'running' ? [{ label: tr('Остановить'), fn: () => bgStop(t) }] : []),
+    { label: tr('Удалить'), fn: () => bgDelete(t) },
+  ]);
+}
+
+// ── цель: модель крутит раунды, пока задача не решится (Session.goal) ─────────
+const goalActive = computed(() => goal.value?.status === 'active');
+function openGoalForm(): void {
+  if (roundActive.value) return;
+  const g = goal.value;
+  openForm(tr('Цель'), [
+    { key: 'text', type: 'text', label: tr('Чего достичь'), value: g?.text ?? '', placeholder: tr('пусто — автономный режим без детекции завершения') },
+    { key: 'maxRounds', label: tr('Бюджет раундов-продолжений'), value: String(g?.maxRounds ?? snapshot.settings?.goalMaxRounds ?? 12) },
+  ], (v) => {
+    const text = v.text.trim();
+    if (!text) {
+      // пустой текст — прежний авто-режим: обёртка auto.on/off над целью
+      rpcReport(rpc(g?.status === 'active' ? 'auto.off' : 'auto.on', { n: Number(v.maxRounds) || undefined }));
+      return;
+    }
+    const rounds = Number(v.maxRounds);
+    rpcReport(rpc('goal.set', { text, maxRounds: Number.isInteger(rounds) && rounds > 0 ? rounds : undefined }));
+  }, {
+    extra: g?.status === 'active'
+      ? [{ label: tr('⏹ Отменить цель'), fn: () => rpcReport(rpc('goal.cancel', {})) }]
+      : [],
+  });
+}
+
 // ── сессии ───────────────────────────────────────────────────────────────────
 function openSessionEdit(id: string): void {
   if (roundActive.value) return;
@@ -1414,7 +1528,7 @@ function deleteSession(id: string, title: string): void {
 
 // ── сворачивание секций (localStorage) ───────────────────────────────────────
 const LS_COLLAPSED = 'dt-collapsed';
-const DEFAULT_COLLAPSED = ['team', 'models', 'schedule', 'projects'];
+const DEFAULT_COLLAPSED = ['team', 'models', 'schedule', 'bg', 'projects'];
 const collapsed = reactive(new Set<string>((() => {
   try {
     const saved = localStorage.getItem(LS_COLLAPSED);
@@ -1531,10 +1645,6 @@ function removeStaged(i: number): void {
 }
 
 // ── авто-режим и статус ──────────────────────────────────────────────────────
-function toggleAuto(): void {
-  if (roundActive.value) return;
-  send({ type: 'command', text: autoMode.value ? '/auto off' : '/auto on' });
-}
 function abortRound(): void {
   send({ type: 'abort' });
 }
@@ -1786,6 +1896,11 @@ function argHintItems(op: OpHint, argPos: number, d: CompletionData): HintItem[]
   }
   if (hint === 'models') {
     return d.modelIds.map((id) => ({ label: id, hint: '', insert: id + ' ' }));
+  }
+  if (hint === 'bg') {
+    return bgTasks.value.map((t) => ({
+      label: t.id, hint: `${BG_STATUS_EMOJI[t.status]} ${t.title || t.command.slice(0, 50)}`, insert: t.id + ' ',
+    }));
   }
   // память: «кого|shared» из имени аргумента; тулы — тоже из имени
   const args = (op.args ?? '').split(' ');
@@ -2108,6 +2223,34 @@ onMounted(connectWs);
         </ul>
       </section>
 
+      <section class="side-sec" :class="{ collapsed: collapsed.has('bg') }" data-sec="bg">
+        <div class="side-head" @click="toggleSec('bg')">
+          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <span class="sec-name">{{ tr('Фоновые') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('bg') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('bg')">▽</button>
+          <button class="sec-add" :title="tr('Новая фоновая задача')" @click.stop="openBgForm">＋</button>
+        </div>
+        <div v-if="sideFilter.bg.open" class="sec-frow" @click.stop>
+          <input v-model="sideFilter.bg.text" :placeholder="tr('фильтр: название, команда, статус')" @keydown.esc="sideFilterEsc('bg')">
+        </div>
+        <ul id="bg-list">
+          <li
+            v-for="t in bgView"
+            :key="t.id"
+            :title="`${bgLine(t)}${t.error ? ` · ${t.error}` : ''}${t.adopted ? ` · ${tr('пережил перезапуск')}` : ''} · ${tr('правая кнопка — лог/остановить/удалить')}`"
+            @click="openBgLog(t.id)"
+            @contextmenu.prevent="ctxBg($event, t)"
+          >
+            <span class="tag" :class="{ in: t.status === 'running' }">{{ BG_STATUS_EMOJI[t.status] }}</span>
+            <span class="meta">{{ t.status === 'running' ? bgDur(t.startedAt) : t.id.slice(3, 11) }}</span>
+            <span>{{ (t.title || t.command).slice(0, 40) }}</span>
+            <span v-if="t.status === 'running'" class="del" :title="tr('Остановить')" @click.stop="bgStop(t)">✕</span>
+            <span v-else class="del" :title="tr('Удалить')" @click.stop="bgDelete(t)">✕</span>
+          </li>
+          <li v-if="sideOn('bg') && !bgView.length" class="no-match">{{ tr('нет совпадений') }}</li>
+        </ul>
+      </section>
+
     </aside>
 
     <!-- на телефоне затемняет чат под выдвинутой шторкой; клик — закрыть -->
@@ -2142,6 +2285,7 @@ onMounted(connectWs);
               </div>
             </div>
             <div v-else-if="it.msg.authorId === 'tool'" class="toolblock">{{ it.msg.text }}</div>
+            <div v-else-if="it.msg.authorId === 'bg' || it.msg.authorId === 'goal'" class="sysline">{{ it.msg.text }}</div>
             <div v-else-if="it.msg.authorId === 'session-ref'" class="attachment">
               <b>📎 {{ it.msg.authorName }}</b>
               <div class="digest">{{ it.msg.text }}</div>
@@ -2195,12 +2339,12 @@ onMounted(connectWs);
         <button v-show="roundActive" id="btn-abort" :title="tr('Прервать раунд (Esc в терминале)')" @click="abortRound">⏹ {{ tr('Прервать') }}</button>
         <button
           id="btn-auto"
-          :class="{ in: autoMode }"
-          :title="autoMode
-            ? `Автономный режим вкл (осталось ${autoLeft} ходов). Клик — выключить.`
-            : 'Автономный режим: агенты решают вопросы сами. Клик — включить.'"
-          @click="toggleAuto"
-        >🤖 {{ tr('Авто') }}{{ autoMode ? ` (${autoLeft})` : '' }}</button>
+          :class="{ in: goalActive }"
+          :title="goalActive
+            ? tr('Цель активна ({done} из {max} раундов). Клик — форма цели: текст, бюджет, отмена.', { done: goal?.roundsDone ?? 0, max: goal?.maxRounds ?? 0 })
+            : tr('Цель: агенты продолжат раунды, пока задача не решится. Пустой текст — прежний автономный режим.')"
+          @click="openGoalForm"
+        >🎯 {{ tr('Цель') }}{{ goalActive ? ` (${goal?.roundsDone ?? 0}/${goal?.maxRounds ?? 0})` : '' }}</button>
       </div>
 
       <div v-if="hintActive" id="hints">
@@ -2337,6 +2481,7 @@ onMounted(connectWs);
       </div>
       <div class="row">
         <button @click="submitForm">{{ tr('Сохранить') }}</button>
+        <button v-for="(b, i) in modal.extra" :key="`x${i}`" @click="runModalExtra(b)">{{ b.label }}</button>
         <button @click="closeForm">{{ tr('Отмена') }}</button>
       </div>
     </div>
@@ -2349,6 +2494,17 @@ onMounted(connectWs);
       <div v-for="(l, i) in report.lines" :key="i" class="repline" :class="{ 'repline-gap': l === '' }">{{ l }}</div>
       <div class="row">
         <button @click="closeReport">{{ tr('Закрыть') }}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── лог фонового процесса: пока открыто, раз в 1.5с дочитываем хвост ──── -->
+  <div v-if="bgLogModal.show" id="modal" @keydown.esc="closeBgLog">
+    <div class="modal-box modal-wide">
+      <h2>{{ tr('Лог — {title}', { title: bgLogModal.title }) }} <span class="dim">{{ bgLogModal.id }}</span></h2>
+      <pre class="bglog">{{ bgLogModal.text }}</pre>
+      <div class="row">
+        <button @click="closeBgLog">{{ tr('Закрыть') }}</button>
       </div>
     </div>
   </div>

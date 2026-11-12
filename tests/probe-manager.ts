@@ -139,7 +139,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('псевдо-агент: id/имя/эмодзи/цвет',
     agent.id === 'manager' && agent.name === cfg.name &&
     agent.emoji === cfg.emoji && agent.color === cfg.color);
-  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 3200 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
+  check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 3500 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
 }
 
 // --- parseManagerReply ---

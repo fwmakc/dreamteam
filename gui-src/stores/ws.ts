@@ -1,5 +1,5 @@
 import { computed, reactive, ref } from 'vue';
-import type { ChatMessage, ProjectInfo, ScheduleTaskInfo, StateSnapshot, WsEvent, WsMessage } from '../types';
+import type { BgTaskInfo, ChatMessage, ProjectInfo, ScheduleTaskInfo, StateSnapshot, WsEvent, WsMessage } from '../types';
 
 // ── утилиты ──────────────────────────────────────────────────────────────────
 export const COLORS: Record<string, string> = {
@@ -308,6 +308,9 @@ function dispatchEvent(type: string, msg: Record<string, unknown>): void {
       break;
     case 'schedule':
       snapshot.scheduleTasks = msg.tasks as ScheduleTaskInfo[];
+      break;
+    case 'bg':
+      snapshot.bgTasks = msg.tasks as BgTaskInfo[];
       break;
     case 'rpc_result':
       resolveRpc(String(msg.id ?? ''), msg.result);

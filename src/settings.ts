@@ -38,6 +38,12 @@ export interface SettingsConfig {
   maxOutputChars: number;
   /** Порог автосжатия контекста, % заполнения окна модели (10–99) */
   compressThreshold: number;
+  /** Бюджет цели (goal) по умолчанию: максимум раундов-продолжений (1–200) */
+  goalMaxRounds: number;
+  /** Период пингов фоновых задач по умолчанию, минут (0 — пинги выключены) */
+  bgCheckMinutes: number;
+  /** Таймаут фоновых задач по умолчанию, минут (0 — без таймаута) */
+  bgTimeoutMinutes: number;
   /** Модель по умолчанию: ссылка {id, temperature…} — агенты без своей модели берут её */
   model?: ModelRef;
   /** Служебная модель (модератор, нейминг, сжатие, память); пусто — model */
@@ -91,6 +97,27 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
   ) {
     throw new Error(`${file}: поле "compressThreshold" — целое число от 10 до 99 (процент заполнения окна)`);
   }
+  const goalMaxRounds = raw.goalMaxRounds;
+  if (
+    goalMaxRounds !== undefined &&
+    (typeof goalMaxRounds !== 'number' || !Number.isInteger(goalMaxRounds) || goalMaxRounds < 1 || goalMaxRounds > 200)
+  ) {
+    throw new Error(`${file}: поле "goalMaxRounds" — целое число от 1 до 200 (бюджет раундов цели)`);
+  }
+  const bgCheckMinutes = raw.bgCheckMinutes;
+  if (
+    bgCheckMinutes !== undefined &&
+    (typeof bgCheckMinutes !== 'number' || !Number.isInteger(bgCheckMinutes) || bgCheckMinutes < 0 || bgCheckMinutes > 1440)
+  ) {
+    throw new Error(`${file}: поле "bgCheckMinutes" — целое число от 0 до 1440 (период пингов фоновых задач, 0 — выключить)`);
+  }
+  const bgTimeoutMinutes = raw.bgTimeoutMinutes;
+  if (
+    bgTimeoutMinutes !== undefined &&
+    (typeof bgTimeoutMinutes !== 'number' || !Number.isInteger(bgTimeoutMinutes) || bgTimeoutMinutes < 0 || bgTimeoutMinutes > 10080)
+  ) {
+    throw new Error(`${file}: поле "bgTimeoutMinutes" — целое число от 0 до 10080 (таймаут фоновых задач, 0 — без таймаута)`);
+  }
   const language = raw.language;
   if (language !== undefined && (typeof language !== 'string' || language.trim() === '')) {
     throw new Error(`${file}: поле "language" — непустая строка («russian», «ru-RU», «русский» — как угодно)`);
@@ -128,6 +155,9 @@ export function loadSettings(file: string, termCols: number): SettingsConfig {
     runTimeoutMs: typeof runTimeoutMs === 'number' ? runTimeoutMs : 180000,
     maxOutputChars: typeof maxOutputChars === 'number' ? maxOutputChars : 4000,
     compressThreshold: typeof compressThreshold === 'number' ? compressThreshold : 85,
+    goalMaxRounds: typeof goalMaxRounds === 'number' ? goalMaxRounds : 12,
+    bgCheckMinutes: typeof bgCheckMinutes === 'number' ? bgCheckMinutes : 5,
+    bgTimeoutMinutes: typeof bgTimeoutMinutes === 'number' ? bgTimeoutMinutes : 0,
     model,
     serviceModel,
   };

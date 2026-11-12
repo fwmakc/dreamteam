@@ -122,6 +122,21 @@ export interface SessionUsage {
   rounds: number;
 }
 
+/** Цель разговора (Session.goal): цикл «крутить, пока не решит». */
+export interface GoalState {
+  /** Текст цели; undefined — авто-режим без детекции завершения. */
+  text?: string;
+  /** Бюджет: максимум раундов-продолжений после первого хода. */
+  maxRounds: number;
+  /** Сколько раундов-продолжений уже сделано. */
+  roundsDone: number;
+  startedAt: number;
+  /** active — крутится; done/failed — отчёт модели; budget — лимит; cancelled — снята. */
+  status: 'active' | 'done' | 'failed' | 'budget' | 'cancelled';
+  /** Итог из ```goal done или причина из failed. */
+  result?: string;
+}
+
 export interface Session {
   id: string;
   title: string;
@@ -142,6 +157,11 @@ export interface Session {
   digestInLog?: boolean;
   /** Кто позван в этот чат (id агентов); пусто — вся команда (старые разговоры) */
   participants?: string[];
+
+  /** Цель: раунды продолжаются, пока модель не отчитается блоком ```goal
+   *  done|failed или не исчерпается бюджет; без текста — прежний авто-режим
+   *  (продолжение — autoMessage из настроек). Персистится — переживает рестарт. */
+  goal?: GoalState;
 
   /** Накопительная статистика токенов (заполняется при раундах) */
   usage?: SessionUsage;
@@ -286,7 +306,11 @@ export type ManagerAction =
   /** Правка карточки модели по ключам контракта провайдера (vision, maxTokens…) */
   | { op: 'model.update'; id: string; fields: Record<string, unknown> }
   /** Удалить карточку модели (основная, служебная и менеджерская защищены) */
-  | { op: 'model.delete'; id: string };
+  | { op: 'model.delete'; id: string }
+  /** Задать цель текущему разговору (бюджет раундов-продолжений опционален) */
+  | { op: 'goal.set'; text: string; maxRounds?: number }
+  /** Отменить активную цель текущего разговора */
+  | { op: 'goal.cancel' };
 
 /** Сервер в действии менеджера (project.host.add) */
 export interface ManagerHostSpec {

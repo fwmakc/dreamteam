@@ -92,6 +92,9 @@ await gui.next((m) => m.type === 'state'); // первый state — без пр
   const st = await gui.next((m) => m.type === 'state' && Boolean((m.state as { session?: unknown }).session));
   const pr = (st.state as { project: { id: string } | null }).project;
   check('GUI/TUI 0: проект открыт, разговор создан', pr?.id === 'proj', JSON.stringify(pr));
+  // контракт GUI: секция «Фоновые» и чип «🎯 Цель» рисуются из снапшота
+  const st0 = st.state as { bgTasks?: unknown[]; goal?: unknown };
+  check('GUI/TUI 0: в снапшоте bgTasks (массив) и goal', Array.isArray(st0.bgTasks), JSON.stringify([st0.goal, st0.bgTasks]).slice(0, 200));
 }
 
 // ── Шаг 1: создать новую сессию ──────────────────────────────────────────────
