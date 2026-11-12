@@ -1,6 +1,6 @@
 {
   "name": "dreamteam",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "description": "Чат с командой ИИ-агентов: терминальный TUI и локальный веб-GUI на одном ядре",
   "type": "module",
   "bin": {
@@ -51,6 +51,7 @@
     "probe:scenario-gui": "tsx tests/probe-gui-scenario.ts",
     "probe:scenario-tui": "npm i --no-save node-pty && tsx tests/probe-tui-scenario.ts && npm prune",
     "smoke:live": "tsx tests/smoke-live.ts",
+    "smoke:gigachat": "tsx tests/smoke-gigachat.ts",
     "probe:api": "tsx tests/probe-api.ts",
     "probe:data": "tsx tests/probe-data.ts",
     "probe:e2e": "npm i --no-save node-pty && tsx tests/probe-wizard-pty.ts && tsx tests/probe-input.ts && tsx tests/probe-startup.ts && npm prune",

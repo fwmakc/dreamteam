@@ -213,6 +213,240 @@ const chats = (): Captured[] => captured.filter((c) => c.url?.endsWith('/chat/co
   const insecure = make({ caCertPath: undefined, insecureTLS: true });
   const { text } = await collect(insecure, { messages: [{ role: 'user', content: 'x' }] });
   check('insecureTLS: транспорт живёт и без caCertPath', text === 'Привет мир', text);
+
+  // файл с цепочкой (несколько PEM-блоков, как root+sub у gu-st.ru): Node из
+  // одной multi-cert строки берёт в доверие только последний сертификат —
+  // адаптер обязан разрезать файл и передавать блоки массивом (бой это поймал)
+  reset();
+  const { writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const chainCert = join(tmpdir(), 'gigachat-probe-chain.pem');
+  writeFileSync(chainCert, readFileSync(certPath, 'utf8') + readFileSync(certPath, 'utf8'));
+  const chained = make({ caCertPath: chainCert });
+  const { text: chainText } = await collect(chained, { messages: [{ role: 'user', content: 'x' }] });
+  check('caCertPath: файл-цепочка (2 PEM-блока) работает', chainText === 'Привет мир', chainText);
+}
+
+// ── 8. нативный function calling: запрос ────────────────────────────────────
+// Тулы агента как ToolSpec (те же собирает functionSpecs из actions.ts).
+const toolsSpec = [
+  { name: 'run', description: 'Команда локальной оболочки.', parameters: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] } },
+  { name: 'file', description: 'Записать файл.', parameters: { type: 'object', properties: { arg: { type: 'string' }, body: { type: 'string' }, project: { type: 'string' } }, required: ['arg', 'body'] } },
+];
+const jsonOk = (obj: unknown) => (res: ServerResponse): void => {
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(obj));
+};
+{
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: 'Привет' }, finish_reason: 'stop' }], usage: { prompt_tokens: 8, completion_tokens: 2 } });
+  const p = make();
+  await collect(p, {
+    system: 'Ты робот',
+    messages: [{ role: 'user', content: 'покажи контейнеры' }],
+    tools: toolsSpec,
+  });
+  const payload = JSON.parse(chats()[0]!.body) as Record<string, unknown>;
+  check('функции: stream:false, function_call:auto', payload.stream === false && payload.function_call === 'auto', chats()[0]!.body.slice(0, 160));
+  const fns = payload.functions as { name: string; description: string; parameters: Record<string, unknown> }[];
+  check('функции: обе переданы, имена/схемы без искажений', fns.length === 2 && fns[0]!.name === 'run' && fns[1]!.name === 'file' && fns[0]!.parameters.type === 'object', JSON.stringify(fns));
+  const msgs = payload.messages as { role: string; content: string | null }[];
+  check('функции: system первым', msgs[0]?.role === 'system' && msgs[0]?.content === 'Ты робот', JSON.stringify(msgs));
+}
+
+// ── 9. function_call из ответа → тул-блок движка ────────────────────────────
+{
+  reset();
+  chatResponder = jsonOk({
+    choices: [{ message: { role: 'assistant', content: null, function_call: { name: 'run', arguments: { body: 'docker ps' } } }, finish_reason: 'function_call' }],
+    usage: { prompt_tokens: 30, completion_tokens: 12 },
+  });
+  const p = make();
+  const { text, usage } = await collect(p, { messages: [{ role: 'user', content: 'x' }], tools: toolsSpec });
+  check('вызов: конвертирован в тул-блок ```run', text === '```run docker ps\n```', JSON.stringify(text));
+  check('вызов: usage из полного ответа', usage.promptTokens === 30 && usage.outputTokens === 12, JSON.stringify(usage));
+
+  // блок действительно понимается движком: parseActions вытаскивает действие
+  const { parseActions } = await import('../src/actions.js');
+  const actions = parseActions(text, ['run']);
+  check('вызов: блок разбирается движком', actions.length === 1 && actions[0]!.kind === 'run' && actions[0]!.command === 'docker ps', JSON.stringify(actions));
+}
+
+// ── 10. аргументы строкой и мусором ─────────────────────────────────────────
+{
+  const p = make();
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: null, function_call: { name: 'file', arguments: '{"project":"shop","arg":"a/b.txt","body":"привет"}' } }, finish_reason: 'function_call' }] });
+  const { text } = await collect(p, { messages: [{ role: 'user', content: 'x' }], tools: toolsSpec });
+  check('строка-JSON аргументов: блок file с префиксом проекта', text === '```file shop:a/b.txt\nпривет\n```', JSON.stringify(text));
+
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: 'Смотрю.', function_call: { name: 'run', arguments: 'ls -la' } } }] });
+  const { text: text2 } = await collect(p, { messages: [{ role: 'user', content: 'x' }], tools: toolsSpec });
+  check('мусор-аргументы: текст реплики + блок с командой в body', text2 === 'Смотрю.\n\n```run ls -la\n```', JSON.stringify(text2));
+
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: null, function_call: { name: 'restart_server', arguments: { cmd: 'x' } } } }] });
+  const { text: text3 } = await collect(p, { messages: [{ role: 'user', content: 'x' }], tools: toolsSpec });
+  check('неизвестная функция: текст-предупреждение вместо блока', text3.includes('неизвестную функцию «restart_server»') && !text3.includes('```'), text3);
+
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: 'Просто отвечаю текстом.' }, finish_reason: 'stop' }] });
+  const { text: text4 } = await collect(p, { messages: [{ role: 'user', content: 'x' }], tools: toolsSpec });
+  check('ответ без вызова: обычный текст, блоков нет', text4 === 'Просто отвечаю текстом.', text4);
+}
+
+// ── 11. история: пара «блок → результаты» в нативные роли ───────────────────
+{
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: 'Готово.' }, finish_reason: 'stop' }] });
+  const p = make();
+  await collect(p, {
+    messages: [
+      { role: 'user', content: 'Пользователь: собери статус' },
+      { role: 'user', content: 'Глеб: ```run\ndocker ps\n```' },
+      { role: 'user', content: '⚙ Результаты твоих действий:\n✅ CONTAINER ID …' },
+      { role: 'user', content: 'Модератор передаёт слово тебе. Ответь по существу.' },
+    ],
+    tools: toolsSpec,
+  });
+  const msgs = (JSON.parse(chats()[0]!.body) as { messages: { role: string; content: string | null; name?: string; function_call?: { name?: string; arguments?: unknown } }[] }).messages;
+  check('история: 4 сообщения (пара стала нативной, соседи на месте)', msgs.length === 4, JSON.stringify(msgs));
+  check('история: assistant с function_call на месте блока', msgs[1]?.role === 'assistant' && msgs[1]?.content === '' && msgs[1]?.function_call?.name === 'run', JSON.stringify(msgs[1]));
+  check('история: аргументы функции из блока (объект по схеме)', typeof msgs[1]?.function_call?.arguments === 'object' && JSON.stringify(msgs[1]!.function_call!.arguments) === '{"body":"docker ps"}', String(msgs[1]?.function_call?.arguments));
+  let funcResult: unknown;
+  try {
+    funcResult = JSON.parse(msgs[2]?.content ?? '');
+  } catch {
+    funcResult = null;
+  }
+  check('история: роль function с результатом сразу за вызовом', msgs[2]?.role === 'function' && msgs[2]?.name === 'run' && typeof msgs[2]?.content === 'string' && funcResult !== null && (funcResult as { result?: unknown }).result === '✅ CONTAINER ID …', JSON.stringify(msgs[2]));
+  check('история: соседние user-сообщения не тронуты', msgs[0]?.role === 'user' && msgs[3]?.role === 'user', JSON.stringify([msgs[0], msgs[3]]));
+
+  // пример ```run в разговоре (не вызов: после него нет результатов) остаётся текстом
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: 'ок' } }] });
+  await collect(p, {
+    messages: [
+      { role: 'user', content: 'Глеб: вот пример:\n```run\ndocker ps\n```\nработает так' },
+      { role: 'user', content: 'Яна: поняла' },
+    ],
+    tools: toolsSpec,
+  });
+  const msgs2 = (JSON.parse(chats()[0]!.body) as { messages: { role: string }[] }).messages;
+  check('история: пример блока без результатов остаётся user (склеен)', msgs2.length === 1 && msgs2[0]?.role === 'user', JSON.stringify(msgs2));
+}
+
+// ── 11b. functions_state_id: с живого ответа → в replay (проверено боем:
+// без id модель продолжает разговор сломанно — мусор или повторный вызов) ───
+{
+  const p = make();
+  // раунд A: модель вызывает run, сервер возвращает свой идентификатор
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: null, function_call: { name: 'run', arguments: { body: 'docker ps' } }, functions_state_id: 'sid-1' }, finish_reason: 'function_call' }] });
+  await collect(p, { messages: [{ role: 'user', content: 'Пользователь: собери статус' }], tools: toolsSpec });
+  // раунд B: та же пара «блок → результаты» в истории — replay несёт id
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: 'Готово.' }, finish_reason: 'stop' }] });
+  await collect(p, {
+    messages: [
+      { role: 'user', content: 'Пользователь: собери статус' },
+      { role: 'user', content: 'Глеб: ```run\ndocker ps\n```' },
+      { role: 'user', content: '⚙ Результаты твоих действий:\n✅ CONTAINER ID …' },
+      { role: 'user', content: 'Прочитай результат и ответь.' },
+    ],
+    tools: toolsSpec,
+  });
+  const msgs = (JSON.parse(chats()[0]!.body) as { messages: { role: string; functions_state_id?: string; function_call?: { arguments?: unknown } }[] }).messages;
+  check('state-id: assistant в replay несёт functions_state_id с ответа', msgs[1]?.functions_state_id === 'sid-1', JSON.stringify(msgs[1]));
+  check('state-id: аргументы совпали с запомненным вызовом', JSON.stringify(msgs[1]?.function_call?.arguments) === '{"body":"docker ps"}', JSON.stringify(msgs[1]?.function_call?.arguments));
+
+  // другой вызов (аргументы не совпадают) — id не подставляется
+  reset();
+  chatResponder = jsonOk({ choices: [{ message: { role: 'assistant', content: 'ок' }, finish_reason: 'stop' }] });
+  await collect(p, {
+    messages: [
+      { role: 'user', content: 'Глеб: ```run\ndocker compose up -d\n```' },
+      { role: 'user', content: '⚙ Результаты твоих действий:\n✅ Started' },
+      { role: 'user', content: 'Продолжай.' },
+    ],
+    tools: toolsSpec,
+  });
+  const msgs3 = (JSON.parse(chats()[0]!.body) as { messages: { role: string; functions_state_id?: string }[] }).messages;
+  check('state-id: чужой вызов без идентификатора (мягкий промах)', msgs3[1]?.role === 'assistant' && msgs3[1]?.functions_state_id === undefined, JSON.stringify(msgs3[1]));
+}
+
+// ── 12. грамматика: blockFromCall → parseActions → callFromBlock ────────────
+{
+  const mod = await import('../src/actions.js');
+  const kinds = ['run', 'file', 'ssh', 'look', 'git', 'arch', 'docs', 'ocr', 'web', 'mail', 'telegram', 'max', 'pdf.export'];
+  type Call = { kind: string; args: Record<string, string | number> };
+  // действие движка обратно в вид блока (проект — в строку блока, как в грамматике)
+  const argsOf = (a: ReturnType<typeof mod.parseActions>[number]): { kind: string; line: string; body: string } => {
+    const pfx = 'project' in a && a.project ? `${a.project}:` : '';
+    if (a.kind === 'file') return { kind: 'file', line: pfx + a.path, body: a.content };
+    if (a.kind === 'look') return { kind: 'look', line: pfx + a.path, body: a.question };
+    if (a.kind === 'ssh') return { kind: 'ssh', line: a.host, body: a.command };
+    if (a.kind === 'run') return { kind: 'run', line: pfx, body: a.command };
+    if (a.kind === 'image') return { kind: 'image', line: a.project ? `${a.project}:` : '', body: '' };
+    return { kind: a.tool, line: pfx, body: a.command }; // остались кастомные тулы
+  };
+  const canon = (args: Record<string, unknown>): string => JSON.stringify(Object.entries(args).sort((x, y) => (x[0] < y[0] ? -1 : 1)));
+  const cases: Call[] = [
+    { kind: 'run', args: { body: 'docker ps' } },
+    { kind: 'run', args: { project: 'shop', body: 'docker compose up -d' } },
+    { kind: 'file', args: { project: 'shop', arg: 'a/b.txt', body: 'привет' } },
+    { kind: 'file', args: { arg: 'notes.md', body: '# план' } },
+    { kind: 'ssh', args: { arg: 'prod', body: 'systemctl status nginx' } },
+    { kind: 'ssh', args: { arg: 'shop:prod', body: 'uptime' } },
+    { kind: 'look', args: { arg: 'images/кот.png', body: 'что на картинке?' } },
+    { kind: 'git', args: { body: 'log --oneline -5' } },
+    { kind: 'docs', args: { body: 'read отчёт.pdf' } },
+    { kind: 'pdf.export', args: { project: 'shop', body: 'тело запроса' } },
+  ];
+  for (const c of cases) {
+    const block = mod.blockFromCall(c);
+    const actions = mod.parseActions(block ?? '', kinds);
+    let back: Call | null = null;
+    if (actions.length === 1) {
+      const r = argsOf(actions[0]!);
+      back = mod.callFromBlock(r.kind, r.line, r.body);
+    }
+    // ssh «проект:хост» парсится в project+arg — сравниваем нормализованно
+    const want: Record<string, unknown> = { ...c.args };
+    if (c.kind === 'ssh' && typeof want.arg === 'string' && want.arg.includes(':') && !('project' in want)) {
+      const [p, ...rest] = want.arg.split(':');
+      want.project = p;
+      want.arg = rest.join(':');
+    }
+    check(
+      `блок↔функция: ${c.kind} ${JSON.stringify(c.args)}`,
+      block !== null && actions.length === 1 && back !== null && back.kind === c.kind && canon(back.args) === canon(want),
+      `block=${JSON.stringify(block)} actions=${JSON.stringify(actions)} back=${JSON.stringify(back)}`,
+    );
+  }
+  // image: свой набор параметров и парсинг тела
+  const img = mod.blockFromCall({ kind: 'image', args: { project: 'shop', prompt: 'кот в шляпе', size: '512x512', n: 2, refs: 'images/a.png, images/b.png' } });
+  const imgActions = mod.parseActions(img ?? '', ['image']);
+  check(
+    'блок↔функция: image с параметрами',
+    img !== null && imgActions.length === 1 && imgActions[0]!.kind === 'image' && imgActions[0]!.params.prompt === 'кот в шляпе' && imgActions[0]!.params.size === '512x512' && imgActions[0]!.params.n === 2 && imgActions[0]!.project === 'shop' && imgActions[0]!.params.refs?.length === 2,
+    `img=${JSON.stringify(img)} actions=${JSON.stringify(imgActions)}`,
+  );
+  check('пустой вызов: блока нет', mod.blockFromCall({ kind: 'run', args: {} }) === null, String(mod.blockFromCall({ kind: 'run', args: {} })));
+  check('image без промпта: блока нет', mod.blockFromCall({ kind: 'image', args: { size: '512x512' } }) === null, String(mod.blockFromCall({ kind: 'image', args: { size: '512x512' } })));
+}
+
+// ── 13. functionSpecs: объявления функций из тулов агента ───────────────────
+{
+  const { functionSpecs } = await import('../src/actions.js');
+  const specs = functionSpecs({ tools: { files: null, shell: null, git: null, ssh: null, look: null, image: null, 'pdf.export': null } } as never) ?? [];
+  const names = specs.map((s) => s.name);
+  check('specs: виды блоков всех включённых тулов', JSON.stringify(names) === JSON.stringify(['file', 'run', 'git', 'ssh', 'look', 'image', 'pdf.export']), JSON.stringify(names));
+  check('specs: описания и схемы заполнены', specs.every((s) => s.description.length > 10 && s.parameters.type === 'object'), JSON.stringify(specs.map((s) => s.name)));
+  const imgSpec = specs.find((s) => s.name === 'image')!;
+  check('specs: image — свои параметры с обязательным prompt', Array.isArray((imgSpec.parameters as { required?: string[] }).required) && (imgSpec.parameters as { required: string[] }).required.includes('prompt'), JSON.stringify(imgSpec.parameters));
+  check('specs: без тулов — undefined', functionSpecs({ tools: null } as never) === undefined, String(functionSpecs({ tools: null } as never)));
 }
 
 await new Promise<void>((done) => server.close(() => done()));

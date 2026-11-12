@@ -259,6 +259,14 @@ writes a file. The home is the real one (keys and `models/`), the project is
 a temporary sandbox — nothing in a real project changes. The hermetic probes
 (`npm run probe`) never touch the live API — they are free and deterministic.
 
+A separate live smoke for GigaChat — `npm run smoke:gigachat`: the full
+native function-calling cycle against the real Sber API. The model is asked
+to print a file holding a secret phrase, the command is executed (only if
+it is strictly cat/type of that file), the result goes back to the model,
+and it has to name the secret. Without a key in `gigachat.json` and the
+Ministry of Digital Development certificate the smoke gets no further than
+precise hints about where to get each.
+
 ### Token caching (fewer tokens for the same conversation)
 
 Conversation rounds grow the history at the tail, so providers can reuse the cached prefix — repeated tokens are not billed at full price twice.
@@ -297,6 +305,18 @@ supplies the Russian TLS certificate.
    `certs/russian_trusted_root_ca.pem`). For a quick check you can instead set
    `"insecureTLS": true` (insecure, for tests only).
 4. In the chat: `/settings update model.id=gigachat`.
+
+Dreamteam's GigaChat also speaks native function calling: the agent's tools
+go into the request as the `functions` field (name, description, JSON
+Schema), the model answers with a `function_call`, and the result goes back
+to it as a `role: "function"` message. The bridge is two-way: the model gets
+the same tools as every other agent (including files in `tools/`), and its
+call is executed by the engine's regular pipeline — gates, the live
+confirmation question and iteration limits work exactly as they do for
+everyone; the call lands in the history as a regular tool block
+(`` run … ``), and on the next request the "block → result" pair is
+turned back into the native "function_call → function" pair. If the agent
+has no tools, the adapter behaves as before — plain text protocol.
 
 Every agent can run on its own model — in its card in `~/.dreamteam/agents/` the
 `"model"` field is an id string or an object with overrides; by command:
@@ -791,7 +811,10 @@ keeps working — this way, step by step, the "coder" really writes files, and t
 "devops" really runs `docker ps` and reads the output instead of making it up.
 At most three "action → result → continuation" cycles per answer. Everything that
 happens stays in the history: `/session history` shows the actions as "⚙ tools"
-entries.
+entries. Each agent's prompt also carries a grounding rule: only what the history
+confirms counts as done — the "⚙ tools" results (✅/❌/⛔); plans are phrased as
+plans ("I will do it"), not as completed work, and claiming actions the history
+doesn't show is explicitly forbidden.
 
 **The working folder comes from project.json.** The agents work in the folder the
 project points to via its `"path"` field (set at `/project new`, changed with
@@ -1486,7 +1509,9 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   `probe-memory` (word budgets, reflection, log rotation, LLM merges on a
   stub), `probe-images` (the mock painter, the openai-images transport on a
   local stub, the tool run), `probe-gigachat` (the full transport on a
-  local HTTPS stub with its own certificate), `probe-frugal` (the LLM
+  local HTTPS stub with its own certificate, plus the native function
+  calling bridge: specs in the payload, function_call answers turned into
+  tool blocks, history pairs converted back to native roles), `probe-frugal` (the LLM
   moderator's plan), `probe-shortcut` (linux/mac branches via platform
   substitution), `probe-tools`/`probe-commands`/`probe-mail`/`probe-api`
   extras (the cheatsheet, the @-mention picker, mail helpers, the GUI rpc

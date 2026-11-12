@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { Agent, ImageProvider, LLMProvider } from './types.js';
+import type { Agent, ImageProvider, LLMProvider, ToolSpec } from './types.js';
 import { agentToolIds, BUILTIN_TOOL_IDS, PROJECT_SUBDIRS, type Tool } from './tools-api.js';
 import { loadSettings } from './settings.js';
 import { DT_HOME, PROJECT_DIR } from './paths.js';
@@ -279,6 +279,259 @@ function splitTarget(s: string): { target?: string; rest: string } {
   const m = /^([a-z][a-z0-9_-]{1,}):([\s\S]+)$/.exec(s);
   if (!m) return { rest: s };
   return { target: m[1], rest: m[2] };
+}
+
+// ── нативный function calling (gigachat и т.п.) ─────────────────────────────
+// Провайдеры, умеющие передавать инструменты структурой запроса, получают
+// тулы агента как ToolSpec (functionSpecs), а ответ модели — вызов функции с
+// аргументами — конвертируют обратно в обычный тул-блок движка
+// (blockFromCall), чтобы весь конвейер (parseActions → check → run) работал
+// без изменений. Обратная сторона — callFromBlock: блок из истории
+// превращается в аргументы функции для следующего запроса.
+
+/** Заголовок сообщения движка с результатами действий (автор «tool»); идёт
+ *  сразу за сообщением с тул-блоком — по этой паре нативные провайдеры
+ *  восстанавливают history «assistant с function_call → function с результатом». */
+export const TOOL_RESULT_HEADER = '⚙ Результаты твоих действий:';
+
+/**
+ * Тулы агента как объявления функций для нативного protocol calling.
+ * Имена — виды тул-блоков движка («run», «file», «git», id кастомного),
+ * параметры — универсальная тройка {project, arg, body} (у image — свои).
+ * Нет тулов — undefined: ключ tools в запрос не ставится.
+ */
+export function functionSpecs(agent: Agent, customTools?: Map<string, Tool>): ToolSpec[] | undefined {
+  const ids = agentToolIds(agent);
+  if (ids.length === 0) return undefined;
+  const universal = (argDesc: string, bodyDesc: string, required: string[]) => ({
+    type: 'object',
+    properties: {
+      project: { type: 'string', description: 'id проекта из назначенных тебе, если действие адресовано проекту' },
+      arg: { type: 'string', description: argDesc },
+      body: { type: 'string', description: bodyDesc },
+    },
+    required,
+  });
+  const kindOf: Record<string, string> = { files: 'file', shell: 'run', git: 'git', arch: 'arch', ssh: 'ssh', look: 'look', image: 'image', docs: 'docs', ocr: 'ocr', web: 'web', mail: 'mail', telegram: 'telegram', max: 'max' };
+  const descs: Record<string, { desc: string; arg: string; body: string; required: string[] }> = {
+    file: {
+      desc: 'Записать файл целиком (это полная перезапись, а не дифф).',
+      arg: 'путь: относительный внутри рабочей папки или с префиксом inbox/ (файлы от человека), mail/ (вложения писем), images/ (нарисованные картинки)',
+      body: 'полное содержимое файла',
+      required: ['arg', 'body'],
+    },
+    run: {
+      desc: 'Выполнить команду в локальной оболочке этого ПК, в рабочей папке.',
+      arg: 'обычно пусто — команда целиком в body',
+      body: 'одна команда оболочки',
+      required: ['body'],
+    },
+    git: {
+      desc: 'Git в репозитории рабочей папки: читающее (status, log, diff, show, blame) — молча, изменяющее (commit, push, reset) — по правилам карточки.',
+      arg: 'обычно пусто — всё в body',
+      body: 'аргументы git, например «status» или «log --oneline -5»',
+      required: ['body'],
+    },
+    arch: {
+      desc: 'Zip/tar-архивы без внешних программ.',
+      arg: 'обычно пусто — всё в body',
+      body: '«pack архив.zip папка/или/файл», «unpack архив.zip» или «list архив.zip»',
+      required: ['body'],
+    },
+    ssh: {
+      desc: 'Выполнить команду на сервере по ssh. Серверы задаёт хозяин в project.json.',
+      arg: 'цель: «хост» или «проект:хост» из назначенных тебе серверов',
+      body: 'команда для выполнения на сервере',
+      required: ['arg', 'body'],
+    },
+    look: {
+      desc: 'Показать файл твоей vision-модели и получить ответ на вопрос по картинке.',
+      arg: 'путь к картинке (в рабочей папке или префиксы inbox/, mail/, images/)',
+      body: 'вопрос: что именно разглядеть',
+      required: ['arg'],
+    },
+    docs: {
+      desc: 'Документы pdf/docx/xlsx/csv/odt/ods: чтение и запись.',
+      arg: 'обычно пусто — всё в body',
+      body: '«read путь», «md путь», «tables путь [страницы] [csv]», «write путь» и markdown-тело, «append путь» и markdown, «convert pdf файл»',
+      required: ['body'],
+    },
+    ocr: {
+      desc: 'Распознать текст и таблицы со сканов (png/jpg/pdf и картинки в docx).',
+      arg: 'обычно пусто — всё в body',
+      body: '«text файл» или «tables файл [страницы]» (вторым словом «csv» — таблицы как csv)',
+      required: ['body'],
+    },
+    web: {
+      desc: 'Читать разрешённые хозяином сайты (JavaScript не исполняется).',
+      arg: 'обычно пусто — всё в body',
+      body: '«read URL» или «links URL [фильтр-подстрока адреса]»',
+      required: ['body'],
+    },
+    mail: {
+      desc: 'Почта проекта (ящики задаёт хозяин в project.json).',
+      arg: 'обычно пусто — всё в body',
+      body: '«list ящик [N]», «find ящик запрос», «read ящик N», «send ящик» — для send: строки «кому:», «тема:», «файлы:» и текст письма',
+      required: ['body'],
+    },
+    telegram: {
+      desc: 'Бот Telegram проекта (токен задаёт хозяин).',
+      arg: 'обычно пусто — всё в body',
+      body: '«list», «in [N]» или «send chat_id» — для send: строка «файлы:» и текст сообщения',
+      required: ['body'],
+    },
+    max: {
+      desc: 'Бот мессенджера MAX проекта (токен задаёт хозяин).',
+      arg: 'обычно пусто — всё в body',
+      body: '«chats», «in [N]» или «send chat_id|user:id» — для send: строка «файлы:» и текст сообщения',
+      required: ['body'],
+    },
+  };
+  const specs: ToolSpec[] = [];
+  for (const id of ids) {
+    const kind = kindOf[id];
+    if (kind) {
+      const d = descs[kind]!;
+      const description = kind === 'image'
+        ? 'Нарисовать картинку image-моделью; файлы сохраняются в images/ папки проекта в доме.'
+        : d.desc;
+      specs.push({
+        name: kind,
+        description,
+        parameters:
+          kind === 'image'
+            ? {
+                type: 'object',
+                properties: {
+                  project: { type: 'string', description: 'id проекта из назначенных тебе, если действие адресовано проекту' },
+                  prompt: { type: 'string', description: 'подробное описание изображения: стиль, композиция, палитра, свет' },
+                  size: { type: 'string', description: '«512x768», «1024x1024»…' },
+                  n: { type: 'integer', description: 'сколько вариантов (до 8)' },
+                  steps: { type: 'integer', description: 'шаги диффузии' },
+                  guidance: { type: 'number', description: 'насколько строго следовать промпту' },
+                  seed: { type: 'integer', description: 'воспроизводимость' },
+                  refs: { type: 'string', description: 'пути образцов через запятую (режим перерисовки), обычно images/…' },
+                },
+                required: ['prompt'],
+              }
+            : universal(d.arg, d.body, d.required),
+      });
+      continue;
+    }
+    if ((BUILTIN_TOOL_IDS as readonly string[]).includes(id)) continue;
+    const tool = customTools?.get(id);
+    specs.push({
+      name: id,
+      description: tool?.desc ?? `Кастомный тул «${id}» (tools/${id}.ts).`,
+      parameters: universal('обычно пусто — всё в body', 'тело запроса к тулу (формат — в описании тула)', ['body']),
+    });
+  }
+  return specs.length > 0 ? specs : undefined;
+}
+
+/** Вызов тула в терминах нативного function calling: вид блока + аргументы. */
+export interface ToolCall {
+  kind: string;
+  /** {project?, arg?, body?}; у image — {project?, prompt, size?, n?, steps?, guidance?, seed?, refs?} */
+  args: Record<string, string | number>;
+}
+
+/** Блок из истории (вид + строка забора + тело) → аргументы функции. */
+export function callFromBlock(kind: string, line: string, body: string): ToolCall {
+  const args: Record<string, string | number> = {};
+  if (kind === 'image') {
+    const pm = /^([a-z][a-z0-9_-]{1,}):(.*)$/.exec(line.trim());
+    if (pm?.[1]) args.project = pm[1];
+    const params = parseImageParams(body);
+    if (params.prompt) args.prompt = params.prompt;
+    if (params.size) args.size = params.size;
+    if (params.n) args.n = params.n;
+    if (params.steps) args.steps = params.steps;
+    if (params.guidance !== undefined) args.guidance = params.guidance;
+    if (params.seed !== undefined) args.seed = params.seed;
+    if (params.refs?.length) args.refs = params.refs.join(', ');
+    return { kind, args };
+  }
+  if (LINE_KINDS.has(kind)) {
+    // file/look/ssh: путь/цель — строка забора, тело — отдельно
+    const { target: t2, rest } = splitTarget(line.trim());
+    if (t2) args.project = t2;
+    if (rest.trim()) args.arg = rest.trim();
+    if (body.trim()) args.body = body.trim();
+  } else {
+    // run и собратья: ровно как в parseActions — склейка строки забора и тела,
+    // затем отделение префикса проекта
+    const combined = (line.trim() + '\n' + body).replace(/^\n+/, '').trim();
+    const { target: t2, rest } = splitTarget(combined);
+    if (t2) args.project = t2;
+    const command = (t2 ? rest : combined).trim();
+    if (command) args.body = command;
+  }
+  return { kind, args };
+}
+
+/** Виды блоков, где аргумент — отдельная строка забора (у остальных строка
+ *  забора склеивается с телом, как у run). */
+const LINE_KINDS = new Set(['file', 'look', 'ssh']);
+
+/**
+ * Вызов функции → текст тул-блока движка, ровно в грамматике parseActions:
+ * путь/цель/команда — на строке забора (её читают file/ssh/look и клей run),
+ * тело (содержимое файла, вопрос, многострочная команда) — следующими строками.
+ * Пустой вызов (нечего исполнять) — null: провайдер скажет об этом текстом.
+ */
+export function blockFromCall(call: ToolCall): string | null {
+  const { kind, args } = call;
+  const str = (key: string) => {
+    const v = args[key];
+    return typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
+  };
+  if (kind === 'image') {
+    const prompt = str('prompt');
+    if (!prompt) return null;
+    const lines = [`prompt: ${prompt}`];
+    for (const key of ['size', 'n', 'steps', 'guidance', 'seed', 'refs']) {
+      const v = str(key);
+      if (v) lines.push(`${key}: ${v}`);
+    }
+    const project = str('project');
+    return '```image' + (project ? ` ${project}:` : '') + '\n' + lines.join('\n') + '\n```';
+  }
+  const arg = str('arg');
+  const body = str('body');
+  const project = str('project');
+  if (LINE_KINDS.has(kind)) {
+    if (!arg) return null; // файлу/серверу/картинке нужен путь — пустой блок не собрать
+    const target = project ? `${project}:${arg}` : arg;
+    return '```' + kind + ' ' + target + '\n' + (body ? body + '\n' : '') + '```';
+  }
+  if (!arg && !body) return null;
+  // run и собратья: строка забора и тело склеиваются (m[2] + '\n' + m[3])
+  const command = arg && body ? `${arg}\n${body}` : arg || body;
+  const withTarget = project ? `${project}:${command}` : command;
+  if (!withTarget.includes('\n')) {
+    return '```' + kind + (withTarget ? ` ${withTarget}` : '') + '\n```';
+  }
+  return '```' + kind + '\n' + withTarget + '\n```';
+}
+
+/**
+ * Первый тул-блок известного вида в тексте — для конвертации истории в
+ * нативный function calling. Не отличает «вызов» от «примера в разговоре»:
+ * пару конвертирует только там, где следом идёт сообщение с результатами.
+ */
+export function firstBlockOfKind(
+  text: string,
+  kinds: readonly string[],
+): { kind: string; line: string; body: string } | null {
+  if (kinds.length === 0) return null;
+  const re = new RegExp(
+    '```(' + kinds.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')[ \\t]*([^\\n]*)\\n([\\s\\S]*?)```',
+    'm',
+  );
+  const m = re.exec(text);
+  if (!m) return null;
+  return { kind: m[1]!, line: m[2]!, body: m[3]! };
 }
 
 /** Короткая строка для подтверждения и для отчёта об отказе. */
@@ -770,7 +1023,7 @@ export function actionsHint(agent: Agent, cfg: ToolsConfig, customTools?: Map<st
   const ws = workspaceFor(agent, {}, cfg);
   const lines: string[] = [
     '## Инструменты',
-    `Ты можешь не только обсуждать, но и реально действовать. Твоя рабочая папка: ${ws} (абсолютный путь). Пути в блоках file — относительные, внутри рабочей папки. ` +
+    `Ты можешь не только обсуждать, но и реально действовать. Единственный способ подействовать — блоки ниже: вне их у тебя нет ни рук, ни доступа к серверам и чужим системам. Твоя рабочая папка: ${ws} (абсолютный путь). Пути в блоках file — относительные, внутри рабочей папки. ` +
       'Прикладное проекта живёт в доме, рядом с разговорами: пути с префиксом inbox/ (файлы от человека), mail/ (вложения писем) и images/ (нарисованные картинки) указывают туда — читай их в блоках look/docs/ocr и вкладывай в письма, всё остальное — рабочая папка.',
   ];
   if (projects.length > 0) {

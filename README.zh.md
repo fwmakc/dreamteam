@@ -149,6 +149,8 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
 
 对着真实（非 mock）服务商的快速检查：经理的实时回答、经理确实按请求创建智能体、带 `files` 的智能体确实写出文件。家目录是真实的（密钥和 `models/`），项目是临时沙箱 —— 真实项目里什么都不会变。密封探针（`npm run probe`）绝不触碰真实 API —— 免费且确定。
 
+GigaChat 另有独立的实战冒烟 —— `npm run smoke:gigachat`：在真实 Sber API 上跑完整的原生 function calling 循环。让模型用命令打印一个藏着秘密短语的文件，命令被执行（仅当严格是该文件的 cat/type），结果回传给模型，由它说出秘密。卡片 `gigachat.json` 里没有密钥、也没有数字部证书时，冒烟不会走得更远 —— 只会给出精确的「去哪儿拿」提示。
+
 ### 提示缓存（同样的对话，更少的 tokens）
 
 对话每轮在历史尾部增长，服务商可以复用前缀缓存 — 相同的 tokens 不会按全价计费两次。
@@ -179,6 +181,8 @@ Coding Plan 密钥用在普通端点会报错 `429: Insufficient balance or no r
    （控制台密钥已经是现成的 Basic 字符串；如果你拿到的是 client_id/secret 对，改设 `"clientId"` 和 `"clientSecret"`。）
 3. 按 GigaChat 说明下载数字部根证书，放到 `caCertPath` 指定的路径（默认 `certs/russian_trusted_root_ca.pem`）。快速验证可改设 `"insecureTLS": true`（不安全，仅用于测试）。
 4. 在聊天里：`/settings update model.id=gigachat`。
+
+dreamteam 的 GigaChat 还说原生 function calling：智能体的工具以 `functions` 字段进入请求（名字、描述、JSON Schema），模型以 `function_call` 调用作答，结果以 `role: "function"` 消息回传给它。桥是双向的：模型拿到与其他智能体相同的工具（包括 `tools/` 里的文件），它的调用由引擎的常规管线执行 —— 门禁、活体确认提问与迭代上限对谁都一样；调用以常规工具块（`` run … ``）进入历史，下一次请求时「块 → 结果」对又被转回原生「function_call → function」对。智能体没有工具时，适配器照旧走纯文本协议。
 
 每个智能体都可以跑在独立的模型上 —— `~/.dreamteam/agents/` 里它的 `"model"` 字段是模型 id 字符串，或带覆盖参数的对象；命令：`/agent update marina model.id=claude`。可以组一支混合模型队伍（比如 Marina 用 Claude，Dmitry 用 GLM）。
 
@@ -414,7 +418,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
   `y` — 执行，`n` — 拒绝（智能体会知道被拒，并提出别的方案）；
 - `deny` — 直接拒绝，不提问。
 
-内置默认：`files` 静默放行工作文件夹内的路径，越界则提问；`look` 和 `image` 总是放行；`shell` 和 `ssh` 对每条命令都提问，直到工具卡片定义了规则（见下文“工具卡片”）。结果作为“⚙ tools”的消息返回给智能体，它继续工作 —— 就这样一步一步，“程序员”真的在写文件，“运维”真的在跑 `docker ps` 并阅读输出而不是编造。每次回答最多三个“动作 → 结果 → 继续”循环。发生的一切都留在历史里：`/session history` 把动作显示为“⚙ tools”条目。
+内置默认：`files` 静默放行工作文件夹内的路径，越界则提问；`look` 和 `image` 总是放行；`shell` 和 `ssh` 对每条命令都提问，直到工具卡片定义了规则（见下文“工具卡片”）。结果作为“⚙ tools”的消息返回给智能体，它继续工作 —— 就这样一步一步，“程序员”真的在写文件，“运维”真的在跑 `docker ps` 并阅读输出而不是编造。每次回答最多三个“动作 → 结果 → 继续”循环。发生的一切都留在历史里：`/session history` 把动作显示为“⚙ tools”条目。每个智能体的提示词里还内置一条「落地规则」：只有历史确认过的事才算做成 —— 即“⚙ tools”的结果（✅/❌/⛔）；计划要说成计划（“我会做”），而不是已完成，把自己历史里没有的动作说成做过被明确禁止。
 
 **工作文件夹来自 project.json。** 智能体在项目 `"path"` 字段指定的文件夹工作（创建项目时经 `/project new` 设置，用 `/project update path=…` 更改；通常是你启动应用的仓库 —— 以及通过智能体 `"workspace"` 字段分配的子文件夹，相对工作文件夹的路径）。文件只写在那里，命令只在那里跑 —— 有一个固定例外：项目的附属子文件夹（`inbox/` — 人发来的文件、`mail/` — 邮件附件、`images/` — 生成的图片）位于家目录的项目文件夹里，工具按前缀读取它们（`look inbox/扫描.png`、`ocr mail/合同.pdf`、`refs: images/poster-2.png`）。
 
@@ -759,7 +763,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 
 项目由 `tests/` 里的探针检查 — 不用测试框架，每个文件直接运行并对每项检查打印 `ok`/`FAIL`。所有探针都是密封的：真实数据不被触碰，家目录重定向到临时文件夹（`DT_HOME`）。
 
-- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `agent.tool.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、无 id 创建（文件夹名或时间戳）、波浪线表示系统主目录、Tab 路径补全、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。更新的探针以同样的方式覆盖内部机制：`probe-ids`（标识符掩码的边界）、`probe-sse`（SSE 工具集与密钥校验）、`probe-schedule`（日程文件、serve 计时器与真实引擎上的 `/schedule` 操作）、`probe-memory`（词数预算、反思、日志轮转、stub 上的 LLM 合并）、`probe-images`（mock 画师、本地 stub 上的 openai-images 传输、工具运行）、`probe-gigachat`（本地 HTTPS stub 上的完整传输，自带证书）、`probe-frugal`（LLM 主持人的计划）、`probe-shortcut`（替换平台来覆盖 linux/mac 分支）、`probe-tools`/`probe-commands`/`probe-mail`/`probe-api` 的补充（工具小抄、@提及弹窗、邮件助手、GUI rpc 表面含导入导出）。`probe-web` 的桩站跑在本地 http 服务器上 —— 探针链不再触碰互联网。
+- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `agent.tool.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、无 id 创建（文件夹名或时间戳）、波浪线表示系统主目录、Tab 路径补全、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。更新的探针以同样的方式覆盖内部机制：`probe-ids`（标识符掩码的边界）、`probe-sse`（SSE 工具集与密钥校验）、`probe-schedule`（日程文件、serve 计时器与真实引擎上的 `/schedule` 操作）、`probe-memory`（词数预算、反思、日志轮转、stub 上的 LLM 合并）、`probe-images`（mock 画师、本地 stub 上的 openai-images 传输、工具运行）、`probe-gigachat`（本地 HTTPS stub 上的完整传输，自带证书；含原生 function calling 桥：请求里的 specs、function_call 答复转工具块、历史的「块 → 结果」对转回原生角色）、`probe-frugal`（LLM 主持人的计划）、`probe-shortcut`（替换平台来覆盖 linux/mac 分支）、`probe-tools`/`probe-commands`/`probe-mail`/`probe-api` 的补充（工具小抄、@提及弹窗、邮件助手、GUI rpc 表面含导入导出）。`probe-web` 的桩站跑在本地 http 服务器上 —— 探针链不再触碰互联网。
 - `npm run probe:e2e` — Windows 真实伪终端（ConPTY）下的同样区域：首次启动向导全程（`probe-wizard-pty`：语言选择器响应方向键、创建 mock 模型、TUI 启动）、真正到达应用的东西（`probe-input`）与经迷你 VT 仿真器的渲染屏幕（`probe-startup`：无项目启动、打开带旧谈话的项目、面板中的历史、滚轮/PgUp/鼠标/选择）。它自行安装并移除 node-pty。
 - `npm run probe:tui` — 伪终端里完整跑一遍应用：无项目启动 → `/project new` → 礼宾经理问候、`team.add`、`chat.add`、带工具的一轮、`/agents`、退出 — 全在 mock 服务商和临时文件夹上进行。`probe:scenario-tui` —— 同一场景，每步之后还校验磁盘上的文件（会话、agents/、导出归档）。
 - `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui-dist/ 静态资源、快照中的无项目启动、WS 礼宾场景（`project.open` → 问候、发言、经对话的 team.add）、rpc（`project.open`、`sessions.list`、`session.agent.add/delete`、`settings.update`（带模型校验）、`session.new` 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。

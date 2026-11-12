@@ -178,12 +178,26 @@ export interface LLMMessage {
   images?: string[];
 }
 
+/**
+ * Объявление инструмента для провайдеров с нативным function calling
+ * (gigachat: массив functions в chat/completions). parameters — JSON Schema.
+ * Движок собирает его из тулов агента; текст-протокольные провайдеры поле игнорируют.
+ */
+export interface ToolSpec {
+  /** Имя вида тул-блока движка («run», «file», «git», id кастомного тула) */
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
 /** Запрос к провайдеру */
 export interface StreamRequest {
   system?: string;
   messages: LLMMessage[];
   temperature?: number;
   maxTokens?: number;
+  /** Нативные инструменты агента; нет тулов — ключ не ставится */
+  tools?: ToolSpec[];
   /** Режим размышлений (GLM): перекрывает карточку модели */
   thinking?: 'enabled' | 'disabled';
   /** Глубина размышлений (GLM): перекрывает карточку модели */

@@ -21,9 +21,11 @@ import {
   checkPermission,
   describeAction,
   executeRunAction,
+  functionSpecs,
   loadToolsConfig,
   parseActions,
   safePath,
+  TOOL_RESULT_HEADER,
   workspaceFor,
   type Action,
   type ToolsConfig,
@@ -90,6 +92,7 @@ import type {
   Session,
   StreamRequest,
   TeamMemory,
+  ToolSpec,
   UserProfile,
 } from '../types.js';
 import type { Presenter, SpeakerRef } from './presenter.js';
@@ -100,7 +103,10 @@ import { t, tf, conversationLanguage } from '../i18n.js';
 const commonRules = (language: string) =>
   `Общие правила: отвечай строго на языке: ${language}, от первого лица, коротко и живо (обычно 2–5 предложений), ` +
   'без заголовков и списков, если тебя прямо не просят. Не выходи из роли и не упоминай, что ты ИИ. ' +
-  'Если не согласен с коллегой — говори об этом прямо и обращайся к нему по имени.';
+  'Если не согласен с коллегой — говори об этом прямо и обращайся к нему по имени. ' +
+  'Свершившимся считай только то, что подтверждено историей: результатами «⚙ инструменты» (строки ✅/❌/⛔) или сообщениями о сделанных настройках. ' +
+  'Не приписывай себе действий, которых в истории нет: если что-то ещё не сделано или тебе недоступно — скажи прямо, ' +
+  'а планы формулируй как планы («сделаю»), а не как сделанное.';
 
 const DIGEST_SYSTEM = `Ты — помощник команды. Сделай краткий конспект разговора, чтобы его можно было передать в другой разговор.
 Сохрани: тему; что решили и договорились; ключевые аргументы с именами; важные названия, цифры и ограничения; что осталось незакрытым.
@@ -448,7 +454,7 @@ export class Engine {
       } else if (m.authorId === 'user') {
         messages.push({ role: 'user', content: `${user.name}: ${m.text}` });
       } else if (m.authorId === 'tool') {
-        messages.push({ role: 'user', content: `⚙ Результаты твоих действий:\n${m.text}` });
+        messages.push({ role: 'user', content: `${TOOL_RESULT_HEADER}\n${m.text}` });
       } else {
         messages.push({
           role: 'user',
@@ -469,6 +475,7 @@ export class Engine {
     if (personal) {
       blocks.push(`Твоя память (субъективно и сжато, это то, что ты помнишь сам):\n${personal}`);
     }
+    let tools: ToolSpec[] | undefined;
     if (agentToolIds(agent).length > 0) {
       // desc кастомных тулов — из живых экземпляров; кривая карточка не должна
       // ронять сборку промпта: об ошибке отрапортует конвейер при выполнении
@@ -486,11 +493,14 @@ export class Engine {
       }
       const hint = actionsHint(agent, this.toolsConfig(), custom);
       if (hint) blocks.push(hint);
+      // провайдерам с нативным function calling (gigachat) — те же тулы структурой запроса
+      tools = functionSpecs(agent, custom);
     }
     blocks.push(commonRules(this.language));
     return {
       system: blocks.join('\n\n'),
       messages,
+      tools,
       // не задано — дефолт провайдера: температура карточки модели (с учётом
       // переопределений settings.model и model.* агента), без своего хардкода
       temperature: agent.model?.temperature,

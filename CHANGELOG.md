@@ -7,6 +7,68 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
+## [0.0.19] — 2026-11-12
+
+### Added
+
+- **Native function calling for GigaChat.** The adapter now speaks the
+  protocol Sber's model was actually trained on, instead of waiting for
+  fenced blocks in plain text: the agent's tools go into the request as the
+  `functions` field (name, description, JSON Schema — `function_call:
+  "auto"`), the model answers with `choices[0].message.function_call`, and
+  the result goes back as a `role: "function"` message right after the call.
+  The bridge is two-way and touches nothing else in the engine: the answer
+  is rendered back into an ordinary tool block (`` run … ``) so the whole
+  pipeline — `parseActions`, permission gates, the live confirmation
+  question, iteration limits — executes it like any other agent's action;
+  and on the next request the history pairs «tool block → ⚙ result» are
+  converted back into native «assistant function_call → function result»
+  messages (raw messages, before the alternating-roles normalization
+  merges them). Names are sanitized to the GigaChat charset
+  (`[^A-Za-z0-9_-]` → `_`, 64 chars, deduped), arguments are parsed
+  defensively (an object per the docs, a JSON string, or a plain string
+  that falls back to the command body), a call to an unknown function
+  yields a text warning instead of a crash, and an agent without tools
+  keeps the plain text protocol. The history replay is checked against the
+  official OpenAPI schema (api.yml on developers.sber.ru): `arguments` in
+  the replayed function_call is a JSON object (the schema type), the
+  assistant message carries `content: ""` (required string, empty when
+  calling), and the function result is sent as a stringified JSON object
+  (`{"result": …}`) per the «обернутый в строку JSON-объект» requirement.
+  Two more behaviors were caught by the live smoke (`npm run
+  smoke:gigachat`, added alongside — runs the whole cycle against the real
+  API: connect, native call, a guarded `cat`/`type` of a temp file, the
+  answer naming the file's secret) and are handled: the server's
+  `functions_state_id` is remembered per call (signature = tool kind +
+  sorted arguments, capped at 64) and attached to the replayed assistant
+  message — without it GigaChat continues the conversation broken (mangled
+  pseudo-JSON or a repeated call); and a CA file holding a chain
+  (root + sub, as gu-st.ru ships them) is split into PEM blocks and passed
+  to Node as an array — a single multi-cert string makes Node trust only
+  the last certificate (`SELF_SIGNED_CERT_IN_CHAIN`). A miss on the
+  state-id map degrades gracefully to sending no id. The engine got a new optional
+  `StreamRequest.tools` (`ToolSpec[]`) that `buildRequest` attaches
+  whenever the agent has tools (built-in kinds and files in `tools/`
+  alike); other providers ignore it.
+- **Live smoke for the GigaChat function-calling loop: `npm run
+  smoke:gigachat`.** A hand-run check against the real Sber API: the model
+  is asked to print a temp file holding a secret phrase, the command is
+  executed only if it is strictly cat/type of that file, the output goes
+  back as a tool result, and the model has to name the secret — connect,
+  native call, execution and comprehension in one pass. Without the key in
+  `gigachat.json` or the Ministry of Digital Development certificate it
+  stops right there with precise instructions on where to get each.
+- **Grounding rule against phantom completed actions.** Agents sometimes
+  wrote as if a task had been carried out («yes, I went to the server last
+  night and set it up» — with no credentials ever given). The system prompt
+  now states for every agent: only what the history confirms counts as
+  done — the «⚙ tools» results (✅/❌/⛔) or messages about settings actually
+  made; claiming actions the history does not show is forbidden, and plans
+  must be phrased as plans («I will do it»), not as completed work. The
+  tools cheatsheet adds the boundary statement in the same spirit: the
+  blocks are the only way to act — outside them the agent has no hands and
+  no access to servers or foreign systems.
+
 ## [0.0.18] — 2026-11-03
 
 ### Added
