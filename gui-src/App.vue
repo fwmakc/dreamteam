@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import MarkdownIt from 'markdown-it';
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue';
+import type { Component } from 'vue';
+import {
+  ArrowUp, CalendarClock, ChartNoAxesColumnIncreasing, Check, ChevronDown, CircleUserRound,
+  Clapperboard, Copy, CornerUpLeft, Cpu, Download, ExternalLink, Eye, Folder, FolderOpen,
+  FolderPlus, Funnel, House, KeyRound, Link2, LogOut, Menu, MessageSquare, Paperclip,
+  Pause, Pencil, Play, Plus, ScrollText, SlidersHorizontal, Square, SquareTerminal,
+  Target, Trash2, Upload, UserMinus, UserPlus, Users, X,
+} from '@lucide/vue';
 import type {
   AgentInfo, BgTaskInfo, CardSchema, ChatMessage, DirListing, FieldSpec, GoalInfo, MailInfo, MessengerInfo, OpHint,
   ProjectHost, ProjectInfo, ProjectRecordInfo, ModelInfo, ScheduleTaskInfo, SessionMeta,
@@ -186,6 +194,19 @@ function tr(s: string, vars?: Record<string, string | number>): string {
   return out;
 }
 
+// ── тема интерфейса: выбор хранится на этом устройстве, «Авто» следует ОС ────
+const GUI_THEMES = ['auto', 'light', 'dark', 'indigo'] as const;
+type GuiTheme = (typeof GUI_THEMES)[number];
+const savedTheme = localStorage.getItem('dt-theme');
+const guiTheme = ref<GuiTheme>(GUI_THEMES.includes(savedTheme as GuiTheme) ? savedTheme as GuiTheme : 'auto');
+document.documentElement.dataset.theme = guiTheme.value;
+function setGuiTheme(value: string): void {
+  const next = GUI_THEMES.includes(value as GuiTheme) ? value as GuiTheme : 'auto';
+  guiTheme.value = next;
+  localStorage.setItem('dt-theme', next);
+  document.documentElement.dataset.theme = next;
+}
+
 watchEffect(() => {
   const def = models.value.find((p) => p.isDefault);
   if (def) document.title = `Dream Team — ${def.id}`;
@@ -258,10 +279,14 @@ async function copyText(text: string): Promise<boolean> {
     }
   }
 }
+// Тот же Lucide Copy, что компонентом у реплик: renderer markdown-it отдаёт HTML,
+// поэтому здесь нужна статическая SVG-строка (без пользовательского содержимого).
+const COPY_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
 // короткий фидбек на кнопке: ✓ скопировано / ✗ не вышло, через секунду — обратно
 function flashCopy(btn: HTMLElement, ok: boolean): void {
+  const original = btn.innerHTML;
   btn.textContent = ok ? '✓' : '✗';
-  setTimeout(() => { btn.textContent = '⧉'; }, 900);
+  setTimeout(() => { btn.innerHTML = original; }, 900);
 }
 
 // `code` и ```fence``` — с кнопкой копирования (.code-copy): клик ловит
@@ -269,13 +294,13 @@ function flashCopy(btn: HTMLElement, ok: boolean): void {
 // языка на лету (как у file-link)
 md.renderer.rules.code_inline = (tokens, idx) => {
   const title = md.utils.escapeHtml(tr('Скопировать'));
-  return `<span class="codewrap"><code>${md.utils.escapeHtml(tokens[idx].content)}</code><button class="code-copy" title="${title}">⧉</button></span>`;
+  return `<span class="codewrap"><code>${md.utils.escapeHtml(tokens[idx].content)}</code><button class="code-copy" title="${title}" aria-label="${title}">${COPY_ICON}</button></span>`;
 };
 const fenceBase = md.renderer.rules.fence
   ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
 md.renderer.rules.fence = (tokens, idx, options, env, self) => {
   const title = md.utils.escapeHtml(tr('Скопировать'));
-  return `<div class="codeblock"><button class="code-copy" title="${title}">⧉</button>${fenceBase(tokens, idx, options, env, self)}</div>`;
+  return `<div class="codeblock"><button class="code-copy" title="${title}" aria-label="${title}">${COPY_ICON}</button>${fenceBase(tokens, idx, options, env, self)}</div>`;
 };
 // видимый текст реплики пользователя: ведущие метки [имя] прикреплённых файлов
 // уже показаны чипами (att-row) — из текста их убираем, остальное не трогаем
@@ -376,7 +401,7 @@ watch(
 // ── контекстное меню (правая кнопка) и подтверждение удаления ────────────────
 // двойной клик в интерфейсе не используется: одиночный клик — основное
 // действие записи, правая кнопка — меню «Изменить»/«Удалить».
-type CtxItem = { label: string; fn: () => void };
+type CtxItem = { label: string; fn: () => void; icon?: Component };
 const ctx = reactive({ show: false, x: 0, y: 0, items: [] as CtxItem[] });
 function openCtx(e: MouseEvent, items: CtxItem[]): void {
   // клампим с двух сторон: меню не должно вылезать ни справа, ни слева
@@ -430,8 +455,8 @@ function onChatContext(e: MouseEvent): void {
   e.preventDefault();
   const href = a.getAttribute('href') ?? '';
   openCtx(e, [
-    { label: tr('Открыть'), fn: () => window.open(href, '_blank', 'noopener') },
-    { label: tr('Сохранить'), fn: () => downloadFile(href) },
+    { label: tr('Открыть'), icon: ExternalLink, fn: () => window.open(href, '_blank', 'noopener') },
+    { label: tr('Сохранить'), icon: Download, fn: () => downloadFile(href) },
   ]);
 }
 
@@ -529,33 +554,33 @@ function answerDelete(yes: boolean): void {
 
 function ctxTeam(e: MouseEvent, a: AgentInfo): void {
   openCtx(e, [
-    { label: tr('Изменить'), fn: () => openAgentSettings(a) },
-    { label: tr('Удалить'), fn: () => delAgent(a) },
+    { label: tr('Изменить'), icon: Pencil, fn: () => openAgentSettings(a) },
+    { label: tr(a.inChat ? 'Вывести из чата' : 'Позвать в чат'), icon: a.inChat ? UserMinus : UserPlus, fn: () => toggleChat(a) },
   ]);
 }
 function ctxModel(e: MouseEvent, p: ModelInfo): void {
   const items: CtxItem[] = [
-    { label: tr('Изменить'), fn: () => openModelSettings(p) },
-    ...(!p.img ? [{ label: tr('Статистика'), fn: () => modelUsageReport(p.id) }] : []),
+    { label: tr('Изменить'), icon: Pencil, fn: () => openModelSettings(p) },
+    ...(!p.img ? [{ label: tr('Статистика'), icon: ChartNoAxesColumnIncreasing, fn: () => modelUsageReport(p.id) }] : []),
   ];
-  if (!p.isDefault) items.push({ label: tr('Удалить'), fn: () => delModel(p) });
+  if (!p.isDefault) items.push({ label: tr('Удалить'), icon: Trash2, fn: () => delModel(p) });
   openCtx(e, items);
 }
 function ctxSession(e: MouseEvent, id: string, title: string): void {
   openCtx(e, [
-    { label: tr('Изменить'), fn: () => openSessionEdit(id) },
-    { label: tr('Статистика'), fn: () => sessionUsageReport(id, title) },
-    { label: tr('Удалить'), fn: () => deleteSession(id, title) },
+    { label: tr('Изменить'), icon: Pencil, fn: () => openSessionEdit(id) },
+    { label: tr('Статистика'), icon: ChartNoAxesColumnIncreasing, fn: () => sessionUsageReport(id, title) },
+    { label: tr('Удалить'), icon: Trash2, fn: () => deleteSession(id, title) },
   ]);
 }
 function ctxSchedule(e: MouseEvent, t: ScheduleTaskInfo): void {
   openCtx(e, [
-    { label: tr(t.enabled ? 'Пауза' : 'Запустить'), fn: () => scheduleToggle(t) },
-    { label: tr('Удалить'), fn: () => scheduleDelete(t) },
+    { label: tr(t.enabled ? 'Пауза' : 'Запустить'), icon: t.enabled ? Pause : Play, fn: () => scheduleToggle(t) },
+    { label: tr('Удалить'), icon: Trash2, fn: () => scheduleDelete(t) },
   ]);
 }
 function ctxHost(e: MouseEvent, p: ProjectInfo, h: ProjectHost): void {
-  openCtx(e, [{ label: tr('Удалить'), fn: () => projectHostDelete(p, h) }]);
+  openCtx(e, [{ label: tr('Удалить'), icon: Trash2, fn: () => projectHostDelete(p, h) }]);
 }
 
 // ── модальная форма: поля [{key,label,value,placeholder?,type?,values?}] ─────
@@ -571,13 +596,16 @@ type FormField = {
   /** Тип model: текст JSON-переопределения (селектор хранится в value) */
   json?: string;
 };
+type ModalAction = { label: string; fn: () => void; class?: string; icon?: Component };
 const modal = reactive({
   show: false, title: '', error: '',
   fields: [] as FormField[],
   onSave: null as null | ((v: Record<string, string>) => void),
   settingsActions: false,
-  /** Доп. кнопки в ряду «Сохранить/Отмена» (например «Отменить цель») */
-  extra: [] as { label: string; fn: () => void }[],
+  /** Доп. кнопки перед «Отмена» (например «Отменить цель») */
+  extra: [] as ModalAction[],
+  /** Отдельные действия после «Отмена», прижатые к правому краю */
+  end: [] as ModalAction[],
 });
 /** Свёрнутые группы текущей формы (пересобираются при каждом открытии). */
 const modalCollapsed = reactive(new Set<string>());
@@ -602,7 +630,7 @@ const modalSections = computed<ModalSection[]>(() => {
 });
 const modalBox = ref<HTMLElement | null>(null);
 function openForm(title: string, fields: FormField[], onSave: (v: Record<string, string>) => void,
-  opts?: { settingsActions?: boolean; extra?: { label: string; fn: () => void }[] }): void {
+  opts?: { settingsActions?: boolean; extra?: ModalAction[]; end?: ModalAction[] }): void {
   modal.title = title;
   modal.fields = fields.map((f) => ({
     key: f.key, label: f.label, value: f.value ?? '', placeholder: f.placeholder,
@@ -615,6 +643,7 @@ function openForm(title: string, fields: FormField[], onSave: (v: Record<string,
   modal.onSave = onSave;
   modal.settingsActions = opts?.settingsActions ?? false;
   modal.extra = opts?.extra ?? [];
+  modal.end = opts?.end ?? [];
   modalCollapsed.clear();
   // группы по умолчанию свёрнуты; но группа с JSON-режимом ссылки разворачивается —
   // иначе включённый вручную JSON не виден
@@ -622,7 +651,7 @@ function openForm(title: string, fields: FormField[], onSave: (v: Record<string,
   modal.show = true;
   nextTick(() => modalBox.value?.querySelector<HTMLElement>('input, textarea, select')?.focus());
 }
-function runModalExtra(b: { label: string; fn: () => void }): void {
+function runModalExtra(b: ModalAction): void {
   closeForm();
   b.fn();
 }
@@ -630,6 +659,7 @@ function closeForm(): void {
   modal.show = false;
   modal.onSave = null;
   modal.extra = [];
+  modal.end = [];
 }
 
 // ── отчёт по токенам: ПКМ «Статистика» у разговора или модели ───────────────
@@ -871,9 +901,9 @@ const MODEL_PRIMARY = new Set(['provider', 'model', 'baseUrl', 'apiKey', 'client
 function modelGroupOf(path: string): string | undefined {
   return MODEL_PRIMARY.has(path) ? undefined : tr('Расширенные настройки');
 }
-/** Подпись модели в селекторе: id — имя у API, ◉ — зрячая. */
+/** Подпись модели в селекторе: id — имя у API, текстом отмечаем зрение. */
 function modelOption(m: ModelInfo): string {
-  return `${m.id} — ${m.model ?? m.kind}${m.vision ? ' ◉' : ''}`;
+  return `${m.id} — ${m.model ?? m.kind}${m.vision ? ` · ${tr('зрение')}` : ''}`;
 }
 /** Ссылки на модели — один контрол (тип model): селектор + «вручную (JSON)…».
  *  Варианты собирает сюда GUI: сама модель — все карточки (пусто = основная
@@ -1040,6 +1070,8 @@ async function openAgentSettings(a: AgentInfo): Promise<void> {
       }
     }
     if (Object.keys(fields).length > 0) rpcReport(rpc('agent.update', { id: a.id, fields }));
+  }, {
+    end: [{ label: tr('Удалить'), icon: Trash2, class: 'bad', fn: () => delAgent(a) }],
   });
 }
 function agentDelete(a: AgentInfo): void {
@@ -1123,12 +1155,24 @@ function openSettingsForm(): void {
     { key: 'autoMessage', label: tr('Автоответ в автономном режиме'), value: st.autoMessage ?? '' },
     { key: 'quotePrefix', label: tr('Сообщение для цитирования'), value: st.quotePrefix ?? '', placeholder: tr('Вы пишете:') },
     uiField,
+    {
+      key: '__theme', label: tr('Тема интерфейса'), value: guiTheme.value, type: 'enum',
+      values: [...GUI_THEMES], optionLabels: [tr('Авто'), tr('Светлая'), tr('Тёмная'), tr('Индиго')],
+    },
     { key: 'width', label: tr('Ширина экрана (40–500)'), value: st.width != null ? String(st.width) : '' },
     { key: 'maxInputRows', label: tr('Максимум строк поля ввода (1–20)'), value: st.maxInputRows != null ? String(st.maxInputRows) : '' },
     { key: 'compressThreshold', label: tr('Порог автосжатия контекста, % (10–99)'), value: st.compressThreshold != null ? String(st.compressThreshold) : '' },
   ], (v) => {
+    setGuiTheme(v.__theme ?? 'auto');
     const patch: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) if (val !== '') patch[k] = k === 'width' || k === 'maxInputRows' || k === 'compressThreshold' ? Number(val) : val;
+    for (const [k, val] of Object.entries(v)) {
+      if (k === '__theme') continue;
+      if (val !== '') patch[k] = k === 'width' || k === 'maxInputRows' || k === 'compressThreshold' ? Number(val) : val;
+    }
+    if (!Object.keys(patch).length) {
+      addFeed('notice', `· ${tr('настройки сохранены')}`);
+      return;
+    }
     rpc('settings.update', { patch })
       .then(() => addFeed('notice', `· ${tr('настройки сохранены')}`))
       .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
@@ -1251,10 +1295,10 @@ function saveProjectSettings(): void {
 }
 function ctxProjectCurrent(e: MouseEvent): void {
   if (!currentProject.value) return;
-  openCtx(e, [{ label: tr('Настройки проекта…'), fn: openProjectSettings }]);
+  openCtx(e, [{ label: tr('Настройки проекта…'), icon: SlidersHorizontal, fn: openProjectSettings }]);
 }
 function ctxProjectKnown(e: MouseEvent, p: ProjectRecordInfo): void {
-  openCtx(e, [{ label: tr('Удалить из дома (разговоры тоже)'), fn: () =>
+  openCtx(e, [{ label: tr('Удалить из дома (разговоры тоже)'), icon: Trash2, fn: () =>
     askDelete(tr('проект «{name}»', { name: p.name }), () => rpcReport(rpc('project.delete', { id: p.name }))) }]);
 }
 /** Новый сервер проекта: ＋ в сайдбаре и ＋ в разделе диалога настроек. */
@@ -1470,9 +1514,9 @@ function bgDelete(t: BgTaskInfo): void {
 }
 function ctxBg(e: MouseEvent, t: BgTaskInfo): void {
   openCtx(e, [
-    { label: tr('Лог'), fn: () => openBgLog(t.id) },
-    ...(t.status === 'running' ? [{ label: tr('Остановить'), fn: () => bgStop(t) }] : []),
-    { label: tr('Удалить'), fn: () => bgDelete(t) },
+    { label: tr('Лог'), icon: ScrollText, fn: () => openBgLog(t.id) },
+    ...(t.status === 'running' ? [{ label: tr('Остановить'), icon: Square, fn: () => bgStop(t) }] : []),
+    { label: tr('Удалить'), icon: Trash2, fn: () => bgDelete(t) },
   ]);
 }
 
@@ -1495,7 +1539,7 @@ function openGoalForm(): void {
     rpcReport(rpc('goal.set', { text, maxRounds: Number.isInteger(rounds) && rounds > 0 ? rounds : undefined }));
   }, {
     extra: g?.status === 'active'
-      ? [{ label: tr('⏹ Отменить цель'), fn: () => rpcReport(rpc('goal.cancel', {})) }]
+      ? [{ label: tr('Отменить цель'), icon: Square, fn: () => rpcReport(rpc('goal.cancel', {})) }]
       : [],
   });
 }
@@ -1614,7 +1658,7 @@ async function onAttachFile(e: Event): Promise<void> {
     try {
       await uploadFile(f);
       stagedFiles.value.push({ name: f.name, size: f.size });
-      addFeed('notice', `· 📎 ${f.name} (${f.size} ${tr('Б')}) — ${tr('прикреплён к сообщению')}`);
+      addFeed('notice', `· ${f.name} (${f.size} ${tr('Б')}) — ${tr('прикреплён к сообщению')}`);
     } catch (err) {
       addFeed('error', `✗ ${f.name}: ${(err as Error).message}`);
     }
@@ -1634,7 +1678,7 @@ function stageRef(): void {
   if (!p) return;
   const name = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
   stagedFiles.value.push({ name, path: p });
-  addFeed('notice', `· 🔗 ${p} — ${tr('прикреплён к сообщению')}`);
+  addFeed('notice', `· ${p} — ${tr('прикреплён к сообщению')}`);
 }
 function cancelRef(): void {
   refVisible.value = false;
@@ -1994,30 +2038,30 @@ onMounted(connectWs);
 <template>
   <!-- ── топбар ──────────────────────────────────────────────────────────── -->
   <header id="topbar">
-    <!-- на телефоне каркас не помещается: ☰ выдвигает сайдбар шторкой -->
-    <button id="btn-menu" class="tb-btn" :title="tr('Разделы')" @click="navOpen = !navOpen">☰</button>
-    <span id="logo">🎬 Dream Team</span>
+    <!-- на телефоне каркас не помещается: меню выдвигает сайдбар шторкой -->
+    <button id="btn-menu" class="tb-btn" :title="tr('Разделы')" :aria-label="tr('Разделы')" @click="navOpen = !navOpen"><Menu aria-hidden="true" /></button>
+    <span id="logo"><Clapperboard aria-hidden="true" /> Dream Team</span>
     <span
       v-if="profile?.name"
       class="badge clickable"
       :title="`${profile.name} — ${tr('клик: настройки')}`"
       @click="openUserProfileForm()"
-    >👤 {{ profile.name }}</span>
+    ><CircleUserRound aria-hidden="true" /> {{ profile.name }}</span>
     <span
       v-if="manager?.name"
       class="badge clickable"
       :title="`${manager.name} (${manager.model ?? ''}) — ${tr('клик: настройки менеджера')}`"
       @click="openManagerForm()"
     >{{ manager.emoji ?? '🛎' }} {{ manager.name }}</span>
-    <button class="tb-btn" :title="tr('Настройки')" @click="openSettingsForm()">⚙</button>
-    <button class="tb-btn" :title="tr('Экспорт всего приложения (дом и все проекты, без .env)')" @click="exportHome">⬇</button>
-    <button class="tb-btn" :title="tr('Импорт всего приложения из zip')" @click="pickImport('home')">⬆</button>
+    <button class="tb-btn" :title="tr('Настройки')" :aria-label="tr('Настройки')" @click="openSettingsForm()"><SlidersHorizontal aria-hidden="true" /></button>
+    <button class="tb-btn" :title="tr('Экспорт всего приложения (дом и все проекты, без .env)')" :aria-label="tr('Экспорт всего приложения (дом и все проекты, без .env)')" @click="exportHome"><Download aria-hidden="true" /></button>
+    <button class="tb-btn" :title="tr('Импорт всего приложения из zip')" :aria-label="tr('Импорт всего приложения из zip')" @click="pickImport('home')"><Upload aria-hidden="true" /></button>
     <input ref="importFileEl" type="file" accept=".zip" class="hidden" @change="onImportFile">
     <span class="spacer"></span>
     <span class="conn" :class="{ on: conn === 'on', off: conn !== 'on' }">
       {{ conn === 'on' ? tr('на связи') : conn === 'off' ? tr('отключено — переподключаюсь…') : tr('подключение…') }}
     </span>
-    <button v-if="logoutVisible" class="tb-btn" :title="tr('Забыть токен доступа на этом устройстве')" @click="logout">{{ tr('Выйти') }}</button>
+    <button v-if="logoutVisible" class="tb-btn" :title="tr('Забыть токен доступа на этом устройстве')" @click="logout"><LogOut aria-hidden="true" /> {{ tr('Выйти') }}</button>
   </header>
 
   <!-- ── доступ по токену ────────────────────────────────────────────────── -->
@@ -2050,18 +2094,19 @@ onMounted(connectWs);
     >
       <section class="side-sec" :class="{ collapsed: isCollapsed('projects') }" data-sec="projects">
         <div class="side-head" @click="toggleSec('projects')">
-          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <Folder class="sec-icon" aria-hidden="true" />
           <span class="sec-name">{{ tr('Проекты') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('projects') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('projects')">▽</button>
-          <button class="sec-add" :title="tr('Новый проект')" @click.stop="newProjectForm">📁＋</button>
-          <button class="sec-add" :title="tr('Открыть проект (имя или папка)')" @click.stop="openProjectForm">📂</button>
+          <button class="sec-filter" :class="{ on: sideOn('projects') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('projects')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('Новый проект')" :aria-label="tr('Новый проект')" @click.stop="newProjectForm"><FolderPlus aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('Открыть проект (имя или папка)')" :aria-label="tr('Открыть проект (имя или папка)')" @click.stop="openProjectForm"><FolderOpen aria-hidden="true" /></button>
         </div>
         <div v-if="sideFilter.projects.open" class="sec-frow" @click.stop>
           <input v-model="sideFilter.projects.text" :placeholder="tr('фильтр: имя или путь')" @keydown.esc="sideFilterEsc('projects')">
         </div>
         <div class="sec-btns">
-          <button :title="tr('Экспорт текущего проекта в zip (project.json и разговоры)')" @click="exportProject">⬇ {{ tr('проект') }}</button>
-          <button :title="tr('Импорт проекта из zip')" @click="pickImport('project')">⬆ {{ tr('импорт') }}</button>
+          <button :title="tr('Экспорт текущего проекта в zip (project.json и разговоры)')" @click="exportProject"><Download aria-hidden="true" /> {{ tr('проект') }}</button>
+          <button :title="tr('Импорт проекта из zip')" @click="pickImport('project')"><Upload aria-hidden="true" /> {{ tr('импорт') }}</button>
         </div>
         <ul id="projects">
           <li
@@ -2070,7 +2115,7 @@ onMounted(connectWs);
             :title="tr('Текущий проект — его данные в доме, projects/<id>/ · правая кнопка — настройки проекта')"
             @contextmenu.prevent="ctxProjectCurrent($event)"
           >
-            <span>📁 {{ currentProject?.name ?? tr('не выбран — выберите или создайте') }}</span><span class="meta">{{ currentProject?.path }}</span>
+            <span><Folder aria-hidden="true" /> {{ currentProject?.name ?? tr('не выбран — выберите или создайте') }}</span><span class="meta">{{ currentProject?.path }}</span>
           </li>
           <li
             v-for="p in knownProjectsView"
@@ -2085,26 +2130,27 @@ onMounted(connectWs);
           <li
             v-for="ph in projectHostsView"
             :key="ph.p.id + ':' + ph.h.name"
-            title="✕ — удалить сервер · ＋ — добавить сервер · правая кнопка — удалить"
+            :title="tr('правая кнопка — удалить сервер')"
             @contextmenu.prevent="ctxHost($event, ph.p, ph.h)"
           >
             <span>{{ ph.p.id }}</span><span class="meta">{{ ph.h.name }}: {{ ph.h.host }}</span>
-            <span class="del" :title="tr('Добавить сервер в проект')" @click.stop="projectHostAdd(ph.p)">＋</span>
-            <span class="del" :title="tr('Удалить сервер')" @click.stop="projectHostDelete(ph.p, ph.h)">✕</span>
+            <button class="del" :title="tr('Добавить сервер в проект')" :aria-label="tr('Добавить сервер в проект')" @click.stop="projectHostAdd(ph.p)"><Plus aria-hidden="true" /></button>
+            <button class="del" :title="tr('Удалить сервер')" :aria-label="tr('Удалить сервер')" @click.stop="projectHostDelete(ph.p, ph.h)"><Trash2 aria-hidden="true" /></button>
           </li>
         </ul>
       </section>
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('sessions') }" data-sec="sessions">
         <div class="side-head" @click="toggleSec('sessions')">
-          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <MessageSquare class="sec-icon" aria-hidden="true" />
           <span class="sec-name">{{ tr('Сессии') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('sessions') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('sessions')">▽</button>
-          <button class="sec-add" :title="tr('Новый разговор')" @click.stop="newSession">＋</button>
+          <button class="sec-filter" :class="{ on: sideOn('sessions') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('sessions')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('Новый разговор')" :aria-label="tr('Новый разговор')" @click.stop="newSession"><Plus aria-hidden="true" /></button>
         </div>
         <div class="sec-btns">
-          <button :title="tr('Экспорт текущего разговора в zip')" @click="exportSession">⬇ {{ tr('сессия') }}</button>
-          <button :title="tr('Импорт разговора из zip')" @click="pickImport('session')">⬆ {{ tr('импорт') }}</button>
+          <button :title="tr('Экспорт текущего разговора в zip')" @click="exportSession"><Download aria-hidden="true" /> {{ tr('сессия') }}</button>
+          <button :title="tr('Импорт разговора из zip')" @click="pickImport('session')"><Upload aria-hidden="true" /> {{ tr('импорт') }}</button>
         </div>
         <ul id="sessions">
           <li
@@ -2120,11 +2166,11 @@ onMounted(connectWs);
               <div class="sub">{{ tr('создан') }} {{ fmtDate(s.createdAt) }}</div>
               <div class="sub">{{ tr('последнее') }} {{ fmtDate(s.updatedAt) }}</div>
             </div>
-            <span
+            <button
               v-if="s.id !== currentSessionId"
-              class="del" :title="tr('Удалить разговор')"
+              class="del" :title="tr('Удалить разговор')" :aria-label="tr('Удалить разговор')"
               @click.stop="deleteSession(s.id, s.title)"
-            >✕</span>
+            ><Trash2 aria-hidden="true" /></button>
           </li>
           <li v-if="sideOn('sessions') && !sessionsView.length" class="no-match">{{ tr('нет совпадений') }}</li>
         </ul>
@@ -2132,28 +2178,28 @@ onMounted(connectWs);
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('team') }" data-sec="team">
         <div class="side-head" @click="toggleSec('team')">
-          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <Users class="sec-icon" aria-hidden="true" />
           <span class="sec-name">{{ tr('Агенты') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('team') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('team')">▽</button>
-          <button class="sec-add" :title="tr('Новый агент')" @click.stop="openAgentCreate">＋</button>
+          <button class="sec-filter" :class="{ on: sideOn('team') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('team')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('Новый агент')" :aria-label="tr('Новый агент')" @click.stop="openAgentCreate"><Plus aria-hidden="true" /></button>
         </div>
         <div v-if="teamError" class="errline side-err">agents.json: {{ teamError }}</div>
         <ul id="team">
           <li
             v-for="a in teamView"
             :key="a.id"
-            :title="`${a.inChat ? tr('Вывести из чата') : tr('Позвать в чат')} · ${tr('правая кнопка — изменить/удалить')}`"
-            @click="toggleChat(a)"
+            :title="tr('Настройки агента {name}', { name: a.name })"
+            @click="openAgentSettings(a)"
             @contextmenu.prevent="ctxTeam($event, a)"
           >
             <div class="content">
               <div class="sess-main">
                 <span>{{ a.emoji }} {{ a.name }}</span>
-                <span class="tag" :class="{ in: a.inChat }">{{ a.inChat ? tr('в чате') : '＋ ' + tr('чат') }}</span>
+                <span class="tag" :class="{ in: a.inChat }"><Plus v-if="!a.inChat" aria-hidden="true" /> {{ a.inChat ? tr('в чате') : tr('чат') }}</span>
               </div>
               <div class="sub">{{ a.description ?? '' }}</div>
             </div>
-            <span class="del" :title="tr('Удалить агента')" @click.stop="delAgent(a)">✕</span>
           </li>
           <li v-if="sideOn('team') && !teamView.length" class="no-match">{{ tr('нет совпадений') }}</li>
         </ul>
@@ -2161,10 +2207,11 @@ onMounted(connectWs);
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('models') }" data-sec="models">
         <div class="side-head" @click="toggleSec('models')">
-          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <Cpu class="sec-icon" aria-hidden="true" />
           <span class="sec-name">{{ tr('Модели') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('models') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('models')">▽</button>
-          <button class="sec-add" :title="tr('Новая модель')" @click.stop="modelCreate">＋</button>
+          <button class="sec-filter" :class="{ on: sideOn('models') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('models')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('Новая модель')" :aria-label="tr('Новая модель')" @click.stop="modelCreate"><Plus aria-hidden="true" /></button>
         </div>
         <ul id="models">
           <li
@@ -2174,20 +2221,20 @@ onMounted(connectWs);
               ? tr('клик — изменить карточку · правая кнопка — изменить/удалить') + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)
               : (p.isDefault ? tr('Модель по умолчанию') : tr('Сделать основным (для агентов)'))
                 + (p.isDefault ? '' : ` · ${tr('клик — сделать основным')} · ${tr('правая кнопка — изменить/удалить')}`)
-                + (p.vision ? ` · ${tr('◉ зрение')}` : '')
+                + (p.vision ? ` · ${tr('зрение')}` : '')
                 + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)"
             @click="clickModel(p)"
             @contextmenu.prevent="ctxModel($event, p)"
           >
             <div class="content">
               <div class="sess-main">
-                <span><span :class="p.ok ? 'st-ok' : 'st-warn'">{{ p.ok ? '✓' : '⚠' }}</span> {{ p.id }}<template v-if="p.vision"><span class="vision">◉</span></template></span>
+                <span><span :class="p.ok ? 'st-ok' : 'st-warn'">{{ p.ok ? '✓' : '⚠' }}</span> {{ p.id }}<template v-if="p.vision"><span class="vision"><Eye aria-hidden="true" /></span></template></span>
                 <span v-if="p.isDefault" class="tag in">{{ tr('основная') }}</span>
                 <span v-if="p.img" class="tag img">{{ tr('картинки') }}</span>
               </div>
               <div class="sub">{{ p.ok ? (p.model ?? p.kind ?? '') : (p.note ?? '') }}</div>
             </div>
-            <span v-if="!p.isDefault" class="del" :title="tr('Удалить модель')" @click.stop="delModel(p)">✕</span>
+            <button v-if="!p.isDefault" class="del" :title="tr('Удалить модель')" :aria-label="tr('Удалить модель')" @click.stop="delModel(p)"><Trash2 aria-hidden="true" /></button>
           </li>
           <li v-if="sideOn('models') && !modelsView.length" class="no-match">{{ tr('нет совпадений') }}</li>
         </ul>
@@ -2195,17 +2242,18 @@ onMounted(connectWs);
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('schedule') }" data-sec="schedule">
         <div class="side-head" @click="toggleSec('schedule')">
-          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <CalendarClock class="sec-icon" aria-hidden="true" />
           <span class="sec-name">{{ tr('Расписание') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('schedule') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('schedule')">▽</button>
-          <button class="sec-add" :title="tr('Новая задача')" @click.stop="openScheduleForm(true)">＋</button>
+          <button class="sec-filter" :class="{ on: sideOn('schedule') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('schedule')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('Новая задача')" :aria-label="tr('Новая задача')" @click.stop="openScheduleForm(true)"><Plus aria-hidden="true" /></button>
         </div>
         <div v-if="sideFilter.schedule.open" class="sec-frow" @click.stop>
           <input v-model="sideFilter.schedule.text" :placeholder="tr('фильтр: текст задачи')" @keydown.esc="sideFilterEsc('schedule')">
         </div>
         <ul id="schedule-list">
           <li class="static" :title="tr('Добавить задачу по расписанию')" @click="openScheduleForm(false)">
-            <span class="tag">＋ {{ tr('задача') }}</span>
+            <span class="tag"><Plus aria-hidden="true" /> {{ tr('задача') }}</span>
           </li>
           <li
             v-for="t in scheduleView"
@@ -2214,10 +2262,10 @@ onMounted(connectWs);
             @click="scheduleToggle(t)"
             @contextmenu.prevent="ctxSchedule($event, t)"
           >
-            <span class="tag" :class="{ in: t.enabled }">{{ t.enabled ? '▶' : '⏸' }}</span>
+            <span class="tag" :class="{ in: t.enabled }"><Play v-if="t.enabled" aria-hidden="true" /><Pause v-else aria-hidden="true" /></span>
             <span class="meta">{{ t.intervalMinutes }} {{ tr('мин') }}</span>
             <span>{{ t.message.slice(0, 40) }}</span>
-            <span class="del" :title="tr('Удалить задачу')" @click.stop="scheduleDelete(t)">✕</span>
+            <button class="del" :title="tr('Удалить задачу')" :aria-label="tr('Удалить задачу')" @click.stop="scheduleDelete(t)"><Trash2 aria-hidden="true" /></button>
           </li>
           <li v-if="sideOn('schedule') && !scheduleView.length" class="no-match">{{ tr('нет совпадений') }}</li>
         </ul>
@@ -2225,10 +2273,11 @@ onMounted(connectWs);
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('bg') }" data-sec="bg">
         <div class="side-head" @click="toggleSec('bg')">
-          <span class="sec-toggle" :title="tr('Свернуть/развернуть')">▾</span>
+          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <SquareTerminal class="sec-icon" aria-hidden="true" />
           <span class="sec-name">{{ tr('Фоновые') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('bg') }" :title="tr('Фильтр')" @click.stop="sideFilterToggle('bg')">▽</button>
-          <button class="sec-add" :title="tr('Новая фоновая задача')" @click.stop="openBgForm">＋</button>
+          <button class="sec-filter" :class="{ on: sideOn('bg') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('bg')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('Новая фоновая задача')" :aria-label="tr('Новая фоновая задача')" @click.stop="openBgForm"><Plus aria-hidden="true" /></button>
         </div>
         <div v-if="sideFilter.bg.open" class="sec-frow" @click.stop>
           <input v-model="sideFilter.bg.text" :placeholder="tr('фильтр: название, команда, статус')" @keydown.esc="sideFilterEsc('bg')">
@@ -2244,8 +2293,8 @@ onMounted(connectWs);
             <span class="tag" :class="{ in: t.status === 'running' }">{{ BG_STATUS_EMOJI[t.status] }}</span>
             <span class="meta">{{ t.status === 'running' ? bgDur(t.startedAt) : t.id.slice(3, 11) }}</span>
             <span>{{ (t.title || t.command).slice(0, 40) }}</span>
-            <span v-if="t.status === 'running'" class="del" :title="tr('Остановить')" @click.stop="bgStop(t)">✕</span>
-            <span v-else class="del" :title="tr('Удалить')" @click.stop="bgDelete(t)">✕</span>
+            <button v-if="t.status === 'running'" class="del" :title="tr('Остановить')" :aria-label="tr('Остановить')" @click.stop="bgStop(t)"><Square aria-hidden="true" /></button>
+            <button v-else class="del" :title="tr('Удалить')" :aria-label="tr('Удалить')" @click.stop="bgDelete(t)"><Trash2 aria-hidden="true" /></button>
           </li>
           <li v-if="sideOn('bg') && !bgView.length" class="no-match">{{ tr('нет совпадений') }}</li>
         </ul>
@@ -2266,7 +2315,7 @@ onMounted(connectWs);
           <template v-for="it in chatFlow" :key="it.key">
             <div v-if="it.kind === 'notice'" class="sysline" :class="it.notice.kind">{{ it.notice.text }}</div>
             <div v-else-if="it.msg.authorId === 'user'" class="msg user" :data-key="it.key">
-              <div class="head">👤 {{ it.msg.authorName }}</div>
+              <div class="head"><CircleUserRound aria-hidden="true" /> {{ it.msg.authorName }}</div>
               <div v-if="it.msg.attachments?.length" class="att-row">
                 <a
                   v-for="(name, i) in it.msg.attachments"
@@ -2275,19 +2324,19 @@ onMounted(connectWs);
                   :href="`/api/file?path=${encodeURIComponent(name)}`"
                   target="_blank"
                   rel="noopener"
-                >📎 {{ name }}</a>
+                ><Paperclip aria-hidden="true" /> {{ name }}</a>
               </div>
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
               <div class="txt" v-html="formatText(attachmentsText(it.msg))"></div>
               <div class="msg-actions">
-                <button class="msg-act" :title="tr('Копировать сообщение')" @click="msgCopy(it, $event.currentTarget as HTMLElement)">⧉</button>
-                <button class="msg-act" :title="tr('Ответить с цитатой')" @click="msgReply(it)">↩</button>
+                <button class="msg-act" :title="tr('Копировать сообщение')" :aria-label="tr('Копировать сообщение')" @click="msgCopy(it, $event.currentTarget as HTMLElement)"><Copy aria-hidden="true" /></button>
+                <button class="msg-act" :title="tr('Ответить с цитатой')" :aria-label="tr('Ответить с цитатой')" @click="msgReply(it)"><CornerUpLeft aria-hidden="true" /></button>
               </div>
             </div>
             <div v-else-if="it.msg.authorId === 'tool'" class="toolblock">{{ it.msg.text }}</div>
             <div v-else-if="it.msg.authorId === 'bg' || it.msg.authorId === 'goal'" class="sysline">{{ it.msg.text }}</div>
             <div v-else-if="it.msg.authorId === 'session-ref'" class="attachment">
-              <b>📎 {{ it.msg.authorName }}</b>
+              <b><Paperclip aria-hidden="true" /> {{ it.msg.authorName }}</b>
               <div class="digest">{{ it.msg.text }}</div>
             </div>
             <div v-else class="msg" :data-key="it.key">
@@ -2297,8 +2346,8 @@ onMounted(connectWs);
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
               <div class="txt" v-html="formatText(it.msg.text)"></div>
               <div class="msg-actions">
-                <button class="msg-act" :title="tr('Копировать сообщение')" @click="msgCopy(it, $event.currentTarget as HTMLElement)">⧉</button>
-                <button class="msg-act" :title="tr('Ответить с цитатой')" @click="msgReply(it)">↩</button>
+                <button class="msg-act" :title="tr('Копировать сообщение')" :aria-label="tr('Копировать сообщение')" @click="msgCopy(it, $event.currentTarget as HTMLElement)"><Copy aria-hidden="true" /></button>
+                <button class="msg-act" :title="tr('Ответить с цитатой')" :aria-label="tr('Ответить с цитатой')" @click="msgReply(it)"><CornerUpLeft aria-hidden="true" /></button>
               </div>
             </div>
           </template>
@@ -2319,8 +2368,8 @@ onMounted(connectWs);
         </div>
         <div class="dim">{{ confirmDialog.desc }}</div>
         <div class="row">
-          <button class="ok" @click="answerConfirm(true)">✓ {{ tr('Разрешить') }}</button>
-          <button class="bad" @click="answerConfirm(false)">✗ {{ tr('Отказать') }}</button>
+          <button class="ok" @click="answerConfirm(true)"><Check aria-hidden="true" /> {{ tr('Разрешить') }}</button>
+          <button class="bad" @click="answerConfirm(false)"><X aria-hidden="true" /> {{ tr('Отказать') }}</button>
         </div>
       </div>
 
@@ -2336,7 +2385,7 @@ onMounted(connectWs);
 
       <div id="statusbar" :class="{ hidden: !statusVisible }">
         <span id="busy-label">{{ busyText }}</span>
-        <button v-show="roundActive" id="btn-abort" :title="tr('Прервать раунд (Esc в терминале)')" @click="abortRound">⏹ {{ tr('Прервать') }}</button>
+        <button v-show="roundActive" id="btn-abort" :title="tr('Прервать раунд (Esc в терминале)')" @click="abortRound"><Square aria-hidden="true" /> {{ tr('Прервать') }}</button>
         <button
           id="btn-auto"
           :class="{ in: goalActive }"
@@ -2344,7 +2393,7 @@ onMounted(connectWs);
             ? tr('Цель активна ({done} из {max} раундов). Клик — форма цели: текст, бюджет, отмена.', { done: goal?.roundsDone ?? 0, max: goal?.maxRounds ?? 0 })
             : tr('Цель: агенты продолжат раунды, пока задача не решится. Пустой текст — прежний автономный режим.')"
           @click="openGoalForm"
-        >🎯 {{ tr('Цель') }}{{ goalActive ? ` (${goal?.roundsDone ?? 0}/${goal?.maxRounds ?? 0})` : '' }}</button>
+        ><Target aria-hidden="true" /> {{ tr('Цель') }}{{ goalActive ? ` (${goal?.roundsDone ?? 0}/${goal?.maxRounds ?? 0})` : '' }}</button>
       </div>
 
       <div v-if="hintActive" id="hints">
@@ -2378,8 +2427,8 @@ onMounted(connectWs);
       <div id="inputrow">
         <div v-if="stagedFiles.length" id="staged">
           <span v-for="(f, i) in stagedFiles" :key="`${f.name}:${i}`" class="chip" :title="f.path">
-            📎 {{ f.path ?? `${f.name} (${f.size} ${tr('Б')})` }}
-            <button :title="tr('убрать')" @click="removeStaged(i)">✕</button>
+            <Paperclip aria-hidden="true" /> {{ f.path ?? `${f.name} (${f.size} ${tr('Б')})` }}
+            <button :title="tr('убрать')" :aria-label="tr('убрать')" @click="removeStaged(i)"><X aria-hidden="true" /></button>
           </span>
         </div>
         <textarea
@@ -2394,11 +2443,11 @@ onMounted(connectWs);
         ></textarea>
         <div class="input-bar">
           <div class="input-tools">
-            <button id="btn-attach" :title="tr('Прикрепить файл (загрузится в inbox проекта)')" @click="pickAttach">📎</button>
-            <button id="btn-ref" :title="tr('Прикрепить по пути на сервере (файл не передаётся через браузер)')" @click="pickRef">🔗</button>
+            <button id="btn-attach" :title="tr('Прикрепить файл (загрузится в inbox проекта)')" :aria-label="tr('Прикрепить файл (загрузится в inbox проекта)')" @click="pickAttach"><Paperclip aria-hidden="true" /></button>
+            <button id="btn-ref" :title="tr('Прикрепить по пути на сервере (файл не передаётся через браузер)')" :aria-label="tr('Прикрепить по пути на сервере (файл не передаётся через браузер)')" @click="pickRef"><Link2 aria-hidden="true" /></button>
             <input ref="attachFileEl" type="file" multiple class="hidden" @change="onAttachFile">
           </div>
-          <button id="btn-send" :title="tr('Отправить')" :disabled="roundActive" @click="sendUserMessage">↑</button>
+          <button id="btn-send" :title="tr('Отправить')" :aria-label="tr('Отправить')" :disabled="roundActive" @click="sendUserMessage"><ArrowUp aria-hidden="true" /></button>
         </div>
       </div>
       <div v-if="ctxInfo || quotaInfo" id="metricsbar">
@@ -2436,7 +2485,7 @@ onMounted(connectWs);
             class="fld-group-head"
             :title="tr('Свернуть/развернуть')"
             @click="toggleModalGroup(sec.title)"
-          ><span class="sec-toggle">▾</span> {{ sec.title }}</button>
+          ><ChevronDown class="sec-toggle" aria-hidden="true" /> {{ sec.title }}</button>
           <div v-for="f in sec.fields" :key="f.key" class="fld" :class="{ 'fld-chk': f.type === 'boolean' }">
             <label>{{ f.label }}</label>
             <!-- enter.stop — перенос строки в textarea, а не submit формы (enter с root);
@@ -2476,13 +2525,14 @@ onMounted(connectWs);
       </div>
       <div v-if="modal.error" class="errline">{{ modal.error }}</div>
       <div v-if="modal.settingsActions" class="row">
-        <button :title="tr('Экспорт настроек (без проектов)')" @click="exportSettings">⬇ {{ tr('экспорт настроек') }}</button>
-        <button :title="tr('Импорт настроек из zip (проекты не трогаются)')" @click="importSettingsForm">⬆ {{ tr('импорт настроек') }}</button>
+        <button :title="tr('Экспорт настроек (без проектов)')" @click="exportSettings"><Download aria-hidden="true" /> {{ tr('экспорт настроек') }}</button>
+        <button :title="tr('Импорт настроек из zip (проекты не трогаются)')" @click="importSettingsForm"><Upload aria-hidden="true" /> {{ tr('импорт настроек') }}</button>
       </div>
       <div class="row">
         <button @click="submitForm">{{ tr('Сохранить') }}</button>
-        <button v-for="(b, i) in modal.extra" :key="`x${i}`" @click="runModalExtra(b)">{{ b.label }}</button>
+        <button v-for="(b, i) in modal.extra" :key="`x${i}`" :class="b.class" @click="runModalExtra(b)"><component :is="b.icon" v-if="b.icon" aria-hidden="true" /> {{ b.label }}</button>
         <button @click="closeForm">{{ tr('Отмена') }}</button>
+        <button v-for="(b, i) in modal.end" :key="`e${i}`" class="modal-action-end" :class="b.class" @click="runModalExtra(b)"><component :is="b.icon" v-if="b.icon" aria-hidden="true" /> {{ b.label }}</button>
       </div>
     </div>
   </div>
@@ -2582,14 +2632,14 @@ onMounted(connectWs);
         <label>{{ tr('Рабочая папка (можно пропустить — данные будут в доме)') }}</label>
         <div class="pathline">
           <input v-model="projNew.path">
-          <button :title="tr('Обзор папок компьютера')" @click="browseOpen((p) => (projNew.path = p), projNew.path || undefined)">📂</button>
+          <button :title="tr('Обзор папок компьютера')" :aria-label="tr('Обзор папок компьютера')" @click="browseOpen((p) => (projNew.path = p), projNew.path || undefined)"><FolderOpen aria-hidden="true" /></button>
         </div>
       </div>
 
       <div v-if="dirBrowse.open" id="dirbrowse">
         <div class="dirnav">
-          <button :title="tr('Домашний каталог')" @click="browseTo()">🏠</button>
-          <button :disabled="!dirBrowse.parent" :title="tr('На уровень выше')" @click="browseUp">↑</button>
+          <button :title="tr('Домашний каталог')" :aria-label="tr('Домашний каталог')" @click="browseTo()"><House aria-hidden="true" /></button>
+          <button :disabled="!dirBrowse.parent" :title="tr('На уровень выше')" :aria-label="tr('На уровень выше')" @click="browseUp"><ArrowUp aria-hidden="true" /></button>
           <span class="meta">{{ dirBrowse.path }}</span>
         </div>
         <div v-if="dirBrowse.drives.length" class="dirdrives">
@@ -2597,7 +2647,7 @@ onMounted(connectWs);
         </div>
         <div v-if="dirBrowse.error" class="errline">{{ dirBrowse.error }}</div>
         <ul v-else class="dirlist">
-          <li v-for="d in dirBrowse.dirs" :key="d.path" @click="browseTo(d.path)">📁 {{ d.name }}</li>
+          <li v-for="d in dirBrowse.dirs" :key="d.path" @click="browseTo(d.path)"><Folder aria-hidden="true" /> {{ d.name }}</li>
           <li v-if="!dirBrowse.dirs.length" class="reg-empty">{{ tr('подпапок нет') }}</li>
         </ul>
         <div class="row">
@@ -2624,14 +2674,14 @@ onMounted(connectWs);
         <label>{{ tr('Рабочая папка') }}</label>
         <div class="pathline">
           <input v-model="projSettings.path">
-          <button :title="tr('Обзор папок компьютера')" @click="browseOpen((p) => (projSettings.path = p), projSettings.path || undefined)">📂</button>
+          <button :title="tr('Обзор папок компьютера')" :aria-label="tr('Обзор папок компьютера')" @click="browseOpen((p) => (projSettings.path = p), projSettings.path || undefined)"><FolderOpen aria-hidden="true" /></button>
         </div>
       </div>
 
       <div v-if="dirBrowse.open" id="dirbrowse">
         <div class="dirnav">
-          <button :title="tr('Домашний каталог')" @click="browseTo()">🏠</button>
-          <button :disabled="!dirBrowse.parent" :title="tr('На уровень выше')" @click="browseUp">↑</button>
+          <button :title="tr('Домашний каталог')" :aria-label="tr('Домашний каталог')" @click="browseTo()"><House aria-hidden="true" /></button>
+          <button :disabled="!dirBrowse.parent" :title="tr('На уровень выше')" :aria-label="tr('На уровень выше')" @click="browseUp"><ArrowUp aria-hidden="true" /></button>
           <span class="meta">{{ dirBrowse.path }}</span>
         </div>
         <div v-if="dirBrowse.drives.length" class="dirdrives">
@@ -2639,7 +2689,7 @@ onMounted(connectWs);
         </div>
         <div v-if="dirBrowse.error" class="errline">{{ dirBrowse.error }}</div>
         <ul v-else class="dirlist">
-          <li v-for="d in dirBrowse.dirs" :key="d.path" @click="browseTo(d.path)">📁 {{ d.name }}</li>
+          <li v-for="d in dirBrowse.dirs" :key="d.path" @click="browseTo(d.path)"><Folder aria-hidden="true" /> {{ d.name }}</li>
           <li v-if="!dirBrowse.dirs.length" class="reg-empty">{{ tr('подпапок нет') }}</li>
         </ul>
         <div class="row">
@@ -2650,37 +2700,37 @@ onMounted(connectWs);
 
       <div class="proj-secs">
         <section>
-          <h3>{{ tr('Серверы') }} <button class="sec-add" :title="tr('Добавить сервер в проект')" @click="curReg && projectHostAdd(curReg)">＋</button></h3>
+          <h3>{{ tr('Серверы') }} <button class="sec-add" :title="tr('Добавить сервер в проект')" :aria-label="tr('Добавить сервер в проект')" @click="curReg && projectHostAdd(curReg)"><Plus aria-hidden="true" /></button></h3>
           <ul class="reglist">
             <li v-for="h in curReg?.hosts ?? []" :key="h.name">
               <span>{{ h.name }}</span>
-              <span class="meta">{{ h.host }}{{ h.user ? ' · ' + h.user : '' }}{{ h.port ? ':' + h.port : '' }}{{ h.hasPassword ? ' · 🔑' : '' }}</span>
-              <span class="del" :title="tr('Изменить сервер')" @click="projectHostEdit(h)">✎</span>
-              <span class="del" :title="tr('Удалить сервер')" @click="curReg && projectHostDelete(curReg, h)">✕</span>
+              <span class="meta">{{ h.host }}{{ h.user ? ' · ' + h.user : '' }}{{ h.port ? ':' + h.port : '' }}<span v-if="h.hasPassword" class="secret-mark" :title="tr('пароль задан')"> · <KeyRound aria-hidden="true" /></span></span>
+              <button class="del" :title="tr('Изменить сервер')" :aria-label="tr('Изменить сервер')" @click="projectHostEdit(h)"><Pencil aria-hidden="true" /></button>
+              <button class="del" :title="tr('Удалить сервер')" :aria-label="tr('Удалить сервер')" @click="curReg && projectHostDelete(curReg, h)"><Trash2 aria-hidden="true" /></button>
             </li>
             <li v-if="!(curReg?.hosts ?? []).length" class="reg-empty">{{ tr('пока пусто — «＋» добавит запись') }}</li>
           </ul>
         </section>
         <section>
-          <h3>{{ tr('Почтовые ящики') }} <button class="sec-add" :title="tr('Добавить ящик в проект')" @click="curReg && projectMailAdd(curReg)">＋</button></h3>
+          <h3>{{ tr('Почтовые ящики') }} <button class="sec-add" :title="tr('Добавить ящик в проект')" :aria-label="tr('Добавить ящик в проект')" @click="curReg && projectMailAdd(curReg)"><Plus aria-hidden="true" /></button></h3>
           <ul class="reglist">
             <li v-for="m in curReg?.mails ?? []" :key="m.id">
               <span>{{ m.id }}</span>
-              <span class="meta">{{ m.user }}{{ m.imap ? ' · ' + m.imap : '' }}{{ m.smtp ? ' · ' + m.smtp : '' }}{{ m.hasPassword ? ' · 🔑' : '' }}</span>
-              <span class="del" :title="tr('Изменить ящик')" @click="projectMailEdit(m)">✎</span>
-              <span class="del" :title="tr('Удалить ящик')" @click="projectMailDelete(m)">✕</span>
+              <span class="meta">{{ m.user }}{{ m.imap ? ' · ' + m.imap : '' }}{{ m.smtp ? ' · ' + m.smtp : '' }}<span v-if="m.hasPassword" class="secret-mark" :title="tr('пароль задан')"> · <KeyRound aria-hidden="true" /></span></span>
+              <button class="del" :title="tr('Изменить ящик')" :aria-label="tr('Изменить ящик')" @click="projectMailEdit(m)"><Pencil aria-hidden="true" /></button>
+              <button class="del" :title="tr('Удалить ящик')" :aria-label="tr('Удалить ящик')" @click="projectMailDelete(m)"><Trash2 aria-hidden="true" /></button>
             </li>
             <li v-if="!(curReg?.mails ?? []).length" class="reg-empty">{{ tr('пока пусто — «＋» добавит запись') }}</li>
           </ul>
         </section>
         <section>
-          <h3>{{ tr('Боты') }} <button class="sec-add" :title="tr('Добавить бота в проект')" @click="curReg && projectBotAdd(curReg)">＋</button></h3>
+          <h3>{{ tr('Боты') }} <button class="sec-add" :title="tr('Добавить бота в проект')" :aria-label="tr('Добавить бота в проект')" @click="curReg && projectBotAdd(curReg)"><Plus aria-hidden="true" /></button></h3>
           <ul class="reglist">
             <li v-for="b in curReg?.messengers ?? []" :key="b.key">
               <span>{{ b.key }}</span>
-              <span class="meta">{{ b.hasToken ? tr('токен задан 🔑') : tr('токена нет') }}</span>
-              <span class="del" :title="tr('Изменить бота')" @click="projectBotEdit(b)">✎</span>
-              <span class="del" :title="tr('Удалить бота')" @click="projectBotDelete(b)">✕</span>
+              <span class="meta">{{ b.hasToken ? tr('токен задан') : tr('токена нет') }} <KeyRound v-if="b.hasToken" aria-hidden="true" /></span>
+              <button class="del" :title="tr('Изменить бота')" :aria-label="tr('Изменить бота')" @click="projectBotEdit(b)"><Pencil aria-hidden="true" /></button>
+              <button class="del" :title="tr('Удалить бота')" :aria-label="tr('Удалить бота')" @click="projectBotDelete(b)"><Trash2 aria-hidden="true" /></button>
             </li>
             <li v-if="!(curReg?.messengers ?? []).length" class="reg-empty">{{ tr('пока пусто — «＋» добавит запись') }}</li>
           </ul>
@@ -2698,7 +2748,7 @@ onMounted(connectWs);
   <template v-if="ctx.show">
     <div class="ctx-overlay" @click="closeCtx" @contextmenu.prevent="closeCtx"></div>
     <div class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }">
-      <button v-for="(it, i) in ctx.items" :key="i" @click="runCtx(it)">{{ it.label }}</button>
+      <button v-for="(it, i) in ctx.items" :key="i" @click="runCtx(it)"><component :is="it.icon" v-if="it.icon" aria-hidden="true" /> {{ it.label }}</button>
     </div>
   </template>
 
@@ -2708,7 +2758,7 @@ onMounted(connectWs);
       <h2>{{ tr('Вы точно хотите удалить запись?') }}</h2>
       <p class="confirm-subject">{{ delConfirm.subject }}</p>
       <div class="row">
-        <button class="bad" @click="answerDelete(true)">{{ tr('Да') }}</button>
+        <button class="bad" @click="answerDelete(true)"><Trash2 aria-hidden="true" /> {{ tr('Да') }}</button>
         <button @click="answerDelete(false)">{{ tr('Нет') }}</button>
       </div>
     </div>

@@ -3,12 +3,12 @@ import type { BgTaskInfo, ChatMessage, ProjectInfo, ScheduleTaskInfo, StateSnaps
 
 // ── утилиты ──────────────────────────────────────────────────────────────────
 export const COLORS: Record<string, string> = {
-  black: '#9aa3af', red: '#e06c75', green: '#98c379', yellow: '#e5c07b',
-  blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2', white: '#d7dae0',
-  gray: '#7f8790',
+  black: 'var(--agent-black)', red: 'var(--agent-red)', green: 'var(--agent-green)',
+  yellow: 'var(--agent-yellow)', blue: 'var(--agent-blue)', magenta: 'var(--agent-magenta)',
+  cyan: 'var(--agent-cyan)', white: 'var(--agent-white)', gray: 'var(--agent-gray)',
 };
 export const colorOf = (name: unknown): string =>
-  COLORS[String(name ?? '').toLowerCase()] ?? '#d7dae0';
+  COLORS[String(name ?? '').toLowerCase()] ?? 'var(--text)';
 export const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/ё/g, 'е');
 
 // ── реактивное состояние ─────────────────────────────────────────────────────

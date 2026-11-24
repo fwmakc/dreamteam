@@ -162,6 +162,66 @@ function checkForms(file: string, src: string): void {
 }
 checkForms('gui-src/App.vue', appSrc);
 
+// --- 4b-theme. четыре палитры, «Авто» по умолчанию и ранняя инициализация ---
+const styleSrc = read('gui-src/src/style.css');
+const indexSrc = read('gui-src/index.html');
+check('темы GUI: auto/light/dark/indigo, auto — по умолчанию и сохраняется локально',
+  appSrc.includes("const GUI_THEMES = ['auto', 'light', 'dark', 'indigo'] as const") &&
+  appSrc.includes("localStorage.getItem('dt-theme')") && appSrc.includes("localStorage.setItem('dt-theme', next)") &&
+  appSrc.includes("? savedTheme as GuiTheme : 'auto'"));
+check('темы GUI: светлая сиреневая, тёмная графитовая, auto следует системной палитре',
+  styleSrc.includes(":root[data-theme='light']") && styleSrc.includes(":root[data-theme='dark'], :root[data-theme='auto']") &&
+  styleSrc.includes('@media (prefers-color-scheme: light)') && styleSrc.includes("--accent: #8c5ebb") &&
+  styleSrc.includes("--accent: #f39a4a") && styleSrc.includes("--bg: #141414"));
+check('тема применяется до загрузки Vue — без вспышки палитры по умолчанию',
+  indexSrc.includes("localStorage.getItem('dt-theme')") && indexSrc.includes('document.documentElement.dataset.theme'));
+check('светлая тема: имена агентов используют тёмные тематические цвета',
+  wsSrc.includes("white: 'var(--agent-white)'") && wsSrc.includes("yellow: 'var(--agent-yellow)'") &&
+  styleSrc.includes('--agent-white: #596372') && styleSrc.includes('--agent-yellow: #8a5a12'));
+
+// --- 4b-icons. единый Lucide вместо служебных эмодзи; аватары/статусы остаются ---
+check('иконки GUI: используется поддерживаемый пакет @lucide/vue',
+  Boolean((JSON.parse(read('package.json')) as { devDependencies: Record<string, string> }).devDependencies['@lucide/vue']) &&
+  appSrc.includes("from '@lucide/vue'") && !appSrc.includes('lucide-vue-next'));
+check('иконки GUI: разделы и основные действия переведены на контурные SVG',
+  ['<Folder class="sec-icon"', '<MessageSquare class="sec-icon"', '<Users class="sec-icon"',
+    '<Cpu class="sec-icon"', '<CalendarClock class="sec-icon"', '<SquareTerminal class="sec-icon"',
+    '<Paperclip aria-hidden="true" />', '<Target aria-hidden="true" />', '<ArrowUp aria-hidden="true" />',
+    '<Trash2 aria-hidden="true" />', '<Copy aria-hidden="true" />', '<CornerUpLeft aria-hidden="true" />',
+  ].every((token) => appSrc.includes(token)));
+check('иконки GUI: прежние служебные эмодзи не остаются кнопками',
+  ['>☰</button>', '>⚙</button>', '>📎</button>', '>🔗</button>', '>↑</button>', '>✕</span>',
+    '>✎</span>', '>⧉</button>', '📁＋</button>', '>🏠</button>', '>📂</button>',
+  ].every((token) => !appSrc.includes(token)));
+check('иконки GUI: icon-only кнопки имеют aria-label, аватары и статусы сохранены',
+  appSrc.includes('id="btn-send" :title="tr(\'Отправить\')" :aria-label="tr(\'Отправить\')"') &&
+  appSrc.includes('id="btn-attach" :title="tr(\'Прикрепить файл (загрузится в inbox проекта)\')" :aria-label=') &&
+  appSrc.includes('aria-label="${title}"') && appSrc.includes('{{ a.emoji }} {{ a.name }}') &&
+  appSrc.includes('BG_STATUS_EMOJI'));
+
+// --- 4b-agent. удаление только из карточки и только после подтверждения ---
+const teamSection = slice(appSrc, '<section class="side-sec" :class="{ collapsed: collapsed.has(\'team\') }"', '<section class="side-sec" :class="{ collapsed: collapsed.has(\'models\') }"');
+const agentForm = slice(appSrc, 'async function openAgentSettings', 'function agentDelete');
+const teamCtx = slice(appSrc, 'function ctxTeam', 'function ctxModel');
+check('агенты: клик открывает карточку, крестика удаления в списке нет',
+  teamSection.includes('@click="openAgentSettings(a)"') && !teamSection.includes('Удалить агента') &&
+  !teamSection.includes('delAgent(a)') && !teamSection.includes('@click="toggleChat(a)"'));
+check('агенты: в карточке есть красная кнопка удаления, но нет действия с чатом',
+  agentForm.includes("end: [{ label: tr('Удалить'), icon: Trash2, class: 'bad', fn: () => delAgent(a) }]") &&
+  !agentForm.includes("fn: () => toggleChat(a)") && !agentForm.includes("tr('Позвать в чат')") &&
+  !agentForm.includes("tr('Вывести из чата')"));
+check('агенты: действие с чатом остаётся в меню, удаление — только через карточку',
+  teamCtx.includes("tr(a.inChat ? 'Вывести из чата' : 'Позвать в чат')") &&
+  teamCtx.includes("fn: () => toggleChat(a)") &&
+  !teamCtx.includes('delAgent') && !teamCtx.includes("label: tr('Удалить')"));
+check('карточка агента: «Сохранить», «Отмена», затем «Удалить» у правого края',
+  appSrc.indexOf('@click="submitForm"') < appSrc.indexOf('@click="closeForm"') &&
+  appSrc.indexOf('@click="closeForm"') < appSrc.indexOf('v-for="(b, i) in modal.end"') &&
+  appSrc.includes('class="modal-action-end"') &&
+  styleSrc.includes('.modal-box .row .modal-action-end { margin-left: auto; }'));
+check('агенты: удаление проходит общее модальное подтверждение',
+  slice(appSrc, 'function agentDelete', 'function toggleChat').includes('askDelete('));
+
 // --- 4c. вложения: 📎 через /api/upload, 🔗 через file_ref; старый base64-
 // канал 'file' из оболочки убран (сервер его ещё понимает — совместимость) ---
 check('оболочка: вложения через uploadFile + file_ref, ws-канала file больше нет',

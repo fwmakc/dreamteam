@@ -7,6 +7,30 @@ protocol — are stable and follow semver: breaking changes land only in a major
 version. Before 0.0.10 the interface was still stabilizing, so no
 compatibility is promised across earlier versions.
 
+## [0.0.21] — 2026-11-24
+
+### Added
+
+- **Four GUI color themes.** «Авто» follows the operating system's light or dark
+  preference and is the default; «Светлая» uses light surfaces with lilac
+  accents, «Тёмная» uses graphite surfaces with orange accents, and «Индиго»
+  keeps the previous palette. The choice is stored locally, applied before Vue
+  starts to avoid a theme flash, and agent-name colors now adapt to the active
+  palette.
+
+### Changed
+
+- **A unified Lucide icon set in the web GUI.** Utility emoji and text symbols
+  were replaced with outlined SVG icons that inherit theme colors through
+  `currentColor`; icon-only controls have accessible names, while agent emoji
+  avatars and compact status indicators remain intact. Context menus, modal
+  actions and Markdown code-copy buttons use the same visual style.
+- **Safer agent management.** The delete cross was removed from the agent list:
+  deletion is available only from the agent card and requires confirmation.
+  «Позвать в чат»/«Вывести из чата» lives exclusively in the context menu, and
+  the card's destructive «Удалить» action is separated at the far right from
+  «Сохранить» and «Отмена».
+
 ## [0.0.20] — 2026-11-12
 
 ### Added

@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dream Team</title>
   <link rel="icon" href="data:,">
+  <script>
+    // До загрузки Vue и CSS: сохранённая тема без вспышки индиго при старте.
+    try {
+      const saved = localStorage.getItem('dt-theme');
+      document.documentElement.dataset.theme = ['light', 'dark', 'indigo'].includes(saved) ? saved : 'auto';
+    } catch {
+      document.documentElement.dataset.theme = 'auto';
+    }
+  </script>
 </head>
 <body>
   <div id="app"></div>
