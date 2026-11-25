@@ -105,7 +105,7 @@ const PROJECT_ID_BAD = /[\\/:*?"<>|\p{C}]/u;
 export function validateProjectId(raw: string): string {
   const id = raw.trim();
   if (!id || id.length > 64 || /\s/.test(id) || PROJECT_ID_BAD.test(id) || id === '.' || id === '..' || id.startsWith('.')) {
-    throw new Error(t('имя проекта — 1–64 символа без пробелов: буквы, цифры, точка, дефис, подчёркивание'));
+    throw new Error(t('PROJECT_NAME_1_64_CHARACTERS_WITHOUT_SPACES_LETTERS'));
   }
   return id;
 }
@@ -138,7 +138,7 @@ export function checkWorkspacePath(raw: string): string {
   const abs = resolve(expandHome(raw));
   const home = resolve(DT_HOME);
   if (abs === home || abs.startsWith(home + sep)) {
-    throw new Error(t('рабочая папка не может быть внутри дома приложения — там ключи моделей и настройки'));
+    throw new Error(t('THE_WORKING_FOLDER_CAN_NOT_BE_INSIDE_THE'));
   }
   return abs;
 }
@@ -146,7 +146,7 @@ export function checkWorkspacePath(raw: string): string {
 function writeNewProject(id: string, path: string | null): ProjectConfig {
   if (path) {
     if (!existsSync(path)) mkdirSync(path, { recursive: true });
-    else if (!statSync(path).isDirectory()) throw new Error(tf('«{path}» — не папка', { path }));
+    else if (!statSync(path).isDirectory()) throw new Error(tf('PATH_IS_NOT_A_FOLDER', { path }));
   }
   const cfg: ProjectConfig = { id, createdAt: Date.now(), hosts: {}, mails: {}, messengers: {} };
   if (path) cfg.path = path;
@@ -181,7 +181,7 @@ export function createProject(idRaw: string | null, pathRaw: string | null): Pro
   if (idRaw !== null) {
     const explicit = validateProjectId(idRaw);
     if (existsSync(join(PROJECTS_DIR, explicit))) {
-      throw new Error(tf('проект «{id}» уже есть — /project open {id}', { id: explicit }));
+      throw new Error(tf('PROJECT_ID_ALREADY_EXISTS_PROJECT_OPEN_ID', { id: explicit }));
     }
     return writeNewProject(explicit, pathRaw ? checkWorkspacePath(pathRaw) : null);
   }
@@ -200,9 +200,9 @@ export function registerWorkspace(ws: string): ProjectConfig {
 /** Удалить проект из дома (projects/<id>/ целиком); рабочая папка не трогается. */
 export function removeProject(id: string, currentDir: string): void {
   const dir = join(PROJECTS_DIR, id);
-  if (!existsSync(dir)) throw new Error(tf('проекта «{id}» нет — см. /projects', { id }));
+  if (!existsSync(dir)) throw new Error(tf('NO_PROJECT_ID_SEE_PROJECTS', { id }));
   if (resolve(dir) === resolve(currentDir)) {
-    throw new Error(tf('проект «{id}» открыт сейчас — сначала переключитесь на другой (/project open)', { id }));
+    throw new Error(tf('PROJECT_ID_IS_OPEN_NOW_SWITCH_TO_ANOTHER', { id }));
   }
   rmSync(dir, { recursive: true, force: true });
 }
@@ -213,8 +213,8 @@ export function renameProject(oldId: string, newIdRaw: string): ProjectConfig {
   if (newId === oldId) return loadProjectConfig(oldId) ?? { id: newId, createdAt: Date.now(), hosts: {}, mails: {}, messengers: {} };
   const from = join(PROJECTS_DIR, oldId);
   const to = join(PROJECTS_DIR, newId);
-  if (!existsSync(from)) throw new Error(tf('проекта «{id}» нет — см. /projects', { id: oldId }));
-  if (existsSync(to)) throw new Error(tf('проект «{id}» уже есть — выберите другое имя', { id: newId }));
+  if (!existsSync(from)) throw new Error(tf('NO_PROJECT_ID_SEE_PROJECTS', { id: oldId }));
+  if (existsSync(to)) throw new Error(tf('PROJECT_ID_ALREADY_EXISTS_PICK_ANOTHER_NAME', { id: newId }));
   renameSync(from, to);
   const cfg = loadProjectConfig(newId) ?? { id: newId, createdAt: Date.now(), hosts: {}, mails: {}, messengers: {} };
   cfg.id = newId;
@@ -226,7 +226,7 @@ export function renameProject(oldId: string, newIdRaw: string): ProjectConfig {
 export function setProjectPath(cfg: ProjectConfig, pathRaw: string): ProjectConfig {
   const path = checkWorkspacePath(pathRaw);
   if (!existsSync(path)) mkdirSync(path, { recursive: true });
-  else if (!statSync(path).isDirectory()) throw new Error(tf('«{path}» — не папка', { path }));
+  else if (!statSync(path).isDirectory()) throw new Error(tf('PATH_IS_NOT_A_FOLDER', { path }));
   cfg.path = path;
   saveProjectConfig(cfg);
   return cfg;
@@ -240,12 +240,12 @@ export function setProjectPath(cfg: ProjectConfig, pathRaw: string): ProjectConf
  */
 export function resolveProjectTarget(arg: string, from: string): ProjectTarget {
   const raw = arg.trim().replace(/^["']|["']$/g, '');
-  if (!raw) throw new Error(t('укажите проект: /project open <id|путь> (список — /projects)'));
+  if (!raw) throw new Error(t('GIVE_A_PROJECT_PROJECT_OPEN_ID_PATH_LIST'));
   const projects = listProjects();
   if (isAbsolute(raw) || raw === '.' || raw === '..' || raw.startsWith('~') || raw.includes('/') || raw.includes('\\')) {
     const path = resolve(from, expandHome(raw));
     if (!existsSync(path) || !statSync(path).isDirectory()) {
-      throw new Error(tf('нет папки «{raw}» — укажите путь или имя из /projects', { raw }));
+      throw new Error(tf('NO_FOLDER_RAW_GIVE_A_PATH_OR_A', { raw }));
     }
     const known = projects.find((p) => p.path && p.path === resolve(path));
     if (known) return { config: known, created: false };
@@ -255,5 +255,5 @@ export function resolveProjectTarget(arg: string, from: string): ProjectTarget {
   if (byId) return { config: byId, created: false };
   const byFolder = projects.find((p) => p.path && basename(p.path).toLowerCase() === raw.toLowerCase());
   if (byFolder) return { config: byFolder, created: false };
-  throw new Error(tf('нет проекта «{raw}» — /project new {raw} создаст его, /projects покажет список', { raw }));
+  throw new Error(tf('NO_PROJECT_RAW_PROJECT_NEW_RAW_WILL_CREATE', { raw }));
 }

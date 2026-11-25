@@ -26,8 +26,8 @@ function check(name: string, cond: boolean, detail?: string): void {
 const root = mkdtempSync(join(tmpdir(), 'dt-memory-'));
 process.env.DT_HOME = root; // memory.ts сам по себе дом не читает — но импорты src могут
 
-const gleb: Agent = { id: 'gleb', name: 'Глеб', emoji: '🧠', color: 'cyan', prompt: '' };
-const mira: Agent = { id: 'mira', name: 'Мира', emoji: '🎨', color: 'magenta', prompt: '' };
+const gleb: Agent = { id: 'gleb', name: 'Глеб', color: 'cyan', prompt: '' };
+const mira: Agent = { id: 'mira', name: 'Мира', color: 'magenta', prompt: '' };
 
 /** Стаб LLM: выдаёт заготовленный текст, запоминает полученный запрос. */
 function stubLLM(reply: string): { provider: LLMProvider; requests: { system?: string; user: string }[] } {

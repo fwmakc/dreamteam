@@ -36,6 +36,7 @@ import {
   managerMentioned,
   managerStateInput,
   parseManagerReply,
+  updateManagerConfig,
   updateTeamAgent,
 } from '../src/manager.js';
 import { loadAccounts } from '../src/mail.js';
@@ -70,16 +71,26 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   const cfg = loadManagerConfig(cfgFile, ['openai', 'mock']);
   check('конфиг: модель сохранена', cfg.model.id === 'openai');
   check('конфиг: дефолтное имя', cfg.name === 'Менеджер', cfg.name);
-  check('конфиг: дефолтный эмодзи', cfg.emoji === '🛎', cfg.emoji);
-  check('конфиг: дефолтный цвет', cfg.color === 'yellow', cfg.color);
-  check('конфиг: дефолтная температура', cfg.temperature === 0.2, String(cfg.temperature));
+  check('конфиг: внешнего вида нет — только имя и модель', Object.keys(cfg).sort().join(',') === 'model,name', JSON.stringify(cfg));
+  check('конфиг: температуры нет — дефолт карточки модели', cfg.model.temperature === undefined, String(cfg.model.temperature));
 }
 {
   writeFileSync(cfgFile, JSON.stringify({ model: { id: 'mock' }, name: 'Пчёлка', emoji: '🎩', color: 'magenta', temperature: 0.5 }));
   const cfg = loadManagerConfig(cfgFile, ['mock']);
-  check('конфиг: свои значения читаются', cfg.name === 'Пчёлка' && cfg.emoji === '🎩' && cfg.color === 'magenta' && cfg.temperature === 0.5);
+  check('конфиг: имя читается, легаси emoji/color игнорируются, temperature — в ссылку', cfg.name === 'Пчёлка' && (cfg as unknown as Record<string, unknown>).emoji === undefined && (cfg as unknown as Record<string, unknown>).color === undefined && cfg.model.temperature === 0.5);
   check('конфиг: обращение по «ё»-имени без «ё»', managerMentioned('@пчелка, добавь', cfg));
   check('конфиг: обращение с «ё»', managerMentioned('@Пчёлка', cfg));
+}
+{
+  writeFileSync(cfgFile, JSON.stringify({ model: { id: 'mock', temperature: 0.4 }, temperature: 0.9 }));
+  const cfg = loadManagerConfig(cfgFile, ['mock']);
+  check('конфиг: температура ссылки бьёт легаси-поле', cfg.model.temperature === 0.4, String(cfg.model.temperature));
+}
+{
+  writeFileSync(cfgFile, JSON.stringify({ model: { id: 'mock', top_p: 0.9 } }));
+  let threw = '';
+  try { loadManagerConfig(cfgFile, ['mock']); } catch (e) { threw = (e as Error).message; }
+  check('конфиг: мусорный ключ ссылки — ошибка', threw.includes('top_p'), threw);
 }
 {
   let threw = '';
@@ -106,7 +117,33 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 }
 {
   writeFileSync(cfgFile, JSON.stringify({ model: { id: 'openai' }, color: 'бирюзовый' }));
-  check('конфиг: незнакомый цвет → yellow', loadManagerConfig(cfgFile, ['openai']).color === 'yellow');
+  check('конфиг: легаси-цвет в файле не мешает загрузке', loadManagerConfig(cfgFile, ['openai']).model.id === 'openai');
+}
+
+// --- updateManagerConfig: параметры — в model-ссылке, как у агентов ---
+{
+  writeFileSync(cfgFile, JSON.stringify({ model: { id: 'openai' }, temperature: 0.2, name: 'Менеджер', emoji: '🛎', color: 'yellow' }));
+  const report = updateManagerConfig(cfgFile, { model: { id: 'mock', temperature: 0.4, maxTokens: 2048 } }, ['openai', 'mock']);
+  const onDisk = JSON.parse(readFileSync(cfgFile, 'utf8')) as { temperature?: number; emoji?: string; color?: string; model?: { id?: string; temperature?: number; maxTokens?: number } };
+  check('update: ссылка записана с параметрами', onDisk.model?.id === 'mock' && onDisk.model?.temperature === 0.4 && onDisk.model?.maxTokens === 2048, JSON.stringify(onDisk));
+  check('update: легаси-temperature вычищена с верхнего уровня', onDisk.temperature === undefined, JSON.stringify(onDisk));
+  check('update: легаси-поля внешнего вида вычищены', onDisk.emoji === undefined && onDisk.color === undefined, JSON.stringify(onDisk));
+  check('update: отчёт называет параметры', report.includes('model="mock"') && report.includes('temperature=0.4') && report.includes('maxTokens=2048'), report);
+}
+{
+  writeFileSync(cfgFile, JSON.stringify({ model: { id: 'openai', temperature: 0.7 } }));
+  const report = updateManagerConfig(cfgFile, { name: 'Пчёлка' }, ['openai']);
+  const onDisk = JSON.parse(readFileSync(cfgFile, 'utf8')) as { name?: string; temperature?: number; model?: { id?: string; temperature?: number } };
+  check('update: имя правится, ссылка с параметрами цела', onDisk.name === 'Пчёлка' && onDisk.model?.temperature === 0.7 && onDisk.temperature === undefined, JSON.stringify(onDisk));
+  check('update: отчёт по скаляру', report.includes('name='), report);
+}
+{
+  writeFileSync(cfgFile, JSON.stringify({ model: { id: 'openai' } }));
+  let threw = '';
+  try { updateManagerConfig(cfgFile, { model: { temperature: 0.5 } }, ['openai']); } catch (e) { threw = (e as Error).message; }
+  check('update: ссылка без id отвергнута валидацией', threw.length > 0, threw);
+  const onDisk = JSON.parse(readFileSync(cfgFile, 'utf8')) as { model?: { id?: string } };
+  check('update: файл не тронут при ошибке', onDisk.model?.id === 'openai', JSON.stringify(onDisk));
 }
 // конфиг из репозитория валиден
 {
@@ -126,7 +163,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   check('mention: чужое @имя — мимо', !managerMentioned('@катя, привет', cfg));
   check('mention: мимо и без слова вообще', !managerMentioned('привет всем', cfg));
   // триггер ! для обычных участников (findMentions); результат — уникальные агенты
-  const team: Agent[] = [{ id: 'katya', name: 'Катя', emoji: '🎨', description: 'дизайнер', color: 'cyan', prompt: 'p' }];
+  const team: Agent[] = [{ id: 'katya', name: 'Катя', description: 'дизайнер', color: 'cyan', prompt: 'p' }];
   check('mention: findMentions @имя и @id', findMentions('@Катя и @katya', team).length === 1);
   check('mention: findMentions !имя и !id', findMentions('!катя, !katya', team).length === 1);
   check('mention: findMentions «ё» и регистр', findMentions('Ёжик !КАТЯ', team).length === 1);
@@ -136,9 +173,8 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   // псевдо-агент пригоден для шапки: есть все поля рендера
   const cfg = loadManagerConfig(cfgFile, ['openai']);
   const agent = managerAsAgent(cfg);
-  check('псевдо-агент: id/имя/эмодзи/цвет',
-    agent.id === 'manager' && agent.name === cfg.name &&
-    agent.emoji === cfg.emoji && agent.color === cfg.color);
+  check('псевдо-агент: id/имя, цвета нет — нейтральный',
+    agent.id === 'manager' && agent.name === cfg.name && agent.color === '');
   check('промпт менеджера короткий и с маркером', MANAGER_PROMPT.length < 3500 && MANAGER_PROMPT.startsWith('Ты — менеджер переговорки'), String(MANAGER_PROMPT.length));
 }
 
@@ -212,8 +248,8 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 // --- managerStateInput ---
 {
   const team: Agent[] = [
-    { id: 'katya', name: 'Катя', emoji: '🎨', description: 'дизайнер', color: 'cyan', prompt: 'p', model: { id: 'claude', temperature: 0.3 }, tools: { files: {}, look: null } },
-    { id: 'gleb', name: 'Глеб', emoji: '💾', description: 'разработчик', color: 'green', prompt: 'p', projects: ['shop'] },
+    { id: 'katya', name: 'Катя', description: 'дизайнер', color: 'cyan', prompt: 'p', model: { id: 'claude', temperature: 0.3 }, tools: { files: {}, look: null } },
+    { id: 'gleb', name: 'Глеб', description: 'разработчик', color: 'green', prompt: 'p', projects: ['shop'] },
   ];
   const sessions: SessionMeta[] = [
     { id: 's1', title: 'Текущий', createdAt: 0, updatedAt: 1, count: 4 },
@@ -259,7 +295,10 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   const agents = loadTeam(agentsDir);
   const katya = agents.find((a) => a.id === 'katya');
   check('team.add: loadTeam валиден, участник на месте', !!katya);
-  check('team.add: дефолты эмодзи/цвета', katya?.emoji === '🤖' && katya?.color === 'white', JSON.stringify(katya));
+  // gleb.json записан с легаси-эмодзи — при загрузке поле отбрасывается
+  const gleb0 = agents.find((a) => a.id === 'gleb') as unknown as Record<string, unknown> | undefined;
+  check('легаси-карточка с эмодзи грузится, поле отброшено', !!gleb0 && gleb0.emoji === undefined, JSON.stringify(gleb0));
+  check('team.add: дефолт цвета, эмодзи нет', katya?.color === 'white' && (katya as unknown as Record<string, unknown> | undefined)?.emoji === undefined, JSON.stringify(katya));
   check('team.add: дефолтный промпт', katya?.prompt === 'Ты — Катя.', katya?.prompt);
   // карточки доходят как есть, null → {} (настройки по умолчанию)
   const kt = katya?.tools;
@@ -302,7 +341,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   const agents = loadTeam(agentsDir);
   const gleb = agents.find((a) => a.id === 'gleb');
   check('team.update: описание/провайдер/temp применились', gleb?.description === 'ведущий разработчик' && gleb?.model?.id === 'openai' && gleb?.model?.temperature === 0.1, JSON.stringify(gleb));
-  check('team.update: остальные поля целы', gleb?.prompt === 'Ты — Глеб.' && gleb?.emoji === '💾');
+  check('team.update: остальные поля целы', gleb?.prompt === 'Ты — Глеб.');
   check('team.update: loadTeam по-прежнему валиден', agents.length === 3);
 
   const before2 = agentsSnapshot();
@@ -497,7 +536,7 @@ const models: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   const bare = resolveHost('staging', cfg);
   check('ssh: голое имя резолвится', !('error' in bare) && bare.project === 'project', JSON.stringify(bare));
   check('ssh: чужой хост — отказ', 'error' in resolveHost('project:nope', cfg), '');
-  const devops: Agent = { id: 'y', name: 'Яна', emoji: '🏍', color: 'cyan', prompt: 'x', tools: { ssh: {} }, projects: ['project'] };
+  const devops: Agent = { id: 'y', name: 'Яна', color: 'cyan', prompt: 'x', tools: { ssh: {} }, projects: ['project'] };
   check('права: ssh по проекту разрешён', checkPermission(devops, { kind: 'ssh', host: 'project:prod', command: 'uptime' }, cfg) === null);
   check('права: ssh по голому имени разрешён', checkPermission(devops, { kind: 'ssh', host: 'staging', command: 'uptime' }, cfg) === null);
   const deny = checkPermission(devops, { kind: 'ssh', host: 'ghost:prod', command: 'uptime' }, cfg);

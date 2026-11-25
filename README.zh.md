@@ -59,7 +59,7 @@ dreamteam serve .            # 网页外壳直接带着当前文件夹的项目
 
 如果没有家目录（`~/.dreamteam`），向导会依次询问：
 
-1. **界面语言** —— 第一个问题，向导本身已经会用它：开箱即用 `ru`、`en`、`zh`，加上来自 `~/.dreamteam/lang/<id>.json` 的自定义语言（见“设置”）。之后用 `/settings update ui=<id>` 更改。
+1. **界面语言** —— 第一个问题，向导本身已经会用它：开箱即用 `ru`、`en`、`zh`，加上来自 `~/.dreamteam/lang/<id>.json` 的自定义语言（见“设置”）。之后用 `/lang <id>` 更改。
 2. **服务商** —— 从适配器列表选择（`mock` 无需密钥即可试用）。
 3. **API 密钥** —— 输入隐藏（不显示、也不进终端日志）；密钥直接保存到 `models/` 的模型卡片里（`"apiKey"` 字段）并立即生效。
 4. **如何向团队介绍你** —— 名字和几句自我介绍（可跳过）。
@@ -73,13 +73,13 @@ dreamteam serve .            # 网页外壳直接带着当前文件夹的项目
 ```
 You > bring in Gleb and Marina
   ✓ Gleb (id "gleb") added to the team
-  💾 Gleb joined the chat.
+  Gleb joined the chat.
 You > enable shell and files for Gleb
   ✓ gleb: tool "shell" enabled
 You > let's set up the shop project: server prod — deploy@203.0.113.10
   ✓ project "shop" added (servers: prod)
 You > alright Gleb, look at the structure and propose a refactoring plan
-  💾 Gleb: …
+  Gleb: …
 ```
 
 经理是唯一修改配置的角色，而且只能通过与它的对话（没有旁门左道 —— 只有规范操作）。它的系统提示词包含实时状态：带工具的团队名单、聊天名单、谈话列表、带服务器的项目注册表以及斜杠命令列表。经理不能写 `tools/` 里的文件 —— 该动作在它的协议里根本不存在。
@@ -215,9 +215,10 @@ dreamteam 的 GigaChat 还说原生 function calling：智能体的工具以 `fu
 | `import <file>` | `/import dt-home-….zip` | 从归档展开家目录（含密钥）：设置/资料/记忆/日程被替换，项目和谈话按 id 并入；需确认 |
 | `settings.export` | `/settings export` | 不含项目的设置：settings.json、个人资料、经理和带密钥的模型 |
 | `settings.import <file>` | `/settings import dt-settings-….zip` | 替换设置/资料/经理/模型（项目不动）；需确认 |
+| `lang [<id>]` | `/lang` · `/lang en` | 界面语言：无参数——显示当前和列表；带 id——即时切换（网页端也可在设置对话框里改） |
 | `agents.list` | `/agents` | 团队名单：id、描述、工具、谁在聊天 |
 | `agent.new <id> [field=value…]` | `/agent new lawyer name=律师 description=法律` | 新成员（默认名字 = id） |
-| `agent.update <id> field=value…` | `/agent update lawyer description=法律 model.temperature=0.4 vision=glm` | 编辑：name= emoji= color= description= prompt= workspace= 及嵌套的 model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=，另有 vision= image=（`models/` 中的模型 id；留空 —— 移除引用） |
+| `agent.update <id> field=value…` | `/agent update lawyer description=法律 model.temperature=0.4 vision=glm` | 编辑：name= color= description= prompt= workspace= 及嵌套的 model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=，另有 vision= image=（`models/` 中的模型 id；留空 —— 移除引用） |
 | `agent.delete <id…>` | `/agent delete lawyer, keks` | 删除成员：逗号或空格分隔的列表 |
 | `agent.tools <id>` | `/agent tools lawyer` | 启用了哪些工具、什么设置 |
 | `agent.tool add <id> <tool…>` | `/agent tool add lawyer files shell` | 启用工具（可多个）：内置的（完整列表 — `/tools`）或 tools/ 里自定义的 |
@@ -269,7 +270,7 @@ dreamteam 的 GigaChat 还说原生 function calling：智能体的工具以 `fu
 | `settings.show` | `/settings` | 当前设置 |
 | `settings.update field=value…` | `/settings update maxTurns=2 model.id=glm` | 设置（自下一轮生效）；嵌套：model.id、serviceModel.id、model.temperature |
 | `manager.show` | `/manager` | 会议室经理：模型、温度、名字 |
-| `manager.update field=value…` | `/manager update model.id=glm temperature=0.2` | 字段：name、emoji、color、temperature 及嵌套的 model.id、model.temperature |
+| `manager.update field=value…` | `/manager update model.id=glm model.temperature=0.2` | 字段：name 及嵌套的 model.id、model.temperature、model.maxTokens、model.thinking、model.reasoning |
 | `/help` | `/help` | 操作帮助（同一份清单） |
 | `/exit` | `/exit` | 退出（仅终端） |
 
@@ -344,7 +345,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 }
 ```
 
-- `ui` — 界面语言：内置 `ru`、`en`、`zh`，或 `~/.dreamteam/lang/<id>.json` 里自定义语言的 id（文件格式 `{ "name": "Deutsch", "translations": { … } }`；id 即不含 `.json` 的文件名，`_` 开头的文件被忽略）。在首次启动向导中选择，用 `/settings update ui=en` 更改。界面和三份 README（`README.md`、`README.ru.md`、`README.zh.md`）提供英语、俄语和中文。刻意不翻译：智能体与经理的系统提示词（回答语言由 `language` 决定）、命令参数名（语法的一部分）、配置诊断（fail-fast 层）。
+- `ui` — 界面语言：内置 `ru`、`en`、`zh`，或 `~/.dreamteam/lang/<id>.json` 里自定义语言的 id（文件格式 `{ "name": "Deutsch", "translations": { "SETTINGS": "Einstellungen", … } }` —— 键是应用自己的标识符，`SCREAMING_SNAKE` 大写形式，如 `SETTINGS`、`NO_DISCUSSIONS_YET`；id 即不含 `.json` 的文件名，`_` 开头的文件被忽略；文件没覆盖的键回退到俄语）。0.0.21 之前以俄语字符串为键的旧文件在加载时自动转换成新键；对不上俄语词典的字符串会在启动时带清单报错退出。在首次启动向导中选择，用 `/settings update ui=en` 更改。界面和三份 README（`README.md`、`README.ru.md`、`README.zh.md`）提供英语、俄语和中文。刻意不翻译：智能体与经理的系统提示词（回答语言由 `language` 决定）、命令参数名（语法的一部分）、配置诊断（fail-fast 层）。
 - `maxTurns` — 每轮最多回答人数（默认 3；0 — 不限，由主持人决定谁答、答几人）。会进入主持人的提示词：“从 1 到 N 中挑选”。
 - `language` — 团队交谈使用的语言。它会原样进入系统提示词 —— “严格用以下语言回答：……” —— 所以任何写法都行：`russian`、`ru-RU`、`english`、`中文`。字段缺失时，团队说界面语言：`ru` → «русский»、`en` → english、`zh` → 中文，自定义语言用自己的文件名（“Deutsch”）—— 回退逻辑在内核里，终端与浏览器行为一致；显式设置始终优先。每轮都会重读该语言：改动无需重启即生效。
 - `width` — 逻辑屏幕宽度，40 到 500 的整数。所有输出（智能体回答、横幅、帮助）都按这个宽度折行，而不是整个终端宽度：文本不会在宽窗口里拉满。终端更窄时，宽度会被压到终端宽度。
@@ -418,7 +419,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 - `ask` — 向你展示确认：
 
   ```
-  ⚙ Command: 💾 Gleb: [shop] docker compose up -d
+  ⚙ Command: Gleb: [shop] docker compose up -d
       y — run · n — deny
   ```
 
@@ -726,12 +727,11 @@ You > @manager add the router server — admin@192.168.1.1
 它的配置在 `~/.dreamteam/manager.json`（文件必需，如同 `settings.json`）：
 
 ```json
-{ "model": "openai", "name": "Manager", "emoji": "🛎", "color": "yellow", "temperature": 0.2 }
+{ "model": { "id": "openai" }, "name": "Manager" }
 ```
 
-- `model` — 指向 `models/` 里的一张卡片；模型取自卡片记录。未知 id — 应用不启动，并给出明确错误。
+- `model` — 指向 `models/` 里的一张卡片，与智能体「模型」区块同构：`{ "id": …, "temperature": …, "maxTokens": … }`，参数覆盖模型卡片，未设置时取模型卡片的默认值（新脚手架不再硬编码 0.2；旧文件顶层的 `temperature` 加载时迁入 `model.temperature`）。未知 id — 应用不启动，并给出明确错误。
 - `name` — 称呼用的名字。`@manager` 和 `!manager` 始终可用，与名字无关；在 `@` 面板里它排第一。
-- `emoji`、`color` — 行的外观；`temperature` 默认比成员更严格（0.2）：期待经理谨慎行事，而不是发挥创意。
 
 `/settings update model.id=…` 更换的是**智能体**的主力模型；经理有自己的模型（来自 `manager.json`）— 由 `/manager update model.id=…` 更改。
 
@@ -739,7 +739,7 @@ You > @manager add the router server — admin@192.168.1.1
 
 ## 自定义智能体与自己的 API
 
-**更换团队** — 编辑 `~/.dreamteam/agents/`（即时生效）：字段 `id`、`name`、`emoji`、`description`、`color`（red/green/yellow/blue/magenta/cyan/white/gray）、`prompt`（人设），可选 `model`（模型 id 字符串或带 temperature 的对象）和 `temperature`；真实动作的权限 — `tools`、`projects`、`workspace`，眼睛和双手 — `vision` 和 `image`（见“工具”与“视觉与图片”）。`model` 字段只能是 `models/` 里存在的 id：`/agent new|update` 命令、网页外壳和经理都会拒绝陌生的 id 并给出可用列表，而不是把垃圾写进配置。
+**更换团队** — 编辑 `~/.dreamteam/agents/`（即时生效）：字段 `id`、`name`、`description`、`color`（red/green/yellow/blue/magenta/cyan/white/gray）、`prompt`（人设），可选 `model`（模型 id 字符串或带 temperature 的对象）和 `temperature`；真实动作的权限 — `tools`、`projects`、`workspace`，眼睛和双手 — `vision` 和 `image`（见“工具”与“视觉与图片”）。`model` 字段只能是 `models/` 里存在的 id：`/agent new|update` 命令、网页外壳和经理都会拒绝陌生的 id 并给出可用列表，而不是把垃圾写进配置。
 
 **接入新 API — 一个文件，无需 fork。** 把适配器放进家目录的架子
 `~/.dreamteam/models/`：文件名即适配器 id，`models/` 里的模型卡片用 `"provider": "<id>"` 引用它。架子在首次启动时创建；代码在启动时加载 — 文件损坏或与内置适配器（含 image-）重名，都会在启动时给出明确错误：
@@ -772,7 +772,7 @@ export default (id: string, config: ProviderConfig): LLMProvider => ({
 
 项目由 `tests/` 里的探针检查 — 不用测试框架，每个文件直接运行并对每项检查打印 `ok`/`FAIL`。所有探针都是密封的：真实数据不被触碰，家目录重定向到临时文件夹（`DT_HOME`）。
 
-- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `agent.tool.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、无 id 创建（文件夹名或时间戳）、波浪线表示系统主目录、Tab 路径补全、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（内置 en/zh、外部 lang/、现场切换）。更新的探针以同样的方式覆盖内部机制：`probe-ids`（标识符掩码的边界）、`probe-sse`（SSE 工具集与密钥校验）、`probe-schedule`（日程文件、serve 计时器与真实引擎上的 `/schedule` 操作）、`probe-bg`（后台任务调度器：启动与退出码、超时、真实进程树的树杀、日志 2 MB 截断、bg.json 持久化与脏输入、通知顺序、重启后收养的完整周期 —— lost、收养任务的 kill 与超时、check 分钟 ping 与「日志未增长」警报、在打印不等于挂起、工具权限与块体自省、挂起任务的端到端 —— ping、模型用 ```bg``` kill 块将其停止并重启以修复原因、以及 bg 消息里的伪 ```goal done``` 不会关闭目标）、`probe-goal`（目标：```goal done|failed``` 裁定、续跑轮数预算、问题自动应答、auto.on 即无文本目标、经理的 goal.set/goal.cancel、新引擎恢复目标、`/goal …` 操作）、`probe-memory`（词数预算、反思、日志轮转、stub 上的 LLM 合并）、`probe-images`（mock 画师、本地 stub 上的 openai-images 传输、工具运行）、`probe-gigachat`（本地 HTTPS stub 上的完整传输，自带证书；含原生 function calling 桥：请求里的 specs、function_call 答复转工具块、历史的「块 → 结果」对转回原生角色）、`probe-frugal`（LLM 主持人的计划）、`probe-shortcut`（替换平台来覆盖 linux/mac 分支）、`probe-tools`/`probe-commands`/`probe-mail`/`probe-api` 的补充（工具小抄、@提及弹窗、邮件助手、GUI rpc 表面含导入导出）。`probe-web` 的桩站跑在本地 http 服务器上 —— 探针链不再触碰互联网。
+- `npm run probe` — 无需真实终端的快速检查：折行（`probe-screen`）、`settings.json` 校验、“project:host”式 ssh 寻址与经项目的权限、屏幕区域计算、实时多行流式输出、鼠标与 Shift+按键选择、回滚区（`probe-editor`：按键、光标、历史、输入）、会议室经理（`probe-manager`：配置校验、回答解析、动作 `agent.tool.add`/`project.host.add` 及回滚、状态）、作为配置入口的经理端到端管线（`probe-manager-flow`：给 LLM 的状态快照、JSON 协议、全部操作直至文件与回滚、历史里的 ✓/✗ 报告、切换时发言留在旧会话）、规范命令（`probe-commands`：内核里所有 `/…`、不写历史的拦截、`/agents`/`/projects` 控制）、家目录中的项目（`probe-project`：文件夹即项目而非注册表文件、启动时的“无项目”状态、`/project new/open/close/delete/update`、无 id 创建（文件夹名或时间戳）、波浪线表示系统主目录、Tab 路径补全、工作文件夹不得位于家目录内、内核切换并隔离谈话与机密、经理的 `project.open`、网页外壳的 rpc 与 state、自动补全）、四级导入导出（`probe-transfer`：整个家目录、仅设置、单个项目连同谈话、单个谈话；卡片密钥在内、.env 不随行、谈话按 id 合并、zip-slip 被挡、经 confirm 取消）、GUI/TUI 数据等价（`probe-consistency`：serve 快照 ≡ 家目录层文件、GUI 的一轮对 TUI 可见、重启即接上）、首次启动向导与骨架（`probe-wizard`，含 API 密钥隐藏）、外部世界工具 — 全部密封：`probe-docs`（在临时文件夹里读写真实 pdf/docx/xlsx）、`probe-ocr`（用本地 canvas 画带字图片并识别）、`probe-web`（白名单与本地桩站）、`probe-mail`（project.json "mails" 字段中的邮箱校验、发送解析、无网络）、`probe-messengers`（telegram 与 max 对两个 API 的本地 mock 服务器）。界面语言系统由 `probe-i18n` 覆盖（键值词典 ru/en/zh、外部 lang/（旧格式自动转换）、现场切换）。更新的探针以同样的方式覆盖内部机制：`probe-ids`（标识符掩码的边界）、`probe-sse`（SSE 工具集与密钥校验）、`probe-schedule`（日程文件、serve 计时器与真实引擎上的 `/schedule` 操作）、`probe-bg`（后台任务调度器：启动与退出码、超时、真实进程树的树杀、日志 2 MB 截断、bg.json 持久化与脏输入、通知顺序、重启后收养的完整周期 —— lost、收养任务的 kill 与超时、check 分钟 ping 与「日志未增长」警报、在打印不等于挂起、工具权限与块体自省、挂起任务的端到端 —— ping、模型用 ```bg``` kill 块将其停止并重启以修复原因、以及 bg 消息里的伪 ```goal done``` 不会关闭目标）、`probe-goal`（目标：```goal done|failed``` 裁定、续跑轮数预算、问题自动应答、auto.on 即无文本目标、经理的 goal.set/goal.cancel、新引擎恢复目标、`/goal …` 操作）、`probe-memory`（词数预算、反思、日志轮转、stub 上的 LLM 合并）、`probe-images`（mock 画师、本地 stub 上的 openai-images 传输、工具运行）、`probe-gigachat`（本地 HTTPS stub 上的完整传输，自带证书；含原生 function calling 桥：请求里的 specs、function_call 答复转工具块、历史的「块 → 结果」对转回原生角色）、`probe-frugal`（LLM 主持人的计划）、`probe-shortcut`（替换平台来覆盖 linux/mac 分支）、`probe-tools`/`probe-commands`/`probe-mail`/`probe-api` 的补充（工具小抄、@提及弹窗、邮件助手、GUI rpc 表面含导入导出）。`probe-web` 的桩站跑在本地 http 服务器上 —— 探针链不再触碰互联网。
 - `npm run probe:e2e` — Windows 真实伪终端（ConPTY）下的同样区域：首次启动向导全程（`probe-wizard-pty`：语言选择器响应方向键、创建 mock 模型、TUI 启动）、真正到达应用的东西（`probe-input`）与经迷你 VT 仿真器的渲染屏幕（`probe-startup`：无项目启动、打开带旧谈话的项目、面板中的历史、滚轮/PgUp/鼠标/选择）。它自行安装并移除 node-pty。
 - `npm run probe:tui` — 伪终端里完整跑一遍应用：无项目启动 → `/project new` → 礼宾经理问候、`team.add`、`chat.add`、带工具的一轮、`/agents`、退出 — 全在 mock 服务商和临时文件夹上进行。`probe:scenario-tui` —— 同一场景，每步之后还校验磁盘上的文件（会话、agents/、导出归档）。
 - `npm run probe:api` — mock 服务商上的服务器 API（`dreamteam serve`），临时文件夹：gui-dist/ 静态资源、快照中的无项目启动、WS 礼宾场景（`project.open` → 问候、发言、经对话的 team.add）、rpc（`project.open`、`sessions.list`、`session.agent.add/delete`、`settings.update`（带模型校验）、`session.new` 及其后的新 state）、实时 confirm/choose 问题 — 客户端回答、超时拒绝、无客户端拒绝。
@@ -851,7 +851,7 @@ dreamteam/
 │   │                         #   files, shell, git, arch, ssh, look, image, docs,
 │   │                         #   ocr, web, mail, telegram, max
 │   ├── i18n.ts               # 界面语言：t()/tf()、内置 ru/en/zh + 家目录的 lang/
-│   ├── locales/              # 内置翻译：en.ts、zh.ts
+│   ├── locales/              # 内置词典：ru.ts（完整源）+ en.ts、zh.ts
 │   ├── completion.ts         # 命令与 @提及自动补全（提示面板、箭头面板）
 │   ├── screen.ts             # 受管屏幕：备用缓冲、区域、按词折行
 │   ├── editor.ts             # 输入编辑器：原始按键、历史、按码点移动光标

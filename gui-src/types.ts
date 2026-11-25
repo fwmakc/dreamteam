@@ -37,7 +37,6 @@ export interface AgentInfo {
   id: string;
   name: string;
   description?: string;
-  emoji?: string;
   color?: string;
   model?: string;
   prompt?: string;
@@ -227,7 +226,7 @@ export interface StateSnapshot {
   /** битый agents.json: текст ошибки (нет файла — пустая команда, ошибки нет) */
   teamError?: string | null;
   team: AgentInfo[];
-  manager: { name: string; emoji: string; color: string; model?: string; temperature?: number };
+  manager: { name: string; model?: string };
   models: ModelInfo[];
   images: { id: string; ok: boolean; note?: string; kind?: string; model?: string; provider?: string }[];
   /** все имена провайдеров (встроенные + кастомные) — селектор в новой модели */
@@ -266,7 +265,7 @@ export type WsEvent =
   | { type: 'auth_failed' }
   | { type: 'notice'; text: string }
   | { type: 'error'; text: string }
-  | { type: 'turn_header'; agent: { id: string; name: string; emoji?: string; color?: string } }
+  | { type: 'turn_header'; agent: { id: string; name: string; color?: string } }
   | { type: 'busy'; id: string; label: string }
   | { type: 'busy_end'; id: string }
   | { type: 'delta'; text: string }
@@ -274,7 +273,7 @@ export type WsEvent =
   | { type: 'say'; text: string }
   | { type: 'tool_results'; results: string[] }
   | { type: 'attachment'; title: string; digest: string }
-  | { type: 'confirm'; id: string; label: string; desc?: string; who?: { id: string; name: string; emoji?: string; color?: string } }
+  | { type: 'confirm'; id: string; label: string; desc?: string; who?: { id: string; name: string; color?: string } }
   | { type: 'choose_session'; id: string; items: { title: string; count: number }[] }
   | { type: 'export_data'; name: string; dataB64: string }
   | { type: 'projects'; projects: ProjectInfo[] }

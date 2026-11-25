@@ -22,9 +22,9 @@ Two shells, one core: a terminal TUI and a local web GUI (`dreamteam serve`).
 
 The interface — and this documentation — come in three languages: English, Russian and
 Chinese (`README.md`, `README.ru.md`, `README.zh.md`). The UI language is chosen at
-first launch (in the wizard) and can be changed at any time with
-`/settings update ui=en` (`ru`, `zh`, or the id of your own language from
-`~/.dreamteam/lang/<id>.json`).
+first launch (in the wizard) and can be changed at any time with `/lang en`
+(`/lang` shows the current one and the list; `ru`, `zh`, or the id of your own
+language from `~/.dreamteam/lang/<id>.json`).
 
 The team belongs to the machine: it lives in your home directory
 (`~/.dreamteam/agents/`) and is shared by all projects. It starts out empty — you
@@ -109,8 +109,7 @@ If there is no home (`~/.dreamteam`), the wizard asks, in order:
 
 1. **Interface language** — the very first question, and the wizard itself already
    speaks it: `ru`, `en`, `zh` out of the box, plus your own languages from
-   `~/.dreamteam/lang/<id>.json` (see "Settings"). Changed later with
-   `/settings update ui=<id>`.
+   `~/.dreamteam/lang/<id>.json` (see "Settings"). Changed later with `/lang <id>`.
 2. **Model** — from the list of adapters (`mock` works for a trial run, no keys
    needed).
 3. **API key** — the input is hidden (not displayed and not written to the terminal
@@ -137,13 +136,13 @@ your remarks are addressed to it, no `@` needed.
 ```
 You > bring in Gleb and Marina
   ✓ Gleb (id "gleb") added to the team
-  💾 Gleb joined the chat.
+  Gleb joined the chat.
 You > enable shell and files for Gleb
   ✓ gleb: tool "shell" enabled
 You > let's set up the shop project: server prod — deploy@203.0.113.10
   ✓ project "shop" added (servers: prod)
 You > alright Gleb, look at the structure and propose a refactoring plan
-  💾 Gleb: …
+  Gleb: …
 ```
 
 The manager is the only one who changes the configuration, and only through a
@@ -354,9 +353,10 @@ There are no aliases or short forms: one name — one operation.
 | `import <file.zip>` | `/import dt-home-….zip` | unfold a home from an archive (with keys): settings/profile/memory/schedule are replaced, projects and conversations merge by id; asks for confirmation |
 | `settings.export` | `/settings export` | settings without projects: settings.json, the profile, the manager and the models with keys |
 | `settings.import <file.zip>` | `/settings import dt-settings-….zip` | replace settings/profile/manager/models (projects untouched); asks for confirmation |
+| `lang [<id>]` | `/lang` · `/lang en` | interface language: no argument — the current one and the list; with an id — switch on the fly (in the web UI — the settings dialog too) |
 | `agents.list` | `/agents` | the team roster: ids, descriptions, tools, who is in the chat |
 | `agent.new <id> [field=value…]` | `/agent new yurist name=Yurist description=law` | a new member (the name defaults to the id) |
-| `agent.update <id> field=value…` | `/agent update yurist description=sourcream model.temperature=0.4 vision=glm` | edit: name= emoji= color= description= prompt= workspace= and the nested model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=, plus vision= image= (a model id from `models/`; empty — remove the reference) |
+| `agent.update <id> field=value…` | `/agent update yurist description=sourcream model.temperature=0.4 vision=glm` | edit: name= color= description= prompt= workspace= and the nested model.id= model.temperature= model.maxTokens= model.thinking= model.reasoning=, plus vision= image= (a model id from `models/`; empty — remove the reference) |
 | `agent.delete <id…>` | `/agent delete yurist, keks` | delete members: a comma- or space-separated list |
 | `agent.tools <id>` | `/agent tools yurist` | which tools are enabled and with what settings |
 | `agent.tool add <id> <tool…>` | `/agent tool add yurist files shell` | enable tools (several at once): built-ins (the full list — `/tools`) or a custom one from tools/ |
@@ -408,7 +408,7 @@ There are no aliases or short forms: one name — one operation.
 | `settings.show` | `/settings` | the current settings |
 | `settings.update field=value…` | `/settings update maxTurns=2 model.id=glm` | settings (take effect from the next round); nested: model.id, serviceModel.id, model.temperature |
 | `manager.show` | `/manager` | the war-room manager: model, temperature, name |
-| `manager.update field=value…` | `/manager update model.id=glm temperature=0.2` | fields: name, emoji, color, temperature and the nested model.id, model.temperature |
+| `manager.update field=value…` | `/manager update model.id=glm model.temperature=0.2` | fields: name and the nested model.id, model.temperature, model.maxTokens, model.thinking, model.reasoning |
 | `/help` | `/help` | help on the operations (the same manifest) |
 | `/exit` | `/exit` | quit (in the terminal only) |
 
@@ -633,8 +633,13 @@ screen and the agents' tool limits.
 
 - `ui` — the interface language: `ru`, `en`, `zh` are built in, or the id of your
   own language from `~/.dreamteam/lang/<id>.json` (a file
-  `{ "name": "Deutsch", "translations": { … } }`; the id is the file name without
-  `.json`, files starting with `_` are ignored). Chosen in the first-launch wizard,
+  `{ "name": "Deutsch", "translations": { "SETTINGS": "Einstellungen", … } }` —
+  the keys are the app's own identifiers, `SCREAMING_SNAKE` like `SETTINGS` or
+  `NO_DISCUSSIONS_YET`; the id is the file name without `.json`, files starting
+  with `_` are ignored; a key the file doesn't cover falls back to Russian). A
+  file from before 0.0.21 keyed by Russian strings is converted automatically
+  at load; a string that matches nothing in the Russian dictionary aborts the
+  startup with a list. Chosen in the first-launch wizard,
   changed with `/settings update ui=en`. The interface and the three READMEs
   (`README.md`, `README.ru.md`, `README.zh.md`) are available in English, Russian
   and Chinese. Deliberately not translated: the agents' and manager's system
@@ -828,7 +833,7 @@ mandatory `check()` method returns one of three verdicts:
 - `ask` — show you a confirmation:
 
   ```
-  ⚙ Command: 💾 Gleb: [shop] docker compose up -d
+  ⚙ Command: Gleb: [shop] docker compose up -d
       y — run · n — deny
   ```
 
@@ -1404,8 +1409,8 @@ Through it — and only through it — the app changes the configuration:
 
 | What you ask | What it does |
 |---|---|
-| "add … to the team" | a new member in `agents/`: id, name, description, prompt, emoji, color, model, temperature, tools |
-| "assign …" | a member edit: description, prompt, model, temperature, name, emoji, color |
+| "add … to the team" | a new member in `agents/`: id, name, description, prompt, color, model, temperature, tools |
+| "assign …" | a member edit: description, prompt, model, temperature, name, color |
 | "bring in …" / "send out …" | the current chat roster (like `/session agent add` and `/session agent delete`) |
 | "show the sessions", "open session 20261027-143052", "new session …", "delete …" | session management (like `/sessions`, `/session open`, `/session new`, `/session delete`) |
 | "rename the session to …", "come up with a name for this conversation" | renaming (like `/session update title=…`); for inventing names the manager uses the short summary or the beginning of the conversation |
@@ -1434,16 +1439,17 @@ It is configured in `~/.dreamteam/manager.json` (the file is required, like
 `settings.json`):
 
 ```json
-{ "model": "openai", "name": "Manager", "emoji": "🛎", "color": "yellow", "temperature": 0.2 }
+{ "model": { "id": "openai" }, "name": "Manager" }
 ```
 
-- `model` — a reference to a card in `models/`; the model is taken from the
-  card's record. An unknown id — the app won't start, with a clear error.
+- `model` — a reference to a card in `models/`, same shape as the agents'
+  «Model» section: `{ "id": …, "temperature": …, "maxTokens": … }`, the params
+  override the model card, unset ones — the model card's defaults apply (the
+  fresh scaffold no longer hardcodes 0.2; an old top-level `temperature`
+  migrates into `model.temperature` on load). An unknown id — the app won't
+  start, with a clear error.
 - `name` — the name for addressing. `@manager` and `!manager` always work,
   regardless of the name; in the `@` popup it is offered first.
-- `emoji`, `color` — the look of the lines; `temperature` by default is stricter
-  than the members' (0.2): careful actions are expected from the manager, not
-  creativity.
 
 `/settings update model.id=…` changes the default model of the **agents**; the
 manager has its own model (from `manager.json`) — changed with
@@ -1452,7 +1458,7 @@ manager has its own model (from `manager.json`) — changed with
 ## Custom agents and your own API
 
 **Change the team** — edit `~/.dreamteam/agents/` (saved on the fly): the
-`id`, `name`, `emoji`, `description`, `color`
+`id`, `name`, `description`, `color`
 (red/green/yellow/blue/magenta/cyan/white/gray), `prompt` (persona) fields,
 optionally `model` (an id string or an object with `temperature`) and
 `temperature`; access to real actions — `tools`,
@@ -1534,8 +1540,8 @@ untouched, the home is redirected into a temporary folder (`DT_HOME`).
   `probe-mail` (mailbox validation in the "mails" field of project.json, send
   parsing, no network),
   `probe-messengers` (telegram and max against local mock servers of both APIs);
-  the UI language system — `probe-i18n` (built-in en/zh, external lang/, live
-  switching). Newer probes cover the inner machinery the same way:
+  the UI language system — `probe-i18n` (key dictionaries ru/en/zh, external
+  lang/ with legacy auto-conversion, live switching). Newer probes cover the inner machinery the same way:
   `probe-ids` (identifier masks at their edges), `probe-sse` (the SSE
   toolkit and key validation), `probe-schedule` (the schedule file, the
   serve ticker and the `/schedule` operations on a live engine), `probe-bg`
@@ -1666,7 +1672,7 @@ dreamteam/
 │   │                         #   files, shell, git, arch, ssh, look, image, docs,
 │   │                         #   ocr, web, mail, telegram, max
 │   ├── i18n.ts               # UI languages: t()/tf(), built-in ru/en/zh + the home's lang/
-│   ├── locales/              # built-in translations: en.ts, zh.ts
+│   ├── locales/              # built-in dictionaries: ru.ts (the full source) + en.ts, zh.ts
 │   ├── completion.ts         # command and @mention autocompletion (the hint panel, the arrow popup)
 │   ├── screen.ts             # the managed screen: alternative buffer, zones, word wrapping
 │   ├── editor.ts             # the input editor: raw keys, history, cursor by codepoints

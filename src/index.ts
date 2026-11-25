@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import pc from 'picocolors';
 import { loadTeam } from './agents.js';
 import { managerAsAgent } from './manager.js';
-import { agentToolIds } from './tools-api.js';
+import { agentToolIds, BUILTIN_TOOL_IDS } from './tools-api.js';
 import { loadToolsConfig, type ToolsConfig } from './actions.js';
 import { HintPanel, MentionPicker, hintRowsFor, makeCompleter, pathCandidates, type CompletionContext } from './completion.js';
 import { OPERATIONS, operationArgs, operationCommand } from './core/operations.js';
@@ -26,7 +26,7 @@ import { cliProjectArgs, parseCliProject } from './cli-project.js';
 import { bootstrapApp } from './core/bootstrap.js';
 import type { ConfirmRequest, Presenter, SpeakerRef, TurnSink } from './core/presenter.js';
 import type { Agent, ChatMessage, LLMProvider, Session } from './types.js';
-import { fmtDate, fmtTime, t, tf } from './i18n.js';
+import { fmtDate, fmtTime, knownLanguages, t, tf } from './i18n.js';
 
 // доступен командам /exit: закрытие readline завершает приложение через 'close'
 let rl: ReturnType<typeof createInterface> | null = null;
@@ -40,7 +40,7 @@ let currentSession: Session | null = null;
 
 /** Название разговора для статус-бара: усечение до 24 симв., как было в промпте. */
 const sessionLabel = (): string => {
-  if (!currentSession) return t('без проекта');
+  if (!currentSession) return t('NO_PROJECT');
   const title = currentSession.title;
   return title.length > 24 ? title.slice(0, 24) + '…' : title;
 };
@@ -92,7 +92,7 @@ const refreshQuota = (): void => {
  *  контекста с сегментом квот (функция — читается после выбора языка) */
 const staticHints = (): string[] => [
   pc.dim(`  [${sessionLabel()}]`),
-  pc.dim(t('  @имя или !имя — участнику · Esc — прервать раунд · /exit — выход · /help — команды')),
+  pc.dim(t('NAME_OR_NAME_TO_A_MEMBER_ESC_ABORT')),
   ctxHintLine() + quotaHintLine(),
 ];
 
@@ -112,7 +112,7 @@ const refreshHints = (): void => {
  *  показываем как 127.0.0.1 — «все интерфейсы» браузер открыть не может. */
 const serveHint = (): string => {
   const host = process.env.HOST || '127.0.0.1';
-  return pc.dim(tf('  Веб-оболочка: dreamteam serve → http://{host}:{port}', {
+  return pc.dim(tf('WEB_SHELL_DREAMTEAM_SERVE_HTTP_HOST_PORT', {
     host: host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host,
     port: process.env.PORT || '8080',
   }));
@@ -154,7 +154,7 @@ function copySelection(screen: Screen | null): boolean {
   if (!text) return false;
   copyToClipboard(text);
   screen?.clearSelection();
-  if (screen) flashStatus(screen, tf('  ✓ Скопировано в буфер ({n} симв.)', { n: text.length }));
+  if (screen) flashStatus(screen, tf('COPIED_TO_CLIPBOARD_N_CHARS', { n: text.length }));
   return true;
 }
 
@@ -374,6 +374,15 @@ function completionCtx(): CompletionContext {
         }
       }, process.cwd(), homedir());
     },
+    // языки интерфейса (встроенные + lang/ дома) — для /lang <id>; битый
+    // lang/ сюда не доходит: старт уронит его громко раньше панели
+    langIds(): string[] {
+      try {
+        return knownLanguages(DT_HOME).map((l) => l.id);
+      } catch {
+        return [];
+      }
+    },
   };
 }
 
@@ -447,7 +456,7 @@ class CliPresenter implements Presenter {
   }
 
   attachment(title: string, digest: string): void {
-    console.log(pc.dim(tf('\n  📎 Приложен конспект разговора «{title}»:', { title })));
+    console.log(pc.dim(tf('ATTACHED_A_DIGEST_OF_SESSION_TITLE', { title })));
     for (const line of digest.split('\n')) console.log(pc.dim('  │ ' + line));
     console.log();
   }
@@ -458,9 +467,9 @@ class CliPresenter implements Presenter {
    * то, что должно ходить молча, записано в карточке тула или решено его check().
    */
   async confirm(req: ConfirmRequest): Promise<boolean> {
-    const who = `${req.who.emoji ?? '🤖'} ${req.who.name}`;
+    const who = req.who.name;
     printDim(`  ⚙ ${req.label}: ${who}: ${req.desc}`);
-    const hint = pc.dim(t('    y — выполнить · n — отказать'));
+    const hint = pc.dim(t('Y_ALLOW_N_DENY'));
     if (editor && screen) {
       // вопрос — в строку статуса над вводом; ответ придёт обычной строкой
       screen.setStatus(hint);
@@ -483,9 +492,9 @@ class CliPresenter implements Presenter {
   }
 
   async chooseSession(items: { title: string; count: number }[]): Promise<number | null> {
-    console.log(pc.dim(t('  Приложить разговор (свежие сверху):')));
-    items.forEach((s, i) => console.log(pc.dim(`    ${i + 1}. ${s.title} — ${tf('{n} сообщ.', { n: s.count })}`)));
-    printDim(t('  Введите номер (Enter — не прикладывать):'));
+    console.log(pc.dim(t('ATTACH_A_SESSION_NEWEST_FIRST')));
+    items.forEach((s, i) => console.log(pc.dim(`    ${i + 1}. ${s.title} — ${tf('N_MSGS', { n: s.count })}`)));
+    printDim(t('ENTER_A_NUMBER_ENTER_DO_NOT_ATTACH'));
     const answer = (await stdinLines.next())?.trim() ?? '';
     const n = Number.parseInt(answer, 10);
     return Number.isInteger(n) && n > 0 ? n - 1 : null;
@@ -521,14 +530,14 @@ function messageRows(m: ChatMessage, team: Agent[]): string[] {
     ? managerAsAgent(appRef.mgr)
     : team.find((a) => a.id === m.authorId);
   const who = m.authorId === 'user'
-    ? pc.cyan(t('Вы'))
+    ? pc.cyan(t('YOU'))
     : m.authorId === 'tool'
-      ? pc.dim(t('⚙ инструменты'))
+      ? pc.dim(t('TOOLS'))
       : isSessionRef(m)
-        ? pc.dim(tf('📎 разговор «{title}»', { title: m.authorName }))
+        ? pc.dim(tf('SESSION_TITLE', { title: m.authorName }))
         : m.authorId === 'bg' || m.authorId === 'goal'
           ? pc.dim(m.authorName)
-          : colorFn(agent?.color)(`${agent?.emoji ?? '🤖'} ${m.authorName}`);
+          : colorFn(agent?.color)(`● ${m.authorName}`);
   const rows = [`  ${who} ${pc.dim(`· ${fmtTime(m.ts)}`)}`];
   for (const line of m.text.split('\n')) rows.push('  ' + line);
   return rows;
@@ -536,27 +545,27 @@ function messageRows(m: ChatMessage, team: Agent[]): string[] {
 
 function printBanner(app: App): void {
   console.log(pc.bold(pc.cyan('\n  ╔══════════════════════════════════════════════╗')));
-  console.log(pc.bold(pc.cyan(`  ║   🎬  DREAM TEAM — ${t('совещание начинается')}     ║`)));
+  console.log(pc.bold(pc.cyan(`  ║   🎬  DREAM TEAM — ${t('THE_MEETING_BEGINS')}     ║`)));
   console.log(pc.bold(pc.cyan('  ╚══════════════════════════════════════════════╝')));
   console.log(
     pc.dim(
-      tf('  версия {v} · дом: {home} · проект: {project}', {
+      tf('VERSION_V_HOME_HOME_PROJECT_PROJECT', {
         v: APP_VERSION,
         home: DT_HOME,
-        project: PROJECT_DIR ? `${basename(PROJECT_DIR)} (${WORKSPACE || t('без рабочей папки')})` : t('не выбран'),
+        project: PROJECT_DIR ? `${basename(PROJECT_DIR)} (${WORKSPACE || t('NO_WORKING_FOLDER')})` : t('NOT_SELECTED'),
       }),
     ),
   );
-  console.log(pc.dim(t('  режим: TUI (запуск в режиме сервера: dreamteam serve)')));
+  console.log(pc.dim(t('MODE_TUI_TO_RUN_THE_SERVER_MODE_DREAMTEAM')));
   console.log(serveHint());
 
   if (app.models.get(app.settings.model?.id ?? '')?.provider.kind === 'mock') {
     console.log(
-      pc.yellow(t('\n  ⚠ Работает MOCK-режим: ответы заготовлены. Впишите API-ключ в .env (см. README).')),
+      pc.yellow(t('MOCK_MODE_IS_ON_THE_REPLIES_ARE_CANNED')),
     );
   }
 
-  printDim(t('\n  /project — проект · /session — разговор'));
+  printDim(t('PROJECT_PROJECTS_SESSION_SESSIONS'));
 }
 
 function printHelp(): void {
@@ -569,22 +578,22 @@ function printHelp(): void {
       rows.push('');
     }
     const args = operationArgs(op);
-    rows.push(`    ${(operationCommand(op) + (args ? ' ' + args : '')).padEnd(26)} — ${t(op.help)}`);
+    rows.push(`    ${(operationCommand(op) + (args ? ' ' + args : '')).padEnd(26)} — ${tf(op.help, { tools: BUILTIN_TOOL_IDS.join(', ') })}`);
   }
   console.log(
     [
       '',
-      t('  Операции (то же — имена rpc и подсказки GUI):'),
+      t('OPERATIONS_THE_SAME_STRINGS_RPC_NAMES_AND_GUI_2'),
       ...rows,
       '',
-      t('  Esc или Ctrl+C во время ответа команды — прервать (частичные ответы сохранятся).'),
-      t('  Перенос строки в полноэкранном режиме: Ctrl+Enter или Alt+Enter; в линейном — \\ + Enter.'),
-      t('  Enter отправляет сообщение целиком; вставка многострочного текста сохраняет переносы.'),
-      t('  В сообщении можно адресовать участников: @марина, @viktor и т.д.'),
-      t('  «!» — полный синоним «@» (Shift+1 на любой раскладке): !марина, !менеджер, !session.'),
-      t('  @менеджер — конфигурация переговорки: состав команды и чата, разговоры.'),
-      t('  @session — приложить конспект другого разговора (@session 2 — сразу номер).'),
-      t('  Начните ввод с «/» — под строкой появятся подсказки (фильтруются при наборе), Tab — дополнить.'),
+      t('ESC_OR_CTRL_C_WHILE_THE_TEAM_IS'),
+      t('LINE_BREAK_IN_THE_FULL_SCREEN_MODE_CTRL'),
+      t('ENTER_SENDS_THE_MESSAGE_AS_A_WHOLE_PASTING'),
+      t('MESSAGES_CAN_ADDRESS_MEMBERS_MARINA_VIKTOR_ETC'),
+      t('IS_A_FULL_SYNONYM_OF_SHIFT_1_ON'),
+      t('MANAGER_MEETING_ROOM_CONFIGURATION_TEAM_AND_CHAT_ROSTER'),
+      t('SESSION_ATTACH_A_DIGEST_OF_ANOTHER_SESSION_SESSION'),
+      t('START_YOUR_INPUT_WITH_HINTS_APPEAR_BELOW_FILTERED'),
       serveHint(),
       '',
     ].join('\n'),
@@ -597,11 +606,11 @@ function printTeam(app: App): void {
     // без открытого проекта чата нет — никто не отмечен как «в этом чате»
     const inChat = new Set(app.session ? chatTeam(app.session, fullTeam).map((a) => a.id) : []);
     const cfg = loadToolsConfig(SETTINGS_FILE, PROJECT_FILE || null, WORKSPACE);
-    console.log(pc.dim(`\n  ${t('Команда:')}`));
+    console.log(pc.dim(`\n  ${t('TEAM')}`));
     for (const agent of fullTeam) {
-      const own = agent.model?.id ? pc.dim(` [${t('модель:')} ${agent.model.id}]`) : '';
+      const own = agent.model?.id ? pc.dim(` [${t('MODEL')} ${agent.model.id}]`) : '';
       const access = accessLine(agent, cfg);
-      const mark = inChat.has(agent.id) ? '' : pc.dim(` · ${tf('не в этом чате (/session agent add {id})', { id: agent.id })}`);
+      const mark = inChat.has(agent.id) ? '' : pc.dim(` · ${tf('NOT_IN_THIS_CHAT_SESSION_AGENT_ADD_ID', { id: agent.id })}`);
       console.log(rosterLine(agent) + own + access + mark);
     }
     console.log();
@@ -617,57 +626,57 @@ function accessLine(agent: Agent, cfg: ToolsConfig): string {
   const parts: string[] = [];
   // серверы — из поля "hosts" project.json текущего проекта: агентам доступен весь его реестр
   const servers = [...new Set([...cfg.projects.values()].flatMap((p) => [...p.hosts.keys()]))];
-  if (servers.length > 0) parts.push(`${t('серверы:')} ${servers.join(', ')}`);
-  if (agent.vision) parts.push(`${t('глаза:')} ${agent.vision}`);
-  if (agent.image) parts.push(`${t('рисует:')} ${agent.image}`);
+  if (servers.length > 0) parts.push(`${t('SERVERS')} ${servers.join(', ')}`);
+  if (agent.vision) parts.push(`${t('EYES')} ${agent.vision}`);
+  if (agent.image) parts.push(`${t('DRAWS')} ${agent.image}`);
   const labels = toolIds.map((id) =>
     id === 'files'
-      ? t('файлы')
+      ? t('FILES')
       : id === 'shell'
-        ? t('консоль')
+        ? t('SHELL')
         : id === 'ssh'
           ? 'ssh'
           : id === 'look'
-            ? t('зрение')
+            ? t('VISION')
             : id === 'image'
-              ? t('картинки')
+              ? t('IMAGES_2')
               : id,
   );
   return pc.dim(` [${labels.join(', ')}${parts.length ? ' · ' + parts.join(' · ') : ''}]`);
 }
 
 function printProviders(app: App): void {
-  console.log(pc.dim(t('\n  Модели (★ — основная):')));
+  console.log(pc.dim(t('MODELS_DEFAULT')));
   for (const [pid, status] of app.models) {
     const mark = pid === app.settings.model?.id ? pc.cyan(' ★') : '';
-    const mgr = pid === app.mgr.model.id ? pc.yellow(` 🛎 ${t('менеджер')}`) : '';
-    const state = status.ok ? pc.green(t('✓ готов')) : pc.yellow(`✗ ${status.note ?? t('не настроен')}`);
-    const vision = status.vision ? pc.magenta(` ◉ ${t('зрение')}`) : '';
+    const mgr = pid === app.mgr.model.id ? pc.yellow(` ${t('MANAGER_2')}`) : '';
+    const state = status.ok ? pc.green(t('DONE')) : pc.yellow(`✗ ${status.note ?? t('NOT_CONFIGURED')}`);
+    const vision = status.vision ? pc.magenta(` ◉ ${t('VISION')}`) : '';
     console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}${vision}${mark}${mgr}`);
   }
   if (app.images.size > 0) {
-    console.log(pc.dim(t('  Картинки (для инструмента image):')));
+    console.log(pc.dim(t('IMAGES_FOR_THE_IMAGE_TOOL')));
     for (const [pid, status] of app.images) {
-      const state = status.ok ? pc.green(t('✓ готов')) : pc.yellow(`✗ ${status.note ?? t('не настроен')}`);
+      const state = status.ok ? pc.green(t('DONE')) : pc.yellow(`✗ ${status.note ?? t('NOT_CONFIGURED')}`);
       console.log(`  • ${pid} (${status.provider.kind}, ${status.provider.model}) ${state}`);
     }
   }
-  printDim(t('  Сменить основную: /settings update model.id=<id>; у менеджера своя — /manager update model.id=<id>.'));
-  printDim(t('  Своя модель у агента: /agent update <id> model.id=<id> (и model.temperature=… при желании).'));
+  printDim(t('TO_SWITCH_THE_DEFAULT_SETTINGS_UPDATE_MODEL_ID'));
+  printDim(t('AN_AGENT_S_OWN_MODEL_AGENT_UPDATE_ID'));
 }
 
 function replaySession(session: Session): void {
   const last = session.messages.slice(-8);
   if (last.length === 0) {
-    printDim(t('  (разговор пуст)'));
+    printDim(t('THE_SESSION_IS_EMPTY'));
     return;
   }
-  printDim(t('  Последние сообщения:'));
+  printDim(t('LATEST_MESSAGES'));
   for (const m of last) {
     const who = m.authorId === 'user'
-      ? t('Вы')
+      ? t('YOU')
       : m.authorId === 'tool'
-        ? t('⚙ инструменты')
+        ? t('TOOLS')
         : m.authorName;
     const brief = m.text.length > 120 ? m.text.slice(0, 120) + '…' : m.text;
     console.log(pc.dim(`    ${who}: ${brief.replace(/\n+/g, ' ')}`));
@@ -683,7 +692,7 @@ type CommandVerdict = 'exit' | 'handled' | 'unknown';
 /** Цветная история разговора — /session history [from] [to], срез включительно. */
 function printHistory(app: App, fromStr?: string, toStr?: string): void {
   if (!app.session) {
-    printDim(t('  Нет открытого разговора — /session new [id] или /session open <id>.'));
+    printDim(t('NO_OPEN_SESSION_SESSION_NEW_ID_OR_SESSION_2'));
     return;
   }
   const all = app.session.messages;
@@ -692,7 +701,7 @@ function printHistory(app: App, fromStr?: string, toStr?: string): void {
   if (fromStr !== undefined) {
     const from = Number.parseInt(fromStr, 10);
     if (!Number.isInteger(from) || from < 1) {
-      printDim(t('  from — номер сообщения (с 1); один аргумент = от N до конца.'));
+      printDim(t('FROM_A_MESSAGE_NUMBER_FROM_1_ONE_ARGUMENT'));
       return;
     }
     start = Math.min(from, all.length) - 1;
@@ -700,14 +709,14 @@ function printHistory(app: App, fromStr?: string, toStr?: string): void {
   if (toStr !== undefined) {
     const to = Number.parseInt(toStr, 10);
     if (!Number.isInteger(to) || to < start + 1) {
-      printDim(t('  to — номер сообщения не меньше from.'));
+      printDim(t('TO_A_MESSAGE_NUMBER_NOT_LESS_THAN_FROM_2'));
       return;
     }
     end = Math.min(to, all.length);
   }
   const shown = all.slice(start, end);
   if (shown.length === 0) {
-    printDim(t('  Разговор пуст.'));
+    printDim(t('THE_SESSION_IS_EMPTY_2'));
     return;
   }
   let team: Agent[] = [];
@@ -717,7 +726,7 @@ function printHistory(app: App, fromStr?: string, toStr?: string): void {
     // без agents.json печатаем без фирменных цветов
   }
   console.log(
-    pc.dim(tf('\n  Разговор «{title}» — показано {shown} из {all} сообщений:', { title: app.session.title, shown: shown.length, all: all.length })),
+    pc.dim(tf('SESSION_TITLE_SHOWING_SHOWN_OF_ALL_MESSAGES_2', { title: app.session.title, shown: shown.length, all: all.length })),
   );
   for (const m of shown) {
     console.log('');
@@ -742,20 +751,20 @@ function runCommand(engine: Engine, line: string): CommandVerdict {
     case 'sessions': {
       // список работает всегда, когда проект открыт (сессия не обязательна)
       if (!app.store) {
-        printDim(t('  Нет открытого проекта — /project new <id> [папка] или /project open <id|путь>.'));
+        printDim(t('NO_OPEN_PROJECT_PROJECT_NEW_ID_FOLDER_OR'));
         return 'handled';
       }
       const list = app.store.list();
       if (list.length === 0) {
-        printDim(t('  Разговоров пока нет.'));
+        printDim(t('NO_SESSIONS_YET_2'));
         return 'handled';
       }
       const currentId = app.session?.id;
-      console.log(pc.dim(`\n  ${t('Разговоры (свежие сверху):')}`));
+      console.log(pc.dim(`\n  ${t('SESSIONS_NEWEST_FIRST')}`));
       list.forEach((s) => {
         const date = fmtDate(s.updatedAt);
-        const cur = s.id === currentId ? pc.cyan(` ${t('← текущий')}`) : '';
-        console.log(`    ${s.id} — ${s.title} — ${tf('{n} сообщ.', { n: s.count })}, ${date}${cur}`);
+        const cur = s.id === currentId ? pc.cyan(` ${t('CURRENT_3')}`) : '';
+        console.log(`    ${s.id} — ${s.title} — ${tf('N_MSGS', { n: s.count })}, ${date}${cur}`);
       });
       console.log();
       return 'handled';
@@ -817,7 +826,7 @@ async function main(): Promise<void> {
       const notes = [...bgDrain(sid), ...bgTick().filter((n) => n.sessionId === sid)];
       for (const n of notes) {
         pendingBg.push({ sessionId: n.sessionId, text: n.text });
-        printDim('\n' + n.text.split('\n')[0] + t('  — подробнее перед следующей отправкой'));
+        printDim('\n' + n.text.split('\n')[0] + t('DETAILS_BEFORE_YOUR_NEXT_MESSAGE'));
       }
     } catch {
       // супервизия не роняет TUI
@@ -890,7 +899,7 @@ async function main(): Promise<void> {
           if (selText) {
             // выделение в поле ввода: копируем, не снимая и не выходя
             copyToClipboard(selText);
-            if (screen) flashStatus(screen, tf('  ✓ Скопировано в буфер ({n} симв.)', { n: selText.length }));
+            if (screen) flashStatus(screen, tf('COPIED_TO_CLIPBOARD_N_CHARS', { n: selText.length }));
             return;
           }
           if (copySelection(screen)) return; // есть выделение панели — копируем, а не выходим
@@ -926,7 +935,7 @@ async function main(): Promise<void> {
   if (screen && app.session && app.session.messages.length > 0) {
     screen.seed(historyRows(app.session.messages));
     printDim(
-      tf('  Продолжаю разговор «{title}» ({n} сообщ.) — /session new для нового, /sessions для списка', { title: app.session.title, n: app.session.messages.length }),
+      tf('CONTINUING_SESSION_TITLE_N_MSGS_SESSION_NEW_FOR', { title: app.session.title, n: app.session.messages.length }),
     );
   }
   // страховка от потерянных первых кадров терминала: одна полная перерисовка
@@ -948,7 +957,7 @@ async function main(): Promise<void> {
   // Цветной промпт передаём самому readline: иначе при перерисовке строки
   // (например, при стирании текста) он подставит свой дефолтный белый '> '.
   // Название текущего разговора — не здесь, а в статус-баре подсказок.
-  const promptFor = (): string => pc.cyan(t('Ты > '));
+  const promptFor = (): string => pc.cyan(t('YOU_3'));
 
   if (!editor) {
     rl = createInterface({
@@ -1109,7 +1118,7 @@ async function main(): Promise<void> {
           for (const p of due) await engine.deliverBgNote(p.text, acBg.signal);
           reseedIfSwitched();
         } catch (err) {
-          printError(tf('ошибка: {err}', { err: err instanceof Error ? err.message : String(err) }));
+          printError(tf('ERROR_ERR', { err: err instanceof Error ? err.message : String(err) }));
         } finally {
           abortActiveRound = null;
         }
@@ -1151,7 +1160,7 @@ async function main(): Promise<void> {
         abortActiveRound = null;
       }
     } catch (err) {
-      printError(tf('ошибка: {err}', { err: err instanceof Error ? err.message : String(err) }));
+      printError(tf('ERROR_ERR', { err: err instanceof Error ? err.message : String(err) }));
     }
   }
   // страховка: выход мимо requestExit (закрытие stdin и т.п.) — гасим экран,
@@ -1171,7 +1180,7 @@ async function main(): Promise<void> {
       // память не критична на выходе
     }
   }
-  console.log(pc.dim(t('\n  Совещание окончено. Пока! 👋')));
+  console.log(pc.dim(t('THE_MEETING_IS_OVER_BYE')));
   // фоновые вливания держат сетевые сокеты — не даём процессу висеть после прощания
   setTimeout(() => process.exit(0), 250).unref();
 }
@@ -1184,6 +1193,6 @@ main().catch((err) => {
   } catch {
     // экран мог не успеть стартовать
   }
-  console.error(pc.red(tf('Фатальная ошибка: {err}', { err: err instanceof Error ? err.stack ?? err.message : String(err) })));
+  console.error(pc.red(tf('FATAL_ERROR_ERR', { err: err instanceof Error ? err.stack ?? err.message : String(err) })));
   process.exit(1);
 });

@@ -10,7 +10,7 @@
  * форма строится на лету — modelCardSchema(provider), а в GUI приезжает
  * rpc-ом model.get вместе с карточкой.
  */
-import type { Agent, Session } from './types.js';
+import type { Agent, ManagerConfig, Session } from './types.js';
 import type { ProjectConfig } from './core/projects.js';
 import type { ModelKeySpec } from './providers/types.js';
 import { contractOf, providerIds } from './providers/registry.js';
@@ -39,7 +39,7 @@ export interface CardSchema {
 
 /** Скалярные поля агента (верхний уровень) + ссылка на модель целиком и vision/image. */
 type AgentPath =
-  | 'name' | 'emoji' | 'color' | 'description' | 'prompt' | 'workspace'
+  | 'name' | 'color' | 'description' | 'prompt' | 'workspace'
   | 'model'
   | 'vision.id' | 'image.id'
   | 'tools';
@@ -50,6 +50,7 @@ type _AgentModelCheck = 'id' extends keyof NonNullable<Agent['model']> ? true : 
 type _AgentRefCheck = 'id' extends keyof NonNullable<Agent['vision']> ? ('id' extends keyof NonNullable<Agent['image']> ? true : never) : never;
 type _SessionCheck = 'title' extends keyof Session ? true : never;
 type _ProjectCheck = 'path' extends keyof ProjectConfig ? true : never;
+type _ManagerCheck = 'model' extends keyof ManagerConfig ? true : never;
 
 /** Собирает FieldSpec, не выпуская path за пределы заданного типа путей. */
 function fields<P extends string>(specs: readonly (Omit<FieldSpec, 'path'> & { path: P })[]): FieldSpec[] {
@@ -62,49 +63,61 @@ export const CARD_SCHEMAS: Record<string, CardSchema> = {
   agent: {
     entity: 'agent',
     fields: fields<AgentPath>([
-      { path: 'name', type: 'string', label: 'Имя' },
-      { path: 'emoji', type: 'string', label: 'Emoji' },
-      { path: 'color', type: 'enum', label: 'Цвет', values: COLOR_VALUES },
-      { path: 'description', type: 'string', label: 'Описание' },
-      { path: 'prompt', type: 'text', label: 'Промпт (системный)', placeholder: 'от первого лица: кто ты, чем занимаешься, как отвечаешь' },
+      { path: 'name', type: 'string', label: 'FIELD_NAME_LABEL' },
+      { path: 'color', type: 'enum', label: 'FIELD_COLOR_LABEL', values: COLOR_VALUES },
+      { path: 'description', type: 'string', label: 'FIELD_DESCRIPTION_LABEL' },
+      { path: 'prompt', type: 'text', label: 'FIELD_PROMPT_LABEL', placeholder: 'FIELD_PROMPT_PLACEHOLDER' },
       {
         path: 'model',
         type: 'model',
-        label: 'Модель',
-        desc: 'пусто — основная модель дома; выберите карточку или задайте вручную (JSON): {"id": "…", "temperature": 0.3} — id можно опустить, останется переопределение параметров основной',
+        label: 'FIELD_MODEL_LABEL',
+        desc: 'FIELD_MODEL_DESC',
       },
       {
         path: 'vision.id',
         type: 'model',
-        label: 'Модель зрения',
-        desc: 'пусто — не менять; выберите зрячую модель (◉) или задайте вручную (JSON): {"id": "…", "temperature": 0.3} — "id" обязателен',
+        label: 'FIELD_VISION_ID_LABEL',
+        desc: 'FIELD_VISION_ID_DESC',
       },
       {
         path: 'image.id',
         type: 'model',
-        label: 'Модель генерации изображений',
-        desc: 'пусто — не менять; выберите модель картинок или задайте вручную (JSON): {"id": "…"} — "id" обязателен',
+        label: 'FIELD_IMAGE_ID_LABEL',
+        desc: 'FIELD_IMAGE_ID_DESC',
       },
       {
         path: 'tools',
         type: 'object',
-        label: 'Тулы',
-        placeholder: '{"files": {}, "look": {}}',
-        desc: 'карта целиком — что в JSON, то в карточке (не дополнение): ключ — тул, значение — его настройки ({} или null — по умолчанию); {} — убрать все; пусто — не менять. Встроенные и свои из tools/ дома',
+        label: 'FIELD_TOOLS_LABEL',
+        placeholder: 'FIELD_TOOLS_PLACEHOLDER',
+        desc: 'FIELD_TOOLS_DESC',
       },
-      { path: 'workspace', type: 'string', label: 'Рабочая папка (подпапка рабочей или путь)' },
+      { path: 'workspace', type: 'string', label: 'FIELD_WORKSPACE_LABEL' },
     ]),
   },
   session: {
     entity: 'session',
     fields: fields<'title'>([
-      { path: 'title', type: 'string', label: 'Название разговора' },
+      { path: 'title', type: 'string', label: 'FIELD_TITLE_LABEL' },
     ]),
   },
   project: {
     entity: 'project',
     fields: fields<'path'>([
-      { path: 'path', type: 'string', label: 'Рабочая папка (создастся, если нет)' },
+      { path: 'path', type: 'string', label: 'FIELD_PATH_LABEL' },
+    ]),
+  },
+  /** Менеджер переговорки: та же модель-ссылка с параметрами, что у агентов */
+  manager: {
+    entity: 'manager',
+    fields: fields<'name' | 'model'>([
+      { path: 'name', type: 'string', label: 'FIELD_NAME_LABEL' },
+      {
+        path: 'model',
+        type: 'model',
+        label: 'FIELD_MODEL_LABEL',
+        desc: 'FIELD_MANAGER_MODEL_DESC',
+      },
     ]),
   },
 };
@@ -123,26 +136,26 @@ const UNIVERSAL_KEYS: Record<string, ModelKeySpec> = {
 /** Метки полей карточки — имя поля в форме (описание живёт в desc контракта).
  *  Ключ без записи здесь рисуется как есть (кастомные адаптеры). */
 const FIELD_TITLES: Record<string, string> = {
-  provider: 'Провайдер',
-  model: 'Модель (имя у API)',
-  baseUrl: 'Адрес API',
-  apiKey: 'Ключ API',
-  authUrl: 'Адрес авторизации',
-  clientId: 'Client ID',
-  clientSecret: 'Client secret',
-  scope: 'Scope',
-  caCertPath: 'Сертификаты Минцифры (путь)',
-  insecureTLS: 'Не проверять сертификат TLS',
-  monitorUrl: 'Адрес мониторинга квот',
-  maxTokens: 'Максимум токенов',
-  contextWindow: 'Размер контекстного окна (токены)',
-  temperature: 'Температура (0–2)',
-  thinking: 'Размышления GLM',
-  reasoning: 'Глубина размышлений',
-  cache: 'Кэш промптов',
-  vision: 'Зрение',
-  extra: 'Доп. поля тела запроса (JSON)',
-  note: 'Заметка',
+  provider: 'LABEL_PROVIDER',
+  model: 'LABEL_MODEL',
+  baseUrl: 'LABEL_BASEURL',
+  apiKey: 'LABEL_APIKEY',
+  authUrl: 'LABEL_AUTHURL',
+  clientId: 'LABEL_CLIENTID',
+  clientSecret: 'LABEL_CLIENTSECRET',
+  scope: 'LABEL_SCOPE',
+  caCertPath: 'LABEL_CACERTPATH',
+  insecureTLS: 'LABEL_INSECURETLS',
+  monitorUrl: 'LABEL_MONITORURL',
+  maxTokens: 'LABEL_MAXTOKENS',
+  contextWindow: 'LABEL_CONTEXTWINDOW',
+  temperature: 'LABEL_TEMPERATURE',
+  thinking: 'LABEL_THINKING',
+  reasoning: 'LABEL_REASONING',
+  cache: 'LABEL_CACHE',
+  vision: 'LABEL_VISION',
+  extra: 'LABEL_EXTRA',
+  note: 'LABEL_NOTE',
 };
 
 /**
@@ -162,11 +175,11 @@ export function modelCardSchema(provider: string): CardSchema {
     const label = FIELD_TITLES[key] ?? key;
     const secret = (SECRET_KEYS as readonly string[]).includes(key);
     const placeholder = secret
-      ? 'пусто — не менять'
+      ? 'EMPTY_KEEP_UNCHANGED'
       : spec.required
-        ? 'обязательное поле'
+        ? 'REQUIRED'
         : spec.type === 'object'
-          ? '{"поле": "значение"}'
+          ? 'FIELD_VALUE'
           : undefined;
     const type: FieldSpec['type'] = secret
       ? 'password'
@@ -196,5 +209,5 @@ export function maskModelCard(card: Record<string, unknown>): Record<string, unk
 }
 
 // проверки живут до первой сборки: при рассинхроне tsc упадёт здесь
-const _checks: [_AgentCheck, _AgentModelCheck, _AgentRefCheck, _SessionCheck, _ProjectCheck] = [true, true, true, true, true];
+const _checks: [_AgentCheck, _AgentModelCheck, _AgentRefCheck, _SessionCheck, _ProjectCheck, _ManagerCheck] = [true, true, true, true, true, true];
 void _checks;

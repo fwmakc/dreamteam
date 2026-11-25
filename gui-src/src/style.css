@@ -721,6 +721,15 @@ button.bad:hover:not(:disabled) { border-color: var(--bad); background: rgb(var(
 #msgs { width: min(100%, 980px); margin: 0 auto; }
 
 .msg { margin-bottom: 24px; max-width: min(830px, 90%); }
+/* кружок-аватар вместо эмодзи: фон = цвет агента (менеджер — var(--text)) */
+.avatar {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 2px;
+}
 .msg .head {
   display: flex;
   align-items: center;

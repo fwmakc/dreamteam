@@ -109,13 +109,13 @@ function shortcutLinux(launcher: string, homeDir: string, opts: ShortcutOpts): s
   mkdirSync(appsDir, { recursive: true });
   const entry = join(appsDir, 'dreamteam.desktop');
   writeFileSync(entry, desktopEntry);
-  notes.push(tf('создал ярлык «Dream Team» → {file}', { file: entry }));
+  notes.push(tf('CREATED_THE_DREAM_TEAM_SHORTCUT_FILE', { file: entry }));
   const desktop = opts.desktopDir ?? detectDesktop({});
   if (desktop) {
     const onDesktop = join(desktop, 'dreamteam.desktop');
     writeFileSync(onDesktop, desktopEntry);
     chmodSync(onDesktop, 0o755);
-    notes.push(tf('создал ярлык «Dream Team» → {file}', { file: onDesktop }));
+    notes.push(tf('CREATED_THE_DREAM_TEAM_SHORTCUT_FILE', { file: onDesktop }));
   }
   void homeDir;
   return notes;
@@ -127,7 +127,7 @@ function shortcutMac(launcher: string, desktopDir: string | null): string[] {
   const file = join(target, 'Dream Team.command');
   writeFileSync(file, `#!/bin/sh\nexec "${launcher}"\n`);
   chmodSync(file, 0o755);
-  return [tf('создал ярлык «Dream Team» → {file}', { file })];
+  return [tf('CREATED_THE_DREAM_TEAM_SHORTCUT_FILE', { file })];
 }
 
 /** Создать ярлык(и) для текущей ОС; возвращает заметки для мастера. */
@@ -138,7 +138,7 @@ export async function createShortcut(homeDir: string, opts: ShortcutOpts = {}): 
   if (process.platform === 'win32') {
     if (!desktopDir) throw new Error('не нашёл папку рабочего стола (Desktop)');
     const link = shortcutWindows(launcher, homeDir, desktopDir);
-    return [tf('создал ярлык «Dream Team» → {file}', { file: link })];
+    return [tf('CREATED_THE_DREAM_TEAM_SHORTCUT_FILE', { file: link })];
   }
   if (process.platform === 'darwin') {
     return shortcutMac(launcher, desktopDir);

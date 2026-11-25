@@ -4,7 +4,6 @@ import type { Session } from '../types.js';
 export interface SpeakerRef {
   id: string;
   name: string;
-  emoji?: string;
   color?: string;
 }
 

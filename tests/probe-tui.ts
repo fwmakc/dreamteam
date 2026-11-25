@@ -180,7 +180,7 @@ check(
 await write('/agents\r');
 check(
   'tui: «Тест» появился в /agents',
-  await waitFor('Тест в /agents', (s) => /🧪 Тест/.test(s), 5000),
+  await waitFor('Тест в /agents', (s) => /● Тест/.test(s), 5000),
 );
 await write('\x15'); // Ctrl+U — стереть ввод (если что-то осталось) перед /exit
 

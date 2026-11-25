@@ -324,7 +324,7 @@ export function addModelConfig(dir: string, id: string, config: Record<string, u
   const { config: checked } = validateCard(path, config);
   mkdirModels(dir);
   writeFileSync(path, `${JSON.stringify(checked, null, 2)}\n`, 'utf8');
-  return tf('✓ модель «{id}» ({provider}) добавлена', { id: mid, provider: String(checked.provider) });
+  return tf('MODEL_ID_PROVIDER_ADDED', { id: mid, provider: String(checked.provider) });
 }
 
 function mkdirModels(dir: string): void {
@@ -359,7 +359,7 @@ export function updateModelConfig(dir: string, id: string, fields: Record<string
   validateCard(path, raw); // заодно приводит строковые true|false и числа к типам контракта
   const changes = touched.map((key) => `${key}="${String(raw[key] ?? '')}"`);
   writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
-  return tf('✓ модель «{id}»: {changes}', { id: mid, changes: changes.join(', ') });
+  return tf('MODEL_ID_CHANGES', { id: mid, changes: changes.join(', ') });
 }
 
 /** Удаляет карточку модели; защищённые id (основная, служебная, менеджерская) не трогаются. */
@@ -371,5 +371,5 @@ export function removeModelConfig(dir: string, id: string, protectedIds: string[
     throw new Error(`модель «${mid}» — основная или менеджерская: сначала назначьте другую`);
   }
   rmSync(path);
-  return tf('✓ модель «{id}» удалена', { id: mid });
+  return tf('MODEL_ID_REMOVED', { id: mid });
 }

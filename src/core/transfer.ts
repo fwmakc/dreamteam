@@ -100,7 +100,7 @@ export function settingsEntries(): TransferEntry[] {
 /** Уровень 3 — один проект: project.json (секреты внутри) + все его разговоры. */
 export function projectEntries(id: string): TransferEntry[] {
   const cfg = loadProjectConfig(id);
-  if (!cfg) throw new Error(tf('проекта «{id}» нет — см. /projects', { id }));
+  if (!cfg) throw new Error(tf('NO_PROJECT_ID_SEE_PROJECTS', { id }));
   const dir = join(PROJECTS_DIR, id);
   return [
     { rel: 'project.json', data: readFileSync(join(dir, 'project.json')) },
@@ -141,7 +141,7 @@ function participantIds(s: Session): Set<string> {
  *  Всей команды машины в архиве нет — карточки только у участников разговора. */
 export function sessionEntriesById(app: App, id: string): TransferEntry[] {
   const s = app.store?.load(id);
-  if (!s) throw new Error(tf('разговор «{id}» не читается', { id }));
+  if (!s) throw new Error(tf('SESSION_ID_CAN_NOT_BE_READ', { id }));
   const out: TransferEntry[] = [{ rel: 'session.json', data: Buffer.from(JSON.stringify(s, null, 2) + '\n') }];
   const wanted = participantIds(s);
   if (wanted.size === 0 || !existsSync(AGENTS_DIR)) return out;
@@ -181,7 +181,7 @@ function writeSettingsFiles(entries: TransferEntry[], files: readonly string[]):
     const e = entries.find((x) => x.rel === f);
     if (!e) continue;
     writeFileSync(join(DT_HOME, f), e.data);
-    report.push(tf('{file} — заменён', { file: f }));
+    report.push(tf('FILE_REPLACED', { file: f }));
   }
   return report;
 }
@@ -207,16 +207,16 @@ function reloadModelsAndManager(app: App, report: string[]): void {
     app.models = loaded.models;
     app.images = loaded.images;
     modelIds = loaded.models.keys();
-    report.push(t('модели перечитаны'));
+    report.push(t('MODELS_RELOADED'));
   } catch (err) {
-    report.push(tf('модели не перечитались ({err})', { err: err instanceof Error ? err.message : String(err) }));
+    report.push(tf('MODELS_NOT_RELOADED_ERR', { err: err instanceof Error ? err.message : String(err) }));
   }
   // manager.json заменён — менеджер в памяти перечитываем сразу, иначе он до
   // перезапуска живёт со старым именем и моделью из прежнего дома
   try {
     app.mgr = loadManagerConfig(MANAGER_FILE, modelIds);
   } catch (err) {
-    report.push(tf('менеджер не перечитался ({err})', { err: err instanceof Error ? err.message : String(err) }));
+    report.push(tf('MANAGER_CONFIG_NOT_RELOADED_ERR', { err: err instanceof Error ? err.message : String(err) }));
   }
 }
 
@@ -250,22 +250,22 @@ function mergeSessions(sessionsDir: string, entries: TransferEntry[], currentSes
 export function applySessionImport(app: App, entries: TransferEntry[]): string {
   const report: string[] = [];
   const sessionEntry = entries.find((x) => x.rel === 'session.json');
-  if (!sessionEntry) throw new Error(t('в архиве нет session.json — это не экспорт сессии'));
+  if (!sessionEntry) throw new Error(t('NO_SESSION_JSON_IN_THE_ARCHIVE_THIS_IS'));
 
   let imported: Session;
   try {
     imported = JSON.parse(sessionEntry.data.toString('utf8')) as Session;
   } catch {
     // битый JSON — тот же честный отказ, что и JSON неправильной формы
-    throw new Error(t('session.json в архиве не похож на разговор — импорт отменён'));
+    throw new Error(t('SESSION_JSON_IN_THE_ARCHIVE_DOES_NOT_LOOK'));
   }
   if (!imported || typeof imported !== 'object'
       || !Array.isArray(imported.messages)
       || typeof imported.title !== 'string') {
-    throw new Error(t('session.json в архиве не похож на разговор — импорт отменён'));
+    throw new Error(t('SESSION_JSON_IN_THE_ARCHIVE_DOES_NOT_LOOK'));
   }
   const store = app.store;
-  if (!store) throw new Error(t('нет открытого проекта — сначала /project new <имя> [папка] или /project open <имя|путь>'));
+  if (!store) throw new Error(t('NO_PROJECT_OPEN_START_WITH_PROJECT_NEW_NAME'));
   const created = store.create();
   const now = Date.now();
   const newSession: Session = {
@@ -280,7 +280,7 @@ export function applySessionImport(app: App, entries: TransferEntry[]): string {
   store.save(newSession);
   const list = store.list();
   const pos = list.findIndex((m) => m.id === newSession.id) + 1;
-  report.push(tf('разговор импортирован как №{n} («{title}»)', { n: pos, title: newSession.title }));
+  report.push(tf('SESSION_IMPORTED_AS_N_TITLE', { n: pos, title: newSession.title }));
 
   const agentEntries = entries.filter((x) => x.rel.startsWith('agents/') && x.rel.endsWith('.json'));
   const wanted = participantIds(imported);
@@ -296,20 +296,20 @@ export function applySessionImport(app: App, entries: TransferEntry[]): string {
     // только участники разговора — не вся команда машины-экспортёра
     const added = mergeTeamAgents(AGENTS_DIR, incoming);
     void loadTeam(AGENTS_DIR); // валидность после записи
-    report.push(tf('участников влито: {n}', { n: added }));
+    report.push(tf('MEMBERS_MERGED_N', { n: added }));
   } else if (wanted.size === 0) {
-    report.push(t('состав разговора не указан — команда не менялась'));
+    report.push(t('SESSION_ROSTER_NOT_GIVEN_THE_TEAM_IS_UNCHANGED'));
   }
-  return tf('Импорт сессии выполнен: {report}', { report: report.join('; ') });
+  return tf('SESSION_IMPORT_DONE_REPORT', { report: report.join('; ') });
 }
 
 /** Уровень 2 — импорт настроек: settings/профиль/менеджер/модели заменяются; проекты не трогаются. */
 export function applySettingsImport(app: App, entries: TransferEntry[]): string {
   const report = writeSettingsFiles(entries, SETTINGS_FILES);
   const models = writeModelEntries(entries);
-  if (models > 0) report.push(tf('моделей влито: {n}', { n: models }));
+  if (models > 0) report.push(tf('MODELS_MERGED_N', { n: models }));
   reloadModelsAndManager(app, report);
-  return tf('Импорт настроек выполнен: {report}', { report: report.join('; ') });
+  return tf('SETTINGS_IMPORT_DONE_REPORT', { report: report.join('; ') });
 }
 
 /** Уровень 1 — импорт всего приложения: дом заменяется, проекты вливаются по id. */
@@ -323,9 +323,9 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     writeFileSync(join(TOOLS_DIR, name), e.data);
     tools++;
   }
-  if (tools > 0) report.push(tf('тулов влито: {n}', { n: tools }));
+  if (tools > 0) report.push(tf('TOOLS_MERGED_N', { n: tools }));
   const models = writeModelEntries(entries);
-  if (models > 0) report.push(tf('моделей влито: {n}', { n: models }));
+  if (models > 0) report.push(tf('MODELS_MERGED_N', { n: models }));
   // карточки агентов: agents/<id>.json — по файлу на агента
   mkdirSync(AGENTS_DIR, { recursive: true });
   let agents = 0;
@@ -335,7 +335,7 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
     writeFileSync(join(AGENTS_DIR, name), e.data);
     agents++;
   }
-  if (agents > 0) report.push(tf('агентов влито: {n}', { n: agents }));
+  if (agents > 0) report.push(tf('AGENTS_MERGED_N', { n: agents }));
   // после замены команды перечитываем память команды
   try {
     app.memory = loadTeamMemory(MEMORY_FILE);
@@ -382,20 +382,20 @@ export function applyHomeImport(app: App, entries: TransferEntry[]): string {
       }
     }
   }
-  if (projects > 0) report.push(tf('проектов создано: {n}', { n: projects }));
-  if (sessions > 0) report.push(tf('разговоров влито: {n}', { n: sessions }));
-  return tf('Импорт приложения выполнен: {report}', { report: report.join('; ') });
+  if (projects > 0) report.push(tf('PROJECTS_CREATED_N', { n: projects }));
+  if (sessions > 0) report.push(tf('SESSIONS_MERGED_N', { n: sessions }));
+  return tf('APP_IMPORT_DONE_REPORT', { report: report.join('; ') });
 }
 
 /** Уровень 3 — импорт проекта: id занят → влив разговоров, свободен → новый проект. */
 export function applyProjectImport(app: App, entries: TransferEntry[], idArg?: string): string {
   const entry = entries.find((x) => x.rel === 'project.json');
-  if (!entry) throw new Error(t('в архиве нет project.json — это не экспорт проекта'));
+  if (!entry) throw new Error(t('NO_PROJECT_JSON_IN_THE_ARCHIVE_THIS_IS'));
   let raw: Partial<ProjectConfig>;
   try {
     raw = JSON.parse(entry.data.toString('utf8')) as Partial<ProjectConfig>;
   } catch {
-    throw new Error(t('project.json в архиве не читается — импорт отменён'));
+    throw new Error(t('PROJECT_JSON_IN_THE_ARCHIVE_CAN_NOT_BE'));
   }
   // имя: аргумент сильнее, иначе — id из архива (имя папки на машине-экспортёре)
   const id = validateProjectId(idArg?.trim() || String(raw.id ?? '') || 'project');
@@ -412,23 +412,23 @@ export function applyProjectImport(app: App, entries: TransferEntry[], idArg?: s
     // рабочая папка машины-экспортёра здесь может не существовать — не тащим
     // чужой путь вслепую: нет папки на диске → проект остаётся без workspace
     if (typeof raw.path === 'string' && raw.path.trim() && existsSync(raw.path.trim())) cfg.path = raw.path.trim();
-    else report.push(t('рабочей папки с машины-экспортёра здесь нет — задайте свою: /project update path=<папка>'));
+    else report.push(t('THE_WORKING_FOLDER_FROM_THE_EXPORTING_MACHINE_IS'));
     saveProjectConfig(cfg);
-    report.push(tf('проект «{id}» создан', { id }));
+    report.push(tf('PROJECT_ID_CREATED', { id }));
   } else {
     // локальные настройки и секреты проекта сильнее архива
-    report.push(tf('проект «{id}» уже был — настройки сохранены локальные', { id }));
+    report.push(tf('PROJECT_ID_ALREADY_EXISTED_THE_LOCAL_SETTINGS_ARE', { id }));
   }
   const { count, reopened } = mergeSessions(
     join(PROJECTS_DIR, id, 'sessions'),
     entries.filter((x) => x.rel.startsWith('sessions/')),
     existed && app.session && PROJECT_DIR && basename(PROJECT_DIR) === id ? app.session.id : null,
   );
-  if (count > 0) report.push(tf('разговоров влито: {n}', { n: count }));
+  if (count > 0) report.push(tf('SESSIONS_MERGED_N', { n: count }));
   if (reopened && app.store && app.session) {
     // вливали в открытый проект и попали в текущий разговор: перечитываем
     const fresh = app.store.load(app.session.id);
     if (fresh) app.session = fresh;
   }
-  return tf('Импорт проекта выполнен: {report}', { report: report.join('; ') });
+  return tf('PROJECT_IMPORT_DONE_REPORT', { report: report.join('; ') });
 }

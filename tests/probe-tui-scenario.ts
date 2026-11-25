@@ -128,7 +128,7 @@ async function main(): Promise<void> {
   await waitDisk(() => agentCards().includes('yurist.json'), 'юрист в agents/');
   const yurist = readJson(join(agentsDir, 'yurist.json'));
   check('2: /agent new — юрист на диске с дефолтами',
-    yurist?.name === 'Юрист' && yurist?.emoji === '🤖' && String(yurist?.prompt).startsWith('Ты — Юрист'),
+    yurist?.name === 'Юрист' && yurist?.color === 'white' && String(yurist?.prompt).startsWith('Ты — Юрист'),
     JSON.stringify(yurist).slice(0, 160));
 
   // ── 3. позвать в сессию ──────────────────────────────────────────────────

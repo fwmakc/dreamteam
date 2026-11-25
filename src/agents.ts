@@ -52,7 +52,6 @@ export function loadTeam(dir: string): Agent[] {
     agents.push({
       id,
       name: String(a.name),
-      emoji: String(a.emoji ?? '🤖'),
       description: a.description ? String(a.description) : undefined,
       color: String(a.color ?? 'white'),
       prompt: String(a.prompt),

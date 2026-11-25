@@ -55,7 +55,7 @@ function makeAsk(io: WizardIo) {
       const a = await ask(prompt);
       if (!a) return fallback;
       if (allowed.includes(a)) return a;
-      io.output.write(pc.yellow(`  ${t('скажи один из:')} ${allowed.join(', ')}\n`));
+      io.output.write(pc.yellow(`  ${t('SAY_ONE_OF')} ${allowed.join(', ')}\n`));
     }
   };
 
@@ -77,7 +77,7 @@ function makeAsk(io: WizardIo) {
       const pocket = new PassThrough();
       pocket.resume();
       const picker = createInterface({ input: io.input, output: pocket, terminal: true });
-      io.output.write(pc.dim(`  ${t('выбор: стрелки ↑/↓, PgUp/PgDn, Home/End, Enter')}\n`));
+      io.output.write(pc.dim(`  ${t('CHOOSE_ARROWS_PGUP_PGDN_HOME_END_ENTER')}\n`));
       const stream = io.input as Readable & { setRawMode?: (m: boolean) => void; isRaw?: boolean };
       const wasRaw = stream.isRaw === true;
       stream.setRawMode?.(true);
@@ -119,13 +119,13 @@ function makeAsk(io: WizardIo) {
       return sel;
     }
     for (;;) {
-      const a = await ask(`  ${t('Выбор [1]:')} `);
+      const a = await ask(`  ${t('PICK_1')} `);
       if (!a) return Math.min(Math.max(def, 0), items.length - 1);
       const n = Number(a);
       if (Number.isInteger(n) && n >= 1 && n <= items.length) return n - 1;
       const byText = items.findIndex((it) => it === a || it.split(' — ')[0] === a);
       if (byText >= 0) return byText;
-      io.output.write(pc.yellow(`  ${t('скажи один из:')} ${items.map((_, i) => i + 1).join(', ')}\n`));
+      io.output.write(pc.yellow(`  ${t('SAY_ONE_OF')} ${items.map((_, i) => i + 1).join(', ')}\n`));
     }
   };
 
@@ -174,7 +174,7 @@ function cardLine(file: string): string {
     const rest = [c.provider, c.model, c.baseUrl].filter(Boolean).join(' · ');
     return rest ? `${id} — ${rest}` : id;
   } catch {
-    return `${id} — ${t('карточка не читается')}`;
+    return `${id} — ${t('CARD_IS_UNREADABLE')}`;
   }
 }
 
@@ -192,7 +192,7 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
     const langs = knownLanguages(homeDir);
     const langIdx = await pick(
       'Язык интерфейса / Interface language / 界面语言:',
-      langs.map((l) => `${l.id} — ${l.name}${l.builtIn ? '' : ` (${t('свой')})`}`),
+      langs.map((l) => `${l.id} — ${l.name}${l.builtIn ? '' : ` (${t('OWN_2')})`}`),
       Math.max(0, langs.findIndex((l) => l.id === 'en')),
     );
     const lang = langs[langIdx].id;
@@ -210,8 +210,8 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
     mkdirSync(modelsDir, { recursive: true });
     const cards = readdirSync(modelsDir).filter((f) => f.endsWith('.json')).sort();
     const mpick = await pick(
-      t('Модель для команды:'),
-      [...cards.map((f) => cardLine(join(modelsDir, f))), t('создать новую модель')],
+      t('MODEL_FOR_THE_TEAM'),
+      [...cards.map((f) => cardLine(join(modelsDir, f))), t('CREATE_A_NEW_MODEL')],
       cards.length, // по умолчанию — создать новую (как велел прежний мастер)
     );
 
@@ -221,36 +221,36 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
     if (mpick < cards.length) {
       // существующая карточка — ничего не пишем, только выбираем её основной
       id = cards[mpick].replace(/\.json$/, '');
-      notes.push(tf('взял существующую модель «{id}» (карточка {file})', { id, file: join(modelsDir, cards[mpick]) }));
+      notes.push(tf('TOOK_THE_EXISTING_MODEL_ID_CARD_FILE', { id, file: join(modelsDir, cards[mpick]) }));
     } else {
-      const ppick = await pick(t('Тип провайдера:'), [
-        t('OpenAI-совместимый API (Z.ai GLM, OpenAI, OpenRouter, DeepSeek, Ollama…)'),
-        t('Anthropic (Claude)'),
+      const ppick = await pick(t('PROVIDER_TYPE'), [
+        t('OPENAI_COMPATIBLE_API_Z_AI_GLM_OPENAI_OPENROUTER'),
+        t('ANTHROPIC_CLAUDE'),
         'GigaChat',
-        t('mock — без API, заготовленные ответы (посмотреть, как всё работает)'),
+        t('MOCK_NO_API_CANNED_REPLIES_TO_SEE_HOW'),
       ]);
       if (ppick === 0) {
         id = 'main';
-        const baseUrl = (await ask(`  ${t('baseUrl API [https://api.openai.com/v1]:')} `)) || 'https://api.openai.com/v1';
-        const model = (await ask(`  ${t('Модель [gpt-4o-mini]:')} `)) || 'gpt-4o-mini';
-        key = await askSecret(`  ${t('Ключ API (ввод скрыт; Enter — пропустить, если API локальный):')} `);
+        const baseUrl = (await ask(`  ${t('API_BASEURL_HTTPS_API_OPENAI_COM_V1')} `)) || 'https://api.openai.com/v1';
+        const model = (await ask(`  ${t('MODEL_GPT_4O_MINI')} `)) || 'gpt-4o-mini';
+        key = await askSecret(`  ${t('API_KEY_INPUT_IS_HIDDEN_ENTER_SKIP_IF')} `);
         card = { provider: 'openai-compatible', baseUrl, model };
         if (key) card.apiKey = key;
       } else if (ppick === 1) {
         id = 'claude';
-        const model = (await ask(`  ${t('Модель [claude-sonnet-4-5]:')} `)) || 'claude-sonnet-4-5';
+        const model = (await ask(`  ${t('MODEL_CLAUDE_SONNET_4_5')} `)) || 'claude-sonnet-4-5';
         for (;;) {
-          key = await askSecret(`  ${t('Ключ API (ввод скрыт):')} `);
+          key = await askSecret(`  ${t('API_KEY_INPUT_IS_HIDDEN')} `);
           if (key) break;
-          io.output.write(pc.yellow(`  ${t('без ключа Claude отвечать не сможет — возьми его в кабинете Anthropic')}\n`));
+          io.output.write(pc.yellow(`  ${t('WITHOUT_A_KEY_CLAUDE_WILL_NOT_BE_ABLE')}\n`));
         }
         card = { provider: 'anthropic-compatible', model, apiKey: key };
       } else if (ppick === 2) {
         id = 'gigachat';
         for (;;) {
-          key = await askSecret(`  ${t('Ключ из кабинета GigaChat (ввод скрыт):')} `);
+          key = await askSecret(`  ${t('KEY_FROM_THE_GIGACHAT_CONSOLE_INPUT_IS_HIDDEN')} `);
           if (key) break;
-          io.output.write(pc.yellow(`  ${t('без ключа GigaChat отвечать не сможет')}\n`));
+          io.output.write(pc.yellow(`  ${t('WITHOUT_A_KEY_GIGACHAT_WILL_NOT_BE_ABLE')}\n`));
         }
         card = { provider: 'gigachat', apiKey: key };
       } else {
@@ -259,11 +259,11 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
       }
 
       writeFileSync(join(modelsDir, `${id}.json`), JSON.stringify(card, null, 2) + '\n');
-      notes.push(tf('создал {file} (модель «{id}» по умолчанию)', { file: join(modelsDir, `${id}.json`), id }));
+      notes.push(tf('CREATED_FILE_MODEL_ID_AS_THE_DEFAULT', { file: join(modelsDir, `${id}.json`), id }));
       if (key) {
-        notes.push(tf('ключ сохранил в {file} (поле "apiKey")', { file: join(modelsDir, `${id}.json`) }));
+        notes.push(tf('SAVED_THE_KEY_TO_FILE_THE_APIKEY_FIELD', { file: join(modelsDir, `${id}.json`) }));
       } else {
-        notes.push(t('ключ не указан — модель будет работать в mock-режиме'));
+        notes.push(t('NO_KEY_GIVEN_THE_MODEL_WILL_RUN_IN'));
       }
     }
     // модель по умолчанию — в settings.json (его ensureHome скаффолдил раньше)
@@ -279,23 +279,23 @@ export async function runWizard(io: WizardIo, homeDir: string = DT_HOME): Promis
     // с примера, чтобы PORT/HOST были перед глазами.
     if (!existsSync(envFile)) {
       writeFileSync(envFile, readFileSync(join(SCAFFOLD_DIR, 'home', 'env.example'), 'utf8'), { mode: 0o600 });
-      notes.push(tf('создал {file} из примера (env.example)', { file: envFile }));
+      notes.push(tf('CREATED_FILE_FROM_THE_EXAMPLE_ENV_EXAMPLE', { file: envFile }));
     }
     writeEnvKey(envFile, 'TOKEN', randomBytes(32).toString('base64url'));
-    notes.push(tf('создал токен доступа TOKEN в {file} (для dreamteam serve)', { file: envFile }));
+    notes.push(tf('CREATED_THE_ACCESS_TOKEN_TOKEN_IN_FILE_FOR', { file: envFile }));
     // Ярлык быстрого запуска: dreamteam serve --open — сервер + браузер одним
     // кликом с рабочего стола. Только живой терминал: в трубе вопросов нет.
     if (io.isTTY) {
-      const want = await askChoice(`  ${t('Ярлык быстрого запуска (dreamteam serve + браузер) на рабочем столе? [Y/n]:')} `, ['y', 'n'], 'y');
+      const want = await askChoice(`  ${t('DESKTOP_SHORTCUT_FOR_QUICK_LAUNCH_DREAMTEAM_SERVE_BROWSER')} `, ['y', 'n'], 'y');
       if (want === 'y') {
         try {
           notes.push(...(await createShortcut(homeDir)));
         } catch (err) {
-          notes.push(tf('ярлык создать не удалось: {err}', { err: err instanceof Error ? err.message : String(err) }));
+          notes.push(tf('COULD_NOT_CREATE_THE_SHORTCUT_ERR', { err: err instanceof Error ? err.message : String(err) }));
         }
       }
     }
-    io.output.write(pc.green(`\n  ${t('Готово. Дальше — живой менеджер: спроси его «что ты умеешь?»')}\n`));
+    io.output.write(pc.green(`\n  ${t('DONE_FROM_HERE_ON_IT_IS_THE_LIVE')}\n`));
     return notes;
   } finally {
     close();
@@ -337,7 +337,7 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
   if (!existsSync(settingsFile)) {
     mkdirSync(homeDir, { recursive: true });
     writeFileSync(settingsFile, JSON.stringify(readScaffold(join('home', 'settings.json')), null, 2) + '\n');
-    notes.push(tf('создал {file} (язык и экран по умолчанию)', { file: settingsFile }));
+    notes.push(tf('CREATED_FILE_DEFAULT_LANGUAGE_AND_SCREEN', { file: settingsFile }));
   }
   // команда — вещь машины: скаффолдим один раз, дальше живёт между проектами
   const agentsDir = join(homeDir, 'agents');
@@ -351,26 +351,26 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
         try { return String(JSON.parse(readFileSync(join(agentsDir, x), 'utf8')).name ?? ''); } catch { return ''; }
       }).filter(Boolean);
       notes.push(names.length > 0
-        ? tf('создал {file} (стартовая команда: {names})', { file: agentsDir, names: names.join(', ') })
-        : tf('создал {file} (пустая команда — менеджер позовёт и настроит)', { file: agentsDir }));
+        ? tf('CREATED_FILE_STARTER_TEAM_NAMES', { file: agentsDir, names: names.join(', ') })
+        : tf('CREATED_FILE_EMPTY_TEAM_THE_MANAGER_WILL_INVITE', { file: agentsDir }));
     } catch { /* scaffold agents/ отсутствует — не беда */ }
   }
   const toolsDir = join(homeDir, 'tools');
   if (!existsSync(toolsDir)) {
     mkdirSync(toolsDir, { recursive: true });
-    notes.push(tf('создал {file} (полка для своих тулов)', { file: toolsDir }));
+    notes.push(tf('CREATED_FILE_A_SHELF_FOR_YOUR_OWN_TOOLS', { file: toolsDir }));
   }
   // полка кастомных адаптеров провайдеров: providers/<id>.ts — как tools/, только адаптеры
   const providersDir = join(homeDir, 'providers');
   if (!existsSync(providersDir)) {
     mkdirSync(providersDir, { recursive: true });
-    notes.push(tf('создал {file} (полка своих адаптеров: <id>.ts — export default фабрика (id, config) => LLMProvider)', { file: providersDir }));
+    notes.push(tf('CREATED_FILE_A_SHELF_FOR_YOUR_OWN_ADAPTERS', { file: providersDir }));
   }
   // полка своих языков: lang/<id>.json — как tools/, только переводы
   const langDir = join(homeDir, 'lang');
   if (!existsSync(langDir)) {
     mkdirSync(langDir, { recursive: true });
-    notes.push(tf('создал {file} (полка своих языков: <id>.json — { "name": "…", "translations": { … } })', { file: langDir }));
+    notes.push(tf('CREATED_FILE_A_SHELF_FOR_CUSTOM_LANGUAGES_ID', { file: langDir }));
   }
   // полка моделей: scaffold-карточки копируются как примеры; без ключей — «не настроены»
   if (!existsSync(modelsDir)) {
@@ -379,7 +379,7 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
       for (const f of readdirSync(join(SCAFFOLD_DIR, 'home', 'models')).filter((x) => x.endsWith('.json'))) {
         writeFileSync(join(modelsDir, f), readFileSync(join(SCAFFOLD_DIR, 'home', 'models', f)));
       }
-      notes.push(tf('создал {file} (карточки моделей — примеры; впишите apiKey или удалите лишние)', { file: modelsDir }));
+      notes.push(tf('CREATED_FILE_MODEL_CARDS_EXAMPLES_FILL_IN_APIKEY', { file: modelsDir }));
     } catch { /* scaffold models/ отсутствует — не беда */ }
   }
   // wizard нужен пока settings.model.id не задан (первый запуск или сброс)
@@ -394,7 +394,7 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
   if (needsWizard) {
     if (!io.isTTY) {
       throw new Error(
-        tf('нет ни одной модели в {dir} — первый запуск проходит мастер: запусти приложение в терминале', { dir: modelsDir }),
+        tf('NO_MODELS_IN_DIR_THE_FIRST_RUN_GOES', { dir: modelsDir }),
       );
     }
     notes.push(...(await runWizard(io, homeDir)));
@@ -408,7 +408,7 @@ export async function ensureHome(io: WizardIo, homeDir: string = DT_HOME): Promi
     manager.model = { id: modelId };
     delete manager.provider;
     writeFileSync(managerFile, JSON.stringify(manager, null, 2) + '\n');
-    notes.push(tf('создал {file} (менеджер переговорки на модели «{id}»)', { file: managerFile, id: modelId }));
+    notes.push(tf('CREATED_FILE_MEETING_ROOM_MANAGER_ON_MODEL_ID', { file: managerFile, id: modelId }));
   }
   return notes;
 }

@@ -185,7 +185,7 @@ const projectHostsView = computed(() =>
 const manager = computed(() => snapshot.manager);
 const commands = computed(() => (snapshot.completion?.operations ?? []) as OpHint[]);
 const statusVisible = computed(() => roundActive.value || busyCount.value > 0);
-const busyText = computed(() => busyLabel.value || (roundActive.value ? tr('раунд идёт…') : ''));
+const busyText = computed(() => busyLabel.value || (roundActive.value ? tr('ROUND_IN_PROGRESS') : ''));
 
 // ── перевод интерфейса: словарь приходит в снапшоте (snapshot.ui.strings) ────
 function tr(s: string, vars?: Record<string, string | number>): string {
@@ -243,7 +243,7 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   if (href.startsWith('/api/file?')) {
     tokens[idx].attrSet('target', '_blank');
     tokens[idx].attrSet('rel', 'noopener');
-    tokens[idx].attrSet('title', tr('Клик — открыть · Ctrl+клик — сохранить'));
+    tokens[idx].attrSet('title', tr('CLICK_OPEN_CTRL_CLICK_SAVE'));
   } else if (/^https?:/i.test(href)) {
     tokens[idx].attrSet('target', '_blank');
     tokens[idx].attrSet('rel', 'noopener');
@@ -293,13 +293,13 @@ function flashCopy(btn: HTMLElement, ok: boolean): void {
 // делегат onChatClick; title ставится на каждый рендер — на случай смены
 // языка на лету (как у file-link)
 md.renderer.rules.code_inline = (tokens, idx) => {
-  const title = md.utils.escapeHtml(tr('Скопировать'));
+  const title = md.utils.escapeHtml(tr('COPY'));
   return `<span class="codewrap"><code>${md.utils.escapeHtml(tokens[idx].content)}</code><button class="code-copy" title="${title}" aria-label="${title}">${COPY_ICON}</button></span>`;
 };
 const fenceBase = md.renderer.rules.fence
   ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
 md.renderer.rules.fence = (tokens, idx, options, env, self) => {
-  const title = md.utils.escapeHtml(tr('Скопировать'));
+  const title = md.utils.escapeHtml(tr('COPY'));
   return `<div class="codeblock"><button class="code-copy" title="${title}" aria-label="${title}">${COPY_ICON}</button>${fenceBase(tokens, idx, options, env, self)}</div>`;
 };
 // видимый текст реплики пользователя: ведущие метки [имя] прикреплённых файлов
@@ -315,7 +315,6 @@ function attachmentsText(m: ChatMessage): string {
   return out;
 }
 function colorByAuthor(m: ChatMessage): string {
-  if (m.authorId === 'manager') return colorOf(manager.value?.color);
   const a = team.value.find((x) => x.id === m.authorId);
   return colorOf(a?.color);
 }
@@ -368,7 +367,7 @@ function msgReply(it: MsgItem): void {
   const quote = (selKey === it.key && selText) || msgRaw(it.msg);
   if (!quote) return;
   const fence = quote.includes('```') ? '````' : '```';
-  const prefix = snapshot.settings?.quotePrefix ?? tr('Вы пишете:');
+  const prefix = snapshot.settings?.quotePrefix ?? tr('YOU_WRITE');
   const mention = it.msg.authorId === 'user' ? '' : `!${it.msg.authorName} `;
   const text = `${mention}${prefix}\n${fence}\n${quote}\n${fence}`;
   draft.value = draft.value ? `${draft.value.replace(/\s+$/, '')}\n${text}` : text;
@@ -455,8 +454,8 @@ function onChatContext(e: MouseEvent): void {
   e.preventDefault();
   const href = a.getAttribute('href') ?? '';
   openCtx(e, [
-    { label: tr('Открыть'), icon: ExternalLink, fn: () => window.open(href, '_blank', 'noopener') },
-    { label: tr('Сохранить'), icon: Download, fn: () => downloadFile(href) },
+    { label: tr('OPEN'), icon: ExternalLink, fn: () => window.open(href, '_blank', 'noopener') },
+    { label: tr('SAVE'), icon: Download, fn: () => downloadFile(href) },
   ]);
 }
 
@@ -554,33 +553,33 @@ function answerDelete(yes: boolean): void {
 
 function ctxTeam(e: MouseEvent, a: AgentInfo): void {
   openCtx(e, [
-    { label: tr('Изменить'), icon: Pencil, fn: () => openAgentSettings(a) },
-    { label: tr(a.inChat ? 'Вывести из чата' : 'Позвать в чат'), icon: a.inChat ? UserMinus : UserPlus, fn: () => toggleChat(a) },
+    { label: tr('EDIT'), icon: Pencil, fn: () => openAgentSettings(a) },
+    { label: tr(a.inChat ? 'REMOVE_FROM_CHAT' : 'INVITE_TO_CHAT'), icon: a.inChat ? UserMinus : UserPlus, fn: () => toggleChat(a) },
   ]);
 }
 function ctxModel(e: MouseEvent, p: ModelInfo): void {
   const items: CtxItem[] = [
-    { label: tr('Изменить'), icon: Pencil, fn: () => openModelSettings(p) },
-    ...(!p.img ? [{ label: tr('Статистика'), icon: ChartNoAxesColumnIncreasing, fn: () => modelUsageReport(p.id) }] : []),
+    { label: tr('EDIT'), icon: Pencil, fn: () => openModelSettings(p) },
+    ...(!p.img ? [{ label: tr('USAGE_STATS'), icon: ChartNoAxesColumnIncreasing, fn: () => modelUsageReport(p.id) }] : []),
   ];
-  if (!p.isDefault) items.push({ label: tr('Удалить'), icon: Trash2, fn: () => delModel(p) });
+  if (!p.isDefault) items.push({ label: tr('DELETE'), icon: Trash2, fn: () => delModel(p) });
   openCtx(e, items);
 }
 function ctxSession(e: MouseEvent, id: string, title: string): void {
   openCtx(e, [
-    { label: tr('Изменить'), icon: Pencil, fn: () => openSessionEdit(id) },
-    { label: tr('Статистика'), icon: ChartNoAxesColumnIncreasing, fn: () => sessionUsageReport(id, title) },
-    { label: tr('Удалить'), icon: Trash2, fn: () => deleteSession(id, title) },
+    { label: tr('EDIT'), icon: Pencil, fn: () => openSessionEdit(id) },
+    { label: tr('USAGE_STATS'), icon: ChartNoAxesColumnIncreasing, fn: () => sessionUsageReport(id, title) },
+    { label: tr('DELETE'), icon: Trash2, fn: () => deleteSession(id, title) },
   ]);
 }
 function ctxSchedule(e: MouseEvent, t: ScheduleTaskInfo): void {
   openCtx(e, [
-    { label: tr(t.enabled ? 'Пауза' : 'Запустить'), icon: t.enabled ? Pause : Play, fn: () => scheduleToggle(t) },
-    { label: tr('Удалить'), icon: Trash2, fn: () => scheduleDelete(t) },
+    { label: tr(t.enabled ? 'PAUSE' : 'RUN'), icon: t.enabled ? Pause : Play, fn: () => scheduleToggle(t) },
+    { label: tr('DELETE'), icon: Trash2, fn: () => scheduleDelete(t) },
   ]);
 }
 function ctxHost(e: MouseEvent, p: ProjectInfo, h: ProjectHost): void {
-  openCtx(e, [{ label: tr('Удалить'), icon: Trash2, fn: () => projectHostDelete(p, h) }]);
+  openCtx(e, [{ label: tr('DELETE'), icon: Trash2, fn: () => projectHostDelete(p, h) }]);
 }
 
 // ── модальная форма: поля [{key,label,value,placeholder?,type?,values?}] ─────
@@ -702,7 +701,7 @@ const ctxInfo = computed(() => {
 
 // ── индикатор квот: рядом с индикатором контекста ────────────────────────────
 /** Короткие метки окон квоты — русский ключ переводится словарём ui.strings. */
-const QUOTA_LABELS: Record<string, string> = { '5h': '5ч', week: 'нед', month: 'мес', mcp: 'mcp' };
+const QUOTA_LABELS: Record<string, string> = { '5h': 'QUOTA_5H', week: 'QUOTA_WEEK', month: 'QUOTA_MONTH', mcp: 'mcp' };
 /** Лимиты тарифа дефолтной модели (z.ai coding plan и др.): остаток в %, цвет
  *  по самому низкому окну, в подсказке — тариф и время сброса. Нет данных — null. */
 const quotaInfo = computed(() => {
@@ -719,15 +718,15 @@ const quotaInfo = computed(() => {
   const band = worst < 20 ? 'bad' : worst < 50 ? 'warn' : 'ok';
   const title = [
     quota.plan ? `plan: ${quota.plan}` : '',
-    ...parts.map((p) => `${p.label}: ${p.pct}%${p.resetAt ? ` · ${tr('сброс {time}', { time: fmtDate(p.resetAt) })}` : ''}`),
+    ...parts.map((p) => `${p.label}: ${p.pct}%${p.resetAt ? ` · ${tr('RESETS_TIME', { time: fmtDate(p.resetAt) })}` : ''}`),
   ].filter(Boolean).join('\n');
   return { band, title, windows: parts };
 });
 function usageLines(u: SessionUsage): string[] {
   const pct = u.promptTokens > 0 ? Math.round((u.cachedTokens / u.promptTokens) * 100) : 0;
   return [
-    tr('Раундов: {rounds}', { rounds: u.rounds }),
-    tr('Вход: {in} · Выход: {out} · Из кэша: {cached} ({pct}%)', {
+    tr('ROUNDS_ROUNDS', { rounds: u.rounds }),
+    tr('IN_IN_OUT_OUT_CACHED_CACHED_PCT', {
       in: fmtNum(u.promptTokens), out: fmtNum(u.outputTokens), cached: fmtNum(u.cachedTokens), pct,
     }),
   ];
@@ -736,15 +735,15 @@ function usageLines(u: SessionUsage): string[] {
 function sessionUsageReport(id: string, title: string): void {
   const meta = sessions.value.find((s) => s.id === id);
   const u = meta?.usage;
-  const lines: string[] = u && u.rounds > 0 ? usageLines(u) : [tr('Статистики пока нет — сделайте раунд с API (не mock).')];
+  const lines: string[] = u && u.rounds > 0 ? usageLines(u) : [tr('NO_STATS_YET_RUN_A_ROUND_WITH_A')];
   const byModel = Object.entries(meta?.usageByModel ?? {}).filter(([, v]) => v.rounds > 0);
   if (byModel.length > 0) {
-    lines.push('', tr('По моделям:'));
+    lines.push('', tr('BY_MODEL'));
     for (const [mid, v] of byModel) {
-      lines.push(`• ${mid} — ${tr('{r} раунд(ов), вход {in}, выход {out}', { r: v.rounds, in: fmtNum(v.promptTokens), out: fmtNum(v.outputTokens) })}`);
+      lines.push(`• ${mid} — ${tr('R_ROUND_S_IN_IN_OUT_OUT', { r: v.rounds, in: fmtNum(v.promptTokens), out: fmtNum(v.outputTokens) })}`);
     }
   }
-  openReport(tr('Статистика разговора «{title}»', { title }), lines);
+  openReport(tr('USAGE_TITLE', { title }), lines);
 }
 /** Отчёт модели: суммарно по всем разговорам дома (считается из state). */
 function modelUsageReport(id: string): void {
@@ -759,9 +758,9 @@ function modelUsageReport(id: string): void {
     cached += u.cachedTokens;
   }
   const lines = rounds > 0
-    ? [...usageLines({ rounds, promptTokens: inTok, cachedTokens: cached, outputTokens: outTok }), tr('В разговорах: {n}', { n: chats })]
-    : [tr('Статистики пока нет — сделайте раунд с API (не mock).')];
-  openReport(tr('Статистика модели {id} — все разговоры', { id }), lines);
+    ? [...usageLines({ rounds, promptTokens: inTok, cachedTokens: cached, outputTokens: outTok }), tr('IN_SESSIONS_N', { n: chats })]
+    : [tr('NO_STATS_YET_RUN_A_ROUND_WITH_A')];
+  openReport(tr('USAGE_OF_ID_ALL_SESSIONS', { id }), lines);
 }
 /** Чекбокс булева поля: значение живёт строкой 'true'/'false' (пусто — не менять). */
 function setBool(f: { value?: string }, ev: Event): void {
@@ -891,33 +890,33 @@ function fieldsFromSchema(schema: CardSchema, current: unknown,
 }
 /** Группы формы агента: ссылки на модели — сворачиваемые секции. */
 function agentGroupOf(path: string): string | undefined {
-  if (path.startsWith('vision.')) return tr('Модель зрения');
-  if (path.startsWith('image.')) return tr('Модель генерации изображений');
+  if (path.startsWith('vision.')) return tr('FIELD_VISION_ID_LABEL');
+  if (path.startsWith('image.')) return tr('FIELD_IMAGE_ID_LABEL');
   return undefined;
 }
 // верхний уровень формы модели: провайдер, имя/адрес/ключ, температура, зрение;
 // остальной контракт (размышления, кэш, окна, доп. поля…) — «Расширенные»
 const MODEL_PRIMARY = new Set(['provider', 'model', 'baseUrl', 'apiKey', 'clientSecret', 'clientId', 'temperature', 'vision']);
 function modelGroupOf(path: string): string | undefined {
-  return MODEL_PRIMARY.has(path) ? undefined : tr('Расширенные настройки');
+  return MODEL_PRIMARY.has(path) ? undefined : tr('ADVANCED_SETTINGS');
 }
 /** Подпись модели в селекторе: id — имя у API, текстом отмечаем зрение. */
 function modelOption(m: ModelInfo): string {
-  return `${m.id} — ${m.model ?? m.kind}${m.vision ? ` · ${tr('зрение')}` : ''}`;
+  return `${m.id} — ${m.model ?? m.kind}${m.vision ? ` · ${tr('VISION')}` : ''}`;
 }
 /** Ссылки на модели — один контрол (тип model): селектор + «вручную (JSON)…».
  *  Варианты собирает сюда GUI: сама модель — все карточки (пусто = основная
  *  модель дома), vision.id — только зрячие, image.id — image-модели
  *  (пусто = «не менять»: форма пустое не шлёт). */
 function withModelSelects(fields: FormField[]): FormField[] {
-  const manual = tr('вручную (JSON)…');
+  const manual = tr('MANUAL_JSON');
   return fields.map((f) => {
     if (f.type !== 'model') return f;
     if (f.key === 'model') {
       return {
         ...f,
         values: ['', ...models.value.map((m) => m.id), '__json__'],
-        optionLabels: [tr('— по умолчанию (основная модель дома) —'), ...models.value.map(modelOption), manual],
+        optionLabels: [tr('DEFAULT_THE_HOUSE_MAIN_MODEL'), ...models.value.map(modelOption), manual],
       };
     }
     if (f.key === 'vision.id') {
@@ -925,7 +924,7 @@ function withModelSelects(fields: FormField[]): FormField[] {
       return {
         ...f,
         values: ['', ...vis.map((m) => m.id), '__json__'],
-        optionLabels: [tr('— не менять —'), ...vis.map((m) => `${m.id} — ${m.model ?? m.kind}`), manual],
+        optionLabels: [tr('KEEP_UNCHANGED'), ...vis.map((m) => `${m.id} — ${m.model ?? m.kind}`), manual],
       };
     }
     if (f.key === 'image.id') {
@@ -933,7 +932,7 @@ function withModelSelects(fields: FormField[]): FormField[] {
       return {
         ...f,
         values: ['', ...imgs.map((m) => m.id), '__json__'],
-        optionLabels: [tr('— не менять —'), ...imgs.map((m) => `${m.id}${m.ok ? '' : ' ⚠'}`), manual],
+        optionLabels: [tr('KEEP_UNCHANGED'), ...imgs.map((m) => `${m.id}${m.ok ? '' : ' ⚠'}`), manual],
       };
     }
     return f;
@@ -962,10 +961,10 @@ function fieldsFromForm(schema: CardSchema, values: Record<string, string>): Rec
       try {
         parsed = JSON.parse(raw);
       } catch {
-        throw new Error(tr('поле «{path}»: жду JSON', { path: f.path }));
+        throw new Error(tr('FIELD_PATH_EXPECTING_JSON', { path: f.path }));
       }
       if (parsed === null || typeof parsed !== 'object') {
-        throw new Error(tr('поле «{path}»: жду JSON', { path: f.path }));
+        throw new Error(tr('FIELD_PATH_EXPECTING_JSON', { path: f.path }));
       }
       out[f.path] = parsed;
       continue;
@@ -991,10 +990,10 @@ function rpcReport(p: Promise<{ text: string }>): void {
     .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 function openAgentCreate(): void {
-  openForm(tr('Новый агент'), [
-    { key: 'id', label: tr('id (латиница, цифры, ./-/_)') },
-    { key: 'name', label: tr('Имя') },
-    { key: 'description', label: tr('Описание (можно пропустить)') },
+  openForm(tr('NEW_AGENT'), [
+    { key: 'id', label: tr('ID_LATIN_LETTERS_DIGITS') },
+    { key: 'name', label: tr('FIELD_NAME_LABEL') },
+    { key: 'description', label: tr('DESCRIPTION_OPTIONAL') },
   ], (v) => rpcReport(rpc('agent.new', v)));
 }
 async function openAgentSettings(a: AgentInfo): Promise<void> {
@@ -1009,7 +1008,7 @@ async function openAgentSettings(a: AgentInfo): Promise<void> {
     addFeed('error', `✗ ${(err as Error).message}`);
     return;
   }
-  openForm(tr('Настройки агента {name}', { name: a.name }), [
+  openForm(tr('AGENT_SETTINGS_NAME', { name: a.name }), [
     ...withModelSelects(schemaFields('agent', card, agentGroupOf)),
   ], (v) => {
     const fields = fieldsFromForm(schema, v);
@@ -1024,10 +1023,10 @@ async function openAgentSettings(a: AgentInfo): Promise<void> {
         try {
           parsed = JSON.parse(jsonText);
         } catch {
-          throw new Error(tr('поле «Модель»: жду JSON-объект'));
+          throw new Error(tr('FIELD_ODEL_EXPECTING_A_JSON_OBJECT'));
         }
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error(tr('поле «Модель»: жду JSON-объект'));
+          throw new Error(tr('FIELD_ODEL_EXPECTING_A_JSON_OBJECT'));
         }
         if (!same(parsed)) fields.model = parsed;
       } else if (card.model !== undefined) {
@@ -1046,8 +1045,8 @@ async function openAgentSettings(a: AgentInfo): Promise<void> {
       const mode = String(v[`${key}.id`] ?? '');
       const jsonText = String(v[`${key}.id.json`] ?? '').trim();
       const bad = key === 'vision'
-        ? tr('поле «Модель зрения»: жду JSON-объект с "id"')
-        : tr('поле «Модель генерации изображений»: жду JSON-объект с "id"');
+        ? tr('FIELD_VISION_MODEL_EXPECTING_A_JSON_OBJECT_WITH')
+        : tr('FIELD_IMAGE_GENERATION_MODEL_EXPECTING_A_JSON_OBJECT');
       const same = (obj: unknown) => JSON.stringify(obj ?? {}) === JSON.stringify(cur ?? {});
       if (mode === '__json__') {
         if (jsonText) {
@@ -1071,7 +1070,7 @@ async function openAgentSettings(a: AgentInfo): Promise<void> {
     }
     if (Object.keys(fields).length > 0) rpcReport(rpc('agent.update', { id: a.id, fields }));
   }, {
-    end: [{ label: tr('Удалить'), icon: Trash2, class: 'bad', fn: () => delAgent(a) }],
+    end: [{ label: tr('DELETE'), icon: Trash2, class: 'bad', fn: () => delAgent(a) }],
   });
 }
 function agentDelete(a: AgentInfo): void {
@@ -1092,12 +1091,12 @@ function modelCreate(): void {
   // селектор провайдеров: встроенные + кастомные (снапшот; старый сервер —
   // без поля — прежний короткий список)
   const providers = (snapshot.providers as string[] | undefined) ?? ['openai-compatible', 'anthropic-compatible', 'zai-coding-plan', 'gigachat', 'mock'];
-  openForm(tr('Новая модель'), [
-    { key: 'id', label: tr('id (латиница, цифры, ./-/_)') },
-    { key: 'provider', label: tr('Провайдер'), type: 'enum', value: 'openai-compatible', values: providers },
-    { key: 'baseUrl', label: tr('Адрес API') },
-    { key: 'model', label: tr('Модель (имя у API)') },
-    { key: 'apiKey', label: tr('Ключ API (можно пусто — для локальных API)') },
+  openForm(tr('NEW_MODEL'), [
+    { key: 'id', label: tr('ID_LATIN_LETTERS_DIGITS') },
+    { key: 'provider', label: tr('LABEL_PROVIDER'), type: 'enum', value: 'openai-compatible', values: providers },
+    { key: 'baseUrl', label: tr('LABEL_BASEURL') },
+    { key: 'model', label: tr('LABEL_MODEL') },
+    { key: 'apiKey', label: tr('API_KEY_MAY_BE_EMPTY_FOR_LOCAL_APIS') },
   ], (v) => rpcReport(rpc('model.new', { id: v.id, config: v })));
 }
 function modelDelete(p: ModelInfo): void {
@@ -1131,7 +1130,7 @@ async function openModelSettings(p: ModelInfo): Promise<void> {
     return;
   }
   if (!schema) return;
-  openForm(tr('Модель {id}', { id: p.id }), fieldsFromSchema(schema, card, modelGroupOf), (v) => {
+  openForm(tr('MODEL_ID_3', { id: p.id }), fieldsFromSchema(schema, card, modelGroupOf), (v) => {
     rpcReport(rpc('model.update', { id: p.id, fields: fieldsFromForm(schema, v) }));
   });
 }
@@ -1145,23 +1144,23 @@ function openSettingsForm(): void {
   const langs: LanguageInfo[] = snapshot.ui?.languages ?? [];
   const uiField: FormField = langs.length
     ? {
-        key: 'ui', label: tr('Язык интерфейса'), value: snapshot.ui?.id ?? '', type: 'enum',
+        key: 'ui', label: tr('UI_LANGUAGE'), value: snapshot.ui?.id ?? '', type: 'enum',
         values: langs.map((l) => l.id),
-        optionLabels: langs.map((l) => `${l.id} — ${l.name}${l.builtIn ? '' : ` (${tr('свой')})`}`),
+        optionLabels: langs.map((l) => `${l.id} — ${l.name}${l.builtIn ? '' : ` (${tr('OWN_2')})`}`),
       }
-    : { key: 'ui', label: tr('Язык интерфейса'), value: snapshot.ui?.id ?? '' };
-  openForm(tr('Настройки'), [
-    { key: 'language', label: tr('Язык общения (russian / ru-RU / english…)'), value: st.language ?? '', placeholder: tr('пусто — как язык интерфейса') },
-    { key: 'autoMessage', label: tr('Автоответ в автономном режиме'), value: st.autoMessage ?? '' },
-    { key: 'quotePrefix', label: tr('Сообщение для цитирования'), value: st.quotePrefix ?? '', placeholder: tr('Вы пишете:') },
+    : { key: 'ui', label: tr('UI_LANGUAGE'), value: snapshot.ui?.id ?? '' };
+  openForm(tr('SETTINGS'), [
+    { key: 'language', label: tr('CONVERSATION_LANGUAGE_RUSSIAN_RU_RU_ENGLISH'), value: st.language ?? '', placeholder: tr('EMPTY_FOLLOWS_THE_UI_LANGUAGE') },
+    { key: 'autoMessage', label: tr('AUTO_REPLY_IN_AUTONOMOUS_MODE'), value: st.autoMessage ?? '' },
+    { key: 'quotePrefix', label: tr('QUOTE_PREFIX'), value: st.quotePrefix ?? '', placeholder: tr('YOU_WRITE') },
     uiField,
     {
-      key: '__theme', label: tr('Тема интерфейса'), value: guiTheme.value, type: 'enum',
-      values: [...GUI_THEMES], optionLabels: [tr('Авто'), tr('Светлая'), tr('Тёмная'), tr('Индиго')],
+      key: '__theme', label: tr('INTERFACE_THEME'), value: guiTheme.value, type: 'enum',
+      values: [...GUI_THEMES], optionLabels: [tr('AUTO'), tr('LIGHT'), tr('DARK'), tr('INDIGO')],
     },
-    { key: 'width', label: tr('Ширина экрана (40–500)'), value: st.width != null ? String(st.width) : '' },
-    { key: 'maxInputRows', label: tr('Максимум строк поля ввода (1–20)'), value: st.maxInputRows != null ? String(st.maxInputRows) : '' },
-    { key: 'compressThreshold', label: tr('Порог автосжатия контекста, % (10–99)'), value: st.compressThreshold != null ? String(st.compressThreshold) : '' },
+    { key: 'width', label: tr('SCREEN_WIDTH_40_500'), value: st.width != null ? String(st.width) : '' },
+    { key: 'maxInputRows', label: tr('MAX_INPUT_ROWS_1_20'), value: st.maxInputRows != null ? String(st.maxInputRows) : '' },
+    { key: 'compressThreshold', label: tr('AUTO_COMPRESS_THRESHOLD_10_99'), value: st.compressThreshold != null ? String(st.compressThreshold) : '' },
   ], (v) => {
     setGuiTheme(v.__theme ?? 'auto');
     const patch: Record<string, unknown> = {};
@@ -1170,34 +1169,70 @@ function openSettingsForm(): void {
       if (val !== '') patch[k] = k === 'width' || k === 'maxInputRows' || k === 'compressThreshold' ? Number(val) : val;
     }
     if (!Object.keys(patch).length) {
-      addFeed('notice', `· ${tr('настройки сохранены')}`);
+      addFeed('notice', `· ${tr('SETTINGS_SAVED')}`);
       return;
     }
     rpc('settings.update', { patch })
-      .then(() => addFeed('notice', `· ${tr('настройки сохранены')}`))
+      .then(() => addFeed('notice', `· ${tr('SETTINGS_SAVED')}`))
       .catch((err: Error) => addFeed('error', `✗ ${err.message}`));
   }, { settingsActions: true });
 }
 function openUserProfileForm(): void {
   const p = profile.value;
   if (!p) return;
-  openForm(tr('Пользователь'), [
-    { key: 'name', label: tr('Имя'), value: p.name ?? '' },
-    { key: 'about', label: tr('О себе'), value: p.about ?? '' },
+  openForm(tr('USER'), [
+    { key: 'name', label: tr('FIELD_NAME_LABEL'), value: p.name ?? '' },
+    { key: 'about', label: tr('ABOUT'), value: p.about ?? '' },
   ], (v) => rpcReport(rpc('profile.update', v)));
 }
-function openManagerForm(): void {
-  const mgr = manager.value;
-  if (!mgr) return;
-  openForm(tr('Менеджер переговорки'), [
-    { key: 'name', label: tr('Имя'), value: mgr.name ?? '' },
-    { key: 'emoji', label: 'Emoji', value: mgr.emoji ?? '' },
-    { key: 'color', label: tr('Цвет (yellow/cyan/…)'), value: mgr.color ?? '' },
-    { key: 'temperature', label: tr('Температура (0–2)'), value: mgr.temperature != null ? String(mgr.temperature) : '' },
-  ], (v) => {
-    const fields: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) if (val !== '') fields[k] = k === 'temperature' ? Number(val) : val;
-    rpcReport(rpc('manager.update', { fields }));
+async function openManagerForm(): Promise<void> {
+  const schema = schemaOf('manager');
+  if (!schema) return;
+  // полная карточка (rpc manager.show): в снапшоте только id модели, а форме
+  // нужна вся ссылка с параметрами (temperature, maxTokens…)
+  let card: Record<string, unknown> = {};
+  try {
+    const r = await rpc<{ manager: Record<string, unknown> }>('manager.show');
+    card = r.manager ?? {};
+  } catch (err) {
+    addFeed('error', `✗ ${(err as Error).message}`);
+    return;
+  }
+  // у менеджера модель обязательна: селектор без «пусто» (в отличие от агента)
+  const fields = withModelSelects(schemaFields('manager', card)).map((f) =>
+    f.key === 'model'
+      ? {
+          ...f,
+          values: (f.values ?? []).filter((v) => v !== ''),
+          optionLabels: (f.optionLabels ?? []).filter((_, i) => i > 0),
+        }
+      : f,
+  );
+  openForm(tr('MEETING_ROOM_MANAGER'), fields, (v) => {
+    const out = fieldsFromForm(schema, v);
+    // модель — контрол как у агента, но сброса нет: менеджер обязан назвать
+    // модель; '__json__' — объект целиком, "id" обязателен (проверит сервер)
+    const mode = String(v['model'] ?? '');
+    const jsonText = String(v['model.json'] ?? '').trim();
+    const same = (obj: unknown) => JSON.stringify(obj ?? {}) === JSON.stringify(card.model ?? {});
+    if (mode === '__json__') {
+      if (jsonText) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(jsonText);
+        } catch {
+          throw new Error(tr('FIELD_ODEL_EXPECTING_A_JSON_OBJECT'));
+        }
+        const id = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (parsed as { id?: unknown }).id
+          : undefined;
+        if (typeof id !== 'string' || !id.trim()) throw new Error(tr('FIELD_MANAGER_MODEL_EXPECTING_A_JSON_OBJECT_WITH'));
+        if (!same(parsed)) out.model = parsed;
+      }
+    } else if (mode && !same({ id: mode })) {
+      out.model = { id: mode };
+    }
+    if (Object.keys(out).length > 0) rpcReport(rpc('manager.update', { fields: out }));
   });
 }
 
@@ -1205,8 +1240,8 @@ function openManagerForm(): void {
 /** Открыть другой проект: имя из списка или папка на диске (смена разговоров). */
 function openProjectForm(): void {
   if (roundActive.value) return;
-  openForm(tr('Открыть проект'), [
-    { key: 'path', label: tr('Имя из списка или путь к папке') },
+  openForm(tr('OPEN_PROJECT'), [
+    { key: 'path', label: tr('A_NAME_FROM_THE_LIST_OR_A_FOLDER') },
   ], (v) => {
     const path = String(v.path ?? '').trim();
     if (path) rpcReport(rpc('project.open', { path }));
@@ -1295,24 +1330,24 @@ function saveProjectSettings(): void {
 }
 function ctxProjectCurrent(e: MouseEvent): void {
   if (!currentProject.value) return;
-  openCtx(e, [{ label: tr('Настройки проекта…'), icon: SlidersHorizontal, fn: openProjectSettings }]);
+  openCtx(e, [{ label: tr('PROJECT_SETTINGS'), icon: SlidersHorizontal, fn: openProjectSettings }]);
 }
 function ctxProjectKnown(e: MouseEvent, p: ProjectRecordInfo): void {
-  openCtx(e, [{ label: tr('Удалить из дома (разговоры тоже)'), icon: Trash2, fn: () =>
-    askDelete(tr('проект «{name}»', { name: p.name }), () => rpcReport(rpc('project.delete', { id: p.name }))) }]);
+  openCtx(e, [{ label: tr('REMOVE_FROM_THE_HOME_SESSIONS_TOO'), icon: Trash2, fn: () =>
+    askDelete(tr('PROJECT_NAME', { name: p.name }), () => rpcReport(rpc('project.delete', { id: p.name }))) }]);
 }
 /** Новый сервер проекта: ＋ в сайдбаре и ＋ в разделе диалога настроек. */
 function projectHostAdd(p: ProjectInfo): void {
   if (roundActive.value) return;
-  openForm(tr('Сервер проекта «{id}»', { id: p.id }), [
-    { key: 'id', label: tr('id сервера (напр. prod)') },
-    { key: 'host', label: tr('Хост (адрес)') },
-    { key: 'user', label: tr('Пользователь (можно пропустить)') },
-    { key: 'password', label: tr('Пароль (можно пропустить)'), type: 'password' },
-    { key: 'port', label: tr('Порт (можно пропустить)') },
-    { key: 'dir', label: tr('Папка на сервере (можно пропустить)') },
+  openForm(tr('PROJECT_SERVER_ID', { id: p.id }), [
+    { key: 'id', label: tr('SERVER_ID_E_G_PROD') },
+    { key: 'host', label: tr('HOST_ADDRESS') },
+    { key: 'user', label: tr('USER_OPTIONAL') },
+    { key: 'password', label: tr('PASSWORD_OPTIONAL'), type: 'password' },
+    { key: 'port', label: tr('PORT_OPTIONAL') },
+    { key: 'dir', label: tr('FOLDER_ON_THE_SERVER_OPTIONAL') },
   ], (v) => {
-    if (!v.id) throw new Error(tr('Жду id сервера'));
+    if (!v.id) throw new Error(tr('EXPECTING_THE_SERVER_ID'));
     const args: Record<string, unknown> = { id: v.id, host: v.host };
     if (v.user) args.user = v.user;
     if (v.password) args.password = v.password;
@@ -1323,12 +1358,12 @@ function projectHostAdd(p: ProjectInfo): void {
 }
 function projectHostEdit(h: ProjectHost): void {
   if (roundActive.value) return;
-  openForm(tr('Сервер «{name}»', { name: h.name }), [
-    { key: 'host', label: tr('Хост (адрес)'), value: h.host },
-    { key: 'user', label: tr('Пользователь (можно пропустить)'), value: h.user ?? '' },
-    { key: 'password', label: tr('Пароль (пусто — не менять)'), type: 'password' },
-    { key: 'port', label: tr('Порт (можно пропустить)'), value: h.port ? String(h.port) : '' },
-    { key: 'dir', label: tr('Папка на сервере (можно пропустить)'), value: h.dir ?? '' },
+  openForm(tr('SERVER_NAME', { name: h.name }), [
+    { key: 'host', label: tr('HOST_ADDRESS'), value: h.host },
+    { key: 'user', label: tr('USER_OPTIONAL'), value: h.user ?? '' },
+    { key: 'password', label: tr('PASSWORD_LEAVE_EMPTY_TO_KEEP'), type: 'password' },
+    { key: 'port', label: tr('PORT_OPTIONAL'), value: h.port ? String(h.port) : '' },
+    { key: 'dir', label: tr('FOLDER_ON_THE_SERVER_OPTIONAL'), value: h.dir ?? '' },
   ], (v) => {
     const args: Record<string, unknown> = { id: h.name, host: v.host };
     if (v.user) args.user = v.user;
@@ -1340,20 +1375,20 @@ function projectHostEdit(h: ProjectHost): void {
 }
 function projectHostDelete(p: ProjectInfo, h: ProjectHost): void {
   if (roundActive.value) return;
-  askDelete(tr('сервер «{name}» проекта «{id}»', { name: h.name, id: p.id }), () => rpcReport(rpc('project.host.delete', { id: h.name })));
+  askDelete(tr('SERVER_NAME_OF_PROJECT_ID', { name: h.name, id: p.id }), () => rpcReport(rpc('project.host.delete', { id: h.name })));
 }
 function projectMailAdd(p: ProjectInfo): void {
   if (roundActive.value) return;
-  openForm(tr('Ящик проекта «{id}»', { id: p.id }), [
-    { key: 'id', label: tr('id ящика (напр. support)') },
-    { key: 'user', label: tr('Логин') },
-    { key: 'password', label: tr('Пароль'), type: 'password' },
-    { key: 'imap', label: tr('IMAP-сервер') },
-    { key: 'smtp', label: tr('SMTP-сервер') },
-    { key: 'port', label: tr('IMAP-порт (можно пропустить)') },
-    { key: 'smtpPort', label: tr('SMTP-порт (можно пропустить)') },
+  openForm(tr('PROJECT_MAILBOX_ID', { id: p.id }), [
+    { key: 'id', label: tr('MAILBOX_ID_E_G_SUPPORT') },
+    { key: 'user', label: tr('LOGIN') },
+    { key: 'password', label: tr('PASSWORD'), type: 'password' },
+    { key: 'imap', label: tr('IMAP_SERVER') },
+    { key: 'smtp', label: tr('SMTP_SERVER') },
+    { key: 'port', label: tr('IMAP_PORT_OPTIONAL') },
+    { key: 'smtpPort', label: tr('SMTP_PORT_OPTIONAL') },
   ], (v) => {
-    if (!v.id) throw new Error(tr('Жду id ящика'));
+    if (!v.id) throw new Error(tr('EXPECTING_THE_MAILBOX_ID'));
     const args: Record<string, unknown> = { id: v.id };
     if (v.user) args.user = v.user;
     if (v.password) args.password = v.password;
@@ -1366,13 +1401,13 @@ function projectMailAdd(p: ProjectInfo): void {
 }
 function projectMailEdit(m: MailInfo): void {
   if (roundActive.value) return;
-  openForm(tr('Ящик «{id}»', { id: m.id }), [
-    { key: 'user', label: tr('Логин'), value: m.user },
-    { key: 'password', label: tr('Пароль (пусто — не менять)'), type: 'password' },
-    { key: 'imap', label: tr('IMAP-сервер'), value: m.imap },
-    { key: 'smtp', label: tr('SMTP-сервер'), value: m.smtp },
-    { key: 'port', label: tr('IMAP-порт (можно пропустить)'), value: m.port ? String(m.port) : '' },
-    { key: 'smtpPort', label: tr('SMTP-порт (можно пропустить)'), value: m.smtpPort ? String(m.smtpPort) : '' },
+  openForm(tr('MAILBOX_ID', { id: m.id }), [
+    { key: 'user', label: tr('LOGIN'), value: m.user },
+    { key: 'password', label: tr('PASSWORD_LEAVE_EMPTY_TO_KEEP'), type: 'password' },
+    { key: 'imap', label: tr('IMAP_SERVER'), value: m.imap },
+    { key: 'smtp', label: tr('SMTP_SERVER'), value: m.smtp },
+    { key: 'port', label: tr('IMAP_PORT_OPTIONAL'), value: m.port ? String(m.port) : '' },
+    { key: 'smtpPort', label: tr('SMTP_PORT_OPTIONAL'), value: m.smtpPort ? String(m.smtpPort) : '' },
   ], (v) => {
     const fields: Record<string, unknown> = {};
     if (v.user) fields.user = v.user;
@@ -1381,37 +1416,37 @@ function projectMailEdit(m: MailInfo): void {
     if (v.smtp) fields.smtp = v.smtp;
     if (v.port) fields.port = Number(v.port);
     if (v.smtpPort) fields.smtpPort = Number(v.smtpPort);
-    if (!Object.keys(fields).length) throw new Error(tr('Нечего менять: заполните хотя бы одно поле'));
+    if (!Object.keys(fields).length) throw new Error(tr('NOTHING_TO_CHANGE_FILL_IN_AT_LEAST_ONE'));
     rpcReport(rpc('project.mail.update', { id: m.id, fields }));
   });
 }
 function projectMailDelete(m: MailInfo): void {
   if (roundActive.value) return;
-  askDelete(tr('ящик «{id}»', { id: m.id }), () => rpcReport(rpc('project.mail.delete', { id: m.id })));
+  askDelete(tr('MAILBOX_ID_2', { id: m.id }), () => rpcReport(rpc('project.mail.delete', { id: m.id })));
 }
 function projectBotAdd(p: ProjectInfo): void {
   if (roundActive.value) return;
-  openForm(tr('Бот проекта «{id}»', { id: p.id }), [
-    { key: 'key', label: tr('Тип бота'), type: 'enum', values: ['telegram', 'max'] },
-    { key: 'token', label: tr('Токен'), type: 'password' },
+  openForm(tr('PROJECT_BOT_ID', { id: p.id }), [
+    { key: 'key', label: tr('BOT_TYPE'), type: 'enum', values: ['telegram', 'max'] },
+    { key: 'token', label: tr('TOKEN'), type: 'password' },
   ], (v) => {
-    if (!v.token) throw new Error(tr('Жду токен бота'));
+    if (!v.token) throw new Error(tr('EXPECTING_THE_BOT_TOKEN'));
     rpcReport(rpc('project.messenger.add', { key: v.key, token: v.token }));
   });
 }
 function projectBotEdit(b: MessengerInfo): void {
   if (roundActive.value) return;
-  openForm(tr('Бот {key}', { key: b.key }), [
-    { key: 'token', label: tr('Новый токен'), type: 'password' },
+  openForm(tr('BOT_KEY', { key: b.key }), [
+    { key: 'token', label: tr('NEW_TOKEN'), type: 'password' },
   ], (v) => {
     // сервер трактует пустой token как «убрать поле» — из формы пустым не шлём
-    if (!v.token) throw new Error(tr('Пустой токен удалил бы токен бота — заполните поле'));
+    if (!v.token) throw new Error(tr('AN_EMPTY_TOKEN_WOULD_ERASE_THE_BOT_TOKEN'));
     rpcReport(rpc('project.messenger.update', { key: b.key, token: v.token }));
   });
 }
 function projectBotDelete(b: MessengerInfo): void {
   if (roundActive.value) return;
-  askDelete(tr('бота «{key}»', { key: b.key }), () => rpcReport(rpc('project.messenger.delete', { key: b.key })));
+  askDelete(tr('BOT_KEY_2', { key: b.key }), () => rpcReport(rpc('project.messenger.delete', { key: b.key })));
 }
 
 // ── расписание ───────────────────────────────────────────────────────────────
@@ -1423,9 +1458,9 @@ function refreshSchedule(): Promise<void> {
 function openScheduleForm(fromSection: boolean): void {
   if (roundActive.value) return;
   if (fromSection) void refreshSchedule();
-  openForm(tr('Задача по расписанию'), [
-    { key: 'message', label: tr('Задание (уйдёт в чат как сообщение)') },
-    { key: 'intervalMinutes', label: tr('Каждые N минут'), value: '10' },
+  openForm(tr('SCHEDULED_TASK'), [
+    { key: 'message', label: tr('TASK_GOES_TO_THE_CHAT_AS_A_MESSAGE') },
+    { key: 'intervalMinutes', label: tr('EVERY_N_MINUTES'), value: '10' },
   ], (v) => {
     rpc('schedule.add', { message: v.message, intervalMinutes: Number(v.intervalMinutes) || 10 })
       .then(() => { if (fromSection) void refreshSchedule(); })
@@ -1436,7 +1471,7 @@ function scheduleToggle(t: ScheduleTaskInfo): void {
   rpc('schedule.toggle', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`));
 }
 function scheduleDelete(t: ScheduleTaskInfo): void {
-  askDelete(tr('задача «{msg}»', { msg: t.message.slice(0, 40) }), () =>
+  askDelete(tr('TASK_MSG', { msg: t.message.slice(0, 40) }), () =>
     rpc('schedule.delete', { id: t.id }).catch((err: Error) => addFeed('error', `✗ ${err.message}`)));
 }
 
@@ -1455,19 +1490,19 @@ function bgDur(from: number, to?: number): string {
 }
 function bgLine(t: BgTaskInfo): string {
   const tail = t.status === 'running'
-    ? `⏳ ${tr('идёт {dur}', { dur: bgDur(t.startedAt) })}`
-    : `${BG_STATUS_EMOJI[t.status]} ${t.status}, ${bgDur(t.startedAt, t.endedAt)}${t.exitCode !== undefined ? `, ${tr('код {n}', { n: t.exitCode })}` : ''}`;
+    ? `⏳ ${tr('RUNNING_DUR', { dur: bgDur(t.startedAt) })}`
+    : `${BG_STATUS_EMOJI[t.status]} ${t.status}, ${bgDur(t.startedAt, t.endedAt)}${t.exitCode !== undefined ? `, ${tr('EXIT_N', { n: t.exitCode })}` : ''}`;
   return `${t.title || t.command.slice(0, 60)} — ${tail}`;
 }
 function openBgForm(): void {
   if (roundActive.value) return;
-  openForm(tr('Фоновая задача'), [
-    { key: 'command', label: tr('Команда (под супервизией: лог, таймаут, остановка)'), placeholder: 'npm run build' },
-    { key: 'title', label: tr('Название'), placeholder: tr('по умолчанию — первая строка команды') },
-    { key: 'timeoutMinutes', label: tr('Таймаут, минут (0 — без таймаута)'), value: '0' },
-    { key: 'checkMinutes', label: tr('Напоминать каждые N минут (0 — выключить)'), value: String(snapshot.settings?.bgCheckMinutes ?? 5) },
+  openForm(tr('BACKGROUND_TASK'), [
+    { key: 'command', label: tr('COMMAND_SUPERVISED_LOG_TIMEOUT_STOP'), placeholder: 'npm run build' },
+    { key: 'title', label: tr('TITLE'), placeholder: tr('DEFAULTS_TO_THE_FIRST_LINE_OF_THE_COMMAND') },
+    { key: 'timeoutMinutes', label: tr('TIMEOUT_MINUTES_0_NO_TIMEOUT'), value: '0' },
+    { key: 'checkMinutes', label: tr('REMIND_EVERY_N_MINUTES_0_OFF'), value: String(snapshot.settings?.bgCheckMinutes ?? 5) },
   ], (v) => {
-    if (!v.command.trim()) throw new Error(tr('Жду команду'));
+    if (!v.command.trim()) throw new Error(tr('WAITING_FOR_A_COMMAND'));
     const tm = Number(v.timeoutMinutes);
     const cm = Number(v.checkMinutes);
     rpcReport(rpc('bg.run', {
@@ -1485,7 +1520,7 @@ function openBgLog(id: string): void {
   const t = bgTasks.value.find((x) => x.id === id);
   bgLogModal.id = id;
   bgLogModal.title = t?.title || id;
-  bgLogModal.text = tr('загрузка…');
+  bgLogModal.text = tr('LOADING');
   bgLogModal.show = true;
   const pull = (): void => {
     rpc<{ text: string }>('bg.log', { id, lines: 400 })
@@ -1509,14 +1544,14 @@ function bgStop(t: BgTaskInfo): void {
   rpcReport(rpc('bg.kill', { id: t.id }));
 }
 function bgDelete(t: BgTaskInfo): void {
-  askDelete(tr('фоновую задачу «{title}»', { title: t.title || t.id }), () =>
+  askDelete(tr('BACKGROUND_TASK_TITLE', { title: t.title || t.id }), () =>
     rpcReport(rpc('bg.delete', { id: t.id })));
 }
 function ctxBg(e: MouseEvent, t: BgTaskInfo): void {
   openCtx(e, [
-    { label: tr('Лог'), icon: ScrollText, fn: () => openBgLog(t.id) },
-    ...(t.status === 'running' ? [{ label: tr('Остановить'), icon: Square, fn: () => bgStop(t) }] : []),
-    { label: tr('Удалить'), icon: Trash2, fn: () => bgDelete(t) },
+    { label: tr('LOG'), icon: ScrollText, fn: () => openBgLog(t.id) },
+    ...(t.status === 'running' ? [{ label: tr('STOP'), icon: Square, fn: () => bgStop(t) }] : []),
+    { label: tr('DELETE'), icon: Trash2, fn: () => bgDelete(t) },
   ]);
 }
 
@@ -1525,9 +1560,9 @@ const goalActive = computed(() => goal.value?.status === 'active');
 function openGoalForm(): void {
   if (roundActive.value) return;
   const g = goal.value;
-  openForm(tr('Цель'), [
-    { key: 'text', type: 'text', label: tr('Чего достичь'), value: g?.text ?? '', placeholder: tr('пусто — автономный режим без детекции завершения') },
-    { key: 'maxRounds', label: tr('Бюджет раундов-продолжений'), value: String(g?.maxRounds ?? snapshot.settings?.goalMaxRounds ?? 12) },
+  openForm(tr('GOAL'), [
+    { key: 'text', type: 'text', label: tr('WHAT_TO_ACHIEVE'), value: g?.text ?? '', placeholder: tr('EMPTY_AUTONOMOUS_MODE_WITHOUT_COMPLETION_DETECTION') },
+    { key: 'maxRounds', label: tr('CONTINUATION_ROUND_BUDGET'), value: String(g?.maxRounds ?? snapshot.settings?.goalMaxRounds ?? 12) },
   ], (v) => {
     const text = v.text.trim();
     if (!text) {
@@ -1539,7 +1574,7 @@ function openGoalForm(): void {
     rpcReport(rpc('goal.set', { text, maxRounds: Number.isInteger(rounds) && rounds > 0 ? rounds : undefined }));
   }, {
     extra: g?.status === 'active'
-      ? [{ label: tr('Отменить цель'), icon: Square, fn: () => rpcReport(rpc('goal.cancel', {})) }]
+      ? [{ label: tr('CANCEL_THE_GOAL'), icon: Square, fn: () => rpcReport(rpc('goal.cancel', {})) }]
       : [],
   });
 }
@@ -1551,7 +1586,7 @@ function openSessionEdit(id: string): void {
   if (!meta) return;
   const schema = schemaOf('session');
   if (!schema) return;
-  openForm(tr('Изменить разговор «{title}»', { title: meta.title }), schemaFields('session', meta), (v) => {
+  openForm(tr('EDIT_CONVERSATION_TITLE', { title: meta.title }), schemaFields('session', meta), (v) => {
     const fields = fieldsFromForm(schema, v);
     if (!fields.title) return;
     // session.update правит ТЕКУЩИЙ разговор — сначала открываем выбранный
@@ -1567,7 +1602,7 @@ function openSession(id: string): void {
   if (!roundActive.value) rpc('session.open', { id }).catch(() => {});
 }
 function deleteSession(id: string, title: string): void {
-  askDelete(tr('разговор «{title}»', { title }), () => rpcReport(rpc('session.delete', { id })));
+  askDelete(tr('SESSION_TITLE_2', { title }), () => rpcReport(rpc('session.delete', { id })));
 }
 
 // ── сворачивание секций (localStorage) ───────────────────────────────────────
@@ -1622,7 +1657,7 @@ async function onImportFile(e: Event): Promise<void> {
   try {
     const b64 = await fileToBase64(f);
     send({ type: IMPORT_TYPE[importKind], dataB64: b64 });
-    addFeed('notice', `· ${tr('Импорт из {file}…', { file: f.name })}`);
+    addFeed('notice', `· ${tr('IMPORTING_FROM_FILE', { file: f.name })}`);
   } catch (err) {
     addFeed('error', `✗ ${(err as Error).message}`);
   }
@@ -1658,7 +1693,7 @@ async function onAttachFile(e: Event): Promise<void> {
     try {
       await uploadFile(f);
       stagedFiles.value.push({ name: f.name, size: f.size });
-      addFeed('notice', `· ${f.name} (${f.size} ${tr('Б')}) — ${tr('прикреплён к сообщению')}`);
+      addFeed('notice', `· ${f.name} (${f.size} ${tr('B')}) — ${tr('ATTACHED_TO_THE_MESSAGE')}`);
     } catch (err) {
       addFeed('error', `✗ ${f.name}: ${(err as Error).message}`);
     }
@@ -1678,7 +1713,7 @@ function stageRef(): void {
   if (!p) return;
   const name = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
   stagedFiles.value.push({ name, path: p });
-  addFeed('notice', `· ${p} — ${tr('прикреплён к сообщению')}`);
+  addFeed('notice', `· ${p} — ${tr('ATTACHED_TO_THE_MESSAGE')}`);
 }
 function cancelRef(): void {
   refVisible.value = false;
@@ -1786,7 +1821,7 @@ function sendUserMessage(): void {
     send({ type: 'command', text });
   } else {
     const full = names ? `${names} ${text}`.trim() : text;
-    const msg: ChatMessage = { authorId: 'user', authorName: profile.value?.name ?? tr('Вы'), text: full, ts: Date.now() };
+    const msg: ChatMessage = { authorId: 'user', authorName: profile.value?.name ?? tr('YOU'), text: full, ts: Date.now() };
     if (attachNames.length) msg.attachments = attachNames;
     messages.push(msg);
     send({ type: 'user_message', text: full, ...(attachNames.length ? { attachments: attachNames } : {}) });
@@ -1817,10 +1852,10 @@ type CompletionData = NonNullable<typeof completionData.value>;
 
 function mentionItems(d: CompletionData): HintItem[] {
   return [
-    { label: d.managerName, hint: tr('менеджер переговорки'), insert: d.managerName + ' ' },
+    { label: d.managerName, hint: tr('TITLE_MANAGER_SHOW'), insert: d.managerName + ' ' },
     ...d.team.filter((a) => a.inChat)
       .map((a) => ({ label: a.name, hint: a.description, insert: a.name + ' ' })),
-    { label: 'session', hint: tr('конспект другого разговора'), insert: 'session ' },
+    { label: 'session', hint: tr('ANOTHER_SESSION_DIGEST'), insert: 'session ' },
   ];
 }
 
@@ -1952,7 +1987,7 @@ function argHintItems(op: OpHint, argPos: number, d: CompletionData): HintItem[]
   if (argName.includes('shared')) {
     return [
       ...d.team.map((a) => ({ label: a.id, hint: a.name, insert: a.id + ' ' })),
-      { label: 'shared', hint: tr('общая память'), insert: 'shared ' },
+      { label: 'shared', hint: tr('SHARED_MEMORY'), insert: 'shared ' },
     ];
   }
   if (argName === 'тул') {
@@ -2039,45 +2074,45 @@ onMounted(connectWs);
   <!-- ── топбар ──────────────────────────────────────────────────────────── -->
   <header id="topbar">
     <!-- на телефоне каркас не помещается: меню выдвигает сайдбар шторкой -->
-    <button id="btn-menu" class="tb-btn" :title="tr('Разделы')" :aria-label="tr('Разделы')" @click="navOpen = !navOpen"><Menu aria-hidden="true" /></button>
+    <button id="btn-menu" class="tb-btn" :title="tr('SECTIONS')" :aria-label="tr('SECTIONS')" @click="navOpen = !navOpen"><Menu aria-hidden="true" /></button>
     <span id="logo"><Clapperboard aria-hidden="true" /> Dream Team</span>
     <span
       v-if="profile?.name"
       class="badge clickable"
-      :title="`${profile.name} — ${tr('клик: настройки')}`"
+      :title="`${profile.name} — ${tr('CLICK_SETTINGS')}`"
       @click="openUserProfileForm()"
     ><CircleUserRound aria-hidden="true" /> {{ profile.name }}</span>
     <span
       v-if="manager?.name"
       class="badge clickable"
-      :title="`${manager.name} (${manager.model ?? ''}) — ${tr('клик: настройки менеджера')}`"
+      :title="`${manager.name} (${manager.model ?? ''}) — ${tr('CLICK_MANAGER_SETTINGS')}`"
       @click="openManagerForm()"
-    >{{ manager.emoji ?? '🛎' }} {{ manager.name }}</span>
-    <button class="tb-btn" :title="tr('Настройки')" :aria-label="tr('Настройки')" @click="openSettingsForm()"><SlidersHorizontal aria-hidden="true" /></button>
-    <button class="tb-btn" :title="tr('Экспорт всего приложения (дом и все проекты, без .env)')" :aria-label="tr('Экспорт всего приложения (дом и все проекты, без .env)')" @click="exportHome"><Download aria-hidden="true" /></button>
-    <button class="tb-btn" :title="tr('Импорт всего приложения из zip')" :aria-label="tr('Импорт всего приложения из zip')" @click="pickImport('home')"><Upload aria-hidden="true" /></button>
+    ><span class="avatar" style="background: var(--text)"></span> {{ manager.name }}</span>
+    <button class="tb-btn" :title="tr('SETTINGS')" :aria-label="tr('SETTINGS')" @click="openSettingsForm()"><SlidersHorizontal aria-hidden="true" /></button>
+    <button class="tb-btn" :title="tr('EXPORT_THE_WHOLE_APP_HOME_AND_ALL_PROJECTS')" :aria-label="tr('EXPORT_THE_WHOLE_APP_HOME_AND_ALL_PROJECTS')" @click="exportHome"><Download aria-hidden="true" /></button>
+    <button class="tb-btn" :title="tr('IMPORT_THE_WHOLE_APP_FROM_ZIP')" :aria-label="tr('IMPORT_THE_WHOLE_APP_FROM_ZIP')" @click="pickImport('home')"><Upload aria-hidden="true" /></button>
     <input ref="importFileEl" type="file" accept=".zip" class="hidden" @change="onImportFile">
     <span class="spacer"></span>
     <span class="conn" :class="{ on: conn === 'on', off: conn !== 'on' }">
-      {{ conn === 'on' ? tr('на связи') : conn === 'off' ? tr('отключено — переподключаюсь…') : tr('подключение…') }}
+      {{ conn === 'on' ? tr('CONNECTED') : conn === 'off' ? tr('DISCONNECTED_RECONNECTING') : tr('CONNECTING') }}
     </span>
-    <button v-if="logoutVisible" class="tb-btn" :title="tr('Забыть токен доступа на этом устройстве')" @click="logout"><LogOut aria-hidden="true" /> {{ tr('Выйти') }}</button>
+    <button v-if="logoutVisible" class="tb-btn" :title="tr('FORGET_THE_ACCESS_TOKEN_ON_THIS_DEVICE')" @click="logout"><LogOut aria-hidden="true" /> {{ tr('LOG_OUT') }}</button>
   </header>
 
   <!-- ── доступ по токену ────────────────────────────────────────────────── -->
   <div v-if="authNeeded" id="auth">
     <div class="auth-box">
-      <h2>{{ tr('Доступ к Dream Team') }}</h2>
-      <p class="dim">{{ tr('Введите токен доступа (TOKEN из ~/.dreamteam/.env сервера).') }}</p>
+      <h2>{{ tr('ACCESS_TO_DREAM_TEAM') }}</h2>
+      <p class="dim">{{ tr('ENTER_THE_ACCESS_TOKEN_TOKEN_FROM_THE_SERVER') }}</p>
       <input
         v-model="authToken"
         type="password"
-        :placeholder="tr('токен')"
+        :placeholder="tr('TOKEN_2')"
         autocomplete="current-password"
         @keydown.enter="doAuth"
       >
       <div v-if="authError" class="errline">{{ authError }}</div>
-      <button @click="doAuth">{{ tr('Войти') }}</button>
+      <button @click="doAuth">{{ tr('SIGN_IN') }}</button>
     </div>
   </div>
 
@@ -2094,34 +2129,34 @@ onMounted(connectWs);
     >
       <section class="side-sec" :class="{ collapsed: isCollapsed('projects') }" data-sec="projects">
         <div class="side-head" @click="toggleSec('projects')">
-          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <ChevronDown class="sec-toggle" :title="tr('COLLAPSE_EXPAND')" aria-hidden="true" />
           <Folder class="sec-icon" aria-hidden="true" />
-          <span class="sec-name">{{ tr('Проекты') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('projects') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('projects')"><Funnel aria-hidden="true" /></button>
-          <button class="sec-add" :title="tr('Новый проект')" :aria-label="tr('Новый проект')" @click.stop="newProjectForm"><FolderPlus aria-hidden="true" /></button>
-          <button class="sec-add" :title="tr('Открыть проект (имя или папка)')" :aria-label="tr('Открыть проект (имя или папка)')" @click.stop="openProjectForm"><FolderOpen aria-hidden="true" /></button>
+          <span class="sec-name">{{ tr('PROJECTS') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('projects') }" :title="tr('FILTER')" :aria-label="tr('FILTER')" @click.stop="sideFilterToggle('projects')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('NEW_PROJECT')" :aria-label="tr('NEW_PROJECT')" @click.stop="newProjectForm"><FolderPlus aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('OPEN_A_PROJECT_NAME_OR_FOLDER')" :aria-label="tr('OPEN_A_PROJECT_NAME_OR_FOLDER')" @click.stop="openProjectForm"><FolderOpen aria-hidden="true" /></button>
         </div>
         <div v-if="sideFilter.projects.open" class="sec-frow" @click.stop>
-          <input v-model="sideFilter.projects.text" :placeholder="tr('фильтр: имя или путь')" @keydown.esc="sideFilterEsc('projects')">
+          <input v-model="sideFilter.projects.text" :placeholder="tr('FILTER_NAME_OR_PATH')" @keydown.esc="sideFilterEsc('projects')">
         </div>
         <div class="sec-btns">
-          <button :title="tr('Экспорт текущего проекта в zip (project.json и разговоры)')" @click="exportProject"><Download aria-hidden="true" /> {{ tr('проект') }}</button>
-          <button :title="tr('Импорт проекта из zip')" @click="pickImport('project')"><Upload aria-hidden="true" /> {{ tr('импорт') }}</button>
+          <button :title="tr('EXPORT_THE_CURRENT_PROJECT_TO_ZIP_PROJECT_JSON')" @click="exportProject"><Download aria-hidden="true" /> {{ tr('PROJECT_2') }}</button>
+          <button :title="tr('IMPORT_A_PROJECT_FROM_ZIP')" @click="pickImport('project')"><Upload aria-hidden="true" /> {{ tr('IMPORT') }}</button>
         </div>
         <ul id="projects">
           <li
             class="proj-current"
             data-project-current
-            :title="tr('Текущий проект — его данные в доме, projects/<id>/ · правая кнопка — настройки проекта')"
+            :title="tr('CURRENT_PROJECT_ITS_DATA_LIVES_IN_THE_HOME')"
             @contextmenu.prevent="ctxProjectCurrent($event)"
           >
-            <span><Folder aria-hidden="true" /> {{ currentProject?.name ?? tr('не выбран — выберите или создайте') }}</span><span class="meta">{{ currentProject?.path }}</span>
+            <span><Folder aria-hidden="true" /> {{ currentProject?.name ?? tr('NOT_SELECTED_PICK_ONE_OR_CREATE_ONE') }}</span><span class="meta">{{ currentProject?.path }}</span>
           </li>
           <li
             v-for="p in knownProjectsView"
             :key="p.name"
             class="proj-row"
-            :title="p.path + ' — ' + tr('переключиться · правая кнопка — удалить из дома')"
+            :title="p.path + ' — ' + tr('SWITCH_RIGHT_CLICK_REMOVE_FROM_THE_HOME')"
             @click.stop="switchProject(p)"
             @contextmenu.prevent="ctxProjectKnown($event, p)"
           >
@@ -2130,173 +2165,173 @@ onMounted(connectWs);
           <li
             v-for="ph in projectHostsView"
             :key="ph.p.id + ':' + ph.h.name"
-            :title="tr('правая кнопка — удалить сервер')"
+            :title="tr('RIGHT_CLICK_REMOVE_THE_SERVER')"
             @contextmenu.prevent="ctxHost($event, ph.p, ph.h)"
           >
             <span>{{ ph.p.id }}</span><span class="meta">{{ ph.h.name }}: {{ ph.h.host }}</span>
-            <button class="del" :title="tr('Добавить сервер в проект')" :aria-label="tr('Добавить сервер в проект')" @click.stop="projectHostAdd(ph.p)"><Plus aria-hidden="true" /></button>
-            <button class="del" :title="tr('Удалить сервер')" :aria-label="tr('Удалить сервер')" @click.stop="projectHostDelete(ph.p, ph.h)"><Trash2 aria-hidden="true" /></button>
+            <button class="del" :title="tr('ADD_A_SERVER_TO_THE_PROJECT')" :aria-label="tr('ADD_A_SERVER_TO_THE_PROJECT')" @click.stop="projectHostAdd(ph.p)"><Plus aria-hidden="true" /></button>
+            <button class="del" :title="tr('DELETE_THE_SERVER')" :aria-label="tr('DELETE_THE_SERVER')" @click.stop="projectHostDelete(ph.p, ph.h)"><Trash2 aria-hidden="true" /></button>
           </li>
         </ul>
       </section>
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('sessions') }" data-sec="sessions">
         <div class="side-head" @click="toggleSec('sessions')">
-          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <ChevronDown class="sec-toggle" :title="tr('COLLAPSE_EXPAND')" aria-hidden="true" />
           <MessageSquare class="sec-icon" aria-hidden="true" />
-          <span class="sec-name">{{ tr('Сессии') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('sessions') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('sessions')"><Funnel aria-hidden="true" /></button>
-          <button class="sec-add" :title="tr('Новый разговор')" :aria-label="tr('Новый разговор')" @click.stop="newSession"><Plus aria-hidden="true" /></button>
+          <span class="sec-name">{{ tr('SESSIONS') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('sessions') }" :title="tr('FILTER')" :aria-label="tr('FILTER')" @click.stop="sideFilterToggle('sessions')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('NEW_SESSION')" :aria-label="tr('NEW_SESSION')" @click.stop="newSession"><Plus aria-hidden="true" /></button>
         </div>
         <div class="sec-btns">
-          <button :title="tr('Экспорт текущего разговора в zip')" @click="exportSession"><Download aria-hidden="true" /> {{ tr('сессия') }}</button>
-          <button :title="tr('Импорт разговора из zip')" @click="pickImport('session')"><Upload aria-hidden="true" /> {{ tr('импорт') }}</button>
+          <button :title="tr('EXPORT_THE_CURRENT_SESSION_TO_ZIP')" @click="exportSession"><Download aria-hidden="true" /> {{ tr('SESSION') }}</button>
+          <button :title="tr('IMPORT_SESSION_FROM_ZIP')" @click="pickImport('session')"><Upload aria-hidden="true" /> {{ tr('IMPORT') }}</button>
         </div>
         <ul id="sessions">
           <li
             v-for="s in sessionsView"
             :key="s.id"
             :class="{ active: s.id === currentSessionId }"
-            :title="`${s.title}\nid: ${s.id}\n${tr('сообщений:')} ${s.count}\n${tr('создан:')} ${fmtDate(s.createdAt)}\n${tr('последнее сообщение:')} ${fmtDate(s.updatedAt)}`"
+            :title="`${s.title}\nid: ${s.id}\n${tr('MESSAGES')} ${s.count}\n${tr('CREATED_2')} ${fmtDate(s.createdAt)}\n${tr('LATEST_MESSAGE_2')} ${fmtDate(s.updatedAt)}`"
             @click="openSession(s.id)"
             @contextmenu.prevent="ctxSession($event, s.id, s.title)"
           >
             <div class="content">
               <div class="sess-main"><span>{{ s.title }}</span></div>
-              <div class="sub">{{ tr('создан') }} {{ fmtDate(s.createdAt) }}</div>
-              <div class="sub">{{ tr('последнее') }} {{ fmtDate(s.updatedAt) }}</div>
+              <div class="sub">{{ tr('CREATED') }} {{ fmtDate(s.createdAt) }}</div>
+              <div class="sub">{{ tr('LATEST') }} {{ fmtDate(s.updatedAt) }}</div>
             </div>
             <button
               v-if="s.id !== currentSessionId"
-              class="del" :title="tr('Удалить разговор')" :aria-label="tr('Удалить разговор')"
+              class="del" :title="tr('DELETE_THE_SESSION')" :aria-label="tr('DELETE_THE_SESSION')"
               @click.stop="deleteSession(s.id, s.title)"
             ><Trash2 aria-hidden="true" /></button>
           </li>
-          <li v-if="sideOn('sessions') && !sessionsView.length" class="no-match">{{ tr('нет совпадений') }}</li>
+          <li v-if="sideOn('sessions') && !sessionsView.length" class="no-match">{{ tr('NO_MATCHES') }}</li>
         </ul>
       </section>
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('team') }" data-sec="team">
         <div class="side-head" @click="toggleSec('team')">
-          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <ChevronDown class="sec-toggle" :title="tr('COLLAPSE_EXPAND')" aria-hidden="true" />
           <Users class="sec-icon" aria-hidden="true" />
-          <span class="sec-name">{{ tr('Агенты') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('team') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('team')"><Funnel aria-hidden="true" /></button>
-          <button class="sec-add" :title="tr('Новый агент')" :aria-label="tr('Новый агент')" @click.stop="openAgentCreate"><Plus aria-hidden="true" /></button>
+          <span class="sec-name">{{ tr('AGENTS') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('team') }" :title="tr('FILTER')" :aria-label="tr('FILTER')" @click.stop="sideFilterToggle('team')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('NEW_AGENT')" :aria-label="tr('NEW_AGENT')" @click.stop="openAgentCreate"><Plus aria-hidden="true" /></button>
         </div>
         <div v-if="teamError" class="errline side-err">agents.json: {{ teamError }}</div>
         <ul id="team">
           <li
             v-for="a in teamView"
             :key="a.id"
-            :title="tr('Настройки агента {name}', { name: a.name })"
+            :title="tr('AGENT_SETTINGS_NAME', { name: a.name })"
             @click="openAgentSettings(a)"
             @contextmenu.prevent="ctxTeam($event, a)"
           >
             <div class="content">
               <div class="sess-main">
-                <span>{{ a.emoji }} {{ a.name }}</span>
-                <span class="tag" :class="{ in: a.inChat }"><Plus v-if="!a.inChat" aria-hidden="true" /> {{ a.inChat ? tr('в чате') : tr('чат') }}</span>
+                <span><span class="avatar" :style="{ background: colorOf(a.color) }"></span> {{ a.name }}</span>
+                <span class="tag" :class="{ in: a.inChat }"><Plus v-if="!a.inChat" aria-hidden="true" /> {{ a.inChat ? tr('IN_CHAT') : tr('CHAT') }}</span>
               </div>
               <div class="sub">{{ a.description ?? '' }}</div>
             </div>
           </li>
-          <li v-if="sideOn('team') && !teamView.length" class="no-match">{{ tr('нет совпадений') }}</li>
+          <li v-if="sideOn('team') && !teamView.length" class="no-match">{{ tr('NO_MATCHES') }}</li>
         </ul>
       </section>
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('models') }" data-sec="models">
         <div class="side-head" @click="toggleSec('models')">
-          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <ChevronDown class="sec-toggle" :title="tr('COLLAPSE_EXPAND')" aria-hidden="true" />
           <Cpu class="sec-icon" aria-hidden="true" />
-          <span class="sec-name">{{ tr('Модели') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('models') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('models')"><Funnel aria-hidden="true" /></button>
-          <button class="sec-add" :title="tr('Новая модель')" :aria-label="tr('Новая модель')" @click.stop="modelCreate"><Plus aria-hidden="true" /></button>
+          <span class="sec-name">{{ tr('MODELS') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('models') }" :title="tr('FILTER')" :aria-label="tr('FILTER')" @click.stop="sideFilterToggle('models')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('NEW_MODEL')" :aria-label="tr('NEW_MODEL')" @click.stop="modelCreate"><Plus aria-hidden="true" /></button>
         </div>
         <ul id="models">
           <li
             v-for="p in modelsView"
             :key="p.id"
             :title="p.img
-              ? tr('клик — изменить карточку · правая кнопка — изменить/удалить') + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)
-              : (p.isDefault ? tr('Модель по умолчанию') : tr('Сделать основным (для агентов)'))
-                + (p.isDefault ? '' : ` · ${tr('клик — сделать основным')} · ${tr('правая кнопка — изменить/удалить')}`)
-                + (p.vision ? ` · ${tr('зрение')}` : '')
-                + (p.ok ? '' : ` · ${tr('проблема:')} ${p.note ?? ''}`)"
+              ? tr('CLICK_EDIT_THE_CARD_RIGHT_CLICK_EDIT_DELETE') + (p.ok ? '' : ` · ${tr('PROBLEM')} ${p.note ?? ''}`)
+              : (p.isDefault ? tr('DEFAULT_MODEL') : tr('MAKE_THE_MAIN_ONE_FOR_AGENTS'))
+                + (p.isDefault ? '' : ` · ${tr('CLICK_MAKE_DEFAULT')} · ${tr('RIGHT_CLICK_EDIT_DELETE')}`)
+                + (p.vision ? ` · ${tr('VISION')}` : '')
+                + (p.ok ? '' : ` · ${tr('PROBLEM')} ${p.note ?? ''}`)"
             @click="clickModel(p)"
             @contextmenu.prevent="ctxModel($event, p)"
           >
             <div class="content">
               <div class="sess-main">
                 <span><span :class="p.ok ? 'st-ok' : 'st-warn'">{{ p.ok ? '✓' : '⚠' }}</span> {{ p.id }}<template v-if="p.vision"><span class="vision"><Eye aria-hidden="true" /></span></template></span>
-                <span v-if="p.isDefault" class="tag in">{{ tr('основная') }}</span>
-                <span v-if="p.img" class="tag img">{{ tr('картинки') }}</span>
+                <span v-if="p.isDefault" class="tag in">{{ tr('DEFAULT_2') }}</span>
+                <span v-if="p.img" class="tag img">{{ tr('IMAGES_2') }}</span>
               </div>
               <div class="sub">{{ p.ok ? (p.model ?? p.kind ?? '') : (p.note ?? '') }}</div>
             </div>
-            <button v-if="!p.isDefault" class="del" :title="tr('Удалить модель')" :aria-label="tr('Удалить модель')" @click.stop="delModel(p)"><Trash2 aria-hidden="true" /></button>
+            <button v-if="!p.isDefault" class="del" :title="tr('DELETE_THE_MODEL')" :aria-label="tr('DELETE_THE_MODEL')" @click.stop="delModel(p)"><Trash2 aria-hidden="true" /></button>
           </li>
-          <li v-if="sideOn('models') && !modelsView.length" class="no-match">{{ tr('нет совпадений') }}</li>
+          <li v-if="sideOn('models') && !modelsView.length" class="no-match">{{ tr('NO_MATCHES') }}</li>
         </ul>
       </section>
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('schedule') }" data-sec="schedule">
         <div class="side-head" @click="toggleSec('schedule')">
-          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <ChevronDown class="sec-toggle" :title="tr('COLLAPSE_EXPAND')" aria-hidden="true" />
           <CalendarClock class="sec-icon" aria-hidden="true" />
-          <span class="sec-name">{{ tr('Расписание') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('schedule') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('schedule')"><Funnel aria-hidden="true" /></button>
-          <button class="sec-add" :title="tr('Новая задача')" :aria-label="tr('Новая задача')" @click.stop="openScheduleForm(true)"><Plus aria-hidden="true" /></button>
+          <span class="sec-name">{{ tr('SCHEDULE_2') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('schedule') }" :title="tr('FILTER')" :aria-label="tr('FILTER')" @click.stop="sideFilterToggle('schedule')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('NEW_TASK')" :aria-label="tr('NEW_TASK')" @click.stop="openScheduleForm(true)"><Plus aria-hidden="true" /></button>
         </div>
         <div v-if="sideFilter.schedule.open" class="sec-frow" @click.stop>
-          <input v-model="sideFilter.schedule.text" :placeholder="tr('фильтр: текст задачи')" @keydown.esc="sideFilterEsc('schedule')">
+          <input v-model="sideFilter.schedule.text" :placeholder="tr('FILTER_TASK_TEXT')" @keydown.esc="sideFilterEsc('schedule')">
         </div>
         <ul id="schedule-list">
-          <li class="static" :title="tr('Добавить задачу по расписанию')" @click="openScheduleForm(false)">
-            <span class="tag"><Plus aria-hidden="true" /> {{ tr('задача') }}</span>
+          <li class="static" :title="tr('ADD_A_SCHEDULED_TASK')" @click="openScheduleForm(false)">
+            <span class="tag"><Plus aria-hidden="true" /> {{ tr('TASK_2') }}</span>
           </li>
           <li
             v-for="t in scheduleView"
             :key="t.id"
-            :title="`${t.message} — ${tr('каждые {n} мин', { n: t.intervalMinutes })} · ${tr('клик — пауза/пуск')} · ${tr('правая кнопка — удалить')}`"
+            :title="`${t.message} — ${tr('EVERY_N_MIN', { n: t.intervalMinutes })} · ${tr('CLICK_PAUSE_RESUME')} · ${tr('RIGHT_CLICK_DELETE')}`"
             @click="scheduleToggle(t)"
             @contextmenu.prevent="ctxSchedule($event, t)"
           >
             <span class="tag" :class="{ in: t.enabled }"><Play v-if="t.enabled" aria-hidden="true" /><Pause v-else aria-hidden="true" /></span>
-            <span class="meta">{{ t.intervalMinutes }} {{ tr('мин') }}</span>
+            <span class="meta">{{ t.intervalMinutes }} {{ tr('MIN') }}</span>
             <span>{{ t.message.slice(0, 40) }}</span>
-            <button class="del" :title="tr('Удалить задачу')" :aria-label="tr('Удалить задачу')" @click.stop="scheduleDelete(t)"><Trash2 aria-hidden="true" /></button>
+            <button class="del" :title="tr('DELETE_THE_TASK')" :aria-label="tr('DELETE_THE_TASK')" @click.stop="scheduleDelete(t)"><Trash2 aria-hidden="true" /></button>
           </li>
-          <li v-if="sideOn('schedule') && !scheduleView.length" class="no-match">{{ tr('нет совпадений') }}</li>
+          <li v-if="sideOn('schedule') && !scheduleView.length" class="no-match">{{ tr('NO_MATCHES') }}</li>
         </ul>
       </section>
 
       <section class="side-sec" :class="{ collapsed: collapsed.has('bg') }" data-sec="bg">
         <div class="side-head" @click="toggleSec('bg')">
-          <ChevronDown class="sec-toggle" :title="tr('Свернуть/развернуть')" aria-hidden="true" />
+          <ChevronDown class="sec-toggle" :title="tr('COLLAPSE_EXPAND')" aria-hidden="true" />
           <SquareTerminal class="sec-icon" aria-hidden="true" />
-          <span class="sec-name">{{ tr('Фоновые') }}</span>
-          <button class="sec-filter" :class="{ on: sideOn('bg') }" :title="tr('Фильтр')" :aria-label="tr('Фильтр')" @click.stop="sideFilterToggle('bg')"><Funnel aria-hidden="true" /></button>
-          <button class="sec-add" :title="tr('Новая фоновая задача')" :aria-label="tr('Новая фоновая задача')" @click.stop="openBgForm"><Plus aria-hidden="true" /></button>
+          <span class="sec-name">{{ tr('BACKGROUND') }}</span>
+          <button class="sec-filter" :class="{ on: sideOn('bg') }" :title="tr('FILTER')" :aria-label="tr('FILTER')" @click.stop="sideFilterToggle('bg')"><Funnel aria-hidden="true" /></button>
+          <button class="sec-add" :title="tr('NEW_BACKGROUND_TASK')" :aria-label="tr('NEW_BACKGROUND_TASK')" @click.stop="openBgForm"><Plus aria-hidden="true" /></button>
         </div>
         <div v-if="sideFilter.bg.open" class="sec-frow" @click.stop>
-          <input v-model="sideFilter.bg.text" :placeholder="tr('фильтр: название, команда, статус')" @keydown.esc="sideFilterEsc('bg')">
+          <input v-model="sideFilter.bg.text" :placeholder="tr('FILTER_TITLE_COMMAND_STATUS')" @keydown.esc="sideFilterEsc('bg')">
         </div>
         <ul id="bg-list">
           <li
             v-for="t in bgView"
             :key="t.id"
-            :title="`${bgLine(t)}${t.error ? ` · ${t.error}` : ''}${t.adopted ? ` · ${tr('пережил перезапуск')}` : ''} · ${tr('правая кнопка — лог/остановить/удалить')}`"
+            :title="`${bgLine(t)}${t.error ? ` · ${t.error}` : ''}${t.adopted ? ` · ${tr('SURVIVED_A_RESTART')}` : ''} · ${tr('RIGHT_CLICK_LOG_STOP_DELETE')}`"
             @click="openBgLog(t.id)"
             @contextmenu.prevent="ctxBg($event, t)"
           >
             <span class="tag" :class="{ in: t.status === 'running' }">{{ BG_STATUS_EMOJI[t.status] }}</span>
             <span class="meta">{{ t.status === 'running' ? bgDur(t.startedAt) : t.id.slice(3, 11) }}</span>
             <span>{{ (t.title || t.command).slice(0, 40) }}</span>
-            <button v-if="t.status === 'running'" class="del" :title="tr('Остановить')" :aria-label="tr('Остановить')" @click.stop="bgStop(t)"><Square aria-hidden="true" /></button>
-            <button v-else class="del" :title="tr('Удалить')" :aria-label="tr('Удалить')" @click.stop="bgDelete(t)"><Trash2 aria-hidden="true" /></button>
+            <button v-if="t.status === 'running'" class="del" :title="tr('STOP')" :aria-label="tr('STOP')" @click.stop="bgStop(t)"><Square aria-hidden="true" /></button>
+            <button v-else class="del" :title="tr('DELETE')" :aria-label="tr('DELETE')" @click.stop="bgDelete(t)"><Trash2 aria-hidden="true" /></button>
           </li>
-          <li v-if="sideOn('bg') && !bgView.length" class="no-match">{{ tr('нет совпадений') }}</li>
+          <li v-if="sideOn('bg') && !bgView.length" class="no-match">{{ tr('NO_MATCHES') }}</li>
         </ul>
       </section>
 
@@ -2306,7 +2341,7 @@ onMounted(connectWs);
     <div id="sb-backdrop" :class="{ show: navOpen }" @click="navOpen = false"></div>
 
     <!-- ширина сайдбара меняется перетаскиванием этой границы -->
-    <div id="sb-resize" :title="tr('Потянуть — изменить ширину')" @mousedown.prevent="startSidebarResize"></div>
+    <div id="sb-resize" :title="tr('DRAG_TO_RESIZE')" @mousedown.prevent="startSidebarResize"></div>
 
     <!-- ── чат ────────────────────────────────────────────────────────────── -->
     <section id="chatwrap">
@@ -2329,8 +2364,8 @@ onMounted(connectWs);
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
               <div class="txt" v-html="formatText(attachmentsText(it.msg))"></div>
               <div class="msg-actions">
-                <button class="msg-act" :title="tr('Копировать сообщение')" :aria-label="tr('Копировать сообщение')" @click="msgCopy(it, $event.currentTarget as HTMLElement)"><Copy aria-hidden="true" /></button>
-                <button class="msg-act" :title="tr('Ответить с цитатой')" :aria-label="tr('Ответить с цитатой')" @click="msgReply(it)"><CornerUpLeft aria-hidden="true" /></button>
+                <button class="msg-act" :title="tr('COPY_MESSAGE')" :aria-label="tr('COPY_MESSAGE')" @click="msgCopy(it, $event.currentTarget as HTMLElement)"><Copy aria-hidden="true" /></button>
+                <button class="msg-act" :title="tr('REPLY_WITH_A_QUOTE')" :aria-label="tr('REPLY_WITH_A_QUOTE')" @click="msgReply(it)"><CornerUpLeft aria-hidden="true" /></button>
               </div>
             </div>
             <div v-else-if="it.msg.authorId === 'tool'" class="toolblock">{{ it.msg.text }}</div>
@@ -2341,19 +2376,19 @@ onMounted(connectWs);
             </div>
             <div v-else class="msg" :data-key="it.key">
               <div class="head" :style="{ color: colorByAuthor(it.msg) }">
-                {{ it.msg.authorName }}
+                <span class="avatar" :style="{ background: colorByAuthor(it.msg) }"></span>{{ it.msg.authorName }}
               </div>
               <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
               <div class="txt" v-html="formatText(it.msg.text)"></div>
               <div class="msg-actions">
-                <button class="msg-act" :title="tr('Копировать сообщение')" :aria-label="tr('Копировать сообщение')" @click="msgCopy(it, $event.currentTarget as HTMLElement)"><Copy aria-hidden="true" /></button>
-                <button class="msg-act" :title="tr('Ответить с цитатой')" :aria-label="tr('Ответить с цитатой')" @click="msgReply(it)"><CornerUpLeft aria-hidden="true" /></button>
+                <button class="msg-act" :title="tr('COPY_MESSAGE')" :aria-label="tr('COPY_MESSAGE')" @click="msgCopy(it, $event.currentTarget as HTMLElement)"><Copy aria-hidden="true" /></button>
+                <button class="msg-act" :title="tr('REPLY_WITH_A_QUOTE')" :aria-label="tr('REPLY_WITH_A_QUOTE')" @click="msgReply(it)"><CornerUpLeft aria-hidden="true" /></button>
               </div>
             </div>
           </template>
           <div v-if="streaming.open" class="msg">
             <div class="head" :style="{ color: colorOf(streaming.color) }">
-              {{ streaming.emoji }} {{ streaming.name }}
+              <span class="avatar" :style="{ background: colorOf(streaming.color) }"></span>{{ streaming.name }}
             </div>
             <!-- eslint-disable-next-line vue/no-v-html — контент экранируется в formatText -->
             <div class="txt" v-html="formatText(streaming.text)"></div>
@@ -2363,37 +2398,37 @@ onMounted(connectWs);
 
       <div v-if="confirmDialog.show" id="confirm" class="panel">
         <div>
-          <b :style="{ color: colorOf(confirmDialog.whoColor) }">{{ confirmDialog.whoEmoji }} {{ confirmDialog.whoName }}</b>
-          {{ tr('просит разрешение:') }} {{ confirmDialog.label }}
+          <b :style="{ color: colorOf(confirmDialog.whoColor) }"><span class="avatar" :style="{ background: colorOf(confirmDialog.whoColor) }"></span>{{ confirmDialog.whoName }}</b>
+          {{ tr('ASKS_PERMISSION') }} {{ confirmDialog.label }}
         </div>
         <div class="dim">{{ confirmDialog.desc }}</div>
         <div class="row">
-          <button class="ok" @click="answerConfirm(true)"><Check aria-hidden="true" /> {{ tr('Разрешить') }}</button>
-          <button class="bad" @click="answerConfirm(false)"><X aria-hidden="true" /> {{ tr('Отказать') }}</button>
+          <button class="ok" @click="answerConfirm(true)"><Check aria-hidden="true" /> {{ tr('ALLOW') }}</button>
+          <button class="bad" @click="answerConfirm(false)"><X aria-hidden="true" /> {{ tr('DENY') }}</button>
         </div>
       </div>
 
       <div v-if="chooseDialog.show" id="choose" class="panel">
-        <div class="side-head">{{ tr('Какой разговор приложить?') }}</div>
+        <div class="side-head">{{ tr('WHICH_SESSION_TO_ATTACH') }}</div>
         <ul id="choose-list">
           <li v-for="(it, i) in chooseDialog.items" :key="i" @click="answerChoose(i)">
-            {{ i + 1 }}. {{ it.title }} <span class="dim">— {{ tr('{n} сообщ.', { n: it.count }) }}</span>
+            {{ i + 1 }}. {{ it.title }} <span class="dim">— {{ tr('N_MSGS', { n: it.count }) }}</span>
           </li>
         </ul>
-        <div class="row"><button @click="answerChoose(null)">{{ tr('Никакой') }}</button></div>
+        <div class="row"><button @click="answerChoose(null)">{{ tr('NONE') }}</button></div>
       </div>
 
       <div id="statusbar" :class="{ hidden: !statusVisible }">
         <span id="busy-label">{{ busyText }}</span>
-        <button v-show="roundActive" id="btn-abort" :title="tr('Прервать раунд (Esc в терминале)')" @click="abortRound"><Square aria-hidden="true" /> {{ tr('Прервать') }}</button>
+        <button v-show="roundActive" id="btn-abort" :title="tr('ABORT_THE_ROUND_ESC_IN_THE_TERMINAL')" @click="abortRound"><Square aria-hidden="true" /> {{ tr('ABORT') }}</button>
         <button
           id="btn-auto"
           :class="{ in: goalActive }"
           :title="goalActive
-            ? tr('Цель активна ({done} из {max} раундов). Клик — форма цели: текст, бюджет, отмена.', { done: goal?.roundsDone ?? 0, max: goal?.maxRounds ?? 0 })
-            : tr('Цель: агенты продолжат раунды, пока задача не решится. Пустой текст — прежний автономный режим.')"
+            ? tr('GOAL_ACTIVE_DONE_OF_MAX_ROUNDS_CLICK_FOR', { done: goal?.roundsDone ?? 0, max: goal?.maxRounds ?? 0 })
+            : tr('GOAL_THE_AGENTS_KEEP_WORKING_ROUNDS_UNTIL_THE')"
           @click="openGoalForm"
-        ><Target aria-hidden="true" /> {{ tr('Цель') }}{{ goalActive ? ` (${goal?.roundsDone ?? 0}/${goal?.maxRounds ?? 0})` : '' }}</button>
+        ><Target aria-hidden="true" /> {{ tr('GOAL') }}{{ goalActive ? ` (${goal?.roundsDone ?? 0}/${goal?.maxRounds ?? 0})` : '' }}</button>
       </div>
 
       <div v-if="hintActive" id="hints">
@@ -2418,7 +2453,7 @@ onMounted(connectWs);
         <input
           ref="refEl"
           v-model="refInput"
-          :placeholder="tr('путь на сервере, например /srv/data/report.pdf')"
+          :placeholder="tr('A_SERVER_SIDE_PATH_E_G_SRV_DATA')"
           @keydown.enter.prevent="stageRef"
           @keydown.esc.prevent="cancelRef"
           @blur="stageRef"
@@ -2427,8 +2462,8 @@ onMounted(connectWs);
       <div id="inputrow">
         <div v-if="stagedFiles.length" id="staged">
           <span v-for="(f, i) in stagedFiles" :key="`${f.name}:${i}`" class="chip" :title="f.path">
-            <Paperclip aria-hidden="true" /> {{ f.path ?? `${f.name} (${f.size} ${tr('Б')})` }}
-            <button :title="tr('убрать')" :aria-label="tr('убрать')" @click="removeStaged(i)"><X aria-hidden="true" /></button>
+            <Paperclip aria-hidden="true" /> {{ f.path ?? `${f.name} (${f.size} ${tr('B')})` }}
+            <button :title="tr('REMOVE')" :aria-label="tr('REMOVE')" @click="removeStaged(i)"><X aria-hidden="true" /></button>
           </span>
         </div>
         <textarea
@@ -2436,18 +2471,18 @@ onMounted(connectWs);
           ref="inputEl"
           v-model="draft"
           rows="2"
-          :placeholder="tr('Напишите агентам… (Enter — отправить, Shift+Enter — новая строка, ↑/↓ — история, @имя — участнику, /help — команды)')"
+          :placeholder="tr('WRITE_TO_THE_AGENTS_ENTER_SEND_SHIFT_ENTER')"
           @keydown="onInputKey"
           @input="autosize(); updateHints()"
           @click="updateHints"
         ></textarea>
         <div class="input-bar">
           <div class="input-tools">
-            <button id="btn-attach" :title="tr('Прикрепить файл (загрузится в inbox проекта)')" :aria-label="tr('Прикрепить файл (загрузится в inbox проекта)')" @click="pickAttach"><Paperclip aria-hidden="true" /></button>
-            <button id="btn-ref" :title="tr('Прикрепить по пути на сервере (файл не передаётся через браузер)')" :aria-label="tr('Прикрепить по пути на сервере (файл не передаётся через браузер)')" @click="pickRef"><Link2 aria-hidden="true" /></button>
+            <button id="btn-attach" :title="tr('ATTACH_A_FILE_IT_UPLOADS_TO_THE_PROJECT')" :aria-label="tr('ATTACH_A_FILE_IT_UPLOADS_TO_THE_PROJECT')" @click="pickAttach"><Paperclip aria-hidden="true" /></button>
+            <button id="btn-ref" :title="tr('ATTACH_BY_A_SERVER_SIDE_PATH_THE_FILE')" :aria-label="tr('ATTACH_BY_A_SERVER_SIDE_PATH_THE_FILE')" @click="pickRef"><Link2 aria-hidden="true" /></button>
             <input ref="attachFileEl" type="file" multiple class="hidden" @change="onAttachFile">
           </div>
-          <button id="btn-send" :title="tr('Отправить')" :aria-label="tr('Отправить')" :disabled="roundActive" @click="sendUserMessage"><ArrowUp aria-hidden="true" /></button>
+          <button id="btn-send" :title="tr('SEND')" :aria-label="tr('SEND')" :disabled="roundActive" @click="sendUserMessage"><ArrowUp aria-hidden="true" /></button>
         </div>
       </div>
       <div v-if="ctxInfo || quotaInfo" id="metricsbar">
@@ -2455,7 +2490,7 @@ onMounted(connectWs);
           v-if="ctxInfo"
           id="ctxbar"
           :class="ctxInfo.band"
-          :title="tr('Контекст: {t} из {w} ({pct}%)', { t: fmtNum(ctxInfo.tokens), w: fmtNum(ctxInfo.win), pct: ctxInfo.pct })"
+          :title="tr('CONTEXT_T_OF_W_PCT', { t: fmtNum(ctxInfo.tokens), w: fmtNum(ctxInfo.win), pct: ctxInfo.pct })"
         >
           <span class="meter"><span class="fill" :style="{ width: ctxInfo.pct + '%' }"></span></span>
           <span>{{ ctxInfo.pct }}% · {{ fmtK(ctxInfo.tokens) }} / {{ fmtK(ctxInfo.win) }}</span>
@@ -2483,7 +2518,7 @@ onMounted(connectWs);
             v-if="sec.collapsible"
             type="button"
             class="fld-group-head"
-            :title="tr('Свернуть/развернуть')"
+            :title="tr('COLLAPSE_EXPAND')"
             @click="toggleModalGroup(sec.title)"
           ><ChevronDown class="sec-toggle" aria-hidden="true" /> {{ sec.title }}</button>
           <div v-for="f in sec.fields" :key="f.key" class="fld" :class="{ 'fld-chk': f.type === 'boolean' }">
@@ -2525,13 +2560,13 @@ onMounted(connectWs);
       </div>
       <div v-if="modal.error" class="errline">{{ modal.error }}</div>
       <div v-if="modal.settingsActions" class="row">
-        <button :title="tr('Экспорт настроек (без проектов)')" @click="exportSettings"><Download aria-hidden="true" /> {{ tr('экспорт настроек') }}</button>
-        <button :title="tr('Импорт настроек из zip (проекты не трогаются)')" @click="importSettingsForm"><Upload aria-hidden="true" /> {{ tr('импорт настроек') }}</button>
+        <button :title="tr('EXPORT_SETTINGS_NO_PROJECTS')" @click="exportSettings"><Download aria-hidden="true" /> {{ tr('TITLE_SETTINGS_EXPORT') }}</button>
+        <button :title="tr('IMPORT_SETTINGS_FROM_ZIP_PROJECTS_UNTOUCHED')" @click="importSettingsForm"><Upload aria-hidden="true" /> {{ tr('TITLE_SETTINGS_IMPORT') }}</button>
       </div>
       <div class="row">
-        <button @click="submitForm">{{ tr('Сохранить') }}</button>
+        <button @click="submitForm">{{ tr('SAVE') }}</button>
         <button v-for="(b, i) in modal.extra" :key="`x${i}`" :class="b.class" @click="runModalExtra(b)"><component :is="b.icon" v-if="b.icon" aria-hidden="true" /> {{ b.label }}</button>
-        <button @click="closeForm">{{ tr('Отмена') }}</button>
+        <button @click="closeForm">{{ tr('CANCEL') }}</button>
         <button v-for="(b, i) in modal.end" :key="`e${i}`" class="modal-action-end" :class="b.class" @click="runModalExtra(b)"><component :is="b.icon" v-if="b.icon" aria-hidden="true" /> {{ b.label }}</button>
       </div>
     </div>
@@ -2543,7 +2578,7 @@ onMounted(connectWs);
       <h2>{{ report.title }}</h2>
       <div v-for="(l, i) in report.lines" :key="i" class="repline" :class="{ 'repline-gap': l === '' }">{{ l }}</div>
       <div class="row">
-        <button @click="closeReport">{{ tr('Закрыть') }}</button>
+        <button @click="closeReport">{{ tr('CLOSE') }}</button>
       </div>
     </div>
   </div>
@@ -2551,10 +2586,10 @@ onMounted(connectWs);
   <!-- ── лог фонового процесса: пока открыто, раз в 1.5с дочитываем хвост ──── -->
   <div v-if="bgLogModal.show" id="modal" @keydown.esc="closeBgLog">
     <div class="modal-box modal-wide">
-      <h2>{{ tr('Лог — {title}', { title: bgLogModal.title }) }} <span class="dim">{{ bgLogModal.id }}</span></h2>
+      <h2>{{ tr('LOG_TITLE', { title: bgLogModal.title }) }} <span class="dim">{{ bgLogModal.id }}</span></h2>
       <pre class="bglog">{{ bgLogModal.text }}</pre>
       <div class="row">
-        <button @click="closeBgLog">{{ tr('Закрыть') }}</button>
+        <button @click="closeBgLog">{{ tr('CLOSE') }}</button>
       </div>
     </div>
   </div>
@@ -2563,60 +2598,60 @@ onMounted(connectWs);
   <!-- ── закрывают окно, «Очистить» чистит и применяет на живом списке ─────── -->
   <div v-if="filterModal.show" id="modal" @keydown.esc="cancelFilter" @keydown.enter.prevent="applyFilter">
     <div class="modal-box" ref="filterBox">
-      <h2>{{ tr('Фильтры') }}</h2>
+      <h2>{{ tr('FILTERS') }}</h2>
       <template v-if="filterModal.sec === 'sessions'">
-        <div class="fld"><label>{{ tr('Название') }}</label><input v-model="filterModal.sessions.text"></div>
+        <div class="fld"><label>{{ tr('TITLE') }}</label><input v-model="filterModal.sessions.text"></div>
         <div class="fld">
-          <label>{{ tr('Создан') }}</label>
+          <label>{{ tr('CREATED_3') }}</label>
           <div class="range"><input type="date" v-model="filterModal.sessions.createdFrom"><span>—</span><input type="date" v-model="filterModal.sessions.createdTo"></div>
         </div>
         <div class="fld">
-          <label>{{ tr('Последнее сообщение') }}</label>
+          <label>{{ tr('LAST_MESSAGE') }}</label>
           <div class="range"><input type="date" v-model="filterModal.sessions.updatedFrom"><span>—</span><input type="date" v-model="filterModal.sessions.updatedTo"></div>
         </div>
       </template>
       <template v-else-if="filterModal.sec === 'team'">
-        <div class="fld"><label>{{ tr('Имя') }}</label><input v-model="filterModal.team.text"></div>
-        <div class="fld"><label>{{ tr('Тулы') }}</label><input v-model="filterModal.team.tools" placeholder="shell, files…"></div>
+        <div class="fld"><label>{{ tr('FIELD_NAME_LABEL') }}</label><input v-model="filterModal.team.text"></div>
+        <div class="fld"><label>{{ tr('FIELD_TOOLS_LABEL') }}</label><input v-model="filterModal.team.tools" placeholder="shell, files…"></div>
         <div class="fld">
-          <label>{{ tr('В чате') }}</label>
+          <label>{{ tr('IN_CHAT_2') }}</label>
           <select v-model="filterModal.team.chat">
-            <option value="">{{ tr('любой') }}</option>
-            <option value="in">{{ tr('в чате') }}</option>
-            <option value="out">{{ tr('не в чате') }}</option>
+            <option value="">{{ tr('ANY') }}</option>
+            <option value="in">{{ tr('IN_CHAT') }}</option>
+            <option value="out">{{ tr('NOT_IN_CHAT') }}</option>
           </select>
         </div>
       </template>
       <template v-else>
         <div class="fld"><label>id</label><input v-model="filterModal.models.text"></div>
         <div class="fld">
-          <label>{{ tr('Провайдер') }}</label>
+          <label>{{ tr('LABEL_PROVIDER') }}</label>
           <select v-model="filterModal.models.provider">
-            <option value="">{{ tr('любой') }}</option>
+            <option value="">{{ tr('ANY') }}</option>
             <option v-for="p in snapshot.providers ?? []" :key="p" :value="p">{{ p }}</option>
           </select>
         </div>
         <div class="fld">
-          <label>{{ tr('Тип') }}</label>
+          <label>{{ tr('TYPE') }}</label>
           <select v-model="filterModal.models.kind">
-            <option value="">{{ tr('любой') }}</option>
-            <option value="chat">{{ tr('обычная') }}</option>
-            <option value="image">{{ tr('изображение') }}</option>
+            <option value="">{{ tr('ANY') }}</option>
+            <option value="chat">{{ tr('REGULAR') }}</option>
+            <option value="image">{{ tr('IMAGE') }}</option>
           </select>
         </div>
         <div class="fld">
           <label>vision</label>
           <select v-model="filterModal.models.vision">
-            <option value="">{{ tr('любой') }}</option>
-            <option value="yes">{{ tr('есть') }}</option>
-            <option value="no">{{ tr('нет') }}</option>
+            <option value="">{{ tr('ANY') }}</option>
+            <option value="yes">{{ tr('YES') }}</option>
+            <option value="no">{{ tr('NONE_2') }}</option>
           </select>
         </div>
       </template>
       <div class="row">
-        <button @click="applyFilter">{{ tr('Применить') }}</button>
-        <button @click="clearFilter">{{ tr('Очистить') }}</button>
-        <button @click="cancelFilter">{{ tr('Отмена') }}</button>
+        <button @click="applyFilter">{{ tr('APPLY') }}</button>
+        <button @click="clearFilter">{{ tr('CLEAR') }}</button>
+        <button @click="cancelFilter">{{ tr('CANCEL') }}</button>
       </div>
     </div>
   </div>
@@ -2625,21 +2660,21 @@ onMounted(connectWs);
   <!-- ── рабочая папка — через браузер папок сервера (как в настройках) ────── -->
   <div v-if="projNew.show" id="projnew" @keydown.esc="projNew.show = false">
     <div class="modal-box proj-box" ref="newProjBox">
-      <h2>{{ tr('Новый проект') }}</h2>
+      <h2>{{ tr('NEW_PROJECT') }}</h2>
 
-      <div class="fld"><label>{{ tr('id проекта (можно пропустить — из папки или штамп)') }}</label><input v-model="projNew.id"></div>
+      <div class="fld"><label>{{ tr('PROJECT_ID_OPTIONAL_FROM_THE_FOLDER_OR_A') }}</label><input v-model="projNew.id"></div>
       <div class="fld">
-        <label>{{ tr('Рабочая папка (можно пропустить — данные будут в доме)') }}</label>
+        <label>{{ tr('WORKING_FOLDER_OPTIONAL_THE_DATA_STAYS_IN_THE') }}</label>
         <div class="pathline">
           <input v-model="projNew.path">
-          <button :title="tr('Обзор папок компьютера')" :aria-label="tr('Обзор папок компьютера')" @click="browseOpen((p) => (projNew.path = p), projNew.path || undefined)"><FolderOpen aria-hidden="true" /></button>
+          <button :title="tr('BROWSE_FOLDERS_ON_THIS_COMPUTER')" :aria-label="tr('BROWSE_FOLDERS_ON_THIS_COMPUTER')" @click="browseOpen((p) => (projNew.path = p), projNew.path || undefined)"><FolderOpen aria-hidden="true" /></button>
         </div>
       </div>
 
       <div v-if="dirBrowse.open" id="dirbrowse">
         <div class="dirnav">
-          <button :title="tr('Домашний каталог')" :aria-label="tr('Домашний каталог')" @click="browseTo()"><House aria-hidden="true" /></button>
-          <button :disabled="!dirBrowse.parent" :title="tr('На уровень выше')" :aria-label="tr('На уровень выше')" @click="browseUp"><ArrowUp aria-hidden="true" /></button>
+          <button :title="tr('HOME_DIRECTORY')" :aria-label="tr('HOME_DIRECTORY')" @click="browseTo()"><House aria-hidden="true" /></button>
+          <button :disabled="!dirBrowse.parent" :title="tr('UP_ONE_LEVEL')" :aria-label="tr('UP_ONE_LEVEL')" @click="browseUp"><ArrowUp aria-hidden="true" /></button>
           <span class="meta">{{ dirBrowse.path }}</span>
         </div>
         <div v-if="dirBrowse.drives.length" class="dirdrives">
@@ -2648,17 +2683,17 @@ onMounted(connectWs);
         <div v-if="dirBrowse.error" class="errline">{{ dirBrowse.error }}</div>
         <ul v-else class="dirlist">
           <li v-for="d in dirBrowse.dirs" :key="d.path" @click="browseTo(d.path)"><Folder aria-hidden="true" /> {{ d.name }}</li>
-          <li v-if="!dirBrowse.dirs.length" class="reg-empty">{{ tr('подпапок нет') }}</li>
+          <li v-if="!dirBrowse.dirs.length" class="reg-empty">{{ tr('NO_SUBFOLDERS') }}</li>
         </ul>
         <div class="row">
-          <button @click="browsePick">{{ tr('Выбрать эту папку') }}</button>
-          <button @click="dirBrowse.open = false">{{ tr('Скрыть обзор') }}</button>
+          <button @click="browsePick">{{ tr('PICK_THIS_FOLDER') }}</button>
+          <button @click="dirBrowse.open = false">{{ tr('HIDE_BROWSE') }}</button>
         </div>
       </div>
 
       <div class="row">
-        <button @click="createProjectNew">{{ tr('Создать') }}</button>
-        <button @click="projNew.show = false">{{ tr('Отмена') }}</button>
+        <button @click="createProjectNew">{{ tr('CREATE') }}</button>
+        <button @click="projNew.show = false">{{ tr('CANCEL') }}</button>
       </div>
     </div>
   </div>
@@ -2667,21 +2702,21 @@ onMounted(connectWs);
   <!-- ── серверы/ящики/боты; секреты в списке замаскированы (🔑 = задан) ──── -->
   <div v-if="projSettings.show" id="projdlg" @keydown.esc="projSettings.show = false">
     <div class="modal-box proj-box">
-      <h2>{{ tr('Настройки проекта «{name}»', { name: currentProject?.name ?? '' }) }}</h2>
+      <h2>{{ tr('PROJECT_SETTINGS_NAME', { name: currentProject?.name ?? '' }) }}</h2>
 
-      <div class="fld"><label>{{ tr('Имя') }}</label><input v-model="projSettings.name"></div>
+      <div class="fld"><label>{{ tr('FIELD_NAME_LABEL') }}</label><input v-model="projSettings.name"></div>
       <div class="fld">
-        <label>{{ tr('Рабочая папка') }}</label>
+        <label>{{ tr('WORKING_FOLDER') }}</label>
         <div class="pathline">
           <input v-model="projSettings.path">
-          <button :title="tr('Обзор папок компьютера')" :aria-label="tr('Обзор папок компьютера')" @click="browseOpen((p) => (projSettings.path = p), projSettings.path || undefined)"><FolderOpen aria-hidden="true" /></button>
+          <button :title="tr('BROWSE_FOLDERS_ON_THIS_COMPUTER')" :aria-label="tr('BROWSE_FOLDERS_ON_THIS_COMPUTER')" @click="browseOpen((p) => (projSettings.path = p), projSettings.path || undefined)"><FolderOpen aria-hidden="true" /></button>
         </div>
       </div>
 
       <div v-if="dirBrowse.open" id="dirbrowse">
         <div class="dirnav">
-          <button :title="tr('Домашний каталог')" :aria-label="tr('Домашний каталог')" @click="browseTo()"><House aria-hidden="true" /></button>
-          <button :disabled="!dirBrowse.parent" :title="tr('На уровень выше')" :aria-label="tr('На уровень выше')" @click="browseUp"><ArrowUp aria-hidden="true" /></button>
+          <button :title="tr('HOME_DIRECTORY')" :aria-label="tr('HOME_DIRECTORY')" @click="browseTo()"><House aria-hidden="true" /></button>
+          <button :disabled="!dirBrowse.parent" :title="tr('UP_ONE_LEVEL')" :aria-label="tr('UP_ONE_LEVEL')" @click="browseUp"><ArrowUp aria-hidden="true" /></button>
           <span class="meta">{{ dirBrowse.path }}</span>
         </div>
         <div v-if="dirBrowse.drives.length" class="dirdrives">
@@ -2690,56 +2725,56 @@ onMounted(connectWs);
         <div v-if="dirBrowse.error" class="errline">{{ dirBrowse.error }}</div>
         <ul v-else class="dirlist">
           <li v-for="d in dirBrowse.dirs" :key="d.path" @click="browseTo(d.path)"><Folder aria-hidden="true" /> {{ d.name }}</li>
-          <li v-if="!dirBrowse.dirs.length" class="reg-empty">{{ tr('подпапок нет') }}</li>
+          <li v-if="!dirBrowse.dirs.length" class="reg-empty">{{ tr('NO_SUBFOLDERS') }}</li>
         </ul>
         <div class="row">
-          <button @click="browsePick">{{ tr('Выбрать эту папку') }}</button>
-          <button @click="dirBrowse.open = false">{{ tr('Скрыть обзор') }}</button>
+          <button @click="browsePick">{{ tr('PICK_THIS_FOLDER') }}</button>
+          <button @click="dirBrowse.open = false">{{ tr('HIDE_BROWSE') }}</button>
         </div>
       </div>
 
       <div class="proj-secs">
         <section>
-          <h3>{{ tr('Серверы') }} <button class="sec-add" :title="tr('Добавить сервер в проект')" :aria-label="tr('Добавить сервер в проект')" @click="curReg && projectHostAdd(curReg)"><Plus aria-hidden="true" /></button></h3>
+          <h3>{{ tr('SERVERS_2') }} <button class="sec-add" :title="tr('ADD_A_SERVER_TO_THE_PROJECT')" :aria-label="tr('ADD_A_SERVER_TO_THE_PROJECT')" @click="curReg && projectHostAdd(curReg)"><Plus aria-hidden="true" /></button></h3>
           <ul class="reglist">
             <li v-for="h in curReg?.hosts ?? []" :key="h.name">
               <span>{{ h.name }}</span>
-              <span class="meta">{{ h.host }}{{ h.user ? ' · ' + h.user : '' }}{{ h.port ? ':' + h.port : '' }}<span v-if="h.hasPassword" class="secret-mark" :title="tr('пароль задан')"> · <KeyRound aria-hidden="true" /></span></span>
-              <button class="del" :title="tr('Изменить сервер')" :aria-label="tr('Изменить сервер')" @click="projectHostEdit(h)"><Pencil aria-hidden="true" /></button>
-              <button class="del" :title="tr('Удалить сервер')" :aria-label="tr('Удалить сервер')" @click="curReg && projectHostDelete(curReg, h)"><Trash2 aria-hidden="true" /></button>
+              <span class="meta">{{ h.host }}{{ h.user ? ' · ' + h.user : '' }}{{ h.port ? ':' + h.port : '' }}<span v-if="h.hasPassword" class="secret-mark" :title="tr('PASSWORD_IS_SET')"> · <KeyRound aria-hidden="true" /></span></span>
+              <button class="del" :title="tr('EDIT_THE_SERVER')" :aria-label="tr('EDIT_THE_SERVER')" @click="projectHostEdit(h)"><Pencil aria-hidden="true" /></button>
+              <button class="del" :title="tr('DELETE_THE_SERVER')" :aria-label="tr('DELETE_THE_SERVER')" @click="curReg && projectHostDelete(curReg, h)"><Trash2 aria-hidden="true" /></button>
             </li>
-            <li v-if="!(curReg?.hosts ?? []).length" class="reg-empty">{{ tr('пока пусто — «＋» добавит запись') }}</li>
+            <li v-if="!(curReg?.hosts ?? []).length" class="reg-empty">{{ tr('EMPTY_SO_FAR_ADDS_AN_ENTRY') }}</li>
           </ul>
         </section>
         <section>
-          <h3>{{ tr('Почтовые ящики') }} <button class="sec-add" :title="tr('Добавить ящик в проект')" :aria-label="tr('Добавить ящик в проект')" @click="curReg && projectMailAdd(curReg)"><Plus aria-hidden="true" /></button></h3>
+          <h3>{{ tr('MAILBOXES_2') }} <button class="sec-add" :title="tr('ADD_MAILBOX_TO_PROJECT')" :aria-label="tr('ADD_MAILBOX_TO_PROJECT')" @click="curReg && projectMailAdd(curReg)"><Plus aria-hidden="true" /></button></h3>
           <ul class="reglist">
             <li v-for="m in curReg?.mails ?? []" :key="m.id">
               <span>{{ m.id }}</span>
-              <span class="meta">{{ m.user }}{{ m.imap ? ' · ' + m.imap : '' }}{{ m.smtp ? ' · ' + m.smtp : '' }}<span v-if="m.hasPassword" class="secret-mark" :title="tr('пароль задан')"> · <KeyRound aria-hidden="true" /></span></span>
-              <button class="del" :title="tr('Изменить ящик')" :aria-label="tr('Изменить ящик')" @click="projectMailEdit(m)"><Pencil aria-hidden="true" /></button>
-              <button class="del" :title="tr('Удалить ящик')" :aria-label="tr('Удалить ящик')" @click="projectMailDelete(m)"><Trash2 aria-hidden="true" /></button>
+              <span class="meta">{{ m.user }}{{ m.imap ? ' · ' + m.imap : '' }}{{ m.smtp ? ' · ' + m.smtp : '' }}<span v-if="m.hasPassword" class="secret-mark" :title="tr('PASSWORD_IS_SET')"> · <KeyRound aria-hidden="true" /></span></span>
+              <button class="del" :title="tr('EDIT_THE_MAILBOX')" :aria-label="tr('EDIT_THE_MAILBOX')" @click="projectMailEdit(m)"><Pencil aria-hidden="true" /></button>
+              <button class="del" :title="tr('REMOVE_THE_MAILBOX')" :aria-label="tr('REMOVE_THE_MAILBOX')" @click="projectMailDelete(m)"><Trash2 aria-hidden="true" /></button>
             </li>
-            <li v-if="!(curReg?.mails ?? []).length" class="reg-empty">{{ tr('пока пусто — «＋» добавит запись') }}</li>
+            <li v-if="!(curReg?.mails ?? []).length" class="reg-empty">{{ tr('EMPTY_SO_FAR_ADDS_AN_ENTRY') }}</li>
           </ul>
         </section>
         <section>
-          <h3>{{ tr('Боты') }} <button class="sec-add" :title="tr('Добавить бота в проект')" :aria-label="tr('Добавить бота в проект')" @click="curReg && projectBotAdd(curReg)"><Plus aria-hidden="true" /></button></h3>
+          <h3>{{ tr('BOTS_2') }} <button class="sec-add" :title="tr('ADD_BOT_TO_PROJECT')" :aria-label="tr('ADD_BOT_TO_PROJECT')" @click="curReg && projectBotAdd(curReg)"><Plus aria-hidden="true" /></button></h3>
           <ul class="reglist">
             <li v-for="b in curReg?.messengers ?? []" :key="b.key">
               <span>{{ b.key }}</span>
-              <span class="meta">{{ b.hasToken ? tr('токен задан') : tr('токена нет') }} <KeyRound v-if="b.hasToken" aria-hidden="true" /></span>
-              <button class="del" :title="tr('Изменить бота')" :aria-label="tr('Изменить бота')" @click="projectBotEdit(b)"><Pencil aria-hidden="true" /></button>
-              <button class="del" :title="tr('Удалить бота')" :aria-label="tr('Удалить бота')" @click="projectBotDelete(b)"><Trash2 aria-hidden="true" /></button>
+              <span class="meta">{{ b.hasToken ? tr('TOKEN_IS_SET') : tr('NO_TOKEN') }} <KeyRound v-if="b.hasToken" aria-hidden="true" /></span>
+              <button class="del" :title="tr('EDIT_THE_BOT')" :aria-label="tr('EDIT_THE_BOT')" @click="projectBotEdit(b)"><Pencil aria-hidden="true" /></button>
+              <button class="del" :title="tr('REMOVE_THE_BOT')" :aria-label="tr('REMOVE_THE_BOT')" @click="projectBotDelete(b)"><Trash2 aria-hidden="true" /></button>
             </li>
-            <li v-if="!(curReg?.messengers ?? []).length" class="reg-empty">{{ tr('пока пусто — «＋» добавит запись') }}</li>
+            <li v-if="!(curReg?.messengers ?? []).length" class="reg-empty">{{ tr('EMPTY_SO_FAR_ADDS_AN_ENTRY') }}</li>
           </ul>
         </section>
       </div>
 
       <div class="row">
-        <button @click="saveProjectSettings">{{ tr('Сохранить') }}</button>
-        <button @click="projSettings.show = false">{{ tr('Отмена') }}</button>
+        <button @click="saveProjectSettings">{{ tr('SAVE') }}</button>
+        <button @click="projSettings.show = false">{{ tr('CANCEL') }}</button>
       </div>
     </div>
   </div>
@@ -2755,11 +2790,11 @@ onMounted(connectWs);
   <!-- ── подтверждение удаления ──────────────────────────────────────────────── -->
   <div v-if="delConfirm.show" id="modal" @click.self="answerDelete(false)">
     <div class="modal-box">
-      <h2>{{ tr('Вы точно хотите удалить запись?') }}</h2>
+      <h2>{{ tr('REALLY_DELETE_THIS_ENTRY') }}</h2>
       <p class="confirm-subject">{{ delConfirm.subject }}</p>
       <div class="row">
-        <button class="bad" @click="answerDelete(true)"><Trash2 aria-hidden="true" /> {{ tr('Да') }}</button>
-        <button @click="answerDelete(false)">{{ tr('Нет') }}</button>
+        <button class="bad" @click="answerDelete(true)"><Trash2 aria-hidden="true" /> {{ tr('YES_2') }}</button>
+        <button @click="answerDelete(false)">{{ tr('NO') }}</button>
       </div>
     </div>
   </div>

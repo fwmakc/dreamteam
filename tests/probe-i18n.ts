@@ -1,10 +1,13 @@
 /**
- * Проба i18n: словари и переключение языка интерфейса.
- *  - встроенные локали: en/zh переводят, ru — тождество; нет перевода — исходная строка;
+ * Проба i18n: словари-ключи и переключение языка интерфейса.
+ *  - встроенные локали ru/en/zh: KEY → перевод; русский — полный словарь,
+ *    а не тождество; нет ключа в активной — русский, нет и его — сам ключ;
  *  - tf: подстановка {переменных} в переводе;
- *  - внешние языки: lang/<id>.json в доме — валидные работают, битые — громкая
- *    ошибка, коллизия со встроенным id — отказ, шаблоны «_*.json» и не-<id>.json
- *    игнорируются;
+ *  - внешние языки: lang/<id>.json в доме — валидные работают (новый формат:
+ *    ключи-идентификаторы; старый до-0.0.21 с русскими ключами перебивается
+ *    автоматически), битые — громкая ошибка, строка без соответствия — отказ
+ *    со списком, коллизия со встроенным id — отказ, шаблоны «_*.json» и
+ *    не-<id>.json игнорируются; непереведённое — русский фолбэком;
  *  - loadSettings: поле "ui" валидируется (непустая строка);
  *  - preloadLocale: лёгкое чтение "ui" до мастера;
  *  - через ядро: /settings update ui=en — интерфейс переключается на лету,
@@ -34,31 +37,31 @@ process.on('exit', () => { try { rmSync(base, { recursive: true, force: true });
 const i18n = await import('../src/i18n.js');
 const { t, tf, applyLocale, knownLanguages, localeId, preloadLocale } = i18n;
 
-// ── встроенные локали ────────────────────────────────────────────────────────
-check('старт: активна русская (тождество)', localeId() === 'ru' && t('Настройки') === 'Настройки');
-check('фолбэк: нет перевода — исходная строка', t('строки нет в словаре') === 'строки нет в словаре');
+// ── встроенные локали: русский — словарь, промахи деградируют читаемо ─────────
+check('старт: активна русская, ключ переводится словарём',
+  localeId() === 'ru' && t('SETTINGS') === 'Настройки' && t('AGENTS') === 'Агенты');
+check('фолбэк: нет ключа нигде — сам ключ', t('NO_SUCH_KEY_ANYWHERE') === 'NO_SUCH_KEY_ANYWHERE');
 
 applyLocale('en', home);
-check('en: t переводит', t('Настройки') === 'Settings' && t('Агенты') === 'Agents' && t('Команда') === 'Command');
+check('en: t переводит', t('SETTINGS') === 'Settings' && t('AGENTS') === 'Agents' && t('COMMAND') === 'Command');
 check('en: tf подставляет переменные',
-  tf('создал {file} (модель «{id}» по умолчанию)', { file: 'p.json', id: 'mock' })
+  tf('CREATED_FILE_MODEL_ID_AS_THE_DEFAULT', { file: 'p.json', id: 'mock' })
     === 'created p.json (model «mock» as the default)');
-check('en: ключ с переводом-пустышкой не обязателен', t('Нет задачи «{id}» — см. /schedule') !== '');
 
 applyLocale('zh', home);
-check('zh: t переводит', t('Настройки') === '设置' && t('Агенты') === '智能体' && t('Команда') === '命令');
+check('zh: t переводит', t('SETTINGS') === '设置' && t('AGENTS') === '智能体' && t('COMMAND') === '命令');
 
 applyLocale('ru', home);
-check('ru: возврат к тождеству', t('Настройки') === 'Настройки' && localeId() === 'ru');
+check('ru: возврат к русскому словарю', t('SETTINGS') === 'Настройки' && localeId() === 'ru');
 
-// ── внешние языки: lang/<id>.json в доме ─────────────────────────────────────
+// ── внешние языки: lang/<id>.json в доме (новый формат — ключи) ───────────────
 const langDir = join(home, 'lang');
 mkdirSync(langDir, { recursive: true });
 writeFileSync(join(langDir, 'de.json'), JSON.stringify({
   name: 'Deutsch',
   translations: {
-    'Настройки': 'Einstellungen',
-    'создал {file} (модель «{id}» по умолчанию)': 'erstellt {file} (Modell «{id}» als Standard)',
+    SETTINGS: 'Einstellungen',
+    CREATED_FILE_MODEL_ID_AS_THE_DEFAULT: 'erstellt {file} (Modell «{id}» als Standard)',
   },
 }, null, 2));
 
@@ -68,16 +71,39 @@ const de = knownLanguages(home).find((l) => l.id === 'de');
 check('knownLanguages: de — внешний, имя из файла', de?.builtIn === false && de?.name === 'Deutsch');
 
 applyLocale('de', home);
-check('внешний: t переводит из lang/de.json', t('Настройки') === 'Einstellungen');
-check('внешний: tf подставляет в перевод файла', tf('создал {file} (модель «{id}» по умолчанию)', { file: 'p.json', id: 'mock' })
+check('внешний: t переводит из lang/de.json', t('SETTINGS') === 'Einstellungen');
+check('внешний: tf подставляет в перевод файла', tf('CREATED_FILE_MODEL_ID_AS_THE_DEFAULT', { file: 'p.json', id: 'mock' })
   === 'erstellt p.json (Modell «mock» als Standard)');
-check('внешний: непереведённое — исходное', t('Команда') === 'Команда');
+check('внешний: непереведённое — русский фолбэком', t('COMMAND') === 'Команда');
 applyLocale('ru', home);
 
-// неизвестный id — громкая ошибка со списком
+// старый формат (до 0.0.21): русские ключи перебиваются в наши KEY по ru-словарю
+writeFileSync(join(langDir, 'fr.json'), JSON.stringify({
+  name: 'Français',
+  translations: {
+    'Настройки': 'Réglages',
+  },
+}, null, 2));
+applyLocale('fr', home);
+check('легаси-формат: русские ключи автоконвертируются в KEY', t('SETTINGS') === 'Réglages');
+check('легаси-формат: непокрытое — русский фолбэком', t('AGENTS') === 'Агенты');
+applyLocale('ru', home);
+
+// строка без соответствия — громкая ошибка со списком
+writeFileSync(join(langDir, 'orphan.json'), JSON.stringify({
+  name: 'Orphan',
+  translations: { 'строки нет в русском словаре': 'x' },
+}, null, 2));
 let threw = '';
+try { knownLanguages(home); } catch (e) { threw = (e as Error).message; }
+check('легаси-ключ без соответствия — отказ со списком',
+  threw.includes('orphan.json') && threw.includes('строки нет в русском словаре'), threw);
+rmSync(join(langDir, 'orphan.json'), { force: true });
+
+// неизвестный id — громкая ошибка со списком
+threw = '';
 try { applyLocale('xx', home); } catch (e) { threw = (e as Error).message; }
-check('неизвестный id — отказ со списком', threw.includes('xx') && threw.includes('ru, en, zh, de'), threw);
+check('неизвестный id — отказ со списком', threw.includes('xx') && threw.includes('ru, en, zh, de, fr'), threw);
 
 // битый JSON языка — ошибка с путём
 writeFileSync(join(langDir, 'broken.json'), '{ битый');
@@ -101,11 +127,10 @@ check('коллизия id с встроенным — отказ', threw.includ
 
 // applyLocale('en') бьёт в встроенный, несмотря на файл-коллизию: порядок не менялся
 applyLocale('en', home);
-check('встроенный приоритетнее файла-коллизии', t('Настройки') === 'Settings');
+check('встроенный приоритетнее файла-коллизии', t('SETTINGS') === 'Settings');
 applyLocale('ru', home);
 
 rmSync(join(langDir, 'en.json'), { force: true });
-rmSync(join(langDir, 'broken.json'), { force: true });
 
 // шаблоны и не-<id>.json игнорируются
 writeFileSync(join(langDir, '_template.json'), '{ не читаем');
@@ -133,7 +158,7 @@ check('шаблон _*.json и не-id файлы игнорируются', okS
 
   // preloadLocale: включает локаль до мастера; без поля — остаётся русская
   preloadLocale(sf, home);
-  check('preloadLocale: включил язык из settings.json', localeId() === 'de' && t('Настройки') === 'Einstellungen');
+  check('preloadLocale: включил язык из settings.json', localeId() === 'de' && t('SETTINGS') === 'Einstellungen');
   applyLocale('ru', home);
   writeFileSync(sf, JSON.stringify({ width: 100 }));
   preloadLocale(sf, home);
@@ -176,7 +201,7 @@ const run = (_e: unknown, line: string): Promise<string[]> => runOperationText(e
 
 let lines = await run(engine, '/settings update ui=en');
 check('settings set ui=en — отчёт на английском', lines.some((l) => l.includes('Settings updated')), lines.join(' | '));
-check('t() переключилась на лету', t('Настройки') === 'Settings' && localeId() === 'en');
+check('t() переключилась на лету', t('SETTINGS') === 'Settings' && localeId() === 'en');
 
 lines = await run(engine, '/help');
 check('/help на английском: заголовок операций', lines.some((l) => l.startsWith('  Operations')), lines.slice(0, 5).join(' | '));
@@ -191,14 +216,14 @@ check('неизвестный ui — отказ со списком', threw.incl
 check('после отказа — язык не менялся', localeId() === 'en');
 
 lines = await run(engine, '/settings update ui=ru');
-check('назад на русский', lines.some((l) => l.includes('Настройки обновлены')) && t('Настройки') === 'Настройки', lines.join(' | '));
+check('назад на русский', lines.some((l) => l.includes('Настройки обновлены')) && t('SETTINGS') === 'Настройки', lines.join(' | '));
 check('settings.json хранит ui:ru', JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')).ui === 'ru');
 
 // ── serve.stateSnapshot: в state.ui уезжает список языков — селектор ⚙ в GUI ──
 const { stateSnapshot } = await import('../src/serve.js');
 const snap = stateSnapshot(app, engine) as {
   settings?: { language?: string; compressThreshold?: number };
-  ui?: { id: string; languages?: { id: string; name: string; builtIn: boolean }[] };
+  ui?: { id: string; languages?: { id: string; name: string; builtIn: boolean }[]; strings?: Record<string, string> };
 };
 const langList = snap.ui?.languages ?? [];
 check('state.ui.languages: системные ru/en/zh встроенные',
@@ -207,6 +232,9 @@ const deInfo = langList.find((l) => l.id === 'de');
 check('state.ui.languages: свой de из lang/ — не встроенный, имя из файла',
   deInfo?.builtIn === false && deInfo?.name === 'Deutsch');
 check('state.ui.id — активная локаль', snap.ui?.id === 'ru');
+// словарь для GUI: ключ → строка активной локали с русским фолбэком
+const strings = snap.ui?.strings ?? {};
+check('state.ui.strings: русский словарь целиком', strings['SETTINGS'] === 'Настройки' && Object.keys(strings).length > 900);
 
 // ── пустой язык общения следует языку интерфейса: ядро — для TUI и GUI сразу ──
 const { conversationLanguage } = await import('../src/i18n.js');

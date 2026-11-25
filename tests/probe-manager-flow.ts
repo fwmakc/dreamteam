@@ -163,8 +163,8 @@ function lastManagerMessage(): string {
 {
   // наполняем переговорку: команда с тула­ми и моделями, проект, история
   mkdirSync(agentsDir, { recursive: true });
-  writeFileSync(join(agentsDir, 'katya.json'), JSON.stringify({ name: 'Катя', emoji: '🎨', color: 'cyan', prompt: 'Ты — Катя.', model: { id: 'claude' }, temperature: 0.3, tools: { files: {}, look: {} } }, null, 2) + '\n');
-  writeFileSync(join(agentsDir, 'gleb.json'), JSON.stringify({ name: 'Глеб', emoji: '💾', color: 'green', prompt: 'Ты — Глеб.', projects: ['project'] }, null, 2) + '\n');
+  writeFileSync(join(agentsDir, 'katya.json'), JSON.stringify({ name: 'Катя', color: 'cyan', prompt: 'Ты — Катя.', model: { id: 'claude' }, temperature: 0.3, tools: { files: {}, look: {} } }, null, 2) + '\n');
+  writeFileSync(join(agentsDir, 'gleb.json'), JSON.stringify({ name: 'Глеб', color: 'green', prompt: 'Ты — Глеб.', projects: ['project'] }, null, 2) + '\n');
   {
     const cfg = JSON.parse(readFileSync(projFile, 'utf8')) as Record<string, unknown>;
     cfg.hosts = { prod: { host: '203.0.113.10' }, staging: { host: 'stg.example.com' } };
@@ -219,7 +219,7 @@ function lastManagerMessage(): string {
   const pasha = team.find((a) => a.id === 'pasha');
   check('team.add: участник в agents/', !!pasha);
   check('team.add: спецификация целиком', pasha?.name === 'Паша' && pasha?.model?.id === 'claude' && pasha?.model?.temperature === 0.4, JSON.stringify(pasha));
-  check('team.add: дефолты эмодзи/цвета/промпта', pasha?.emoji === '🤖' && pasha?.color === 'white' && pasha?.prompt === 'Ты — Паша.', JSON.stringify(pasha));
+  check('team.add: дефолты цвета/промпта, эмодзи нет', pasha?.color === 'white' && pasha?.prompt === 'Ты — Паша.' && (pasha as unknown as Record<string, unknown> | undefined)?.emoji === undefined, JSON.stringify(pasha));
   check('team.add: карточки тула­ов записаны', JSON.stringify(pasha?.tools?.shell) === '{}', JSON.stringify(pasha?.tools));
   const msg = lastManagerMessage();
   check('team.add: say + ✓-отчёт в истории менеджера', msg.includes('Зову Пашу.') && msg.includes('✓ Паша'), msg.slice(0, 160));
@@ -235,7 +235,7 @@ function lastManagerMessage(): string {
   const team = (await import('../src/agents.js')).loadTeam(agentsDir);
   const pasha = team.find((a) => a.id === 'pasha');
   check('team.update: описание и temp применились', pasha?.description === 'ведущий тестировщик' && pasha?.model?.temperature === 0.1, JSON.stringify(pasha));
-  check('team.update: соседние поля целы', pasha?.model?.id === 'claude' && pasha?.emoji === '🤖');
+  check('team.update: соседние поля целы', pasha?.model?.id === 'claude');
   check('team.update: отчёт в истории', lastManagerMessage().includes('description="ведущий тестировщик"'), lastManagerMessage().slice(0, 160));
 }
 
@@ -253,7 +253,7 @@ function lastManagerMessage(): string {
   const mine = app.session!.messages.filter((m) => m.authorId === 'manager');
   check(
     'состав: позвание — отдельная реплика менеджера',
-    mine.at(-3)?.text.includes('💾 Глеб присоединился к чату.') ?? false,
+    mine.at(-3)?.text.includes('Глеб присоединился к чату.') ?? false,
     JSON.stringify(mine.slice(-3).map((m) => m.text)),
   );
   check(

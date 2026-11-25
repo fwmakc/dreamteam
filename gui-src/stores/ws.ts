@@ -29,7 +29,7 @@ export interface FeedItem { ts: number; kind: 'notice' | 'error'; text: string }
 export const feed = reactive<FeedItem[]>([]);
 /** Открытая реплика стрима (между turn_header и turn_end). */
 export const streaming = reactive({
-  open: false, id: '', name: '', emoji: '🤖', color: '', text: '',
+  open: false, id: '', name: '', color: '', text: '',
 });
 const busyMap = reactive(new Map<string, string>());
 export const busyLabel = computed(() => [...busyMap.values()].at(-1) ?? '');
@@ -37,7 +37,7 @@ export const busyCount = computed(() => busyMap.size);
 
 export const confirmDialog = reactive({
   show: false, id: '', label: '', desc: '',
-  whoEmoji: '🤖', whoName: '', whoColor: '',
+  whoName: '', whoColor: '',
 });
 export const chooseDialog = reactive({
   show: false, id: '',
@@ -180,7 +180,7 @@ function finalizeStreaming(): void {
   }
   streaming.open = false;
   streaming.id = ''; streaming.name = '';
-  streaming.emoji = '🤖'; streaming.color = ''; streaming.text = '';
+  streaming.color = ''; streaming.text = '';
 }
 
 function rebuildMessages(history: ChatMessage[] | undefined): void {
@@ -214,11 +214,10 @@ function dispatchEvent(type: string, msg: Record<string, unknown>): void {
     }
     case 'turn_header': {
       finalizeStreaming();
-      const a = (msg.agent ?? {}) as { id?: string; name?: string; emoji?: string; color?: string };
+      const a = (msg.agent ?? {}) as { id?: string; name?: string; color?: string };
       streaming.open = true;
       streaming.id = a.id ?? '';
       streaming.name = a.name ?? '';
-      streaming.emoji = a.emoji ?? '🤖';
       streaming.color = a.color ?? '';
       streaming.text = '';
       break;
@@ -282,12 +281,11 @@ function dispatchEvent(type: string, msg: Record<string, unknown>): void {
       break;
     }
     case 'confirm': {
-      const who = (msg.who ?? {}) as { name?: string; emoji?: string; color?: string };
+      const who = (msg.who ?? {}) as { name?: string; color?: string };
       confirmDialog.show = true;
       confirmDialog.id = String(msg.id ?? '');
       confirmDialog.label = String(msg.label ?? '');
       confirmDialog.desc = String(msg.desc ?? '');
-      confirmDialog.whoEmoji = who.emoji ?? '🤖';
       confirmDialog.whoName = who.name ?? '';
       confirmDialog.whoColor = who.color ?? '';
       break;

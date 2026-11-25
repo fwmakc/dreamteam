@@ -57,8 +57,8 @@ const readProj = (): Record<string, unknown> =>
 
 // команда из двух агентов — в уже скаффолденный проект
 mkdirSync(join(home, 'agents'), { recursive: true });
-writeFileSync(join(home, 'agents', 'test_probe.json'), JSON.stringify({ name: 'Тест', prompt: 'Ты Тест.', emoji: '🧪', color: 'cyan' }, null, 2));
-writeFileSync(join(home, 'agents', 'gleb.json'), JSON.stringify({ name: 'Глеб', prompt: 'Ты Глеб.', emoji: '💾', color: 'yellow' }, null, 2));
+writeFileSync(join(home, 'agents', 'test_probe.json'), JSON.stringify({ name: 'Тест', prompt: 'Ты Тест.', color: 'cyan' }, null, 2));
+writeFileSync(join(home, 'agents', 'gleb.json'), JSON.stringify({ name: 'Глеб', prompt: 'Ты Глеб.', color: 'yellow' }, null, 2));
 
 // консьерж-старт: в чате один менеджер — как после первого запуска
 app.session!.participants = [MANAGER_ID];
@@ -129,7 +129,7 @@ const threw = async (line: string): Promise<string> => {
   check('session open: вернулись на свежий', app.session?.id === fresh);
 
   lines = await run(engine, '/session delete 99');
-  check('session delete: нет такого id — отказ', lines[0]?.includes('Разговора с id «99» нет') ?? false);
+  check('session delete: нет такого id — отказ', lines[0]?.includes('Не нашёл разговор с id «99»') ?? false);
   lines = await run(engine, `/session delete ${fresh}`);
   check('session delete: текущий — отказ «сначала close»', lines[0]?.includes('нельзя') ?? false);
   lines = await run(engine, `/session delete ${older}`);
@@ -145,7 +145,7 @@ const threw = async (line: string): Promise<string> => {
   lines = await run(engine, `/session delete ${x1} ${x2}`);
   check('session delete: список — оба удалены', !app.store!.list().some((s) => s.id === x1 || s.id === x2), JSON.stringify(lines));
   lines = await run(engine, `/session delete ${x1}`);
-  check('session delete: список с чужим id — отказ', lines[0]?.includes('нет') ?? false);
+  check('session delete: список с чужим id — отказ', lines[0]?.includes('Не нашёл разговор с id') ?? false);
   void x3;
 
   await run(engine, '/session open abc');
@@ -211,6 +211,53 @@ const threw = async (line: string): Promise<string> => {
   check('memory: неизвестный id — отказ', lines[0]?.includes('Нет агента с id «призрак»') ?? false);
 }
 
+// ── язык интерфейса: /lang — текущий, список и переключение на лету ──────────
+{
+  let lines = await run(engine, '/lang');
+  check(
+    'lang: список — заголовок, ru/en/zh, текущий отмечен',
+    lines.some((l) => l.includes('Язык интерфейса')) &&
+      lines.some((l) => l.includes('ru — ')) && lines.some((l) => l.includes('en — ')) && lines.some((l) => l.includes('zh — ')) &&
+      lines.some((l) => l.includes('← текущий')) && lines.some((l) => l.includes('/lang <id>')),
+    JSON.stringify(lines),
+  );
+  lines = await run(engine, '/lang xx');
+  check(
+    'lang: неизвестный id — отказ со списком доступных',
+    lines[0]?.includes('«xx»') === true && lines[0]?.includes('ru, en, zh') === true,
+    JSON.stringify(lines),
+  );
+  lines = await run(engine, '/lang ru лишний');
+  check('lang: два аргумента — синтаксис', lines[0]?.includes('Синтаксис: /lang') ?? false, JSON.stringify(lines));
+  lines = await run(engine, '/lang en');
+  check(
+    'lang: переключение — отчёт',
+    lines[0]?.startsWith('✓') === true && lines[0]?.includes('en') === true,
+    JSON.stringify(lines),
+  );
+  const onDisk = JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')) as { ui?: string };
+  check('lang: ui=en на диске', onDisk.ui === 'en');
+  lines = await run(engine, '/lang');
+  check(
+    'lang: смена на лету — список уже на английском',
+    lines.some((l) => l.includes('Interface language')) && lines.some((l) => l.includes('← current')),
+    JSON.stringify(lines),
+  );
+  // страховка: следующие секции ждут русский — возвращаем и проверяем откат
+  lines = await run(engine, '/lang ru');
+  check('lang: назад на русский — отчёт', lines[0]?.startsWith('✓') === true, JSON.stringify(lines));
+  lines = await run(engine, '/lang');
+  check('lang: список снова на русском', lines.some((l) => l.includes('Язык интерфейса')), JSON.stringify(lines));
+  // регрессия диспетчера: одиночная команда с аргументом (/import файл.zip)
+  // прежде падала «Не понял» — второй токен считался глаголом группы
+  lines = await run(engine, '/import нет-файла.zip');
+  check(
+    'dispatch: одиночная команда с аргументом доходит до операции',
+    lines[0]?.includes('нет-файла.zip') === true && lines[0]?.includes('Не понял') === false,
+    JSON.stringify(lines),
+  );
+}
+
 // ── модели: список, смена основной через settings.update ─────────────────────
 {
   let lines = await run(engine, '/models');
@@ -254,7 +301,7 @@ const threw = async (line: string): Promise<string> => {
   let team = await load();
   const second = team.find((a) => a.id === 'test2');
   check('agent new: записан', second?.name === 'Второй');
-  check('agent new: дефолты эмодзи/цвета', second?.emoji === '🤖' && second?.color === 'white');
+  check('agent new: дефолт цвета, эмодзи нет', second?.color === 'white' && (second as unknown as Record<string, unknown> | undefined)?.emoji === undefined);
   const dup = await threw('/agent new test2 name=Дубль');
   check('agent new: дубликат id — ошибка', dup.includes('уже есть'));
 
@@ -509,9 +556,20 @@ const threw = async (line: string): Promise<string> => {
   lines = await run(engine, '/manager');
   check('manager: обзор — модель', lines.some((l) => l.includes('модель: mock')) ?? false);
   lines = await run(engine, '/manager update temperature=0.4');
-  check('manager update: отчёт', lines[0]?.includes('temperature="0.4"') ?? false);
-  const manager = JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')) as { temperature: number };
-  check('manager update: значение на диске', manager.temperature === 0.4);
+  check('manager update: голое temperature — подсказка про model.temperature', lines[0]?.includes('model.temperature=0.4') ?? false, JSON.stringify(lines));
+  lines = await run(engine, '/manager update model.temperature=0.4 model.maxTokens=2048');
+  check(
+    'manager update: отчёт с параметрами ссылки',
+    (lines[0]?.includes('model="mock"') ?? false) && (lines[0]?.includes('temperature=0.4') ?? false) && (lines[0]?.includes('maxTokens=2048') ?? false),
+    JSON.stringify(lines),
+  );
+  const manager = JSON.parse(readFileSync(join(home, 'manager.json'), 'utf8')) as { temperature?: number; model: { id?: string; temperature?: number; maxTokens?: number } };
+  check('manager update: параметры на диске в model-ссылке', manager.model.temperature === 0.4 && manager.model.maxTokens === 2048, JSON.stringify(manager));
+  check('manager update: верхнего temperature нет', manager.temperature === undefined, JSON.stringify(manager));
+  lines = await run(engine, '/manager');
+  check('manager: обзор — температура из ссылки', lines.some((l) => l.includes('0.4')) ?? false, JSON.stringify(lines));
+  lines = await run(engine, '/manager update model.thinking=высокая');
+  check('manager update: thinking по точечному пути', lines[0]?.includes('thinking=высокая') ?? false, JSON.stringify(lines));
 
   lines = await run(engine, '/auto on 3');
   check('auto on: лимит ходов', lines[0]?.includes('до 3 ходов') ?? false);

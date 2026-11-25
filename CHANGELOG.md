@@ -17,19 +17,68 @@ compatibility is promised across earlier versions.
   keeps the previous palette. The choice is stored locally, applied before Vue
   starts to avoid a theme flash, and agent-name colors now adapt to the active
   palette.
+- **`/lang` — switching the interface language on the fly.** Without an argument
+  it shows the current language and the list (built-in `ru`, `en`, `zh` plus
+  your own from `lang/`); `/lang <id>` switches immediately and persists to
+  `settings.json`. Works identically from the TUI input and the web UI message
+  box (the settings dialog with its language dropdown keeps working too), with
+  Tab completion for language ids in the terminal.
+- **Manager model settings now match the agents' «Model» section.** Generation
+  params live in the manager's model reference (`model.temperature`,
+  `model.maxTokens`, `model.thinking`, `model.reasoning` override the model
+  card; unset falls back to it): `/manager update model.temperature=…` in the
+  TUI, the same form as the agents' in the web UI (model selector plus the
+  JSON mode for manual references), and the plain object in `manager.json`
+  (`{ "model": { "id": …, "temperature": … } }`).
+- **Fixed: single-word operations ignored their arguments.** `/import <file.zip>`
+  fell through to «Не понял …» because the dispatcher treated the argument as a
+  group verb; single-word commands (`/export`, `/import`, `/lang`) now receive
+  their arguments as intended.
 
 ### Changed
 
 - **A unified Lucide icon set in the web GUI.** Utility emoji and text symbols
   were replaced with outlined SVG icons that inherit theme colors through
-  `currentColor`; icon-only controls have accessible names, while agent emoji
-  avatars and compact status indicators remain intact. Context menus, modal
+  `currentColor`; icon-only controls have accessible names, while avatars and
+  compact status indicators remain intact. Context menus, modal
   actions and Markdown code-copy buttons use the same visual style.
 - **Safer agent management.** The delete cross was removed from the agent list:
   deletion is available only from the agent card and requires confirmation.
   «Позвать в чат»/«Вывести из чата» lives exclusively in the context menu, and
   the card's destructive «Удалить» action is separated at the far right from
   «Сохранить» and «Отмена».
+- **Interface translations moved to identifier keys.** Dictionary keys are now
+  structural `SCREAMING_SNAKE` identifiers (`SETTINGS`, `NO_DISCUSSIONS_YET`,
+  `HELP_<OP>`, `FIELD_<NAME>_LABEL`) instead of whole Russian strings, so
+  rewording a phrase no longer silently drops its translations. `ru.ts` is the
+  new full source dictionary; `en.ts`/`zh.ts` cover the same key set, a key
+  missing from the active locale falls back to Russian, then to the key.
+  About 180 dead keys were dropped and same-meaning wording pairs unified;
+  `check-i18n` now validates the key format and ru/en/zh parity, and
+  `i18n-diff` reports untranslated and stale keys.
+- **The manager's legacy top-level `temperature` migrates into
+  `model.temperature`** on load, so existing installs keep their 0.2 working;
+  any config write removes the legacy field, and the fresh scaffold no longer
+  hardcodes 0.2 — a new manager takes the temperature from its model card,
+  like the agents.
+- **Avatars are colored dots instead of emoji.** Wherever an agent's emoji used
+  to appear — reply headers and rosters in the TUI, the sidebar, message heads,
+  the streaming chip and confirmations in the web GUI — a `●` dot in the
+  agent's `color` is rendered now; the manager gets a neutral dot. Plain text
+  lines (chat events, spinners, `/agents` output) simply lost their emoji.
+
+### Breaking
+
+- **The `emoji` field is removed.** Agents no longer have `emoji`, and the
+  manager lost both `emoji` and `color`: the keys in existing files are ignored
+  on load and stripped on the next write, and `/manager update` no longer
+  accepts `emoji=`/`color=`. A speaker's look is now its color — a dot in the
+  agent's `color`, a neutral one for the manager.
+- **Custom `lang/<id>.json` files are keyed by identifiers.** The
+  `translations` object now maps the app's `SCREAMING_SNAKE` keys
+  (`{ "SETTINGS": "Einstellungen", … }`), not Russian strings. A pre-0.0.21
+  file is converted automatically at load; a string that matches nothing in
+  the Russian dictionary aborts the startup with a list naming the file.
 
 ## [0.0.20] — 2026-11-12
 

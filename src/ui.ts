@@ -18,14 +18,14 @@ export function colorFn(name?: string): (s: string) => string {
   return (name && COLORS[name.toLowerCase()]) || ((s: string) => s);
 }
 
-/** Заголовок реплики агента: цветной «[💾 Глеб]» */
+/** Заголовок реплики агента: цветной «[● Глеб]» — кружок цвета агента вместо эмодзи */
 export function agentHeader(agent: Agent): string {
-  return colorFn(agent.color)(`[${agent.emoji} ${agent.name}]`);
+  return colorFn(agent.color)(`[● ${agent.name}]`);
 }
 
 export function rosterLine(agent: Agent): string {
   const c = colorFn(agent.color);
-  return `  ${c(`${agent.emoji} ${agent.name}`)}${agent.description ? ` — ${agent.description}` : ''}`;
+  return `  ${c(`● ${agent.name}`)}${agent.description ? ` — ${agent.description}` : ''}`;
 }
 
 /** Тысячи — «128k», меньше тысячи — как есть (индикатор контекста). */
@@ -45,7 +45,7 @@ export function ctxBar(tokens: number, win: number, threshold = 85): string {
 
 /** Короткие метки окон квоты для статус-бара: t() на каждом вызове — язык
  *  выбирается после импорта модуля (как в staticHints). */
-const QUOTA_LABELS: Record<string, string> = { '5h': '5ч', week: 'нед', month: 'мес', mcp: 'mcp' };
+const QUOTA_LABELS: Record<string, string> = { '5h': 'QUOTA_5H', week: 'QUOTA_WEEK', month: 'QUOTA_MONTH', mcp: 'mcp' };
 
 /** Сегмент квот для статус-бара: `Q 5ч 73% · нед 59% · mcp 88%` — ОСТАТОК в
  *  процентах (как в личном кабинете), целиком окрашен по самому низкому окну:

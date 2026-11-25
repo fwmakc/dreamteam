@@ -78,7 +78,6 @@ export interface ModelRef {
 export interface Agent {
   id: string;
   name: string;
-  emoji: string;
   description?: string;
   /** Цвет текста в консоли: red|green|yellow|blue|magenta|cyan|white|gray */
   color: string;
@@ -230,21 +229,18 @@ export interface StreamRequest {
  * Менеджер переговорки: config/manager.json. Это тот самый модератор-оркестратор,
  * но с собственным минимальным конфигом: своя модель, имя, вид. Через него
  * (@менеджер) выполняются все конфигурационные операции — состав команды,
- * состав чата, разговоры.
+ * состав чата, разговоры. Параметры генерации — в model-ссылке, как у агентов
+ * (легаси-поле temperature верхнего уровня переносится туда при чтении).
  */
 export interface ManagerConfig {
-  /** Ссылка на модель из models/ дома */
+  /** Ссылка на модель из models/ дома (id + переопределения параметров) */
   model: ModelRef;
   name: string;
-  emoji: string;
-  color: string;
-  temperature: number;
 }
 
 /** Правка существующего участника (белый список полей для team.update) */
 export interface ManagerUpdateFields {
   name?: string;
-  emoji?: string;
   color?: string;
   description?: string;
   prompt?: string;
@@ -267,7 +263,6 @@ export type ManagerAction =
       id: string;
       name: string;
       prompt?: string;
-      emoji?: string;
       color?: string;
       description?: string;
       /** Легаси: переносится в model.temperature (температура — параметр ссылки на модель) */

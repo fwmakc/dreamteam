@@ -160,8 +160,8 @@ try {
   check('2: agent.new — отчёт о добавлении', String(r2.result.text).includes('Юрист'));
   await waitDisk(() => { try { return loadTeam(agentsDir).some((a) => a.id === 'yurist'); } catch { return false; } }, 'юрист в agents/');
   const yurist = loadTeam(agentsDir).find((a) => a.id === 'yurist');
-  check('2: юрист на диске с дефолтами (эмодзи/цвет/автопромпт)',
-    yurist?.emoji === '🤖' && yurist?.color === 'white' && String(yurist?.prompt).startsWith('Ты — Юрист'),
+  check('2: юрист на диске с дефолтами (цвет/автопромпт, эмодзи нет)',
+    yurist?.color === 'white' && (yurist as unknown as Record<string, unknown> | undefined)?.emoji === undefined && String(yurist?.prompt).startsWith('Ты — Юрист'),
     JSON.stringify(yurist).slice(0, 160));
 
   // ── 3. позвать в сессию ──────────────────────────────────────────────────

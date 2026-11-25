@@ -193,10 +193,10 @@ check('иконки GUI: прежние служебные эмодзи не о�
   ['>☰</button>', '>⚙</button>', '>📎</button>', '>🔗</button>', '>↑</button>', '>✕</span>',
     '>✎</span>', '>⧉</button>', '📁＋</button>', '>🏠</button>', '>📂</button>',
   ].every((token) => !appSrc.includes(token)));
-check('иконки GUI: icon-only кнопки имеют aria-label, аватары и статусы сохранены',
-  appSrc.includes('id="btn-send" :title="tr(\'Отправить\')" :aria-label="tr(\'Отправить\')"') &&
-  appSrc.includes('id="btn-attach" :title="tr(\'Прикрепить файл (загрузится в inbox проекта)\')" :aria-label=') &&
-  appSrc.includes('aria-label="${title}"') && appSrc.includes('{{ a.emoji }} {{ a.name }}') &&
+check('иконки GUI: icon-only кнопки имеют aria-label, аватары-кружки и статусы сохранены',
+  appSrc.includes('id="btn-send" :title="tr(\'SEND\')" :aria-label="tr(\'SEND\')"') &&
+  appSrc.includes('id="btn-attach" :title="tr(\'ATTACH_A_FILE_IT_UPLOADS_TO_THE_PROJECT\')" :aria-label=') &&
+  appSrc.includes('aria-label="${title}"') && appSrc.includes('class="avatar" :style="{ background: colorOf(a.color) }"') &&
   appSrc.includes('BG_STATUS_EMOJI'));
 
 // --- 4b-agent. удаление только из карточки и только после подтверждения ---
@@ -204,16 +204,16 @@ const teamSection = slice(appSrc, '<section class="side-sec" :class="{ collapsed
 const agentForm = slice(appSrc, 'async function openAgentSettings', 'function agentDelete');
 const teamCtx = slice(appSrc, 'function ctxTeam', 'function ctxModel');
 check('агенты: клик открывает карточку, крестика удаления в списке нет',
-  teamSection.includes('@click="openAgentSettings(a)"') && !teamSection.includes('Удалить агента') &&
+  teamSection.includes('@click="openAgentSettings(a)"') && !teamSection.includes("tr('DELETE')") &&
   !teamSection.includes('delAgent(a)') && !teamSection.includes('@click="toggleChat(a)"'));
 check('агенты: в карточке есть красная кнопка удаления, но нет действия с чатом',
-  agentForm.includes("end: [{ label: tr('Удалить'), icon: Trash2, class: 'bad', fn: () => delAgent(a) }]") &&
-  !agentForm.includes("fn: () => toggleChat(a)") && !agentForm.includes("tr('Позвать в чат')") &&
-  !agentForm.includes("tr('Вывести из чата')"));
+  agentForm.includes("end: [{ label: tr('DELETE'), icon: Trash2, class: 'bad', fn: () => delAgent(a) }]") &&
+  !agentForm.includes("fn: () => toggleChat(a)") && !agentForm.includes("tr('INVITE_TO_CHAT')") &&
+  !agentForm.includes("tr('REMOVE_FROM_CHAT')"));
 check('агенты: действие с чатом остаётся в меню, удаление — только через карточку',
-  teamCtx.includes("tr(a.inChat ? 'Вывести из чата' : 'Позвать в чат')") &&
+  teamCtx.includes("tr(a.inChat ? 'REMOVE_FROM_CHAT' : 'INVITE_TO_CHAT')") &&
   teamCtx.includes("fn: () => toggleChat(a)") &&
-  !teamCtx.includes('delAgent') && !teamCtx.includes("label: tr('Удалить')"));
+  !teamCtx.includes('delAgent') && !teamCtx.includes("label: tr('DELETE')"));
 check('карточка агента: «Сохранить», «Отмена», затем «Удалить» у правого края',
   appSrc.indexOf('@click="submitForm"') < appSrc.indexOf('@click="closeForm"') &&
   appSrc.indexOf('@click="closeForm"') < appSrc.indexOf('v-for="(b, i) in modal.end"') &&

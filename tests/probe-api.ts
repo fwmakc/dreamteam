@@ -569,9 +569,9 @@ const client = await makeClient(handle.port);
     const meta = (st.sessions as Record<string, unknown>[])[0];
     check('state: разговор в списке — id/title/createdAt/updatedAt/count', Boolean(meta) && ['count', 'createdAt', 'id', 'title', 'updatedAt'].every((k) => k in meta!));
     const team = st.team as Record<string, unknown>[];
-    check('state: участник — id/name/emoji/color/inChat', team.length > 0 && ['color', 'emoji', 'id', 'inChat', 'name'].every((k) => k in team[0]));
+    check('state: участник — id/name/color/inChat, эмодзи нет', team.length > 0 && ['color', 'id', 'inChat', 'name'].every((k) => k in team[0]) && !('emoji' in team[0]));
     const mgr = st.manager as Record<string, unknown>;
-    check('state: менеджер — name/emoji/color/model', Boolean(mgr) && ['color', 'emoji', 'model', 'name'].every((k) => k in mgr));
+    check('state: менеджер — name/model', Boolean(mgr) && ['model', 'name'].every((k) => k in mgr) && !('emoji' in mgr) && !('color' in mgr));
     const prov = (st.models as Record<string, unknown>[])[0];
     check(
       'state: модель — id/kind/model/ok/isDefault/isManager',
@@ -924,9 +924,13 @@ const client = await makeClient(handle.port);
     check('rpc: model.get — карточка со схемой', mg.card?.provider === 'mock' && mg.card?.apiKey === undefined && typeof mg.schema === 'object', JSON.stringify(mg.card));
 
     // manager.show / settings.show — формы настроек
-    const ms = (await rpc('manager.show')) as { manager?: { name?: string } };
+    const ms = (await rpc('manager.show')) as { manager?: { name?: string; model?: { id?: string; temperature?: number } } };
     const ss = (await rpc('settings.show')) as { settings?: { ui?: string } };
-    check('rpc: manager.show/settings.show — формы', typeof ms.manager?.name === 'string' && ss.settings?.ui === 'ru', JSON.stringify(ms.manager) + ' ' + JSON.stringify(ss.settings));
+    check(
+      'rpc: manager.show/settings.show — формы, model — полная ссылка',
+      typeof ms.manager?.name === 'string' && typeof ms.manager?.model?.id === 'string' && ss.settings?.ui === 'ru',
+      JSON.stringify(ms.manager) + ' ' + JSON.stringify(ss.settings),
+    );
 
     // session.history: срез разговора; session.agents: состав чата и запас
     const hist = (await rpc('session.history', { from: 1, to: 2 })) as { messages?: unknown[] };
@@ -1021,8 +1025,8 @@ const client = await makeClient(handle.port);
     const uiSet = await rpc('settings.update', { patch: { ui: 'ru' } });
     const modelSet = await rpc('settings.update', { patch: { model: { id: 'mock' } } });
     check('rpc: settings.update ui+model — ок', uiSet.ok === true && modelSet.ok === true, JSON.stringify(uiSet));
-    const mgr = await rpc('manager.update', { fields: { temperature: 0.5 } });
-    check('rpc: manager.update — отчёт', String(mgr.text).length > 0, String(mgr.text));
+    const mgr = await rpc('manager.update', { fields: { model: { id: 'mock', temperature: 0.5 } } });
+    check('rpc: manager.update — отчёт с параметром ссылки', String(mgr.text).includes('temperature=0.5'), String(mgr.text));
 
     // session.close: разговор закрыт, проект остаётся; session.new возвращает с приветствием
     const sc = await rpc('session.close');
@@ -1220,7 +1224,7 @@ const client = await makeClient(handle.port);
 
   const withClient = new ServerPresenter(120);
   withClient.addClient(fakeWs);
-  const pending = withClient.confirm({ label: 'Команда', desc: 'ls', who: { id: 'x', name: 'Кто-то', emoji: '🤖' } });
+  const pending = withClient.confirm({ label: 'Команда', desc: 'ls', who: { id: 'x', name: 'Кто-то' } });
   await wait(30);
   const sent = captured.find((d) => d.includes('"confirm"'));
   check('confirm: вопрос ушёл клиенту', sent !== undefined && sent.includes('ls') && sent.includes('Кто-то'));
@@ -1250,7 +1254,7 @@ const client = await makeClient(handle.port);
     const wireWs = { readyState: 1, send: (d: string) => wire.push(d), on: () => {} } as unknown as WebSocket;
     const live = new ServerPresenter();
     live.addClient(wireWs);
-    const who = { id: 'a1', name: 'Ася', emoji: '🐵', color: 'cyan' };
+    const who = { id: 'a1', name: 'Ася', color: 'cyan' };
     live.notice('заметка');
     live.error('беда');
     live.turnHeader(who);

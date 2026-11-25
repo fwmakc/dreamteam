@@ -2,7 +2,7 @@
  * Схема карточек (card-schema.ts) — единый источник форм «Изменить» в GUI:
  *  - состав статики: agent/project/session, пути без дублей; карточка МОДЕЛИ —
  *    динамическая (modelCardSchema из контракта провайдера), сверяется ниже;
- *  - каждая метка и подсказка статики и всех модельных схем — ключ en и zh;
+ *  - каждая метка и подсказка статики и всех модельных схем — ключ ru/en/zh;
  *  - каждый path реально читается из живой карточки дома (агент, разговор,
  *    проект, модель) с согласованным типом (числа, строки, булевы, объекты);
  *  - stateSnapshot отдаёт схемы клиенту как есть (то, что ест GUI);
@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket, type RawData } from 'ws';
 import type { Presenter, SpeakerRef, TurnSink } from '../src/core/presenter.js';
+import { ru } from '../src/locales/ru.js';
 import { en } from '../src/locales/en.js';
 import { zh } from '../src/locales/zh.js';
 import { rmTemp } from './rm-tmp.js';
@@ -62,14 +63,19 @@ const { contractOf } = await import('../src/providers/registry.js');
 // ── состав схем ═══════════════════════════════════════════════════════════════
 {
   const names = Object.keys(CARD_SCHEMAS).sort();
-  check('состав статики: agent, project, session (модель — динамическая)', JSON.stringify(names) === JSON.stringify(['agent', 'project', 'session']), names.join(', '));
-  check('agent: 10 полей', CARD_SCHEMAS.agent.fields.length === 10, String(CARD_SCHEMAS.agent.fields.length));
+  check('состав статики: agent, manager, project, session (модель — динамическая)', JSON.stringify(names) === JSON.stringify(['agent', 'manager', 'project', 'session']), names.join(', '));
+  check('agent: 9 полей', CARD_SCHEMAS.agent.fields.length === 9, String(CARD_SCHEMAS.agent.fields.length));
+  check('manager: 2 поля — имя и модель-ссылка', CARD_SCHEMAS.manager.fields.length === 2, String(CARD_SCHEMAS.manager.fields.length));
+  const mgrModel = CARD_SCHEMAS.manager.fields.find((f) => f.path === 'model');
+  check('manager.model: тип model с описанием', mgrModel?.type === 'model' && mgrModel.desc === 'FIELD_MANAGER_MODEL_DESC', JSON.stringify(mgrModel));
   const all = Object.values(CARD_SCHEMAS).flatMap((s) => s.fields.map((f) => `${s.entity}.${f.path}`));
   check('пути без дублей', new Set(all).size === all.length, all.join(', '));
   const labels = Object.values(CARD_SCHEMAS).flatMap((s) => s.fields.map((f) => f.label));
   const placeholders = Object.values(CARD_SCHEMAS).flatMap((s) => s.fields.map((f) => f.placeholder).filter((p): p is string => Boolean(p)));
-  check('метки — ключи en и zh', labels.every((l) => l in en && l in zh), labels.filter((l) => !(l in en) || !(l in zh)).join(', '));
-  check('подсказки — ключи en и zh', placeholders.every((l) => l in en && l in zh), placeholders.filter((l) => !(l in en) || !(l in zh)).join(', '));
+  const descs = Object.values(CARD_SCHEMAS).flatMap((s) => s.fields.map((f) => f.desc).filter((d): d is string => Boolean(d)));
+  check('метки — ключи ru/en/zh', labels.every((l) => l in ru && l in en && l in zh), labels.filter((l) => !(l in ru) || !(l in en) || !(l in zh)).join(', '));
+  check('подсказки — ключи ru/en/zh', placeholders.every((l) => l in ru && l in en && l in zh), placeholders.filter((l) => !(l in ru) || !(l in en) || !(l in zh)).join(', '));
+  check('описания — ключи ru/en/zh', descs.every((l) => l in ru && l in en && l in zh), descs.filter((l) => !(l in ru) || !(l in en) || !(l in zh)).join(', '));
   const color = CARD_SCHEMAS.agent.fields.find((f) => f.path === 'color');
   check('color: enum 8 цветов', color?.type === 'enum' && (color.values ?? []).length === 8, JSON.stringify(color));
 }
@@ -86,8 +92,8 @@ const PROVIDERS = ['openai-compatible', 'anthropic-compatible', 'zai-coding-plan
     const gotKeys = schema.fields.map((f) => f.path);
     if (JSON.stringify(gotKeys) !== JSON.stringify(wantKeys)) missing.push(`${provider}: ${gotKeys.join('|')}`);
     for (const f of schema.fields) {
-      if (!(f.label in en && f.label in zh)) missing.push(`${provider}.${f.path}: метка`);
-      if (f.placeholder && !(f.placeholder in en && f.placeholder in zh)) missing.push(`${provider}.${f.path}: подсказка`);
+      if (!(f.label in ru && f.label in en && f.label in zh)) missing.push(`${provider}.${f.path}: метка`);
+      if (f.placeholder && !(f.placeholder in ru && f.placeholder in en && f.placeholder in zh)) missing.push(`${provider}.${f.path}: подсказка`);
       const spec = contract.keys[f.path];
       if (!spec) continue;
       const secret = f.path === 'apiKey' || f.path === 'clientSecret';
@@ -107,9 +113,10 @@ const PROVIDERS = ['openai-compatible', 'anthropic-compatible', 'zai-coding-plan
   const thinking = openai.fields.find((f) => f.path === 'thinking');
   check('модель: thinking — enum из контракта', thinking?.type === 'enum' && (thinking.values ?? []).join(',') === 'enabled,disabled', JSON.stringify(thinking));
   const req = openai.fields.find((f) => f.path === 'baseUrl');
-  check('модель: required — подсказка «обязательное поле»', req?.placeholder === 'обязательное поле', JSON.stringify(req));
+  check('модель: required — подсказка-ключ REQUIRED', req?.placeholder === 'REQUIRED', JSON.stringify(req));
   const secret = modelCardSchema('gigachat').fields.find((f) => f.path === 'clientSecret');
-  check('модель: clientSecret — password «пусто — не менять»', secret?.type === 'password' && secret.placeholder === 'пусто — не менять', JSON.stringify(secret));
+  check('модель: clientSecret — password с подсказкой-ключом',
+    secret?.type === 'password' && secret.placeholder === 'EMPTY_KEEP_UNCHANGED', JSON.stringify(secret));
   const custom = modelCardSchema('мой-адаптер');
   check('модель: провайдер без контракта — универсальный набор', custom.fields.length === 5 && custom.fields.map((f) => f.path).join(',') === 'provider,model,baseUrl,apiKey,note', custom.fields.map((f) => f.path).join(','));
 }
@@ -175,8 +182,8 @@ function typeOk(spec: { path: string; type: string; values?: readonly string[] }
   const agentSpecs = CARD_SCHEMAS.agent.fields;
   check(`агент «${a.id}»: все пути схемы читаются с типом`, agentSpecs.every((s) => typeOk(s, a)), agentSpecs.filter((s) => !typeOk(s, a)).map((s) => s.path).join(', '));
   check(
-    'агент: скаляры непусты (имя/эмодзи/цвет/промпт)',
-    ['name', 'emoji', 'color', 'prompt'].every((p) => String(get(a, p) ?? '').length > 0),
+    'агент: скаляры непусты (имя/цвет/промпт)',
+    ['name', 'color', 'prompt'].every((p) => String(get(a, p) ?? '').length > 0),
   );
 
   const st = stateSnapshot(app, engine) as { schemas?: typeof CARD_SCHEMAS; project?: { path: string } | null };

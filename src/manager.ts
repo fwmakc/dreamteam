@@ -21,14 +21,13 @@ import { t, tf } from './i18n.js';
 
 export const MANAGER_ID = 'manager';
 
-const MANAGER_COLORS = new Set(['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'gray']);
-const AGENT_COLORS = MANAGER_COLORS;
+const AGENT_COLORS = new Set(['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'gray']);
 
 /**
  * Читает manager.json в доме. Файл обязателен: нет файла, битый JSON или
  * неизвестная модель — падение на старте с внятной ошибкой.
  */
-/** Правка manager.json из GUI по белому списку; валидация loadManagerConfig после записи. */
+/** Правка manager.json из GUI/TUI по белому списку; валидация loadManagerConfig после записи. */
 export function updateManagerConfig(
   file: string,
   fields: Record<string, unknown>,
@@ -39,30 +38,32 @@ export function updateManagerConfig(
   const changes: string[] = [];
   const updatable: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields ?? {})) {
-    if (!['name', 'emoji', 'color', 'temperature', 'model'].includes(key)) continue;
-    if (key === 'temperature') {
-      const num = Number(value);
-      if (!Number.isFinite(num) || num < 0 || num > 2) {
-        throw new Error(`temperature — жду число от 0 до 2, а не «${value}»`);
+    if (!['name', 'model'].includes(key)) continue;
+    if (key === 'model') {
+      // ссылка на модель: id строкой или объект-ссылка (замена целиком);
+      // существование id проверит loadManagerConfig после записи
+      const ref = normalizeModelRef(value as string | ModelRef);
+      checkModelRef('manager.json: model', ref);
+      updatable[key] = ref;
+      // в отчёте — и переопределения параметров, не только id
+      changes.push(ref.id ? `model="${String(ref.id).trim()}"` : 'model');
+      for (const [k, v] of Object.entries(ref)) {
+        if (k !== 'id' && v !== undefined) changes.push(`${k}=${v}`);
       }
-      updatable[key] = num;
-    } else if (key === 'model') {
-      // ссылка на модель: id строкой или объект; существование проверит loadManagerConfig
-      if (typeof value === 'string' && value.trim()) updatable[key] = { id: value.trim() };
-      else if (value && typeof value === 'object' && !Array.isArray(value)) updatable[key] = value;
-      else throw new Error(`model — id модели («"model": {"id": "…"}»)`);
     } else {
       if (typeof value !== 'string' || !value.trim()) throw new Error(`поле «${key}» — непустая строка`);
       updatable[key] = value.trim();
+      changes.push(`${key}="${String(value.trim())}"`);
     }
-    changes.push(`${key}="${String(JSON.stringify(updatable[key]))}"`);
   }
-  if (changes.length === 0) throw new Error('не понятно, что менять — нет узнаваемых полей');
+  if (Object.keys(updatable).length === 0) throw new Error('не понятно, что менять — нет узнаваемых полей');
   raw.name = updatable.name ?? current.name;
-  raw.emoji = updatable.emoji ?? current.emoji;
-  raw.color = updatable.color ?? current.color;
-  raw.temperature = updatable.temperature ?? current.temperature;
-  raw.model = updatable.model ?? current.model;
+  // легаси-поля внешнего вида менеджера (emoji/color) вычищаем при записи
+  delete raw.emoji;
+  delete raw.color;
+  // легаси: температура жила верхним полем manager.json — вычищаем в ссылку
+  delete raw.temperature;
+  raw.model = (updatable.model as ModelRef | undefined) ?? current.model;
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}
 `, 'utf8');
@@ -73,7 +74,7 @@ export function updateManagerConfig(
     throw err;
   }
   renameSync(tmp, file);
-  return tf('✓ менеджер: {changes}', { changes: changes.join(', ') });
+  return tf('MANAGER_CHANGES', { changes: changes.join(', ') });
 }
 
 export function loadManagerConfig(file: string, knownModelIds: Iterable<string>): ManagerConfig {
@@ -96,32 +97,29 @@ export function loadManagerConfig(file: string, knownModelIds: Iterable<string>)
   } else {
     throw new Error(`${file}: не указан "model" — ссылка на модель из models/ дома ({"id": "…"})`);
   }
+  // легаси: температура жила верхним полем — на чтении переносим в ссылку
+  if (model.temperature === undefined && typeof obj.temperature === 'number' && Number.isFinite(obj.temperature)) {
+    model.temperature = obj.temperature;
+  }
+  checkModelRef(`${file}: model`, model);
   const known = new Set(knownModelIds);
   if (!model.id || !known.has(model.id)) {
     throw new Error(
       `${file}: модель «${model.id ?? ''}» не найдена в models/ дома (есть: ${[...known].join(', ')})`,
     );
   }
-  const color =
-    typeof obj.color === 'string' && MANAGER_COLORS.has(obj.color.toLowerCase()) ? obj.color.toLowerCase() : 'yellow';
-  const temperature =
-    typeof obj.temperature === 'number' && Number.isFinite(obj.temperature) ? obj.temperature : 0.2;
   return {
     model,
     name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : 'Менеджер',
-    emoji: typeof obj.emoji === 'string' && obj.emoji.trim() ? obj.emoji.trim() : '🛎',
-    color,
-    temperature,
   };
 }
 
-/** Псевдо-агент менеджера — для шапки реплики и списка участников */
+/** Псевдо-агент менеджера — для шапки реплики и списка участников (цвета нет — нейтральный) */
 export function managerAsAgent(cfg: ManagerConfig): Agent {
   return {
     id: MANAGER_ID,
     name: cfg.name,
-    emoji: cfg.emoji,
-    color: cfg.color,
+    color: '',
     prompt: MANAGER_PROMPT,
   };
 }
@@ -149,8 +147,8 @@ export const MANAGER_PROMPT =
   'Формат ответа: сначала короткий текст для человека, затем строго один JSON-объект:\n' +
   '{"say":"текст для человека","actions":[...действия...]}\n' +
   'Действия:\n' +
-  '- {"op":"team.add","id":"логин-латиницей","name":"Имя","description":"чем занимается, одной фразой","prompt":"системный промпт от первого лица","emoji":"🎯","color":"blue","model":"id-модели","tools":{"shell":{},"files":null}} — tools: объект-карточки, имя тула → настройки (объект или null = по умолчанию); model: id из «Модели дома» (не указан — основная; параметры — объектом: "model":{"temperature":0.3})\n' +
-  '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","vision":"...","image":"...","name":"...","emoji":"...","color":"..."}}\n' +
+  '- {"op":"team.add","id":"логин-латиницей","name":"Имя","description":"чем занимается, одной фразой","prompt":"системный промпт от первого лица","color":"blue","model":"id-модели","tools":{"shell":{},"files":null}} — tools: объект-карточки, имя тула → настройки (объект или null = по умолчанию); model: id из «Модели дома» (не указан — основная; параметры — объектом: "model":{"temperature":0.3})\n' +
+  '- {"op":"team.update","id":"id_участника","fields":{"description":"...","prompt":"...","model":"...","vision":"...","image":"...","name":"...","color":"..."}}\n' +
   '- {"op":"chat.add","who":"id"} / {"op":"chat.remove","who":"id"} — позвать или вывести из текущего чата\n' +
   '- {"op":"session.list"} — показать разговоры; {"op":"session.open","id":"20261027-143052"} — открыть по id; {"op":"session.new","title":"название","participants":["id"]} — новый разговор; {"op":"session.delete","id":"20261027-143052"} — удалить по id (текущий не удалится); {"op":"session.rename","title":"новое имя"} — переименовать текущий разговор (имя — по краткому содержанию)\n' +
   '- {"op":"agent.tool.add","agent":"id","tool":"files","card":{"allow":["git *"]}} — включить тул агенту; card можно опустить; {"op":"agent.tool.update",…} — обновить карточку; {"op":"agent.tool.delete","agent":"id","tool":"files"} — выключить. Встроенные: ' +
@@ -360,7 +358,6 @@ export interface ManagerNewAgent {
   id: string;
   name: string;
   prompt?: string;
-  emoji?: string;
   color?: string;
   description?: string;
   temperature?: number;
@@ -371,7 +368,6 @@ export interface ManagerNewAgent {
 
 const UPDATABLE_FIELDS = new Set([
   'name',
-  'emoji',
   'color',
   'description',
   'prompt',
@@ -433,7 +429,6 @@ export function addTeamAgent(dir: string, data: ManagerNewAgent, models: Readonl
   if (agentPathExists(dir, id)) throw new Error(`участник с id «${id}» уже есть`);
   const card: Record<string, unknown> = {
     name,
-    emoji: typeof data.emoji === 'string' && data.emoji.trim() ? data.emoji.trim() : '🤖',
     color:
       typeof data.color === 'string' && AGENT_COLORS.has(data.color.toLowerCase())
         ? data.color.toLowerCase()
@@ -458,7 +453,7 @@ export function addTeamAgent(dir: string, data: ManagerNewAgent, models: Readonl
   }
   if (data.tools !== undefined) card.tools = normalizeAgentTools(id, data.tools);
   writeAgentFile(dir, id, card);
-  return tf('✓ {name} (id «{id}») добавлен в команду', { name, id });
+  return tf('NAME_ID_ID_ADDED_TO_THE_TEAM', { name, id });
 }
 
 /** Импорт: вливает входящих агентов по id — новых добавляет, совпавших не трогает. */
@@ -467,6 +462,7 @@ export function mergeTeamAgents(dir: string, incoming: Agent[]): number {
   for (const a of incoming) {
     if (!a?.id || agentPathExists(dir, a.id)) continue;
     const { id: _id, ...card } = a;
+    delete (card as Record<string, unknown>).emoji; // легаси-поле не переживает импорт
     writeAgentFile(dir, a.id, card as Record<string, unknown>);
     added++;
   }
@@ -479,9 +475,9 @@ export function removeTeamAgent(dir: string, id: string): string {
   if (!fid) throw new Error('не указан id участника');
   const path = join(dir, `${fid}.json`);
   if (!existsSync(path)) throw new Error(`участника с id «${fid}» нет в команде`);
-  const card = JSON.parse(readFileSync(path, 'utf8')) as { emoji?: string; name?: string };
+  const card = JSON.parse(readFileSync(path, 'utf8')) as { name?: string };
   rmSync(path);
-  return tf('✓ {emoji} {name} (id «{id}») удалён из команды', { emoji: card.emoji ?? '🤖', name: card.name ?? fid, id: fid });
+  return tf('NAME_ID_REMOVED_FROM_THE_TEAM', { name: card.name ?? fid, id: fid });
 }
 
 /** team.update: правка полей участника по белому списку (read-modify-write одного файла). */
@@ -554,7 +550,7 @@ export function updateTeamAgent(dir: string, id: string, fields: ManagerUpdateFi
   }
   if (changes.length === 0) throw new Error('не понятно, что менять — в fields нет узнаваемых полей');
   writeAgentFile(dir, fid, card);
-  return tf('✓ {name}: {changes}', { name: String(card.name ?? fid), changes: changes.join(', ') });
+  return tf('NAME_CHANGES', { name: String(card.name ?? fid), changes: changes.join(', ') });
 }
 
 // ─── тула участников: agent.tool.add|update|delete (agents.json); файлы в tools/ менеджер не пишет ──
@@ -586,8 +582,8 @@ export function grantTool(dir: string, agentId: string, tool: string, card?: unk
   agentCard.tools = { ...tools, [tid]: normalized };
   writeAgentFile(dir, fid, agentCard);
   return had
-    ? tf('✓ {name}: карточку тула «{tool}» обновил', { name: String(agentCard.name ?? fid), tool: tid })
-    : tf('✓ {name}: тул «{tool}» включён', { name: String(agentCard.name ?? fid), tool: tid });
+    ? tf('NAME_UPDATED_THE_TOOL_TOOL_CARD', { name: String(agentCard.name ?? fid), tool: tid })
+    : tf('NAME_THE_TOOL_TOOL_IS_ENABLED', { name: String(agentCard.name ?? fid), tool: tid });
 }
 
 /** Убирает тул у агента: карточка из поля tools удаляется; не было — ошибка. */
@@ -602,7 +598,7 @@ export function revokeTool(dir: string, agentId: string, tool: string): string {
   delete tools[tid];
   agentCard.tools = tools;
   writeAgentFile(dir, fid, agentCard);
-  return tf('✓ {name}: тул «{tool}» выключен', { name: String(agentCard.name ?? fid), tool: tid });
+  return tf('NAME_TOOL_TOOL_DISABLED', { name: String(agentCard.name ?? fid), tool: tid });
 }
 
 // ─── hosts: серверы проекта (поле "hosts" в project.json) ───────────────────
@@ -679,7 +675,7 @@ export function addProjectHosts(
     added.push(id);
   }
   saveHostsFile(file, registry);
-  return tf('✓ сервер(а) добавлены в проект: {list}', { list: added.join(', ') });
+  return tf('SERVER_S_ADDED_TO_THE_PROJECT_LIST', { list: added.join(', ') });
 }
 
 /** project host delete: убрать сервер из поля "hosts" project.json. */
@@ -691,7 +687,7 @@ export function removeProjectHost(file: string, name: string): string {
   }
   delete registry[hid];
   saveHostsFile(file, registry);
-  return tf('✓ сервер «{id}» убран из проекта', { id: hid });
+  return tf('SERVER_ID_REMOVED_FROM_THE_PROJECT', { id: hid });
 }
 
 // ─── mails: ящики проекта (поле "mails" в project.json) ──────────────────────
@@ -740,7 +736,7 @@ export function addMailAccount(file: string, name: string, spec: unknown): strin
   }
   mails[box] = acc;
   saveMailsFile(file, mails);
-  return tf('✓ ящик «{box}» добавлен ({user} — imap {imap}, smtp {smtp})', { box, user: acc.user, imap: acc.imap, smtp: acc.smtp });
+  return tf('MAILBOX_BOX_ADDED_USER_IMAP_IMAP_SMTP_SMTP', { box, user: acc.user, imap: acc.imap, smtp: acc.smtp });
 }
 
 /** mail remove: убрать ящик из поля "mails" project.json. */
@@ -752,7 +748,7 @@ export function removeMailAccount(file: string, name: string): string {
   }
   delete mails[box];
   saveMailsFile(file, mails);
-  return tf('✓ ящик «{box}» убран', { box });
+  return tf('MAILBOX_BOX_REMOVED', { box });
 }
 
 // ─── messengers: боты telegram/max (поле "messengers" в project.json) ────────
@@ -798,7 +794,7 @@ export function addMessengerBot(file: string, key: string, token: string): strin
   }
   cfg[k] = { token: tok };
   saveMessengersFile(file, cfg);
-  return tf('✓ токен бота «{key}» сохранён в project.json проекта', { key: k });
+  return tf('BOT_TOKEN_KEY_SAVED_TO_THE_PROJECT_PROJECT', { key: k });
 }
 
 /** messenger remove: убрать бота из поля "messengers" project.json. */
@@ -813,7 +809,7 @@ export function removeMessengerBot(file: string, key: string): string {
   }
   delete cfg[k];
   saveMessengersFile(file, cfg);
-  return tf('✓ бот «{key}» убран из проекта', { key: k });
+  return tf('BOT_KEY_REMOVED_FROM_THE_PROJECT', { key: k });
 }
 
 // ─── записи секретов уровня команд: пустой add + update по полям ─────────────
@@ -869,7 +865,7 @@ export function addHostRecord(file: string, id: string): string {
   if (registry[hid] !== undefined) throw new Error(`сервер «${hid}» уже есть — см. /project hosts`);
   registry[hid] = { host: '' };
   saveHostsFile(file, registry);
-  return tf('✓ сервер «{id}» добавлен (пустой) — заполни поля: /project host update {id} host=… user=… port=…', { id: hid });
+  return tf('SERVER_ID_ADDED_EMPTY_FILL_IN_PROJECT_HOST', { id: hid });
 }
 
 /** /project host update: правка полей сервера (host, user, password, dir, port). */
@@ -882,7 +878,7 @@ export function updateHostRecord(file: string, id: string, fields: Record<string
   if (changes.length === 0) throw new Error('не понятно, что менять — жду поле=значение');
   registry[hid] = record as unknown as ManagerHostSpec;
   saveHostsFile(file, registry);
-  return tf('✓ сервер «{id}»: {changes}', { id: hid, changes: changes.join(', ') });
+  return tf('SERVER_ID_CHANGES', { id: hid, changes: changes.join(', ') });
 }
 
 /** /project mail add: пустой ящик — поля заполнит mail update. */
@@ -892,7 +888,7 @@ export function addMailRecord(file: string, id: string): string {
   if (mails[box] !== undefined) throw new Error(`ящик «${box}» уже есть — см. /project mails`);
   mails[box] = {} as MailAccount;
   saveMailsFile(file, mails);
-  return tf('✓ ящик «{id}» добавлен (пустой) — заполни поля: /project mail update {id} user=… password=… imap=… smtp=…', { id: box });
+  return tf('MAILBOX_ID_ADDED_EMPTY_FILL_IN_PROJECT_MAIL', { id: box });
 }
 
 /** /project mail update: правка полей ящика (user, password, imap, smtp, port, smtpPort, tlsNoVerify). */
@@ -905,7 +901,7 @@ export function updateMailRecord(file: string, id: string, fields: Record<string
   if (changes.length === 0) throw new Error('не понятно, что менять — жду поле=значение');
   mails[box] = record as unknown as MailAccount;
   saveMailsFile(file, mails);
-  return tf('✓ ящик «{id}»: {changes}', { id: box, changes: changes.join(', ') });
+  return tf('MAILBOX_ID_CHANGES', { id: box, changes: changes.join(', ') });
 }
 
 /** /project messenger add: пустой бот (token зальёт update или менеджер). */
@@ -918,7 +914,7 @@ export function addMessengerRecord(file: string, key: string): string {
   if (cfg[k] !== undefined) throw new Error(`бот «${k}» уже есть — см. /project messengers`);
   cfg[k] = { token: '' };
   saveMessengersFile(file, cfg);
-  return tf('✓ бот «{key}» добавлен (без токена) — заполни: /project messenger update {id} token=…', { key: k });
+  return tf('BOT_KEY_ADDED_NO_TOKEN_FILL_IN_PROJECT', { key: k });
 }
 
 /** /project messenger update: залить токен боту. */
@@ -934,5 +930,5 @@ export function updateMessengerRecord(file: string, key: string, fields: Record<
   if (changes.length === 0) throw new Error('не понятно, что менять — жду token=…');
   cfg[k] = record;
   saveMessengersFile(file, cfg);
-  return tf('✓ бот «{key}»: токен обновлён', { key: k });
+  return tf('BOT_KEY_TOKEN_UPDATED', { key: k });
 }

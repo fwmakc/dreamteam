@@ -38,14 +38,26 @@ do this automatically.
 
 ## UI strings and i18n
 
-Source strings are **Russian**. Wrap user-facing strings in `t()` (plain) or
-`tf()` (with `{placeholders}`); add translations to `src/locales/en.ts` and
-`src/locales/zh.ts` — both dictionaries must cover exactly the same key set.
+Dictionary keys are **identifiers** (`^[A-Z0-9_]+$`), not the strings
+themselves. Wrap user-facing strings in `t()` (plain) or `tf()` (with
+`{placeholders}` — never concatenate translated pieces). Key style: structural
+prefixes where the origin derives them mechanically (`HELP_<OP>`/`TITLE_<OP>`
+for the operations manifest, `FIELD_<NAME>_LABEL|PLACEHOLDER|DESC` for card
+schemas, `LABEL_<NAME>`, `QUOTA_*`); whole sentences named after their English
+translation (`NO_DISCUSSIONS_YET`, ≤8 words); an atomic shared vocabulary for
+single interface words (`SEND`, `DELETE`, `SESSION`).
+
+`src/locales/ru.ts` is the full source dictionary (Russian); `en.ts` and
+`zh.ts` must cover exactly the same key set. A key missing from the active
+locale falls back to Russian, then to the key itself — a reworded value never
+breaks a translation again.
 
 Deliberately **not** translated: LLM-facing prompts, command argument names
 (syntax), config diagnostics (the fail-fast layer), tool outputs/gates.
 
-A probe guards this: `npm run probe:i18n`.
+Guards: `node scripts/check-i18n.mjs` (key format, ru+en+zh parity, harvested
+call sites) and the probe `npm run probe:i18n`; `node scripts/i18n-diff.mjs`
+reports untranslated and stale keys.
 
 ## Git workflow
 

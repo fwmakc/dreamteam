@@ -149,13 +149,12 @@ export function stateSnapshot(app: App, engine?: Engine, projects?: unknown[]): 
       id: a.id,
       name: a.name,
       description: a.description,
-      emoji: a.emoji,
       color: a.color,
       model: a.model?.id,
       tools: agentToolIds(a),
       inChat: inChat.has(a.id),
     })),
-    manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, model: app.mgr.model.id },
+    manager: { name: app.mgr.name, model: app.mgr.model.id },
     models: [...app.models].map(([id, s]) => ({
       id,
       kind: s.provider.kind,
@@ -751,12 +750,12 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       case 'import_home': {
         const entries = readZipEntries(Buffer.from(String(msg.dataB64 ?? ''), 'base64'));
         const ok = await presenter.confirm({
-          label: 'Импортировать всё приложение из этого архива?',
-          desc: 'Настройки/профиль/модели, память команды и расписание заменяются; проекты и их разговоры вливаются по id; открытый проект перечитывается. Ключи (.env) не переносятся.',
+          label: t('IMPORT_THE_WHOLE_APP_FROM_THIS_ARCHIVE'),
+          desc: t('SETTINGS_PROFILE_MODELS_TEAM_MEMORY_AND_THE_SCHEDULE'),
           who: managerAsAgent(app.mgr),
         });
         if (!ok) {
-          ws.send(JSON.stringify({ type: 'notice', text: '  Импорт отменён.' }));
+          ws.send(JSON.stringify({ type: 'notice', text: '  ' + t('IMPORT_CANCELLED') }));
           return;
         }
         const report = applyHomeImport(app, entries);
@@ -767,12 +766,12 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       case 'import_settings': {
         const entries = readZipEntries(Buffer.from(String(msg.dataB64 ?? ''), 'base64'));
         const ok = await presenter.confirm({
-          label: 'Импортировать настройки приложения из этого архива?',
-          desc: 'settings.json, профиль, менеджер и карточки моделей (с ключами) заменяются; проекты и разговоры не трогаются.',
+          label: t('IMPORT_THE_APP_SETTINGS_FROM_THIS_ARCHIVE'),
+          desc: t('SETTINGS_JSON_THE_PROFILE_THE_MANAGER_AND_THE'),
           who: managerAsAgent(app.mgr),
         });
         if (!ok) {
-          ws.send(JSON.stringify({ type: 'notice', text: '  Импорт отменён.' }));
+          ws.send(JSON.stringify({ type: 'notice', text: '  ' + t('IMPORT_CANCELLED') }));
           return;
         }
         const report = applySettingsImport(app, entries);
@@ -786,12 +785,12 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
           throw new Error('в архиве нет project.json — это архив всего приложения? Тогда: import_home');
         }
         const ok = await presenter.confirm({
-          label: 'Импортировать проект из этого архива?',
-          desc: 'Имя проекта занято — разговоры вливаются в него по id (совпавшие заменяются); свободно — создастся новый проект. Секреты (серверы, почта, боты) не заменяются.',
+          label: t('IMPORT_A_PROJECT_FROM_THIS_ARCHIVE'),
+          desc: t('THE_PROJECT_NAME_IS_TAKEN_SESSIONS_MERGE_INTO'),
           who: managerAsAgent(app.mgr),
         });
         if (!ok) {
-          ws.send(JSON.stringify({ type: 'notice', text: '  Импорт отменён.' }));
+          ws.send(JSON.stringify({ type: 'notice', text: '  ' + t('IMPORT_CANCELLED') }));
           return;
         }
         const report = applyProjectImport(app, entries, argsId(msg) || undefined);
@@ -926,8 +925,8 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         const full = engine.team();
         const inChat = new Set(chatTeam(app.session, full).map((a) => a.id));
         return {
-          inChat: full.filter((a) => inChat.has(a.id)).map((a) => ({ id: a.id, name: a.name, emoji: a.emoji })),
-          outside: full.filter((a) => !inChat.has(a.id)).map((a) => ({ id: a.id, name: a.name, emoji: a.emoji })),
+          inChat: full.filter((a) => inChat.has(a.id)).map((a) => ({ id: a.id, name: a.name })),
+          outside: full.filter((a) => !inChat.has(a.id)).map((a) => ({ id: a.id, name: a.name })),
         };
       }
       case 'session.agent.add':
@@ -1128,7 +1127,8 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         return { text: report };
       }
       case 'manager.show':
-        return { manager: { name: app.mgr.name, emoji: app.mgr.emoji, color: app.mgr.color, temperature: app.mgr.temperature, model: app.mgr.model.id } };
+        // полная model-ссылка (id + параметры) — форма GUI читает карточку целиком
+        return { manager: { name: app.mgr.name, model: app.mgr.model } };
       case 'settings.show':
         return { settings: loadSettings(SETTINGS_FILE, 0) };
       case 'project.host.delete': {
@@ -1380,7 +1380,7 @@ if (process.env.DT_SERVE === '1' || entry.endsWith('/src/serve.ts')) {
         : authToken
           ? 'ОТКРЫТО В СЕТЬ — доступ по токену'
           : 'ОТКРЫТО В СЕТЬ — авторизации нет';
-      console.log(pc.dim(t('\n  режим: Server')));
+      console.log(pc.dim(t('MODE_SERVER')));
       console.log(pc.dim(`  API поднято: ${local} (WS — /ws) · dreamteam v${APP_VERSION} · ${net} · Ctrl+C — останов`));
       if (lan.length > 0) console.log(pc.dim(`  в сети: ${lan.join(', ')}`));
       if (authToken) console.log(pc.dim(`  открыть с токеном: ${local}/?token=${authToken}`));

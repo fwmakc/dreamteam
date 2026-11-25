@@ -2,6 +2,7 @@ import pc from 'picocolors';
 import { isAbsolute, resolve } from 'node:path';
 import { OPERATIONS, extraHints, findOperation, operationCommand, operationArgs, type OpHint, type OpSpec } from './core/operations.js';
 import { t, tf } from './i18n.js';
+import { BUILTIN_TOOL_IDS } from './tools-api.js';
 
 // канонический список операций живёт в ядре (src/core/operations.ts) — отсюда
 // им пользуются терминальные подсказки; /help и сервер отдают тот же список
@@ -28,6 +29,9 @@ export interface CompletionContext {
   /** id фоновых задач проекта (свежие сверху) — для /bg log|kill|delete.
    *  Опционально: пробы и старые вызовы подсказывать не обязаны. */
   bgIds?(): string[];
+  /** id языков интерфейса (встроенные + lang/ дома) — для /lang <id>.
+   *  Опционально: без дома подсказывать не обязаны. */
+  langIds?(): string[];
 }
 
 function commonPrefix(items: string[]): string {
@@ -149,6 +153,8 @@ function argValues(op: OpSpec, argPos: number, ctx: CompletionContext, fragment:
       return [...(ctx.projectNames?.() ?? []), ...(ctx.dirOptions?.(fragment) ?? [])];
     case 'bg':
       return ctx.bgIds?.() ?? [];
+    case 'lang':
+      return ctx.langIds?.() ?? [];
     default:
       return [];
   }
@@ -240,7 +246,7 @@ function sessionRows(ctx: CompletionContext, fragment: string): string[] {
     .filter((s) => s.id.startsWith(fragment))
     .map((s) => ({ id: s.id, title: s.title }));
   if (hits.length === 0) {
-    return [pc.dim(tf('  нет разговора с id «{id}» — см. /sessions', { id: fragment || '…' }))];
+    return [pc.dim(tf('NO_SESSION_WITH_ID_ID_SEE_SESSIONS', { id: fragment || '…' }))];
   }
   return hits
     .slice(0, 8)
@@ -264,7 +270,7 @@ export function hintRowsFor(line: string, ctx: CompletionContext): string[] | nu
 
 function usageRow(op: OpSpec): string {
   const args = operationArgs(op);
-  return `  ${operationCommand(op)}${args ? ' ' + pc.dim(args) : ''}  ${pc.dim('— ' + t(op.help))}`;
+  return `  ${operationCommand(op)}${args ? ' ' + pc.dim(args) : ''}  ${pc.dim('— ' + tf(op.help, { tools: BUILTIN_TOOL_IDS.join(', ') }))}`;
 }
 
 /** Строка особой команды вне реестра — тем же форматом, что usageRow. */
@@ -283,10 +289,10 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
     const prefix = body.toLowerCase();
     const matches = OPERATIONS.filter((o) => operationCommand(o).slice(1).startsWith(prefix));
     const extra = extraHints().filter((h) => h.cmd.slice(1).startsWith(prefix));
-    if (matches.length === 0 && extra.length === 0) return [pc.dim(t('  нет такой команды — см. /help'))];
+    if (matches.length === 0 && extra.length === 0) return [pc.dim(t('NO_SUCH_COMMAND_SEE_HELP'))];
     const rows = matches.slice(0, PANEL_MAX).map(usageRow);
     rows.push(...extra.map(usageExtra));
-    if (matches.length > PANEL_MAX) rows.push(pc.dim(tf('  … ещё {n} — уточните ввод', { n: matches.length - PANEL_MAX })));
+    if (matches.length > PANEL_MAX) rows.push(pc.dim(tf('N_MORE_REFINE_YOUR_INPUT', { n: matches.length - PANEL_MAX })));
     return rows;
   }
 
@@ -295,7 +301,7 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
   const extraCmd = extraHints().find((h) => h.cmd.slice(1) === group);
   if (extraCmd) return [usageExtra(extraCmd)];
   const groupExists = OPERATIONS.some((o) => o.name.startsWith(group + '.'));
-  if (!groupExists) return [pc.dim(t('  нет такой группы — см. /help'))];
+  if (!groupExists) return [pc.dim(t('NO_SUCH_GROUP_SEE_HELP'))];
   const verbs = verbsOf(group);
   const implicitOp = OPERATIONS.find((o) => o.name.startsWith(group + '.') && o.implicit);
 
@@ -303,7 +309,7 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
   if (parts.length === 1 && trailing) {
     if (implicitOp && verbs.length === 0) return [usageRow(implicitOp), ...valueRows(implicitOp, 0, ctx, '')];
     return [
-      pc.dim(tf('  /{group} <{verb}>:', { group, verb: t('глагол') })),
+      pc.dim(tf('GROUP_VERB', { group, verb: t('VERB') })),
       pc.dim('    ' + verbs.slice(0, PANEL_MAX).join('   ')),
     ];
   }
@@ -314,17 +320,17 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
     const exactSub = verbs.includes(typed) ? subVerbsOf(group, typed) : [];
     if (exactSub.length > 0) {
       return [
-        pc.dim(tf('  /{group} <{verb}>:', { group: `${group} ${parts[1]}`, verb: t('глагол') })),
+        pc.dim(tf('GROUP_VERB', { group: `${group} ${parts[1]}`, verb: t('VERB') })),
         pc.dim('    ' + exactSub.slice(0, PANEL_MAX).join('   ')),
       ];
     }
     const hits = verbs.filter((v) => v.startsWith(typed) && v !== typed);
     if (hits.length === 0) {
       // точный глагол без подглаголов (session delete) — использование покажет путь ниже
-      if (!findOperation(`${group}.${typed}`)) return [pc.dim(t('  нет такого глагола — см. /help'))];
+      if (!findOperation(`${group}.${typed}`)) return [pc.dim(t('NO_SUCH_VERB_SEE_HELP'))];
     } else {
       return [
-        pc.dim(tf('  /{group} <{verb}>:', { group, verb: t('глагол') })),
+        pc.dim(tf('GROUP_VERB', { group, verb: t('VERB') })),
         pc.dim('    ' + hits.slice(0, PANEL_MAX).join('   ')),
       ];
     }
@@ -334,19 +340,19 @@ function hintRowsForCommand(line: string, ctx: CompletionContext): string[] | nu
   const sub = parts.length >= 2 ? subVerbsOf(group, parts[1].toLowerCase()) : [];
   if (sub.length > 0) {
     const subRows = (verbs2: string[]) => [
-      pc.dim(tf('  /{group} <{verb}>:', { group: `${group} ${parts[1]}`, verb: t('глагол') })),
+      pc.dim(tf('GROUP_VERB', { group: `${group} ${parts[1]}`, verb: t('VERB') })),
       pc.dim('    ' + verbs2.slice(0, PANEL_MAX).join('   ')),
     ];
     if (parts.length === 2 && trailing) return subRows(sub);
     if (parts.length === 3 && !trailing && !findOperation(`${group}.${parts[1].toLowerCase()}.${parts[2].toLowerCase()}`)) {
       const hits = sub.filter((v) => v.startsWith(parts[2].toLowerCase()) && v !== parts[2].toLowerCase());
-      if (hits.length === 0) return [pc.dim(t('  нет такого глагола — см. /help'))];
+      if (hits.length === 0) return [pc.dim(t('NO_SUCH_VERB_SEE_HELP'))];
       return subRows(hits);
     }
   }
 
   const resolved = resolveCommand(parts);
-  if (!resolved) return [pc.dim(t('  нет такой команды — см. /help'))];
+  if (!resolved) return [pc.dim(t('NO_SUCH_COMMAND_SEE_HELP'))];
   const argPos = Math.max(0, parts.length - resolved.cmdWords + (trailing ? 1 : 0) - 1);
   return [usageRow(resolved.op), ...valueRows(resolved.op, argPos, ctx, trailing ? '' : parts[parts.length - 1] ?? '')];
 }
@@ -364,6 +370,7 @@ function valueRows(op: OpSpec, argPos: number, ctx: CompletionContext, fragment:
   else if (arg.hint === 'projects') values = ctx.projectNames?.() ?? [];
   else if (arg.hint === 'path') values = ctx.dirOptions?.(fragment) ?? [];
   else if (arg.hint === 'bg') values = ctx.bgIds?.() ?? [];
+  else if (arg.hint === 'lang') values = ctx.langIds?.() ?? [];
   if (values === null) return [];
   return [
     `  ${operationCommand(op)} ${pc.dim(operationArgs(op))}:`,
@@ -432,9 +439,9 @@ const MENTION_MAX_WIDTH = 52;
 
 function mentionItems(ctx: CompletionContext): MentionItem[] {
   return [
-    { label: ctx.managerName(), hint: t('менеджер переговорки') },
+    { label: ctx.managerName(), hint: t('TITLE_MANAGER_SHOW') },
     ...ctx.chatAgents().map((a) => ({ label: a.name, hint: a.description })),
-    { label: SESSION_ITEM.label, hint: t('конспект другого разговора') },
+    { label: SESSION_ITEM.label, hint: t('ANOTHER_SESSION_DIGEST') },
   ];
 }
 

@@ -1,14 +1,19 @@
 /**
- * Языки интерфейса. Исходные строки приложения — русские; словарь локали
- * переводит их на лету: t('исходная строка') → перевод, а без перевода —
- * сама строка. Поэтому русский словарь пуст (тождество), английский и
- * китайский — встроенные (src/locales/), а свои языки кладутся файлами в
- * дом: ~/.dreamteam/lang/<id>.json — как tools/, только данные вместо кода:
+ * Языки интерфейса. Ключи — идентификаторы вида NO_DISCUSSIONS_YET (латиница
+ * верхнего регистра, цифры, _); словарь локали переводит их на лету:
+ * t(KEY) → перевод, промах — русский (исходник), потом сам ключ. Русский —
+ * полный словарь src/locales/ru.ts (KEY → строка), английский и китайский —
+ * встроенные (src/locales/), а свои языки кладутся файлами в дом:
+ * ~/.dreamteam/lang/<id>.json — как tools/, только данные вместо кода:
  *
  *   {
  *     "name": "Deutsch",
- *     "translations": { "Разговоров пока нет.": "Noch keine Gespräche." }
+ *     "translations": { "NO_DISCUSSIONS_YET": "Noch keine Gespräche." }
  *   }
+ *
+ * Файлы старого формата (ключи — русские строки, до 0.0.21) читаются тоже:
+ * русские ключи автоматически перебиваются в наши KEY по словарю ru.ts;
+ * строка без соответствия — громкая ошибка со списком при старте.
  *
  * id языка — имя файла без .json (латиница/цифры/-/_); файлы с «_» в начале
  * игнорируются (шаблоны). Выбор — при первом запуске (мастер) и потом
@@ -23,10 +28,17 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { en } from './locales/en.js';
+import { ru } from './locales/ru.js';
 import { zh } from './locales/zh.js';
 
-/** Словарь: русская исходная строка → перевод. */
+/** Словарь: KEY → перевод. */
 type Dict = Record<string, string>;
+
+/** Формат ключей перевода. */
+const KEY_RE = /^[A-Z0-9_]+$/;
+
+/** id файла языка: латиница/цифры/-/_ (шаблоны с «_» отсеяны раньше). */
+const LANG_FILE_RE = /^([a-z0-9][a-z0-9_-]*)\.json$/;
 
 export interface LanguageInfo {
   id: string;
@@ -35,24 +47,25 @@ export interface LanguageInfo {
   builtIn: boolean;
 }
 
-/** Встроенные локали. ru — исходный язык, словарь пустой (тождество). */
+/** Встроенные локали. ru — исходный язык: полный словарь KEY → русский. */
 const BUILT_IN: Record<string, { name: string; dict: Dict }> = {
-  ru: { name: 'Русский', dict: {} },
+  ru: { name: 'Русский', dict: ru },
   en: { name: 'English', dict: en },
   zh: { name: '中文', dict: zh },
 };
 
-const LANG_FILE_RE = /^([a-z0-9][a-z0-9_-]*)\.json$/;
+/** Обратный индекс русского словаря: строка → KEY (автоконвертация легаси). */
+const RU_KEY_BY_STRING = new Map(Object.entries(ru).map(([k, v]) => [v, k]));
 
 let current: Dict = {};
 let currentId = 'ru';
 
-/** Перевод строки интерфейса; нет перевода — исходная русская строка. */
+/** Перевод строки интерфейса: активная локаль → русский → сам ключ. */
 export function t(s: string): string {
-  return current[s] ?? s;
+  return current[s] ?? BUILT_IN.ru.dict[s] ?? s;
 }
 
-/** Перевод с подстановкой значений: tf('создал {file}', { file }) — плейсхолдеры
+/** Перевод с подстановкой значений: tf('CREATED_FILE', { file }) — плейсхолдеры
  *  {имя} в словаре позволяют менять порядок слов (важно для zh). */
 export function tf(key: string, vars: Record<string, string | number>): string {
   let s = t(key);
@@ -80,9 +93,10 @@ export function fmtTime(ts: number): string {
   return new Date(ts).toLocaleTimeString(localeTag());
 }
 
-/** Словарь активной локали — сервер отдаёт его веб-оболочке в state.ui. */
+/** Словарь активной локали с русским фолбэком — сервер отдаёт его веб-оболочке
+ *  в state.ui: один lookup на клиенте, промах остаётся читаемым русским. */
 export function localeDict(): Dict {
-  return current;
+  return { ...BUILT_IN.ru.dict, ...current };
 }
 
 /** Внешние языки из lang/ дома: читает и валидирует все файлы сразу. */
@@ -115,12 +129,23 @@ function loadExternalLanguages(homeDir: string): { id: string; name: string; dic
       throw new Error(`${path}: поле "name" — непустая строка (название языка для меню)`);
     }
     if (!obj.translations || typeof obj.translations !== 'object' || Array.isArray(obj.translations)) {
-      throw new Error(`${path}: поле "translations" — объект «исходная строка»: «перевод»`);
+      throw new Error(`${path}: поле "translations" — объект «KEY»: «перевод»`);
     }
     const dict: Dict = {};
+    const orphans: string[] = [];
     for (const [k, v] of Object.entries(obj.translations)) {
       if (typeof v !== 'string') throw new Error(`${path}: перевод «${k}» — не строка`);
-      dict[k] = v;
+      if (KEY_RE.test(k)) { dict[k] = v; continue; }
+      // старый формат (до 0.0.21): ключ — русская строка; перебиваем в наш KEY
+      const key = RU_KEY_BY_STRING.get(k);
+      if (key) dict[key] = v;
+      else orphans.push(k);
+    }
+    if (orphans.length) {
+      throw new Error(
+        `${path}: ключи не в формате KEY ([A-Z0-9_]) и без соответствия в русском словаре — ` +
+        `обновите файл: ${orphans.map((k) => JSON.stringify(k.slice(0, 60))).join(', ')}`,
+      );
     }
     if (id in BUILT_IN) {
       throw new Error(`${path}: id «${id}» занят встроенным языком — переименуйте файл`);

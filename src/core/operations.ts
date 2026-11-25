@@ -50,7 +50,7 @@ import {
 import { addModelConfig, loadModels, removeModelConfig, updateModelConfig } from '../providers/registry.js';
 import { resolveEndpoints } from '../mail.js';
 import { agentToolIds, BUILTIN_TOOL_IDS } from '../tools-api.js';
-import { t, tf, applyLocale } from '../i18n.js';
+import { t, tf, applyLocale, knownLanguages, localeId } from '../i18n.js';
 import { AGENTS_DIR, DT_HOME, MANAGER_FILE, MODELS_DIR, PROJECTS_DIR, PROJECT_DIR, PROJECT_FILE, SETTINGS_FILE, TOOLS_DIR, WORKSPACE } from '../paths.js';
 import { listProjects } from './projects.js';
 import { looksLikePath } from '../cli-project.js';
@@ -78,7 +78,7 @@ export interface OpArg {
   name: string;
   required: boolean;
   /** Уточнение для панели подсказок (что подставлять: id, файлы, папки…) */
-  hint?: 'sessions' | 'agents' | 'chat' | 'models' | 'projects' | 'schedule' | 'path' | 'bg';
+  hint?: 'sessions' | 'agents' | 'chat' | 'models' | 'projects' | 'schedule' | 'path' | 'bg' | 'lang';
 }
 
 export interface OpSpec {
@@ -100,15 +100,15 @@ export interface OpSpec {
 
 function sessionsText(app: App): string[] {
   // список работает всегда, когда открыт проект — даже без разговора (/session close)
-  if (!app.store) return [t('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>')];
+  if (!app.store) return [t('NO_OPEN_PROJECT_START_WITH_PROJECT_NEW_ID')];
   const list = app.store.list();
-  if (list.length === 0) return [t('Разговоров пока нет — /session new [id].')];
+  if (list.length === 0) return [t('NO_SESSIONS_YET_SESSION_NEW_ID')];
   const fmt = (ts: number) => new Date(ts).toLocaleString('ru-RU');
-  const lines = ['', t('Разговоры (свежие сверху):')];
+  const lines = ['', t('SESSIONS_NEWEST_FIRST')];
   for (const s of list) {
-    const cur = s.id === app.session?.id ? t(' ← текущий') : '';
-    lines.push(`• ${s.id} — ${s.title} — ${t('сообщ.:')} ${s.count}${cur}`);
-    lines.push(`   ${t('создан')} ${fmt(s.createdAt)} · ${t('последнее сообщение')} ${fmt(s.updatedAt)}`);
+    const cur = s.id === app.session?.id ? t('CURRENT_2') : '';
+    lines.push(`• ${s.id} — ${s.title} — ${t('MSGS')} ${s.count}${cur}`);
+    lines.push(`   ${t('CREATED')} ${fmt(s.createdAt)} · ${t('LATEST_MESSAGE')} ${fmt(s.updatedAt)}`);
   }
   lines.push('');
   return lines;
@@ -126,24 +126,24 @@ function agentsText(app: App): string[] {
   try {
     fullTeam = loadTeam(AGENTS_DIR);
   } catch {
-    return [t('agents.json недоступен.')];
+    return [t('AGENTS_JSON_IS_UNAVAILABLE')];
   }
   const inChat = new Set(app.session ? chatTeam(app.session, fullTeam).map((a) => a.id) : []);
   const lines = [
-    tf('{emoji} {name} — менеджер переговорки: консьерж и шлюз настроек [модель: {model}]', {
-      emoji: app.mgr.emoji, name: app.mgr.name, model: app.mgr.model.id ?? '',
+    tf('MEETING_ROOM_MANAGER_CONCIERGE_AND_SETTINGS', {
+      name: app.mgr.name, model: app.mgr.model.id ?? '',
     }),
   ];
   for (const a of fullTeam) {
     const tools = agentToolIds(a);
     const marks = [
-      tools.length > 0 ? tf('тулы: {list}', { list: tools.join(', ') }) : '',
-      a.model?.id ? tf('модель: {id}', { id: a.model.id }) : '',
+      tools.length > 0 ? tf('TOOLS_LIST', { list: tools.join(', ') }) : '',
+      a.model?.id ? tf('MODEL_ID', { id: a.model.id }) : '',
     ].filter(Boolean);
     lines.push(
-      `• ${a.id} — ${a.emoji} ${a.name}${a.description ? ' — ' + a.description : ''}` +
+      `• ${a.id} — ${a.name}${a.description ? ' — ' + a.description : ''}` +
       (marks.length > 0 ? ` [${marks.join(' · ')}]` : '') +
-      (app.session && !inChat.has(a.id) ? ` · ${t('не в этом чате')} (/session agent add ${a.id})` : ''),
+      (app.session && !inChat.has(a.id) ? ` · ${t('NOT_IN_THIS_CHAT')} (/session agent add ${a.id})` : ''),
     );
   }
   return lines;
@@ -157,18 +157,18 @@ function ctxK(n: number): string {
 function modelsText(app: App): string[] {
   const lines: string[] = [];
   for (const [id, s] of app.models) {
-    const state = s.ok ? t('✓ готов') : `✗ ${s.note ?? t('не настроен')}`;
+    const state = s.ok ? t('DONE') : `✗ ${s.note ?? t('NOT_CONFIGURED')}`;
     const w = s.config?.contextWindow;
     lines.push(
       `• ${id} (${s.provider.kind}, ${s.provider.model}) ${state}` +
-      (s.vision ? ` ${t('◉ зрение')}` : '') +
-      (typeof w === 'number' && w > 0 ? ` · ${tf('окно {n}', { n: ctxK(w) })}` : '') +
-      (id === app.settings.model?.id ? ` ${t('★ основной')}` : '') +
-      (id === app.mgr.model.id ? ` ${t('🛎 менеджер')}` : ''),
+      (s.vision ? ` ◉ ${t('VISION')}` : '') +
+      (typeof w === 'number' && w > 0 ? ` · ${tf('WINDOW_N', { n: ctxK(w) })}` : '') +
+      (id === app.settings.model?.id ? ` ${t('DEFAULT')}` : '') +
+      (id === app.mgr.model.id ? ` ${t('MANAGER')}` : ''),
     );
   }
   for (const [id, s] of app.images) {
-    lines.push(`  ${t('картинки:')} ${id} ${s.ok ? t('✓ готов') : `✗ ${s.note ?? t('не настроен')}`}`);
+    lines.push(`  ${t('IMAGES')} ${id} ${s.ok ? t('DONE') : `✗ ${s.note ?? t('NOT_CONFIGURED')}`}`);
   }
   return lines;
 }
@@ -181,25 +181,25 @@ function historyText(app: App, fromStr?: string, toStr?: string): string[] {
   let to = all.length;
   if (fromStr !== undefined) {
     const f = Number.parseInt(fromStr, 10);
-    if (!Number.isInteger(f) || f <= 0) return [tf('from — номер сообщения (с 1), а не «{v}»', { v: fromStr })];
+    if (!Number.isInteger(f) || f <= 0) return [tf('FROM_A_MESSAGE_NUMBER_FROM_1_NOT_V', { v: fromStr })];
     from = f;
   }
   if (toStr !== undefined) {
     const to2 = Number.parseInt(toStr, 10);
-    if (!Number.isInteger(to2) || to2 < from) return [tf('to — номер сообщения не меньше from ({from}), а не «{v}»', { from, v: toStr })];
+    if (!Number.isInteger(to2) || to2 < from) return [tf('TO_A_MESSAGE_NUMBER_NOT_LESS_THAN_FROM', { from, v: toStr })];
     to = to2;
   }
   const shown = all.slice(from - 1, to);
-  if (shown.length === 0) return [t('Разговор пуст (или срез пустой — см. /session history).')];
+  if (shown.length === 0) return [t('THE_SESSION_IS_EMPTY_OR_THE_SLICE_IS')];
   const lines = [
-    tf('Разговор «{title}» — показано {shown} из {all} сообщений:', { title: session.title, shown: shown.length, all: all.length }),
+    tf('SESSION_TITLE_SHOWING_SHOWN_OF_ALL_MESSAGES', { title: session.title, shown: shown.length, all: all.length }),
     '',
   ];
   for (const m of shown) {
     const who = m.authorId === 'user'
-      ? t('Вы')
+      ? t('YOU')
       : m.authorId === 'tool'
-        ? t('⚙ инструменты')
+        ? t('TOOLS')
         : isSessionRef(m)
           ? `📎 ${m.authorName}`
           : m.authorName;
@@ -219,52 +219,52 @@ function memoryText(app: App, arg: string): string[] {
   const { session } = requireSession(app);
   if (arg === 'shared') {
     if (!app.memory.shared) {
-      return [t('Общая память пока пуста — заполняется при закрытии разговоров (/session new, /exit).')];
+      return [t('THE_SHARED_MEMORY_IS_STILL_EMPTY_IT_FILLS')];
     }
-    return ['', t('Общая память команды:'), ...app.memory.shared.split('\n'), ''];
+    return ['', t('TEAM_SHARED_MEMORY'), ...app.memory.shared.split('\n'), ''];
   }
   if (!arg) {
     const withMem = memTeam.filter((a) => session.memories?.[a.id]);
     return [
-      t('Чья память: /memory <id> (например, /memory gleb), /memory shared — общая.'),
+      t('WHOSE_MEMORY_MEMORY_ID_E_G_MEMORY_GLEB'),
       withMem.length > 0
-        ? tf('Уже помнят что-то: {ids}', { ids: withMem.map((a) => a.id).join(', ') })
-        : t('Пока никто не «осмыслил» разговор (память обновляется примерно раз в 12 сообщений).'),
+        ? tf('ALREADY_REMEMBER_SOMETHING_IDS', { ids: withMem.map((a) => a.id).join(', ') })
+        : t('NOBODY_HAS_REFLECTED_ON_THE_SESSION_YET_MEMORY'),
     ];
   }
   const who = memTeam.find((a) => a.id === arg.trim().toLowerCase());
-  if (!who) return [tf('Нет агента с id «{id}» — см. /agents', { id: arg })];
+  if (!who) return [tf('NO_AGENT_WITH_ID_ID_SEE_AGENTS', { id: arg })];
   const mine = session.memories?.[who.id];
   const glob = app.memory.agents[who.id];
   const lines = [
     '',
-    tf('Что {name} ({id}) помнит в разговоре «{title}»:', { name: who.name, id: who.id, title: session.title }),
-    `${t('Задача:')} ${mine?.task ?? '—'}`,
-    `${t('Отношение к вам:')} ${mine?.towardUser ?? '—'}`,
+    tf('WHAT_NAME_ID_REMEMBERS_IN_SESSION_TITLE', { name: who.name, id: who.id, title: session.title }),
+    `${t('TASK')} ${mine?.task ?? '—'}`,
+    `${t('HOW_THEY_SEE_YOU')} ${mine?.towardUser ?? '—'}`,
   ];
   if (mine?.ties && Object.keys(mine.ties).length > 0) {
     const byId = new Map(memTeam.map((a) => [a.id, a.name] as const));
     for (const [id, note] of Object.entries(mine.ties)) lines.push(`${byId.get(id) ?? id}: ${note}`);
   } else {
-    lines.push(`${t('Коллеги:')} —`);
+    lines.push(`${t('COLLEAGUES')} —`);
   }
-  lines.push(`${t('Из других разговоров:')} ${glob?.otherChats ?? '—'}`, '');
+  lines.push(`${t('FROM_OTHER_SESSIONS')} ${glob?.otherChats ?? '—'}`, '');
   return lines;
 }
 
 function projectListText(): string[] {
-  const lines = ['', t('Проекты (открыть: /project open <id|путь>):')];
+  const lines = ['', t('PROJECTS_OPEN_PROJECT_OPEN_ID_PATH')];
   const all = listProjects();
   if (all.length === 0 && !PROJECT_DIR) {
-    lines.push(t('  пока ни одного — /project new <id> [папка] создаст первый'));
+    lines.push(t('NONE_YET_PROJECT_NEW_ID_FOLDER_WILL_CREATE'));
   }
-  const noPath = t('(папка не задана)');
+  const noPath = t('FOLDER_NOT_SET');
   for (const p of all) {
     const cur = Boolean(PROJECT_DIR) && basename(PROJECT_DIR) === p.id;
     lines.push(
       cur
-        ? tf('• {id} — {path} ← текущий', { id: p.id, path: p.path ?? noPath })
-        : tf('• {id} — {path}', { id: p.id, path: p.path ?? noPath }),
+        ? tf('ID_PATH_CURRENT', { id: p.id, path: p.path ?? noPath })
+        : tf('ID_PATH', { id: p.id, path: p.path ?? noPath }),
     );
   }
   lines.push('');
@@ -279,16 +279,16 @@ function sessionAgentsText(engine: Engine): string[] {
   try {
     fullTeam = loadTeam(AGENTS_DIR);
   } catch {
-    return [t('agents.json недоступен.')];
+    return [t('AGENTS_JSON_IS_UNAVAILABLE')];
   }
   const inChat = chatTeam(session, fullTeam);
   const outside = fullTeam.filter((a) => !inChat.some((c) => c.id === a.id));
   const lines = [
-    tf('В чате разговора «{title}»:', { title: session.title }),
-    ...inChat.map((a) => `• ${a.id} — ${a.emoji} ${a.name}${a.id === 'manager' ? ` — ${t('менеджер')}` : ''}`),
+    tf('IN_THE_CHAT_OF_SESSION_TITLE', { title: session.title }),
+    ...inChat.map((a) => `• ${a.id} — ${a.name}${a.id === 'manager' ? ` — ${t('MANAGER_2')}` : ''}`),
   ];
   if (outside.length > 0) {
-    lines.push('', t('Можно позвать: /session agent add <id>'), ...outside.map((a) => `• ${a.id} — ${a.emoji} ${a.name}`));
+    lines.push('', t('CAN_INVITE_SESSION_AGENT_ADD_ID'), ...outside.map((a) => `• ${a.id} — ${a.name}`));
   }
   lines.push('');
   return lines;
@@ -304,7 +304,7 @@ function bgTaskLine(task: ReturnType<typeof bgInfo>): string {
   const emoji =
     task.status === 'running' ? '⏳' : task.status === 'done' ? '✅' : task.status === 'failed' ? '❌' : task.status === 'timeout' ? '⏱' : task.status === 'killed' ? '⛔' : '❓';
   const dur = formatBgDuration((task.endedAt ?? Date.now()) - task.startedAt);
-  const who = task.by === 'user' ? t('вы') : task.by;
+  const who = task.by === 'user' ? t('YOU_2') : task.by;
   const extra =
     task.status === 'running'
       ? `${emoji} идёт ${dur}${task.pid ? `, pid ${task.pid}` : ''}`
@@ -315,13 +315,13 @@ function bgTaskLine(task: ReturnType<typeof bgInfo>): string {
 /** /session agent add|delete <id…|all>: событие чата пишется репликой менеджера. */
 function sessionAgentChange(engine: Engine, rest: string[], verb: 'add' | 'delete'): string[] {
   const emptyHint = verb === 'add'
-    ? t('Кого позвать? /session agent add <id…|all> (кто в чате — /session agents)')
-    : t('Кого вывести? /session agent delete <id…|all> (кто в чате — /session agents)');
+    ? t('WHOM_TO_INVITE_SESSION_AGENT_ADD_ID_ALL')
+    : t('WHOM_TO_REMOVE_SESSION_AGENT_DELETE_ID_ALL');
   let fullTeam: Agent[];
   try {
     fullTeam = loadTeam(AGENTS_DIR);
   } catch {
-    return [t('agents.json недоступен — изменить чат не получится.')];
+    return [t('AGENTS_JSON_IS_UNAVAILABLE_CANNOT_CHANGE_THE_CHAT')];
   }
   const req = expandIds(rest);
   if (req.length === 0) return [emptyHint];
@@ -333,11 +333,11 @@ function sessionAgentChange(engine: Engine, rest: string[], verb: 'add' | 'delet
       const inChat = new Set(session ? chatTeam(session, fullTeam).map((a) => a.id) : []);
       ids = fullTeam.map((a) => a.id).filter((id) => !inChat.has(id));
       if (ids.length === 0) {
-        return [fullTeam.length === 0 ? t('В команде никого нет — /agent new <id> создаст.') : t('Вся команда уже в чате.')];
+        return [fullTeam.length === 0 ? t('THE_TEAM_IS_EMPTY_AGENT_NEW_ID_WILL') : t('THE_WHOLE_TEAM_IS_ALREADY_IN_THE_CHAT')];
       }
     } else {
       ids = session ? chatTeam(session, fullTeam).map((a) => a.id) : [];
-      if (ids.length === 0) return [t('Кроме менеджера в чате никого.')];
+      if (ids.length === 0) return [t('NOBODY_BUT_THE_MANAGER_IS_IN_THE_CHAT')];
     }
   }
   const notes: string[] = [];
@@ -380,14 +380,14 @@ function parseFields(pairs: string[]): Record<string, string | number> | string[
   const out: Record<string, string | number> = {};
   for (const pair of pairs) {
     const eq = pair.indexOf('=');
-    if (eq === -1) return [tf('Поле без значения: «{pair}» — жду поле=значение', { pair })];
+    if (eq === -1) return [tf('A_FIELD_WITHOUT_A_VALUE_PAIR_EXPECTED_FIELD', { pair })];
     const key = pair.slice(0, eq).trim();
     const value = pair.slice(eq + 1);
-    if (!key) return [tf('Пустое имя поля: «{pair}»', { pair })];
-    if (!value) return [tf('Пустое значение у поля «{key}»', { key })];
+    if (!key) return [tf('EMPTY_FIELD_NAME_PAIR', { pair })];
+    if (!value) return [tf('EMPTY_VALUE_FOR_FIELD_KEY', { key })];
     if (key === 'temperature' || key === 'maxTokens' || key.endsWith('.temperature') || key.endsWith('.maxTokens')) {
       const num = Number(value);
-      if (!Number.isFinite(num)) return [tf('{key} — жду числом, а не «{value}»', { key, value })];
+      if (!Number.isFinite(num)) return [tf('KEY_EXPECTED_A_NUMBER_NOT_VALUE', { key, value })];
       out[key] = num;
     } else {
       out[key] = value;
@@ -414,10 +414,10 @@ function modelRefPatch(
     const base = k.slice(0, dot);
     const sub = k.slice(dot + 1);
     if (!bases.includes(base) || sub.includes('.')) {
-      return { patch: {}, error: [tf('Вложенное поле «{key}» не знаю — можно {bases}.* (id, temperature, maxTokens…)', { key: k, bases: bases.join(', ') + '.*' })] };
+      return { patch: {}, error: [tf('UNKNOWN_NESTED_FIELD_KEY_ALLOWED_BASES_ID_TEMPERATURE', { key: k, bases: bases.join(', ') + '.*' })] };
     }
     if (!SUBS.has(sub)) {
-      return { patch: {}, error: [tf('«{base}.{sub}» не знаю — можно: {subs}', { base, sub, subs: [...SUBS].join(', ') })] };
+      return { patch: {}, error: [tf('UNKNOWN_BASE_SUB_ALLOWED_SUBS', { base, sub, subs: [...SUBS].join(', ') })] };
     }
     patch[base] = { ...(patch[base] ?? current[base] ?? {}), [sub]: v } as ModelRef;
   }
@@ -446,7 +446,7 @@ function exportHomeZip(engine: Engine): string[] {
   const entries = homeEntries();
   const file = join(exportTargetDir(), `home-${stamp()}.zip`);
   writeFileSync(file, packEntriesZip(entries));
-  return [tf('Экспорт: {file} ({n} записей, включая ключи моделей — хранить как пароль)', { file, n: entries.length })];
+  return [tf('EXPORT_FILE_N_RECORDS_INCLUDES_MODEL_KEYS_TREAT', { file, n: entries.length })];
 }
 
 /** /settings export — настройки без проектов; в имени файла — профиль. */
@@ -454,22 +454,22 @@ function exportSettingsZip(engine: Engine): string[] {
   const entries = settingsEntries();
   const file = join(exportTargetDir(), `settings-${profileLabel(engine.app.profile.name)}-${stamp()}.zip`);
   writeFileSync(file, packEntriesZip(entries));
-  return [tf('Экспорт: {file} ({n} записей, включая ключи моделей — хранить как пароль)', { file, n: entries.length })];
+  return [tf('EXPORT_FILE_N_RECORDS_INCLUDES_MODEL_KEYS_TREAT', { file, n: entries.length })];
 }
 
 /** /project export — только текущий проект: project.json (с секретами) и разговоры. */
 function exportProjectZip(engine: Engine): string[] {
-  if (!PROJECT_DIR) return [t('Нет открытого проекта — экспортировать нечего.')];
+  if (!PROJECT_DIR) return [t('NO_OPEN_PROJECT_NOTHING_TO_EXPORT')];
   const id = basename(PROJECT_DIR);
   let entries: ReturnType<typeof projectEntries>;
   try {
     entries = projectEntries(id);
   } catch (err) {
-    return [tf('Не удалось собрать архив проекта «{id}»: {err}', { id, err: err instanceof Error ? err.message : String(err) })];
+    return [tf('COULD_NOT_PACK_THE_ARCHIVE_OF_PROJECT_ID', { id, err: err instanceof Error ? err.message : String(err) })];
   }
   const file = join(exportTargetDir(), `project-${id}-${stamp()}.zip`);
   writeFileSync(file, packEntriesZip(entries));
-  return [tf('Экспорт: {file} ({n} записей — project.json и разговоры)', { file, n: entries.length })];
+  return [tf('EXPORT_FILE_N_RECORDS_PROJECT_JSON_AND_SESSIONS', { file, n: entries.length })];
 }
 
 /** /session export — только текущий разговор. */
@@ -480,7 +480,7 @@ function exportSessionZip(engine: Engine): string[] {
   const entries = sessionEntriesById(app, session.id);
   const file = join(exportTargetDir(), `session-${proj}-${session.id}-${stamp()}.zip`);
   writeFileSync(file, packEntriesZip(entries));
-  return [tf('Экспорт: {file} ({n} записей)', { file, n: entries.length })];
+  return [tf('EXPORT_FILE_N_RECORDS', { file, n: entries.length })];
 }
 
 // ── манифест ─────────────────────────────────────────────────────────────────
@@ -488,18 +488,18 @@ function exportSessionZip(engine: Engine): string[] {
 export const OPERATIONS: OpSpec[] = [
   // разговоры
   {
-    name: 'sessions.list', implicit: true, needsProject: true, title: 'список разговоров',
-    help: 'разговоры проекта: id, свежие сверху, текущий отмечен',
+    name: 'sessions.list', implicit: true, needsProject: true, title: 'TITLE_SESSIONS_LIST',
+    help: 'HELP_SESSIONS_LIST',
     run: async (engine) => sessionsText(engine.app),
   },
   {
     name: 'session.new',
     args: [{ name: 'id', required: false }],
     needsProject: true,
-    title: 'новый разговор',
-    help: 'создаёт и открывает; без id — автоштамп вида 20261027-143052',
+    title: 'TITLE_SESSION_NEW',
+    help: 'HELP_SESSION_NEW',
     run: async (engine, rest, signal) => {
-      if (rest.length > 1) return [t('Синтаксис: /session new [id] — id одним словом (или вовсе без id — автоштамп)')];
+      if (rest.length > 1) return [t('SYNTAX_SESSION_NEW_ID_A_ONE_WORD_ID')];
       const id = rest[0];
       await engine.newSession(signal ?? new AbortController().signal, id);
       return [];
@@ -509,30 +509,30 @@ export const OPERATIONS: OpSpec[] = [
     name: 'session.open',
     args: [{ name: 'id', required: true, hint: 'sessions' }],
     needsProject: true,
-    title: 'открыть разговор',
-    help: 'переключиться на разговор по id (список — /sessions)',
+    title: 'TITLE_SESSION_OPEN',
+    help: 'HELP_SESSION_OPEN',
     run: async (engine, rest) => {
       const id = rest.join(' ').trim();
-      if (!id) return [t('Синтаксис: /session open <id> (список — /sessions)')];
+      if (!id) return [t('SYNTAX_SESSION_OPEN_ID_LIST_SESSIONS')];
       engine.openSessionById(id);
       return [];
     },
   },
   {
     name: 'session.close', needsProject: true,
-    title: 'закрыть разговор',
-    help: 'текущий разговор закрыт, проект остаётся открытым',
+    title: 'TITLE_SESSION_CLOSE',
+    help: 'HELP_SESSION_CLOSE',
     run: async (engine) => [engine.closeSession()],
   },
   {
     name: 'session.delete',
     args: [{ name: 'id…', required: true, hint: 'sessions' }],
     needsProject: true,
-    title: 'удалить разговор',
-    help: 'текущий удалить нельзя — сначала /session close; можно несколько',
+    title: 'TITLE_SESSION_DELETE',
+    help: 'HELP_SESSION_DELETE',
     run: async (engine, rest) => {
       const ids = expandIds(rest);
-      if (ids.length === 0) return [t('Синтаксис: /session delete <id…> (список — /sessions)')];
+      if (ids.length === 0) return [t('SYNTAX_SESSION_DELETE_ID_LIST_SESSIONS')];
       return ids.map((id) => engine.deleteSessionById(id));
     },
   },
@@ -540,14 +540,14 @@ export const OPERATIONS: OpSpec[] = [
     name: 'session.update',
     args: [{ name: 'title=…', required: false }],
     needsProject: true, needsSession: true,
-    title: 'править разговор',
-    help: 'текущий разговор: title=… ; без полей менеджер придумает имя по дайджесту',
+    title: 'TITLE_SESSION_UPDATE',
+    help: 'HELP_SESSION_UPDATE',
     run: async (engine, rest) => {
       const parsed = rest.length > 0 ? parseFields(rest) : {};
       if (Array.isArray(parsed)) return parsed;
       const keys = Object.keys(parsed);
       if (keys.some((k) => k !== 'title')) {
-        return [t('У разговора одно поле: title=… (без полей имя придумает менеджер)')];
+        return [t('A_SESSION_HAS_ONE_FIELD_TITLE_WITH_NO')];
       }
       return [await engine.renameSession(typeof parsed.title === 'string' ? parsed.title : undefined)];
     },
@@ -559,37 +559,37 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'to', required: false },
     ],
     needsProject: true, needsSession: true,
-    title: 'история разговора',
-    help: 'срез сообщений включительно; один аргумент — от N до конца; без — весь',
+    title: 'TITLE_SESSION_HISTORY',
+    help: 'HELP_SESSION_HISTORY',
     run: async (engine, rest) => historyText(engine.app, rest[0], rest[1]),
   },
   {
     name: 'session.export', needsProject: true, needsSession: true,
-    title: 'экспорт разговора',
-    help: 'архив текущего разговора: session-<проект>-<разговор>-<штамп>.zip',
+    title: 'TITLE_SESSION_EXPORT',
+    help: 'HELP_SESSION_EXPORT',
     run: async (engine) => exportSessionZip(engine),
   },
   {
     name: 'session.import',
     args: [{ name: 'файл.zip', required: true }],
     needsProject: true,
-    title: 'импорт разговора',
-    help: 'вернуть разговор из архива (вливается в открытый проект как новый)',
+    title: 'TITLE_SESSION_IMPORT',
+    help: 'HELP_SESSION_IMPORT',
     run: async (engine, rest) => {
       const file = rest.join(' ');
-      if (!file) return [t('Синтаксис: /session import <файл.zip>')];
-      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
+      if (!file) return [t('SYNTAX_SESSION_IMPORT_FILE_ZIP')];
+      if (!existsSync(file)) return [tf('NO_FILE_FILE', { file })];
       const entries = readZipEntries(readFileSync(file));
       if (!entries.some((e) => e.rel === 'session.json')) {
-        return [t('В архиве нет session.json — это архив всего приложения? Тогда: /import <файл>')];
+        return [t('NO_SESSION_JSON_IN_THE_ARCHIVE_IS_IT')];
       }
       return [await applySessionImport(engine.app, entries)];
     },
   },
   {
     name: 'session.agents', needsProject: true, needsSession: true,
-    title: 'кто в чате',
-    help: 'участники текущего разговора и кого можно позвать',
+    title: 'TITLE_SESSION_AGENTS',
+    help: 'HELP_SESSION_AGENTS',
     run: async (engine) => sessionAgentsText(engine),
   },
   {
@@ -598,8 +598,8 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id…|all', required: true, hint: 'agents' },
     ],
     needsProject: true, needsSession: true,
-    title: 'позвать в чат',
-    help: 'по id из /agents; можно несколько; all — вся команда',
+    title: 'TITLE_SESSION_AGENT_ADD',
+    help: 'HELP_SESSION_AGENT_ADD',
     run: async (engine, rest) => sessionAgentChange(engine, rest, 'add'),
   },
   {
@@ -608,40 +608,40 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id…|all', required: true, hint: 'chat' },
     ],
     needsProject: true, needsSession: true,
-    title: 'вывести из чата',
-    help: 'реплики останутся в истории; можно несколько; all — все',
+    title: 'TITLE_SESSION_AGENT_DELETE',
+    help: 'HELP_SESSION_AGENT_DELETE',
     run: async (engine, rest) => sessionAgentChange(engine, rest, 'delete'),
   },
 
   // весь дом
   {
-    name: 'export', title: 'экспорт всего приложения',
-    help: 'дом целиком: настройки, команда, модели с ключами, память, расписание и ВСЕ проекты с разговорами; .env (TOKEN/PORT) — вещь машины',
+    name: 'export', title: 'TITLE_EXPORT',
+    help: 'HELP_EXPORT',
     run: async (engine) => exportHomeZip(engine),
   },
   {
     name: 'import',
     args: [{ name: 'файл.zip', required: true }],
-    title: 'импорт всего приложения',
-    help: 'настройки/профиль/память/расписание заменяются, проекты и разговоры вливаются; с подтверждением',
+    title: 'TITLE_IMPORT',
+    help: 'HELP_IMPORT',
     run: async (engine, rest) => {
       const file = rest.join(' ');
-      if (!file) return [t('Синтаксис: /import <файл.zip>')];
-      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
+      if (!file) return [t('SYNTAX_IMPORT_FILE_ZIP')];
+      if (!existsSync(file)) return [tf('NO_FILE_FILE', { file })];
       const entries = readZipEntries(readFileSync(file));
       const ok = await engine.confirmAction(
-        t('Импортировать всё приложение из этого архива?'),
-        t('Настройки/профиль/модели, память команды и расписание заменяются; проекты и их разговоры вливаются по id; открытый проект перечитывается. Ключи (.env) не переносятся.'),
+        t('IMPORT_THE_WHOLE_APP_FROM_THIS_ARCHIVE'),
+        t('SETTINGS_PROFILE_MODELS_TEAM_MEMORY_AND_THE_SCHEDULE'),
       );
-      if (!ok) return [t('Импорт отменён.')];
+      if (!ok) return [t('IMPORT_CANCELLED')];
       return [applyHomeImport(engine.app, entries)];
     },
   },
 
   // команда
   {
-    name: 'agents.list', implicit: true, title: 'состав команды',
-    help: 'кто в команде (id, имя, роль), у кого какие тулы, кто в чате',
+    name: 'agents.list', implicit: true, title: 'TITLE_AGENTS_LIST',
+    help: 'HELP_AGENTS_LIST',
     run: async (engine) => agentsText(engine.app),
   },
   {
@@ -650,20 +650,20 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id', required: true },
       { name: 'поле=значение…', required: false },
     ],
-    title: 'новый агент',
-    help: 'имя по умолчанию = id; поля: name= emoji= color= description= prompt= model.id= (тонкие параметры — model.temperature= и соседи, можно без id: переопределение на основной модели)',
+    title: 'TITLE_AGENT_NEW',
+    help: 'HELP_AGENT_NEW',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
-      if (!id) return [t('Синтаксис: /agent new <id> [поле=значение…] — затем /agent update <id> name=… description=…')];
+      if (!id) return [t('SYNTAX_AGENT_NEW_ID_FIELD_VALUE_THEN_AGENT')];
       if (!/^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9_-]+)*$/.test(id)) {
-        return [tf('id «{id}» не по маске: строчная латиница и цифры, внутри точка, «-», «_»', { id })];
+        return [tf('ID_ID_VIOLATES_THE_MASK_LOWERCASE_LATIN_LETTERS', { id })];
       }
       const fields: Record<string, unknown> = { id, name: id };
       if (pairs.length > 0) {
         const parsed = parseFields(pairs);
         if (Array.isArray(parsed)) return parsed;
         const tempKey = Object.keys(parsed).find((k) => k.toLowerCase() === 'temperature');
-        if (tempKey !== undefined) return [tf('temperature= — больше поля агента; температура живёт в модели: model.temperature={v}', { v: String(parsed[tempKey]) })];
+        if (tempKey !== undefined) return [tf('TEMPERATURE_IS_NO_LONGER_AN_AGENT_FIELD_TEMPERATURE', { v: String(parsed[tempKey]) })];
         const { patch, error } = modelRefPatch(parsed, ['model'], {});
         if (error) return error;
         for (const [k, v] of Object.entries(parsed)) {
@@ -681,20 +681,20 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id', required: true, hint: 'agents' },
       { name: 'поле=значение…', required: true },
     ],
-    title: 'править агента',
-    help: 'поля: name, emoji, color, description, prompt, workspace, vision, image; вложенные: model.id, model.temperature, model.maxTokens, model.thinking, model.reasoning',
+    title: 'TITLE_AGENT_UPDATE',
+    help: 'HELP_AGENT_UPDATE',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
         return [
-          t('Синтаксис: /agent update <id> поле=значение…'),
-          t('Поля: name, emoji, color, description, prompt, workspace, vision, image; вложенные: model.id, model.temperature, model.maxTokens, model.thinking, model.reasoning'),
+          t('SYNTAX_AGENT_UPDATE_ID_FIELD_VALUE'),
+          t('FIELDS_NAME_COLOR_DESCRIPTION_PROMPT_WORKSPACE_VISION'),
         ];
       }
       const parsed = parseFields(pairs);
       if (Array.isArray(parsed)) return parsed;
       const tempKey = Object.keys(parsed).find((k) => k.toLowerCase() === 'temperature');
-      if (tempKey !== undefined) return [tf('temperature= — больше поля агента; температура живёт в модели: model.temperature={v}', { v: String(parsed[tempKey]) })];
+      if (tempKey !== undefined) return [tf('TEMPERATURE_IS_NO_LONGER_AN_AGENT_FIELD_TEMPERATURE', { v: String(parsed[tempKey]) })];
       // текущая ссылка агента — база для мерджа model.*
       let current: ModelRef | undefined;
       try {
@@ -710,31 +710,31 @@ export const OPERATIONS: OpSpec[] = [
         (fields as Record<string, string | number>)[k.toLowerCase()] = v;
       }
       if (patch.model) fields.model = patch.model;
-      if (Object.keys(fields).length === 0) return [t('Не понял, что менять — жду поле=значение')];
+      if (Object.keys(fields).length === 0) return [t('DIDN_T_UNDERSTAND_WHAT_TO_CHANGE_EXPECTING_FIELD')];
       return [updateTeamAgent(AGENTS_DIR, id, fields, engine.app.models)];
     },
   },
   {
     name: 'agent.get',
     args: [{ name: 'id', required: true, hint: 'agents' }],
-    title: 'показать агента',
-    help: 'полная карточка JSON — все поля, включая вложенные model/vision/image/context',
+    title: 'TITLE_AGENT_GET',
+    help: 'HELP_AGENT_GET',
     run: async (_engine, rest) => {
       const id = (rest[0] ?? '').trim().toLowerCase();
-      if (!id) return [t('Синтаксис: /agent get <id> (список — /agents)')];
+      if (!id) return [t('SYNTAX_AGENT_GET_ID_LIST_AGENTS')];
       const agent = loadTeam(AGENTS_DIR).find((a) => a.id === id);
-      if (!agent) return [tf('нет агента с id «{id}» — список: /agents', { id })];
+      if (!agent) return [tf('NO_AGENT_WITH_ID_ID_SEE_AGENTS', { id })];
       return [JSON.stringify(agent, null, 2)];
     },
   },
   {
     name: 'agent.delete',
     args: [{ name: 'id', required: true, hint: 'agents' }],
-    title: 'удалить агента',
-    help: 'из команды; можно несколько — через запятую или пробел',
+    title: 'TITLE_AGENT_DELETE',
+    help: 'HELP_AGENT_DELETE',
     run: async (_engine, rest) => {
       const ids = rest.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean);
-      if (ids.length === 0) return [t('Синтаксис: /agent delete <id> [id…] — id через пробел или запятую')];
+      if (ids.length === 0) return [t('SYNTAX_AGENT_DELETE_ID_ID_IDS_SEPARATED_BY')];
       const lines: string[] = [];
       for (const id of ids) {
         try {
@@ -749,21 +749,21 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'agent.tools',
     args: [{ name: 'id агента', required: true, hint: 'agents' }],
-    title: 'тулы агента',
-    help: 'какие тулы включены и с какими настройками',
+    title: 'TITLE_AGENT_TOOLS',
+    help: 'HELP_AGENT_TOOLS',
     run: async (_engine, rest) => {
       const id = (rest[0] ?? '').trim().toLowerCase();
-      if (!id) return [t('Синтаксис: /agent tools <id> (список — /agents)')];
+      if (!id) return [t('SYNTAX_AGENT_TOOLS_ID_LIST_AGENTS')];
       let agent: Agent | undefined;
       try {
         agent = loadTeam(AGENTS_DIR).find((a) => a.id === id);
       } catch {
-        return [t('agents.json недоступен.')];
+        return [t('AGENTS_JSON_IS_UNAVAILABLE')];
       }
-      if (!agent) return [tf('Нет агента с id «{id}» — см. /agents', { id })];
+      if (!agent) return [tf('NO_AGENT_WITH_ID_ID_SEE_AGENTS', { id })];
       const tools = agentToolIds(agent);
-      if (tools.length === 0) return [tf('{name}: тулов и так нет — /agent tool add {id} <тул>', { name: agent.name, id })];
-      return ['', tf('{name} ({id}), тулы:', { name: agent.name, id }), ...tools.map((tl) => `• ${tl}`), ''];
+      if (tools.length === 0) return [tf('NAME_NO_TOOLS_YET_AGENT_TOOL_ADD_ID', { name: agent.name, id })];
+      return ['', tf('NAME_ID_TOOLS', { name: agent.name, id }), ...tools.map((tl) => `• ${tl}`), ''];
     },
   },
   {
@@ -772,12 +772,12 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id агента', required: true, hint: 'agents' },
       { name: 'тул…', required: true },
     ],
-    title: 'включить тул',
-    help: 'встроенные ' + BUILTIN_TOOL_IDS.join(', ') + ' или свой из tools/; можно несколько',
+    title: 'TITLE_AGENT_TOOL_ADD',
+    help: 'HELP_AGENT_TOOL_ADD',
     run: async (_engine, rest) => {
       const [who, ...req] = rest;
       const tools = req.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean);
-      if (!who || tools.length === 0) return [t('Синтаксис: /agent tool add <id агента> <тул…> (files, shell, ssh, look, image или свой из tools/)')];
+      if (!who || tools.length === 0) return [t('SYNTAX_AGENT_TOOL_ADD_AGENT_ID_TOOL_FILES')];
       const lines: string[] = [];
       for (const tool of tools) {
         try {
@@ -796,12 +796,12 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'тул', required: true },
       { name: 'поле=значение…', required: true },
     ],
-    title: 'настроить тул',
-    help: 'карточка тула в agents.json: поле=значение…',
+    title: 'TITLE_AGENT_TOOL_UPDATE',
+    help: 'HELP_AGENT_TOOL_UPDATE',
     run: async (_engine, rest) => {
       const [who, tool, ...pairs] = rest;
       if (!who || !tool || pairs.length === 0) {
-        return [t('Синтаксис: /agent tool update <id агента> <тул> поле=значение…')];
+        return [t('SYNTAX_AGENT_TOOL_UPDATE_AGENT_ID_TOOL_FIELD')];
       }
       const parsed = parseFields(pairs);
       if (Array.isArray(parsed)) return parsed;
@@ -814,22 +814,22 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id агента', required: true, hint: 'agents' },
       { name: 'тул…|all', required: true },
     ],
-    title: 'выключить тул',
-    help: 'убрать карточку тула из агента; можно несколько; all — все тулы',
+    title: 'TITLE_AGENT_TOOL_DELETE',
+    help: 'HELP_AGENT_TOOL_DELETE',
     run: async (_engine, rest) => {
       const [who, ...req] = rest;
-      if (!who || req.length === 0) return [t('Синтаксис: /agent tool delete <id агента> <тул…|all>')];
+      if (!who || req.length === 0) return [t('SYNTAX_AGENT_TOOL_DELETE_AGENT_ID_TOOL_ALL')];
       let tools = req.flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean);
       if (tools.length === 1 && tools[0].toLowerCase() === 'all') {
         let agent: Agent | undefined;
         try {
           agent = loadTeam(AGENTS_DIR).find((a) => a.id === who.trim().toLowerCase());
         } catch {
-          return [t('agents.json недоступен.')];
+          return [t('AGENTS_JSON_IS_UNAVAILABLE')];
         }
-        if (!agent) return [tf('Нет агента с id «{id}» — см. /agents', { id: who })];
+        if (!agent) return [tf('NO_AGENT_WITH_ID_ID_SEE_AGENTS', { id: who })];
         tools = agentToolIds(agent);
-        if (tools.length === 0) return [tf('{name}: тулов и так нет — /agent tool add {id} <тул>', { name: agent.name, id: agent.id })];
+        if (tools.length === 0) return [tf('NAME_NO_TOOLS_YET_AGENT_TOOL_ADD_ID', { name: agent.name, id: agent.id })];
       }
       const lines: string[] = [];
       for (const tool of tools) {
@@ -848,8 +848,8 @@ export const OPERATIONS: OpSpec[] = [
     name: 'tools.list',
     implicit: true,
     args: [{ name: 'тул', required: false }],
-    title: 'тулы дома',
-    help: 'встроенные и свои из tools/: что умеет и у кого включён; <тул> — карточка тула',
+    title: 'TITLE_TOOLS_LIST',
+    help: 'HELP_TOOLS_LIST',
     run: async (engine, rest) => {
       await engine.refreshUserTools(); // полку могли править руками — показываем, что лежит сейчас
       const house = engine.houseTools();
@@ -867,70 +867,70 @@ export const OPERATIONS: OpSpec[] = [
       const id = (rest[0] ?? '').trim().toLowerCase();
       if (!id) {
         const builtin = house.filter((tl) => tl.builtin).length;
-        const lines = [tf('Тулы дома: {n} встроенных + {m} своих (tools/):', { n: builtin, m: house.length - builtin })];
+        const lines = [tf('HOUSE_TOOLS_N_BUILT_IN_M_OWN_TOOLS', { n: builtin, m: house.length - builtin })];
         for (const tl of house) {
           const holders = holdersOf(tl.id);
           lines.push(
-            `• ${tl.id} — ${tl.desc}${tl.builtin ? '' : t(' — свой')}` +
-              (holders ? tf(' — у: {who}', { who: holders }) : t(' — ни у кого')),
+            `• ${tl.id} — ${tl.desc}${tl.builtin ? '' : t('OWN')}` +
+              (holders ? tf('USED_BY_WHO', { who: holders }) : t('NOBODY')),
           );
         }
         lines.push('');
         lines.push(
-          t('Свой тул — /tool new <id>; описание — /tool update <тул> description=…; карточка тула — /tools <тул>; включить агенту — /agent tool add <id агента> <тул>'),
+          t('OWN_TOOL_TOOL_NEW_ID_DESCRIPTION_TOOL_UPDATE'),
         );
         return lines;
       }
       const tl = house.find((x) => x.id === id);
-      if (!tl) return [tf('Тула «{id}» нет — есть: {known}', { id, known: house.map((x) => x.id).join(', ') })];
+      if (!tl) return [tf('NO_TOOL_ID_KNOWN_KNOWN', { id, known: house.map((x) => x.id).join(', ') })];
       const holders = holdersOf(tl.id);
       const lines = [
-        tf('{id} — {kind}', { id: tl.id, kind: tl.builtin ? t('встроенный тул') : tf('свой тул (tools/{id}.ts)', { id: tl.id }) }),
+        tf('ID_KIND', { id: tl.id, kind: tl.builtin ? t('BUILT_IN_TOOL') : tf('OWN_TOOL_TOOLS_ID_TS', { id: tl.id }) }),
         `  ${tl.desc}`,
       ];
       if (tl.builtin) {
         lines.push(
-          t('  карточек дома у встроенных нет — код и описание живут в приложении; настройки агенту: /agent tool update <id агента> <тул> поле=значение…'),
+          t('BUILT_INS_HAVE_NO_HOUSE_CARDS_CODE_AND'),
         );
       } else {
         const cardFile = join(TOOLS_DIR, `${tl.id}.json`);
         if (existsSync(cardFile)) {
           try {
-            lines.push(tf('  карточка дома (tools/{id}.json): {card}', { id: tl.id, card: JSON.stringify(JSON.parse(readFileSync(cardFile, 'utf8'))) }));
+            lines.push(tf('HOUSE_CARD_TOOLS_ID_JSON_CARD', { id: tl.id, card: JSON.stringify(JSON.parse(readFileSync(cardFile, 'utf8'))) }));
           } catch (err) {
-            lines.push(tf('  tools/{id}.json — кривой JSON: {msg} — тул не соберётся, поправьте файл', { id: tl.id, msg: String(err instanceof Error ? err.message : err) }));
+            lines.push(tf('TOOLS_ID_JSON_BROKEN_JSON_MSG_THE_TOOL', { id: tl.id, msg: String(err instanceof Error ? err.message : err) }));
           }
         } else {
-          lines.push(t('  карточки дома нет — тул описан в своём коде; добавить описание: /tool update <тул> description=…'));
+          lines.push(t('NO_HOUSE_CARD_THE_TOOL_DESCRIBES_ITSELF_IN'));
         }
       }
-      lines.push(holders ? tf('  включён у: {who}', { who: holders }) : t('  ни у кого не включён — включить: /agent tool add <id агента> <тул>'));
+      lines.push(holders ? tf('USED_BY_WHO_2', { who: holders }) : t('NOT_USED_BY_ANYONE_ENABLE_AGENT_TOOL_ADD'));
       return lines;
     },
   },
   {
     name: 'tool.new',
     args: [{ name: 'id тула', required: true }],
-    title: 'новый свой тул',
-    help: 'шаблон tools/<id>.ts (отвечает hello world) + карточка; код дальше правится руками',
+    title: 'TITLE_TOOL_NEW',
+    help: 'HELP_TOOL_NEW',
     run: async (engine, rest) => {
       const id = (rest[0] ?? '').trim().toLowerCase();
-      if (!id || !isToolId(id)) return [t('Синтаксис: /tool new <id> — id тула: строчные буквы/цифры/./-/_ от 2 символов')];
+      if (!id || !isToolId(id)) return [t('SYNTAX_TOOL_NEW_ID_TOOL_ID_LOWERCASE_LETTERS')];
       if ((BUILTIN_TOOL_IDS as readonly string[]).includes(id)) {
-        return [tf('«{id}» — имя занято встроенным тулом, придумайте другое', { id })];
+        return [tf('ID_IS_TAKEN_BY_A_BUILT_IN_TOOL', { id })];
       }
       const tsFile = join(TOOLS_DIR, `${id}.ts`);
-      if (existsSync(tsFile)) return [tf('tools/{id}.ts уже есть — что умеет, покажет /tools {id}', { id })];
+      if (existsSync(tsFile)) return [tf('TOOLS_ID_TS_ALREADY_EXISTS_TOOLS_ID_SHOWS', { id })];
       mkdirSync(TOOLS_DIR, { recursive: true });
       writeFileSync(tsFile, toolTemplate(id), 'utf8');
       const cardFile = join(TOOLS_DIR, `${id}.json`);
       if (!existsSync(cardFile)) {
-        writeFileSync(cardFile, `${JSON.stringify({ description: t('шаблон: на любое тело отвечает hello world') }, null, 2)}\n`, 'utf8');
+        writeFileSync(cardFile, `${JSON.stringify({ description: t('TEMPLATE_ANSWERS_HELLO_WORLD_TO_ANY_BODY') }, null, 2)}\n`, 'utf8');
       }
       await engine.refreshUserTools();
       return [
-        tf('✓ Тул «{id}» завёл: tools/{id}.ts — шаблон hello world, рядом карточка tools/{id}.json', { id }),
-        tf('Код правьте в файле; описание — /tool update {id} description=…; включить агенту — /agent tool add <id агента> {id}', { id }),
+        tf('CREATED_TOOL_ID_TOOLS_ID_TS_HELLO_WORLD', { id }),
+        tf('EDIT_THE_CODE_IN_THE_FILE_DESCRIPTION_TOOL', { id }),
       ];
     },
   },
@@ -940,17 +940,17 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'тул', required: true },
       { name: 'поле=значение…', required: true },
     ],
-    title: 'настроить тул',
-    help: 'карточка дома tools/<тул>.json: поле=значение…; description — что умеет (для /tools и менеджера)',
+    title: 'TITLE_AGENT_TOOL_UPDATE',
+    help: 'HELP_TOOL_UPDATE',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       const tid = (id ?? '').trim().toLowerCase();
-      if (!tid || pairs.length === 0) return [t('Синтаксис: /tool update <тул> поле=значение… (например description=ведёт расчёты)')];
+      if (!tid || pairs.length === 0) return [t('SYNTAX_TOOL_UPDATE_TOOL_FIELD_VALUE_E_G')];
       if ((BUILTIN_TOOL_IDS as readonly string[]).includes(tid)) {
-        return [tf('«{id}» — встроенный: код и описание живут в приложении; настройки агенту — /agent tool update <id агента> {id} …', { id: tid })];
+        return [tf('ID_IS_BUILT_IN_CODE_AND_DESCRIPTION_LIVE', { id: tid })];
       }
       if (!existsSync(join(TOOLS_DIR, `${tid}.ts`))) {
-        return [tf('Тула «{id}» нет (нет файла tools/{id}.ts) — завести: /tool new {id}', { id: tid })];
+        return [tf('NO_TOOL_ID_NO_TOOLS_ID_TS_FILE', { id: tid })];
       }
       const cardFile = join(TOOLS_DIR, `${tid}.json`);
       const card: Record<string, unknown> = {};
@@ -959,7 +959,7 @@ export const OPERATIONS: OpSpec[] = [
           const parsed: unknown = JSON.parse(readFileSync(cardFile, 'utf8'));
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) Object.assign(card, parsed);
         } catch (err) {
-          return [tf('tools/{id}.json — кривой JSON, поправьте файл: {msg}', { id: tid, msg: String(err instanceof Error ? err.message : err) })];
+          return [tf('TOOLS_ID_JSON_BROKEN_JSON_FIX_THE_FILE', { id: tid, msg: String(err instanceof Error ? err.message : err) })];
         }
       }
       const patch = parseFields(pairs);
@@ -968,21 +968,21 @@ export const OPERATIONS: OpSpec[] = [
       mkdirSync(TOOLS_DIR, { recursive: true });
       writeFileSync(cardFile, `${JSON.stringify(card, null, 2)}\n`, 'utf8');
       await engine.refreshUserTools();
-      return [tf('✓ Карточку тула «{id}» записал: tools/{id}.json ({fields})', { id: tid, fields: Object.keys(patch).join(', ') })];
+      return [tf('WROTE_THE_CARD_OF_TOOL_ID_TOOLS_ID', { id: tid, fields: Object.keys(patch).join(', ') })];
     },
   },
   {
     name: 'tool.delete',
     args: [{ name: 'тул…|all', required: true }],
-    title: 'удалить свой тул',
-    help: 'файл tools/<тул>.ts и карточка дома; включённым агентам тул выключается; встроенные не удаляются; all — все свои',
+    title: 'TITLE_TOOL_DELETE',
+    help: 'HELP_TOOL_DELETE',
     run: async (engine, rest) => {
       const asked = rest.flatMap((s) => s.split(',')).map((s) => s.trim().toLowerCase()).filter(Boolean);
-      if (asked.length === 0) return [t('Синтаксис: /tool delete <тул…|all> — встроенные не удаляются')];
+      if (asked.length === 0) return [t('SYNTAX_TOOL_DELETE_TOOL_ALL_BUILT_INS_CANNOT')];
       await engine.refreshUserTools(); // «all» — это то, что на полке прямо сейчас
       const own = engine.houseTools().filter((tl) => !tl.builtin).map((tl) => tl.id);
       const targets = asked.length === 1 && asked[0] === 'all' ? own : asked;
-      if (targets.length === 0) return [t('Своих тулов и так нет — завести: /tool new <id>')];
+      if (targets.length === 0) return [t('NO_OWN_TOOLS_YET_CREATE_ONE_TOOL_NEW')];
       let teamAgents: Agent[] = [];
       try {
         teamAgents = engine.team();
@@ -992,18 +992,18 @@ export const OPERATIONS: OpSpec[] = [
       const lines: string[] = [];
       for (const tid of targets) {
         if ((BUILTIN_TOOL_IDS as readonly string[]).includes(tid)) {
-          lines.push(tf('✗ «{id}» — встроенный тул, его не удалить (агенту выключается: /agent tool delete <id агента> {id})', { id: tid }));
+          lines.push(tf('ID_IS_A_BUILT_IN_TOOL_AND_CANNOT', { id: tid }));
           continue;
         }
         const tsFile = join(TOOLS_DIR, `${tid}.ts`);
         if (!existsSync(tsFile)) {
-          lines.push(tf('✗ Тула «{id}» нет — нет файла tools/{id}.ts', { id: tid }));
+          lines.push(tf('NO_TOOL_ID_THERE_IS_NO_TOOLS_ID', { id: tid }));
           continue;
         }
         try {
           rmSync(tsFile);
         } catch (err) {
-          lines.push(tf('✗ tools/{id}.ts не удаляется: {msg}', { id: tid, msg: String(err instanceof Error ? err.message : err) }));
+          lines.push(tf('CANNOT_DELETE_TOOLS_ID_TS_MSG', { id: tid, msg: String(err instanceof Error ? err.message : err) }));
           continue;
         }
         const cardFile = join(TOOLS_DIR, `${tid}.json`);
@@ -1013,13 +1013,13 @@ export const OPERATIONS: OpSpec[] = [
           if (!agentToolIds(a).includes(tid)) continue;
           try {
             revokeTool(AGENTS_DIR, a.id, tid);
-            tail = tail ? `${tail}, ${a.id}` : tf(' (был включён у: {who}', { who: a.id });
+            tail = tail ? `${tail}, ${a.id}` : tf('WAS_USED_BY_WHO', { who: a.id });
           } catch {
             // карточка агента уже не ссылается на этот тул
           }
         }
         if (tail) tail += ')';
-        lines.push(tf('✓ Тул «{id}» удалил: tools/{id}.ts и карточку дома{tail}', { id: tid, tail }));
+        lines.push(tf('DELETED_TOOL_ID_TOOLS_ID_TS_AND_THE', { id: tid, tail }));
       }
       await engine.refreshUserTools();
       return lines;
@@ -1028,8 +1028,8 @@ export const OPERATIONS: OpSpec[] = [
 
   // модели
   {
-    name: 'models.list', implicit: true, title: 'модели',
-    help: 'какие есть, кто готов, кто основная и менеджерская',
+    name: 'models.list', implicit: true, title: 'TITLE_MODELS_LIST',
+    help: 'HELP_MODELS_LIST',
     run: async (engine) => modelsText(engine.app),
   },
   {
@@ -1038,12 +1038,12 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id', required: true },
       { name: 'поле=значение…', required: true },
     ],
-    title: 'новая модель',
-    help: 'provider обязателен; дальше model, baseUrl, apiKey и ключи контракта провайдера',
+    title: 'TITLE_MODEL_NEW',
+    help: 'HELP_MODEL_NEW',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return [t('Синтаксис: /model new <id> provider=openai-compatible model=… baseUrl=… apiKey=…')];
+        return [t('SYNTAX_MODEL_NEW_ID_PROVIDER_OPENAI_COMPATIBLE_MODEL')];
       }
       const config = parseFields(pairs);
       if (Array.isArray(config)) return config;
@@ -1058,17 +1058,17 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id', required: true, hint: 'models' },
       { name: 'поле=значение…', required: true },
     ],
-    title: 'править модель',
-    help: 'provider, model, baseUrl, apiKey, maxTokens, temperature, thinking…; вложенных полей у карточки нет',
+    title: 'TITLE_MODEL_UPDATE',
+    help: 'HELP_MODEL_UPDATE',
     run: async (engine, rest) => {
       const [id, ...pairs] = rest;
       if (!id || pairs.length === 0) {
-        return [t('Синтаксис: /model update <id> model=… baseUrl=… apiKey=… provider=…')];
+        return [t('SYNTAX_MODEL_UPDATE_ID_MODEL_BASEURL_APIKEY_PROVIDER')];
       }
       const parsed = parseFields(pairs);
       if (Array.isArray(parsed)) return parsed;
       if (Object.keys(parsed).some((k) => k.includes('.'))) {
-        return [t('У карточки модели вложенных полей нет — только плоские: provider, model, baseUrl, apiKey…')];
+        return [t('A_MODEL_CARD_HAS_NO_NESTED_FIELDS_ONLY')];
       }
       const fields: Record<string, unknown> = { ...parsed };
       const report = updateModelConfig(MODELS_DIR, id, fields);
@@ -1079,24 +1079,24 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'model.get',
     args: [{ name: 'id', required: true, hint: 'models' }],
-    title: 'показать модель',
-    help: 'полная карточка JSON — все поля контракта провайдера',
+    title: 'TITLE_MODEL_GET',
+    help: 'HELP_MODEL_GET',
     run: async (engine, rest) => {
       const id = (rest[0] ?? '').trim();
-      if (!id) return [t('Синтаксис: /model get <id> (список — /models)')];
+      if (!id) return [t('SYNTAX_MODEL_GET_ID_SEE_MODELS')];
       const slot = engine.app.models.get(id);
-      if (!slot) return [tf('модели «{id}» нет — список: /models', { id })];
+      if (!slot) return [tf('NO_MODEL_ID_SEE_MODELS', { id })];
       return [JSON.stringify(slot.config ?? { provider: id }, null, 2)];
     },
   },
   {
     name: 'model.delete',
     args: [{ name: 'id…', required: true, hint: 'models' }],
-    title: 'удалить модель',
-    help: 'основную не удалить — сначала /settings update model.id=другая; можно несколько',
+    title: 'TITLE_MODEL_DELETE',
+    help: 'HELP_MODEL_DELETE',
     run: async (engine, rest) => {
       const ids = expandIds(rest);
-      if (ids.length === 0) return [t('Синтаксис: /model delete <id…>')];
+      if (ids.length === 0) return [t('SYNTAX_MODEL_DELETE_ID')];
       const s = engine.app.settings;
       const protectedIds = [s.model?.id, s.serviceModel?.id, engine.app.mgr.model.id].filter((x): x is string => Boolean(x));
       const lines = ids.map((id) => {
@@ -1113,31 +1113,31 @@ export const OPERATIONS: OpSpec[] = [
 
   // профиль и память
   {
-    name: 'profile.show', implicit: true, title: 'ваш профиль',
-    help: 'как вас видит команда (user.json)',
+    name: 'profile.show', implicit: true, title: 'TITLE_PROFILE_SHOW',
+    help: 'HELP_PROFILE_SHOW',
     run: async (engine) => {
       const p = engine.app.profile;
       return [
-        tf('Вы: {name}{about}', {
+        tf('YOU_NAME_ABOUT', {
           name: p.name,
           about: p.about ? ` — ${p.about}` : '',
         }),
-        t('Поправить: /profile update name=… about=…'),
+        t('TO_EDIT_PROFILE_UPDATE_NAME_ABOUT'),
       ];
     },
   },
   {
     name: 'profile.update',
     args: [{ name: 'поле=значение…', required: true }],
-    title: 'править профиль',
-    help: 'поля: name, about',
+    title: 'TITLE_PROFILE_UPDATE',
+    help: 'HELP_PROFILE_UPDATE',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /profile update name=… about=…')];
+      if (rest.length === 0) return [t('SYNTAX_PROFILE_UPDATE_NAME_ABOUT')];
       const parsed = parseFields(rest);
       if (Array.isArray(parsed)) return parsed;
       const keys = Object.keys(parsed);
       if (keys.some((k) => !['name', 'about'].includes(k))) {
-        return [t('Поля профиля: name, about')];
+        return [t('PROFILE_FIELDS_NAME_ABOUT')];
       }
       return [engine.updateProfile({
         name: typeof parsed.name === 'string' ? parsed.name : undefined,
@@ -1148,15 +1148,15 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'memory.show', implicit: true, needsProject: true, needsSession: true,
     args: [{ name: 'id|shared', required: false, hint: 'agents' }],
-    title: 'память',
-    help: 'без аргумента — обзор; «shared» — общая память команды',
+    title: 'TITLE_MEMORY_SHOW',
+    help: 'HELP_MEMORY_SHOW',
     run: async (engine, rest) => memoryText(engine.app, rest.join(' ')),
   },
 
   // проекты
   {
-    name: 'projects.list', implicit: true, title: 'проекты',
-    help: 'реестр проектов дома; смена — /project open, создание — /project new',
+    name: 'projects.list', implicit: true, title: 'TITLE_PROJECTS_LIST',
+    help: 'HELP_PROJECTS_LIST',
     run: async () => projectListText(),
   },
   {
@@ -1165,8 +1165,8 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id', required: false },
       { name: 'папка', required: false, hint: 'path' },
     ],
-    title: 'новый проект',
-    help: 'создаёт и открывает; без id — имя из папки или штамп как у разговоров; папка создаётся, если её нет',
+    title: 'TITLE_PROJECT_NEW',
+    help: 'HELP_PROJECT_NEW',
     run: async (engine, rest) => {
       if (rest.length === 0) return [engine.newProject(null, null)];
       const pathy = (a: string) => looksLikePath(a) || a.startsWith('~');
@@ -1182,27 +1182,27 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'project.open',
     args: [{ name: 'id|путь', required: true, hint: 'projects' }],
-    title: 'открыть проект',
-    help: 'сменить проект не выходя из приложения; незнакомая папка — регистрируется',
+    title: 'TITLE_PROJECT_OPEN',
+    help: 'HELP_PROJECT_OPEN',
     run: async (engine, rest) => {
       const arg = rest.join(' ').trim();
-      if (!arg) return [t('Синтаксис: /project open <id|путь> (список — /projects)')];
+      if (!arg) return [t('SYNTAX_PROJECT_OPEN_ID_PATH_LIST_PROJECTS')];
       return [engine.switchProject(arg, false)];
     },
   },
   {
-    name: 'project.close', title: 'закрыть проект',
-    help: 'остаться без проекта: разговоры сохранены, состояние как после запуска',
+    name: 'project.close', title: 'TITLE_PROJECT_CLOSE',
+    help: 'HELP_PROJECT_CLOSE',
     run: async (engine) => [engine.closeProject()],
   },
   {
     name: 'project.delete',
     args: [{ name: 'id|путь…', required: true, hint: 'projects' }],
-    title: 'удалить проект',
-    help: 'из дома (projects/<id>/ вместе с разговорами); рабочая папка не трогается; текущий не удалить; можно несколько',
+    title: 'TITLE_PROJECT_DELETE',
+    help: 'HELP_PROJECT_DELETE',
     run: async (engine, rest) => {
       const args = expandIds(rest);
-      if (args.length === 0) return [t('Синтаксис: /project delete <id|путь…>')];
+      if (args.length === 0) return [t('SYNTAX_PROJECT_DELETE_ID_PATH')];
       return args.map((arg) => {
         try {
           return engine.deleteProject(arg);
@@ -1216,15 +1216,15 @@ export const OPERATIONS: OpSpec[] = [
     name: 'project.update',
     args: [{ name: 'поле=значение…', required: true }],
     needsProject: true,
-    title: 'править проект',
-    help: 'текущий проект: name=… (переименовать, папка в доме) или path=… (сменить рабочую папку)',
+    title: 'TITLE_PROJECT_UPDATE',
+    help: 'HELP_PROJECT_UPDATE',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /project update name=новое-id или path=папка')];
+      if (rest.length === 0) return [t('SYNTAX_PROJECT_UPDATE_NAME_NEW_ID_OR_PATH')];
       const parsed = parseFields(rest);
       if (Array.isArray(parsed)) return parsed;
       const keys = Object.keys(parsed);
       if (keys.some((k) => k !== 'name' && k !== 'path')) {
-        return [t('У проекта два поля: name=… (переименовать) и path=… (рабочая папка)')];
+        return [t('A_PROJECT_HAS_TWO_FIELDS_NAME_RENAME_AND')];
       }
       const lines: string[] = [];
       if (typeof parsed.name === 'string') lines.push(engine.renameCurrentProject(parsed.name));
@@ -1234,8 +1234,8 @@ export const OPERATIONS: OpSpec[] = [
   },
   {
     name: 'project.export', needsProject: true,
-    title: 'экспорт проекта',
-    help: 'архив текущего проекта: project-<id>-<штамп>.zip (project.json с секретами и все разговоры)',
+    title: 'TITLE_PROJECT_EXPORT',
+    help: 'HELP_PROJECT_EXPORT',
     run: async (engine) => exportProjectZip(engine),
   },
   {
@@ -1244,46 +1244,46 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'файл.zip', required: true },
       { name: 'id', required: false },
     ],
-    title: 'импорт проекта',
-    help: 'id занят — разговоры вольются в него по id, свободен — новый проект; с подтверждением',
+    title: 'TITLE_PROJECT_IMPORT',
+    help: 'HELP_PROJECT_IMPORT',
     run: async (engine, rest) => {
       const file = rest[0] ?? '';
-      if (!file) return [t('Синтаксис: /project import <файл.zip> [id]')];
-      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
+      if (!file) return [t('SYNTAX_PROJECT_IMPORT_FILE_ZIP_ID')];
+      if (!existsSync(file)) return [tf('NO_FILE_FILE', { file })];
       const entries = readZipEntries(readFileSync(file));
       if (!entries.some((e) => e.rel === 'project.json')) {
-        return [t('В архиве нет project.json — это архив всего приложения? Тогда: /import <файл>')];
+        return [t('NO_PROJECT_JSON_IN_THE_ARCHIVE_IS_IT')];
       }
       const ok = await engine.confirmAction(
-        t('Импортировать проект из этого архива?'),
-        t('Имя проекта занято — разговоры вливаются в него по id (совпавшие заменяются); свободно — создастся новый проект. Секреты (серверы, почта, боты) не заменяются.'),
+        t('IMPORT_A_PROJECT_FROM_THIS_ARCHIVE'),
+        t('THE_PROJECT_NAME_IS_TAKEN_SESSIONS_MERGE_INTO'),
       );
-      if (!ok) return [t('Импорт отменён.')];
+      if (!ok) return [t('IMPORT_CANCELLED')];
       return [applyProjectImport(engine.app, entries, rest.slice(1).join(' ').trim() || undefined)];
     },
   },
 
   // секреты проекта
   {
-    name: 'project.mails', needsProject: true, title: 'ящики',
-    help: 'реестр ящиков (поле "mails" в project.json); добавить — /project mail add <id>',
+    name: 'project.mails', needsProject: true, title: 'TITLE_PROJECT_MAILS',
+    help: 'HELP_PROJECT_MAILS',
     run: async () => {
       const mails = loadMailsFile(PROJECT_FILE);
       const ids = Object.keys(mails);
       if (ids.length === 0) {
-        return [t('Ящиков нет — /project mail add <id>, затем /project mail update <id> user=… password=… imap=… smtp=…')];
+        return [t('NO_MAILBOXES_PROJECT_MAIL_ADD_ID_THEN_PROJECT')];
       }
-      const lines = ['', t('Ящики:')];
+      const lines = ['', t('MAILBOXES')];
       for (const [id, a] of Object.entries(mails)) {
         if (!a.user) {
-          lines.push(`• ${id} — ${t('не заполнен: /project mail update')} ${id} user=… password=… imap=… smtp=…`);
+          lines.push(`• ${id} — ${t('NOT_FILLED_IN_PROJECT_MAIL_UPDATE')} ${id} user=… password=… imap=… smtp=…`);
           continue;
         }
         try {
           const ep = resolveEndpoints(a);
-          lines.push(`• ${id}: ${a.user} — imap ${ep.imap.host}:${ep.imap.port}, smtp ${ep.smtp.host}:${ep.smtp.port}${a.tlsNoVerify ? ` ${t('(без сверки сертификата)')}` : ''}`);
+          lines.push(`• ${id}: ${a.user} — imap ${ep.imap.host}:${ep.imap.port}, smtp ${ep.smtp.host}:${ep.smtp.port}${a.tlsNoVerify ? ` ${t('NO_CERTIFICATE_VERIFICATION')}` : ''}`);
         } catch {
-          lines.push(`• ${id}: ${a.user} — ${t('настройки неполные')}`);
+          lines.push(`• ${id}: ${a.user} — ${t('SETTINGS_INCOMPLETE')}`);
         }
       }
       lines.push('');
@@ -1294,11 +1294,11 @@ export const OPERATIONS: OpSpec[] = [
     name: 'project.mail.add',
     args: [{ name: 'id', required: true }],
     needsProject: true,
-    title: 'новый ящик',
-    help: 'пустая запись; поля заполнит /project mail update',
+    title: 'TITLE_PROJECT_MAIL_ADD',
+    help: 'HELP_PROJECT_MAIL_ADD',
     run: async (_engine, rest) => {
       const id = (rest[0] ?? '').trim();
-      if (!id) return [t('Синтаксис: /project mail add <id>')];
+      if (!id) return [t('SYNTAX_PROJECT_MAIL_ADD_ID')];
       return [addMailRecord(PROJECT_FILE, id)];
     },
   },
@@ -1309,11 +1309,11 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: true },
     ],
     needsProject: true,
-    title: 'править ящик',
-    help: 'поля: user, password, imap, smtp, port, smtpPort, tlsNoVerify',
+    title: 'TITLE_PROJECT_MAIL_UPDATE',
+    help: 'HELP_PROJECT_MAIL_UPDATE',
     run: async (_engine, rest) => {
       const [id, ...pairs] = rest;
-      if (!id || pairs.length === 0) return [t('Синтаксис: /project mail update <id> user=… password=… imap=… smtp=… [port=…] [smtpPort=…] [tlsNoVerify=true]')];
+      if (!id || pairs.length === 0) return [t('SYNTAX_PROJECT_MAIL_UPDATE_ID_USER_PASSWORD_IMAP')];
       const parsed = parseFields(pairs);
       if (Array.isArray(parsed)) return parsed;
       return [updateMailRecord(PROJECT_FILE, id, parsed)];
@@ -1323,11 +1323,11 @@ export const OPERATIONS: OpSpec[] = [
     name: 'project.mail.delete',
     args: [{ name: 'id…', required: true }],
     needsProject: true,
-    title: 'убрать ящик',
-    help: 'из поля "mails" project.json проекта; можно несколько',
+    title: 'TITLE_PROJECT_MAIL_DELETE',
+    help: 'HELP_PROJECT_MAIL_DELETE',
     run: async (_engine, rest) => {
       const ids = expandIds(rest);
-      if (ids.length === 0) return [t('Синтаксис: /project mail delete <id…>')];
+      if (ids.length === 0) return [t('SYNTAX_PROJECT_MAIL_DELETE_ID')];
       return ids.map((id) => {
         try {
           return removeMailAccount(PROJECT_FILE, id);
@@ -1338,19 +1338,19 @@ export const OPERATIONS: OpSpec[] = [
     },
   },
   {
-    name: 'project.hosts', needsProject: true, title: 'серверы',
-    help: 'серверы проекта (поле "hosts" в project.json); добавить — /project host add <id>',
+    name: 'project.hosts', needsProject: true, title: 'TITLE_PROJECT_HOSTS',
+    help: 'HELP_PROJECT_HOSTS',
     run: async () => {
       const hosts = loadHostsFile(PROJECT_FILE);
       const ids = Object.keys(hosts);
       if (ids.length === 0) {
-        return [t('Серверов нет — /project host add <id>, затем /project host update <id> host=… user=… port=…')];
+        return [t('NO_SERVERS_PROJECT_HOST_ADD_ID_THEN_PROJECT')];
       }
       return [
         '',
-        t('Серверы проекта (поле "hosts" в project.json):'),
+        t('PROJECT_SERVERS_THE_HOSTS_FIELD_OF_PROJECT_JSON'),
         ...Object.entries(hosts).map(([id, h]) => {
-          if (!h.host) return `• ${id} — ${t('не заполнен: /project host update')} ${id} host=… user=… port=…`;
+          if (!h.host) return `• ${id} — ${t('NOT_FILLED_IN_PROJECT_HOST_UPDATE')} ${id} host=… user=… port=…`;
           return `• ${id}: ${h.user ? h.user + '@' : ''}${h.host}${h.port ? ':' + h.port : ''}`;
         }),
         '',
@@ -1361,11 +1361,11 @@ export const OPERATIONS: OpSpec[] = [
     name: 'project.host.add',
     args: [{ name: 'id', required: true }],
     needsProject: true,
-    title: 'новый сервер',
-    help: 'пустая запись; поля заполнит /project host update',
+    title: 'TITLE_PROJECT_HOST_ADD',
+    help: 'HELP_PROJECT_HOST_ADD',
     run: async (_engine, rest) => {
       const id = (rest[0] ?? '').trim();
-      if (!id) return [t('Синтаксис: /project host add <id>')];
+      if (!id) return [t('SYNTAX_PROJECT_HOST_ADD_ID')];
       return [addHostRecord(PROJECT_FILE, id)];
     },
   },
@@ -1376,11 +1376,11 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'поле=значение…', required: true },
     ],
     needsProject: true,
-    title: 'править сервер',
-    help: 'поля: host, user, password, dir, port',
+    title: 'TITLE_PROJECT_HOST_UPDATE',
+    help: 'HELP_PROJECT_HOST_UPDATE',
     run: async (_engine, rest) => {
       const [id, ...pairs] = rest;
-      if (!id || pairs.length === 0) return [t('Синтаксис: /project host update <id> host=… [user=…] [password=…] [dir=…] [port=…]')];
+      if (!id || pairs.length === 0) return [t('SYNTAX_PROJECT_HOST_UPDATE_ID_HOST_USER_PASSWORD')];
       const parsed = parseFields(pairs);
       if (Array.isArray(parsed)) return parsed;
       return [updateHostRecord(PROJECT_FILE, id, parsed)];
@@ -1390,11 +1390,11 @@ export const OPERATIONS: OpSpec[] = [
     name: 'project.host.delete',
     args: [{ name: 'id…', required: true }],
     needsProject: true,
-    title: 'убрать сервер',
-    help: 'из поля "hosts" project.json проекта; можно несколько',
+    title: 'TITLE_PROJECT_HOST_DELETE',
+    help: 'HELP_PROJECT_HOST_DELETE',
     run: async (_engine, rest) => {
       const ids = expandIds(rest);
-      if (ids.length === 0) return [t('Синтаксис: /project host delete <id…>')];
+      if (ids.length === 0) return [t('SYNTAX_PROJECT_HOST_DELETE_ID')];
       return ids.map((id) => {
         try {
           return removeProjectHost(PROJECT_FILE, id);
@@ -1405,29 +1405,29 @@ export const OPERATIONS: OpSpec[] = [
     },
   },
   {
-    name: 'project.messengers', needsProject: true, title: 'боты',
-    help: 'токены ботов (поле "messengers" в project.json); добавить — /project messenger add <telegram|max>',
+    name: 'project.messengers', needsProject: true, title: 'TITLE_PROJECT_MESSENGERS',
+    help: 'HELP_PROJECT_MESSENGERS',
     run: async () => {
       const cfg = loadMessengersFile(PROJECT_FILE);
       const rows = (['telegram', 'max'] as const)
         .filter((k) => cfg[k] !== undefined)
         .map((k) => {
           const token = (cfg[k] as { token?: string } | undefined)?.token;
-          return `• ${k}: ${token ? t('токен сохранён') : t('токен не задан — /project messenger update')} ${k} token=…`;
+          return `• ${k}: ${token ? t('TOKEN_SAVED') : t('TOKEN_NOT_SET_PROJECT_MESSENGER_UPDATE')} ${k} token=…`;
         });
-      if (rows.length === 0) return [t('Ботов нет — /project messenger add <telegram|max>, затем /project messenger update <id> token=…')];
-      return ['', t('Боты:'), ...rows, ''];
+      if (rows.length === 0) return [t('NO_BOTS_PROJECT_MESSENGER_ADD_TELEGRAM_MAX_THEN')];
+      return ['', t('BOTS'), ...rows, ''];
     },
   },
   {
     name: 'project.messenger.add',
     args: [{ name: 'telegram|max', required: true }],
     needsProject: true,
-    title: 'новый бот',
-    help: 'пустая запись; токен зальёт /project messenger update',
+    title: 'TITLE_PROJECT_MESSENGER_ADD',
+    help: 'HELP_PROJECT_MESSENGER_ADD',
     run: async (_engine, rest) => {
       const key = (rest[0] ?? '').trim();
-      if (!key) return [t('Синтаксис: /project messenger add <telegram|max>')];
+      if (!key) return [t('SYNTAX_PROJECT_MESSENGER_ADD_TELEGRAM_MAX')];
       return [addMessengerRecord(PROJECT_FILE, key)];
     },
   },
@@ -1438,11 +1438,11 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'token=…', required: true },
     ],
     needsProject: true,
-    title: 'залить токен',
-    help: 'Telegram — @BotFather, MAX — dev.max.ru; токен в отчёте не светится',
+    title: 'TITLE_PROJECT_MESSENGER_UPDATE',
+    help: 'HELP_PROJECT_MESSENGER_UPDATE',
     run: async (_engine, rest) => {
       const [key, ...pairs] = rest;
-      if (!key || pairs.length === 0) return [t('Синтаксис: /project messenger update <telegram|max> token=…')];
+      if (!key || pairs.length === 0) return [t('SYNTAX_PROJECT_MESSENGER_UPDATE_TELEGRAM_MAX_TOKEN')];
       const parsed = parseFields(pairs);
       if (Array.isArray(parsed)) return parsed;
       return [updateMessengerRecord(PROJECT_FILE, key, parsed)];
@@ -1452,26 +1452,26 @@ export const OPERATIONS: OpSpec[] = [
     name: 'project.messenger.delete',
     args: [{ name: 'telegram|max', required: true }],
     needsProject: true,
-    title: 'убрать бота',
-    help: 'из поля "messengers" project.json проекта',
+    title: 'TITLE_PROJECT_MESSENGER_DELETE',
+    help: 'HELP_PROJECT_MESSENGER_DELETE',
     run: async (_engine, rest) => {
       const key = (rest[0] ?? '').trim();
-      if (!key) return [t('Синтаксис: /project messenger delete <telegram|max>')];
+      if (!key) return [t('SYNTAX_PROJECT_MESSENGER_DELETE_TELEGRAM_MAX')];
       return [removeMessengerBot(PROJECT_FILE, key)];
     },
   },
 
   // расписание, автономный режим, статистика
   {
-    name: 'schedule.list', implicit: true, title: 'расписание',
-    help: 'задачи, которые serve запускает сам по интервалу',
+    name: 'schedule.list', implicit: true, title: 'TITLE_SCHEDULE_LIST',
+    help: 'HELP_SCHEDULE_LIST',
     run: async () => {
       const tasks = loadSchedule(DT_HOME);
-      if (tasks.length === 0) return [t('Задач нет — /schedule add <задание> [минуты]')];
+      if (tasks.length === 0) return [t('NO_TASKS_SCHEDULE_ADD_TASK_MINUTES')];
       return [
         '',
-        t('Расписание:'),
-        ...tasks.map((t2) => `${t2.enabled ? '▶' : '⏸'} ${t2.message.slice(0, 60)} — ${tf('каждые {n} мин', { n: t2.intervalMinutes })} [${t2.id}]`),
+        t('SCHEDULE'),
+        ...tasks.map((t2) => `${t2.enabled ? '▶' : '⏸'} ${t2.message.slice(0, 60)} — ${tf('EVERY_N_MIN', { n: t2.intervalMinutes })} [${t2.id}]`),
         '',
       ];
     },
@@ -1482,31 +1482,31 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'задание', required: true },
       { name: 'минуты', required: false },
     ],
-    title: 'новая задача',
-    help: 'текст уйдёт в чат как сообщение руководителя; интервал по умолчанию 10 минут',
+    title: 'TITLE_SCHEDULE_ADD',
+    help: 'HELP_SCHEDULE_ADD',
     run: async (_engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /schedule add <задание> [минуты]')];
+      if (rest.length === 0) return [t('SYNTAX_SCHEDULE_ADD_TASK_MINUTES')];
       const last = rest[rest.length - 1];
       const minutes = Number.parseInt(last, 10);
       const every = Number.isInteger(minutes) && minutes > 0 ? minutes : 10;
       const message = (Number.isInteger(minutes) && minutes > 0 ? rest.slice(0, -1) : rest).join(' ');
-      if (!message) return [t('Синтаксис: /schedule add <задание> [минуты]')];
+      if (!message) return [t('SYNTAX_SCHEDULE_ADD_TASK_MINUTES')];
       const dir = DT_HOME;
       const tasks = loadSchedule(dir);
       const id = `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       tasks.push({ id, message, intervalMinutes: every, enabled: true });
       saveSchedule(dir, tasks);
-      return [tf('✓ Задача «{msg}» каждые {n} мин [{id}]', { msg: message.slice(0, 60), n: every, id })];
+      return [tf('TASK_MSG_EVERY_N_MIN_ID', { msg: message.slice(0, 60), n: every, id })];
     },
   },
   {
     name: 'schedule.toggle',
     args: [{ name: 'id…', required: true, hint: 'schedule' }],
-    title: 'вкл/выкл задачу',
-    help: 'пауза и возврат без удаления; можно несколько',
+    title: 'TITLE_SCHEDULE_TOGGLE',
+    help: 'HELP_SCHEDULE_TOGGLE',
     run: async (_engine, rest) => {
       const ids = expandIds(rest);
-      if (ids.length === 0) return [t('Синтаксис: /schedule toggle <id…>')];
+      if (ids.length === 0) return [t('SYNTAX_SCHEDULE_TOGGLE_ID')];
       const dir = DT_HOME;
       const tasks = loadSchedule(dir);
       const lines: string[] = [];
@@ -1514,12 +1514,12 @@ export const OPERATIONS: OpSpec[] = [
       for (const id of ids) {
         const task = tasks.find((t2) => t2.id === id);
         if (!task) {
-          lines.push(tf('Нет задачи «{id}» — см. /schedule', { id }));
+          lines.push(tf('NO_TASK_ID_SEE_SCHEDULE', { id }));
           continue;
         }
         task.enabled = !task.enabled;
         touched = true;
-        lines.push(tf('{state}: {msg}', { state: task.enabled ? t('▶ Включена') : t('⏸ Выключена'), msg: task.message.slice(0, 60) }));
+        lines.push(tf('STATE_MSG', { state: task.enabled ? t('ON') : t('OFF'), msg: task.message.slice(0, 60) }));
       }
       if (touched) saveSchedule(dir, tasks);
       return lines;
@@ -1528,19 +1528,19 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'schedule.delete',
     args: [{ name: 'id…', required: true, hint: 'schedule' }],
-    title: 'удалить задачу',
-    help: 'полностью; можно несколько',
+    title: 'TITLE_SCHEDULE_DELETE',
+    help: 'HELP_SCHEDULE_DELETE',
     run: async (_engine, rest) => {
       const ids = expandIds(rest);
-      if (ids.length === 0) return [t('Синтаксис: /schedule delete <id…>')];
+      if (ids.length === 0) return [t('SYNTAX_SCHEDULE_DELETE_ID')];
       const dir = DT_HOME;
       const gone = new Set(ids);
       const before = loadSchedule(dir);
       const tasks = before.filter((t2) => !gone.has(t2.id));
       saveSchedule(dir, tasks);
       const missing = ids.length - (before.length - tasks.length);
-      const lines = [tf('Удалено: задач осталось {n}', { n: tasks.length })];
-      if (missing > 0) lines.push(tf('Не нашёл: {n} (список — /schedule)', { n: missing }));
+      const lines = [tf('DELETED_N_TASKS_LEFT', { n: tasks.length })];
+      if (missing > 0) lines.push(tf('NOT_FOUND_N_LIST_SCHEDULE', { n: missing }));
       return lines;
     },
   },
@@ -1549,17 +1549,17 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'bg.list', implicit: true, needsProject: true,
     args: [{ name: 'all', required: false }],
-    title: 'фоновые задачи',
-    help: 'текущего разговора; «all» — все задачи проекта',
+    title: 'TITLE_BG_LIST',
+    help: 'HELP_BG_LIST',
     run: async (_engine, rest) => {
       const all = (rest[0] ?? '').trim().toLowerCase() === 'all';
       const tasks = bgList();
       const mine = all ? tasks : tasks.filter((t2) => t2.sessionId === requireSession(_engine.app).session.id);
       if (mine.length === 0) {
-        return [t('Фоновых задач нет — /bg run <команда> или блок ```bg в ответе агента')];
+        return [t('NO_BACKGROUND_TASKS_BG_RUN_COMMAND_OR_A')];
       }
       return [
-        all ? t('Фоновые задачи проекта:') : t('Фоновые задачи этого разговора:'),
+        all ? t('BACKGROUND_TASKS_OF_THE_PROJECT') : t('BACKGROUND_TASKS_OF_THIS_SESSION'),
         ...mine.map(bgTaskLine),
       ];
     },
@@ -1567,12 +1567,12 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'bg.run', needsProject: true, needsSession: true,
     args: [{ name: 'команда…', required: true }],
-    title: 'запустить команду фоном',
-    help: 'опции перед командой: timeout=30m check=5 title=сборка',
+    title: 'TITLE_BG_RUN',
+    help: 'HELP_BG_RUN',
     run: async (_engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /bg run [timeout=30m] [check=5] [title=…] <команда…>')];
+      if (rest.length === 0) return [t('SYNTAX_BG_RUN_TIMEOUT_30M_CHECK_5_TITLE')];
       const parsed = parseBgSpawn(rest.join(' '));
-      if (!parsed.command) return [t('Синтаксис: /bg run [timeout=30m] [check=5] [title=…] <команда…>')];
+      if (!parsed.command) return [t('SYNTAX_BG_RUN_TIMEOUT_30M_CHECK_5_TITLE')];
       const task = spawnBg({
         sessionId: requireSession(_engine.app).session.id,
         by: 'user',
@@ -1581,7 +1581,7 @@ export const OPERATIONS: OpSpec[] = [
         timeoutMs: parsed.timeoutMs,
         checkMinutes: parsed.checkMinutes,
       });
-      return [bgTaskLine(task), t('Завершение придёт в этот разговор; лог — /bg log ' + task.id)];
+      return [bgTaskLine(task), tf('THE_COMPLETION_NOTICE_WILL_ARRIVE_IN_THIS_SESSION', { id: task.id })];
     },
   },
   {
@@ -1590,11 +1590,11 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'id', required: true, hint: 'bg' },
       { name: 'строк', required: false },
     ],
-    title: 'лог фоновой задачи',
-    help: 'хвост вывода (по умолчанию 40 строк)',
+    title: 'TITLE_BG_LOG',
+    help: 'HELP_BG_LOG',
     run: async (_engine, rest) => {
       const id = rest[0] ?? '';
-      if (!id) return [t('Синтаксис: /bg log <id> [строк] — список: /bg')];
+      if (!id) return [t('SYNTAX_BG_LOG_ID_LINES_LIST_BG')];
       const lines = Math.max(1, Math.min(2000, Number.parseInt(rest[1] ?? '', 10) || 40));
       return [bgLog(id, lines)];
     },
@@ -1602,20 +1602,20 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'bg.kill', needsProject: true,
     args: [{ name: 'id…', required: true, hint: 'bg' }],
-    title: 'остановить фоновую задачу',
-    help: 'процесс и его дерево; можно несколько',
+    title: 'TITLE_BG_KILL',
+    help: 'HELP_BG_KILL',
     run: async (_engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /bg kill <id…> — список: /bg')];
+      if (rest.length === 0) return [t('SYNTAX_BG_KILL_ID_LIST_BG')];
       return rest.map((id) => bgKill(id));
     },
   },
   {
     name: 'bg.delete', needsProject: true,
     args: [{ name: 'id…', required: true, hint: 'bg' }],
-    title: 'удалить завершённую задачу',
-    help: 'из списка и лог с диска; running — нельзя',
+    title: 'TITLE_BG_DELETE',
+    help: 'HELP_BG_DELETE',
     run: async (_engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /bg delete <id…> — список: /bg')];
+      if (rest.length === 0) return [t('SYNTAX_BG_DELETE_ID_LIST_BG')];
       return rest.map((id) => bgDelete(id));
     },
   },
@@ -1623,8 +1623,8 @@ export const OPERATIONS: OpSpec[] = [
   // цель (Session.goal): крутить разговор, пока модель не отчитается
   {
     name: 'goal.status', implicit: true, needsProject: true, needsSession: true,
-    title: 'состояние цели',
-    help: 'текст, бюджет раундов, итог',
+    title: 'TITLE_GOAL_STATUS',
+    help: 'HELP_GOAL_STATUS',
     run: async (engine) => engine.goalStatusLines(),
   },
   {
@@ -1633,63 +1633,63 @@ export const OPERATIONS: OpSpec[] = [
       { name: 'текст…', required: true },
       { name: 'раунды', required: false },
     ],
-    title: 'задать цель',
-    help: 'раунды продолжаются, пока модель не ответит ```goal done|failed; бюджет по умолчанию из настроек',
+    title: 'TITLE_GOAL_SET',
+    help: 'HELP_GOAL_SET',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /goal set <текст…> [раунды]')];
+      if (rest.length === 0) return [t('SYNTAX_GOAL_SET_TEXT_ROUNDS')];
       const last = Number.parseInt(rest[rest.length - 1]!, 10);
       const rounds = Number.isInteger(last) && last > 0 ? last : loadSettings(SETTINGS_FILE, 0).goalMaxRounds;
       const text = (Number.isInteger(last) && last > 0 ? rest.slice(0, -1) : rest).join(' ').trim();
-      if (!text) return [t('Синтаксис: /goal set <текст…> [раунды]')];
+      if (!text) return [t('SYNTAX_GOAL_SET_TEXT_ROUNDS')];
       return [engine.setGoal(text, rounds)];
     },
   },
   {
     name: 'goal.done', needsProject: true, needsSession: true,
-    title: 'цель достигнута (вручную)',
-    help: 'вы сами проверили итог — цикл останавливается',
+    title: 'TITLE_GOAL_DONE',
+    help: 'HELP_GOAL_DONE',
     run: async (engine) => [engine.finishGoal('done', 'подтверждено пользователем')],
   },
   {
     name: 'goal.cancel', needsProject: true, needsSession: true,
-    title: 'снять цель',
-    help: 'раунды больше не продолжаются',
+    title: 'TITLE_GOAL_CANCEL',
+    help: 'HELP_GOAL_CANCEL',
     run: async (engine) => [engine.cancelGoal()],
   },
 
   {
     name: 'auto.on',
     args: [{ name: 'N', required: false }],
-    title: 'включить автономный режим',
-    help: 'агенты решают вопросы сами, до N ходов (по умолчанию 10)',
+    title: 'TITLE_AUTO_ON',
+    help: 'HELP_AUTO_ON',
     run: async (engine, rest) => {
       const turns = Math.min(Math.max(Number.parseInt(rest[0] ?? '', 10) || 10, 1), 50);
       engine.setAutoMode(true, turns);
-      return [tf('🤖 автономный режим: до {n} ходов без вашего участия. Остановить — /auto off или ⏹.', { n: turns })];
+      return [tf('AUTONOMOUS_MODE_UP_TO_N_TURNS_WITHOUT_YOU', { n: turns })];
     },
   },
   {
-    name: 'auto.off', title: 'выключить автономный режим',
-    help: 'вернуть руководителя в разговор',
+    name: 'auto.off', title: 'TITLE_AUTO_OFF',
+    help: 'HELP_AUTO_OFF',
     run: async (engine) => {
       engine.setAutoMode(false, 0);
-      return [t('🤖 автономный режим выключен.')];
+      return [t('AUTONOMOUS_MODE_IS_OFF')];
     },
   },
 
   {
     name: 'usage.show', implicit: true, needsProject: true, needsSession: true,
     args: [{ name: 'id модели', required: false, hint: 'models' }],
-    title: 'статистика токенов',
-    help: 'вход/выход/кэш накопительно; с id модели — только по ней',
+    title: 'TITLE_USAGE_SHOW',
+    help: 'HELP_USAGE_SHOW',
     run: async (engine, rest) => {
       const { session } = requireProject(engine.app);
       const mid = (rest[0] ?? '').trim();
       const line = (u: { promptTokens: number; cachedTokens: number; outputTokens: number; rounds: number }): string[] => {
         const pct = u.promptTokens > 0 ? Math.round((u.cachedTokens / u.promptTokens) * 100) : 0;
         return [
-          tf('Раундов: {rounds}', { rounds: u.rounds }),
-          tf('Вход: {in} · Выход: {out} · Из кэша: {cached} ({pct}%)', {
+          tf('ROUNDS_ROUNDS', { rounds: u.rounds }),
+          tf('IN_IN_OUT_OUT_CACHED_CACHED_PCT', {
             in: u.promptTokens.toLocaleString('ru-RU'),
             out: u.outputTokens.toLocaleString('ru-RU'),
             cached: u.cachedTokens.toLocaleString('ru-RU'),
@@ -1700,18 +1700,18 @@ export const OPERATIONS: OpSpec[] = [
       if (mid) {
         const u = session.usageByModel?.[mid];
         if (!u || u.rounds === 0) {
-          return [tf('По модели «{id}» статистики нет (срез по моделям собирается с этого обновления).', { id: mid })];
+          return [tf('NO_STATS_FOR_MODEL_ID_THE_PER_MODEL', { id: mid })];
         }
-        return [tf('Модель {id}:', { id: mid }), ...line(u)];
+        return [tf('MODEL_ID_2', { id: mid }), ...line(u)];
       }
       const u = session.usage;
-      if (!u || u.rounds === 0) return [t('Статистики пока нет — сделайте раунд с API (не mock).')];
-      const lines = ['', t('Итого за разговор:'), ...line(u)];
+      if (!u || u.rounds === 0) return [t('NO_STATS_YET_RUN_A_ROUND_WITH_A')];
+      const lines = ['', t('SESSION_TOTAL'), ...line(u)];
       const win = typeof session.contextModel === 'string'
         ? engine.app.models.get(session.contextModel)?.config?.contextWindow
         : undefined;
       if (session.contextTokens && typeof win === 'number' && win > 0) {
-        lines.push(tf('Контекст: {t} из {w} ({pct}%)', {
+        lines.push(tf('CONTEXT_T_OF_W_PCT', {
           t: session.contextTokens.toLocaleString('ru-RU'),
           w: win.toLocaleString('ru-RU'),
           pct: Math.min(100, Math.round((session.contextTokens / win) * 100)),
@@ -1719,25 +1719,62 @@ export const OPERATIONS: OpSpec[] = [
       }
       const byModel = Object.entries(session.usageByModel ?? {}).filter(([, v]) => v.rounds > 0);
       if (byModel.length > 1) {
-        lines.push('', t('По моделям:'));
-        for (const [id, v] of byModel) lines.push(`• ${id} — ${tf('{r} раунд(ов), вход {in}, выход {out}', { r: v.rounds, in: v.promptTokens.toLocaleString('ru-RU'), out: v.outputTokens.toLocaleString('ru-RU') })}`);
+        lines.push('', t('BY_MODEL'));
+        for (const [id, v] of byModel) lines.push(`• ${id} — ${tf('R_ROUND_S_IN_IN_OUT_OUT', { r: v.rounds, in: v.promptTokens.toLocaleString('ru-RU'), out: v.outputTokens.toLocaleString('ru-RU') })}`);
       }
       lines.push('');
       return lines;
     },
   },
 
+  // язык интерфейса: частый случай settings update ui=… вынесен в отдельную
+  // команду — работает одинаково из ввода TUI и веб-оболочки (ядро одно)
+  {
+    name: 'lang',
+    args: [{ name: 'id', required: false, hint: 'lang' }],
+    title: 'TITLE_LANG',
+    help: 'HELP_LANG',
+    run: async (engine, rest) => {
+      if (rest.length > 1) return [t('SYNTAX_LANG_ID_SEE_LANG')];
+      const langs = knownLanguages(DT_HOME);
+      const id = (rest[0] ?? '').trim();
+      if (!id) {
+        const cur = localeId();
+        return [
+          '',
+          t('LANG_AVAILABLE'),
+          ...langs.map((l) => `    ${l.id} — ${l.name}${l.builtIn ? '' : ` (${t('OWN_2')})`}${l.id === cur ? ' ' + t('CURRENT_3') : ''}`),
+          t('LANG_SWITCH_HINT'),
+          '',
+        ];
+      }
+      if (!langs.some((l) => l.id === id)) {
+        return [tf('LANG_UNKNOWN_ID_AVAILABLE_IDS', { id, ids: langs.map((l) => l.id).join(', ') })];
+      }
+      // персист как в settings.update: tmp → валидация → rename; применение —
+      // после записи, чтобы неудачная запись не оставила переключённый язык
+      const raw = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
+      raw.ui = id;
+      const tmp = SETTINGS_FILE + '.tmp';
+      writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n');
+      loadSettings(tmp, 0);
+      renameSync(tmp, SETTINGS_FILE);
+      applyLocale(id, DT_HOME); // id уже проверен списком — не бросит
+      return [tf('LANG_SWITCHED_ID', { id })];
+    },
+  },
+
   // настройки, менеджер
   {
-    name: 'settings.show', implicit: true, title: 'настройки',
-    help: 'язык, maxTurns, ширина и остальные поля settings.json',
+    name: 'settings.show', implicit: true, title: 'TITLE_SETTINGS_SHOW',
+    help: 'HELP_SETTINGS_SHOW',
     run: async (engine) => {
       const s = loadSettings(SETTINGS_FILE, 0);
       return [
         '',
-        t('Настройки (settings.json):'),
+        t('SETTINGS_SETTINGS_JSON'),
         ...Object.entries(s).map(([k, v]) => `    ${k} = ${String(v)}`),
-        t('Поменять: /settings update поле=значение (например, /settings update maxTurns=2 или /settings update ui=en; модель — model.id=…)'),
+        t('TO_CHANGE_SETTINGS_UPDATE_FIELD_VALUE_E_G'),
         '',
       ];
     },
@@ -1745,10 +1782,10 @@ export const OPERATIONS: OpSpec[] = [
   {
     name: 'settings.update',
     args: [{ name: 'поле=значение…', required: true }],
-    title: 'поменять настройки',
-    help: 'вступают в силу со следующего раунда; вложенные: model.id=…, serviceModel.id=…, model.temperature=…',
+    title: 'TITLE_SETTINGS_UPDATE',
+    help: 'HELP_SETTINGS_UPDATE',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /settings update поле=значение… (см. /settings)')];
+      if (rest.length === 0) return [t('SYNTAX_SETTINGS_UPDATE_FIELD_VALUE_SEE_SETTINGS')];
       const parsed = parseFields(rest);
       if (Array.isArray(parsed)) return parsed;
       // ссылки на модели через точечные пути: id с проверкой существования
@@ -1758,9 +1795,9 @@ export const OPERATIONS: OpSpec[] = [
       });
       if (error) return error;
       for (const [base, ref] of Object.entries(patch)) {
-        if (!ref.id) return [tf('{base}.id пуст — укажите существующую модель', { base })];
+        if (!ref.id) return [tf('BASE_ID_IS_EMPTY_NAME_AN_EXISTING_MODEL', { base })];
         if (!engine.app.models.has(ref.id)) {
-          return [tf('Нет модели «{id}». Доступны: {list}', { id: ref.id, list: [...engine.app.models.keys()].join(', ') })];
+          return [tf('NO_MODEL_ID_AVAILABLE_LIST', { id: ref.id, list: [...engine.app.models.keys()].join(', ') })];
         }
       }
       // настройки типизированы: числа и булевы приводим сразу
@@ -1783,71 +1820,67 @@ export const OPERATIONS: OpSpec[] = [
       if (typeof fields.ui === 'string') applyLocale(fields.ui, DT_HOME);
       if (patch.model) engine.app.settings.model = patch.model;
       if (patch.serviceModel) engine.app.settings.serviceModel = patch.serviceModel;
-      return [t('✓ Настройки обновлены (язык и лимиты — со следующего раунда)')];
+      return [t('SETTINGS_UPDATED_LANGUAGE_AND_LIMITS_APPLY_FROM_THE')];
     },
   },
   {
-    name: 'settings.export', title: 'экспорт настроек',
-    help: 'настройки без проектов: settings-<профиль>-<штамп>.zip (settings, профиль, менеджер, модели с ключами)',
+    name: 'settings.export', title: 'TITLE_SETTINGS_EXPORT',
+    help: 'HELP_SETTINGS_EXPORT',
     run: async (engine) => exportSettingsZip(engine),
   },
   {
     name: 'settings.import',
     args: [{ name: 'файл.zip', required: true }],
-    title: 'импорт настроек',
-    help: 'settings/профиль/менеджер/модели заменяются, проекты не трогаются; с подтверждением',
+    title: 'TITLE_SETTINGS_IMPORT',
+    help: 'HELP_SETTINGS_IMPORT',
     run: async (engine, rest) => {
       const file = rest.join(' ');
-      if (!file) return [t('Синтаксис: /settings import <файл.zip>')];
-      if (!existsSync(file)) return [tf('Файла «{file}» нет', { file })];
+      if (!file) return [t('SYNTAX_SETTINGS_IMPORT_FILE_ZIP')];
+      if (!existsSync(file)) return [tf('NO_FILE_FILE', { file })];
       const entries = readZipEntries(readFileSync(file));
       const ok = await engine.confirmAction(
-        t('Импортировать настройки приложения из этого архива?'),
-        t('settings.json, профиль, менеджер и карточки моделей (с ключами) заменяются; проекты и разговоры не трогаются.'),
+        t('IMPORT_THE_APP_SETTINGS_FROM_THIS_ARCHIVE'),
+        t('SETTINGS_JSON_THE_PROFILE_THE_MANAGER_AND_THE'),
       );
-      if (!ok) return [t('Импорт отменён.')];
+      if (!ok) return [t('IMPORT_CANCELLED')];
       return [applySettingsImport(engine.app, entries)];
     },
   },
 
   {
-    name: 'manager.show', implicit: true, title: 'менеджер переговорки',
-    help: 'его модель, имя и температура',
+    name: 'manager.show', implicit: true, title: 'TITLE_MANAGER_SHOW',
+    help: 'HELP_MANAGER_SHOW',
     run: async (engine) => [
       '',
-      tf('Менеджер: {emoji} {name}', { emoji: engine.app.mgr.emoji, name: engine.app.mgr.name }),
-      `    ${t('модель:')} ${engine.app.mgr.model.id} · ${t('температура:')} ${engine.app.mgr.temperature ?? '—'}`,
-      t('Поменять: /manager update model.id=… temperature=… name=… emoji=… color=…'),
+      tf('MANAGER_NAME', { name: engine.app.mgr.name }),
+      `    ${t('MODEL')} ${engine.app.mgr.model.id} · ${t('TEMPERATURE')} ${engine.app.mgr.model.temperature ?? '—'}`,
+      t('CHANGE_MANAGER_UPDATE_FIELDS'),
       '',
     ],
   },
   {
     name: 'manager.update',
     args: [{ name: 'поле=значение…', required: true }],
-    title: 'настроить менеджера',
-    help: 'поля: name, emoji, color, temperature; вложенные: model.id (температура менеджера — его поле temperature, остальные параметры — в карточке модели)',
+    title: 'TITLE_MANAGER_UPDATE',
+    help: 'HELP_MANAGER_UPDATE',
     run: async (engine, rest) => {
-      if (rest.length === 0) return [t('Синтаксис: /manager update model.id=… temperature=… name=… emoji=… color=…')];
+      if (rest.length === 0) return [t('SYNTAX_MANAGER_UPDATE_FIELDS')];
       const parsed = parseFields(rest);
       if (Array.isArray(parsed)) return parsed;
+      const tempKey = Object.keys(parsed).find((k) => k.toLowerCase() === 'temperature');
+      if (tempKey !== undefined) return [tf('TEMPERATURE_IS_NO_LONGER_A_MANAGER_FIELD_TEMPERATURE', { v: String(parsed[tempKey]) })];
       const { patch, error } = modelRefPatch(parsed, ['model'], { model: engine.app.mgr.model });
       if (error) return error;
-      // каждый запрос менеджера несёт его temperature (поле manager.json), поэтому
-      // переопределения model.temperature/maxTokens/… в его ссылке не срабатывают
-      const extra = Object.keys(parsed).filter((k) => k.toLowerCase().startsWith('model.') && k.toLowerCase() !== 'model.id');
-      if (extra.length > 0) {
-        return [tf('manager.{key} не сработает — у менеджера переопределяется только id; параметры правь в карточке модели', { key: extra[0] })];
-      }
       const fields: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(parsed)) {
         if (k.includes('.')) continue;
-        if (!['name', 'emoji', 'color', 'temperature'].includes(k)) {
-          return [tf('Поле «{key}» не знаю — можно: name, emoji, color, temperature, model.id', { key: k })];
+        if (!['name'].includes(k)) {
+          return [tf('UNKNOWN_FIELD_KEY_ALLOWED_NAME_MODEL', { key: k })];
         }
         fields[k] = v;
       }
       if (patch.model) fields.model = patch.model;
-      if (Object.keys(fields).length === 0) return [t('Не понял, что менять — жду поле=значение')];
+      if (Object.keys(fields).length === 0) return [t('DIDN_T_UNDERSTAND_WHAT_TO_CHANGE_EXPECTING_FIELD')];
       const known = [...engine.app.models.keys()];
       const report = updateManagerConfig(MANAGER_FILE, fields, known);
       engine.app.mgr = loadManagerConfig(MANAGER_FILE, known);
@@ -1874,10 +1907,10 @@ export async function runOperationArgs(engine: Engine, name: string, args: strin
 /** Гейты «без проекта»/«без разговора»: операции отвечают подсказкой вместо падения. */
 async function runOp(engine: Engine, op: OpSpec, args: string[], signal?: AbortSignal): Promise<string[]> {
   if ((op.needsProject || op.needsSession) && !engine.app.store) {
-    return [t('нет открытого проекта — сначала /project new <id> [папка] или /project open <id|путь>')];
+    return [t('NO_OPEN_PROJECT_START_WITH_PROJECT_NEW_ID')];
   }
   if (op.needsSession && !engine.app.session) {
-    return [t('нет открытого разговора — /session new [id] или /session open <id>; список — /sessions')];
+    return [t('NO_OPEN_SESSION_SESSION_NEW_ID_OR_SESSION')];
   }
   return op.run(engine, args, signal);
 }
@@ -1957,7 +1990,7 @@ export interface DirListing {
 export function listDirs(rawPath?: string): DirListing {
   const target = rawPath && rawPath.trim() ? resolve(rawPath.trim()) : homedir();
   if (!existsSync(target) || !statSync(target).isDirectory()) {
-    throw new Error(tf('папки «{path}» нет', { path: target }));
+    throw new Error(tf('NO_FOLDER_PATH', { path: target }));
   }
   let dirs: DirEntry[] = [];
   try {
@@ -1983,10 +2016,10 @@ export function listDirs(rawPath?: string): DirListing {
 /** Принимаются вводом вне реестра (runOperationText) — подсказки для них живут здесь же. */
 export function extraHints(): OpHint[] {
   return [
-    { cmd: '/help', help: t('список операций и приёмы ввода') },
-    { cmd: '/exit', help: t('выход; в веб-оболочке просто закройте страницу') },
-    { cmd: '/quit', help: t('то же, что /exit') },
-    { cmd: '/q', help: t('то же, что /exit') },
+    { cmd: '/help', help: t('LIST_THE_OPERATIONS_AND_INPUT_TRICKS') },
+    { cmd: '/exit', help: t('QUIT_IN_THE_WEB_UI_JUST_CLOSE_THE') },
+    { cmd: '/quit', help: t('SAME_AS_EXIT') },
+    { cmd: '/q', help: t('SAME_AS_EXIT') },
   ];
 }
 
@@ -2006,16 +2039,17 @@ export async function runOperationText(
   const [group, second, ...rest] = tokens;
   if (group === 'help') return helpLines();
   if (group === 'exit' || group === 'quit' || group === 'q') {
-    return [t('/exit — команда терминала. В веб-оболочке просто закройте страницу.')];
+    return [t('EXIT_IS_A_TERMINAL_COMMAND_IN_THE_WEB')];
   }
   // трёхсловные имена (project mail add) важнее двухсловных: ищем с хвоста
   const explicit3 = second && rest.length > 0 ? byName.get(`${group}.${second}.${rest[0].toLowerCase()}`) : undefined;
   if (explicit3) return runOp(engine, explicit3, pairArgs(explicit3, rest.slice(1)), signal);
   const explicit = second ? byName.get(`${group}.${second.toLowerCase()}`) : undefined;
   if (explicit) return runOp(engine, explicit, pairArgs(explicit, rest), signal);
-  // одиночная команда без группы (/export, /import)
-  const single = second ? undefined : byName.get(group.toLowerCase());
-  if (single) return runOp(engine, single, pairArgs(single, rest), signal);
+  // одиночная команда без группы (/export, /import, /lang): второй токен —
+  // не глагол группы, а её первый аргумент (/import файл.zip, /lang en)
+  const single = byName.get(group.toLowerCase());
+  if (single) return runOp(engine, single, pairArgs(single, second ? [second, ...rest] : rest), signal);
   // обзор группы: verb-less (`/agents`) или имплицитная операция с аргументом
   // (`/memory gleb`, `/memory shared`) — глагол не нужен
   const implicit = OPERATIONS.find((o) => o.name.startsWith(`${group}.`) && o.implicit);
@@ -2028,13 +2062,13 @@ export async function runOperationText(
   const near = groups.find((g) => g.startsWith(group.toLowerCase()));
   return [
     near
-      ? tf('Не понял «/{cmd}». Есть группа /{near} — /help покажет её операции.', { cmd: `${group}${second ? ' ' + second : ''}`, near })
-      : t('Неизвестная команда. /help — список операций.'),
+      ? tf('DID_NOT_UNDERSTAND_CMD_THERE_IS_A_NEAR', { cmd: `${group}${second ? ' ' + second : ''}`, near })
+      : t('UNKNOWN_COMMAND_HELP_THE_LIST_OF_OPERATIONS'),
   ];
 }
 
 function helpLines(): string[] {
-  const lines = [t('Операции (это же — имена rpc и подсказки GUI):')];
+  const lines = [t('OPERATIONS_THE_SAME_STRINGS_RPC_NAMES_AND_GUI')];
   let group = '';
   for (const op of OPERATIONS) {
     const g = op.name.split('.')[0];
@@ -2043,12 +2077,12 @@ function helpLines(): string[] {
       lines.push('');
     }
     const label = (operationCommand(op) + (op.args ? ' ' + operationArgs(op) : '')).padEnd(30);
-    lines.push(`    ${label} — ${t(op.help)}`);
+    lines.push(`    ${label} — ${tf(op.help, { tools: BUILTIN_TOOL_IDS.join(', ') })}`);
   }
   lines.push(
     '',
-    t('  @имя или !имя — обратиться к участнику; @менеджер — к менеджеру переговорки;'),
-    t('  @session <id разговора> — приложить конспект другого разговора.'),
+    t('NAME_OR_NAME_ADDRESS_A_MEMBER_MANAGER_THE'),
+    t('SESSION_SESSION_ID_ATTACH_A_DIGEST_OF_ANOTHER'),
   );
   return lines;
 }

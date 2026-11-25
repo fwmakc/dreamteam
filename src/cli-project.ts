@@ -39,9 +39,9 @@ export function parseCliProject(args: string[]): CliProjectForm {
   const rest = args.filter((a) => a !== '--open'); // флаг serve — к проекту не относится
   if (rest.length === 0) return { kind: 'none' };
   const [head, second] = rest;
-  if (second) return { kind: 'error', message: tf('Лишний аргумент «{a}» — укажите один путь: dreamteam <путь>.', { a: second }) };
+  if (second) return { kind: 'error', message: tf('EXTRA_ARGUMENT_A_PASS_A_SINGLE_PATH_DREAMTEAM', { a: second }) };
   if (!looksLikePath(head)) {
-    return { kind: 'error', message: tf('«{a}» не похоже на путь — папку пишите как ./имя или полным путём; открыть проект по имени можно командой /project open {a} внутри приложения.', { a: head }) };
+    return { kind: 'error', message: tf('A_DOES_NOT_LOOK_LIKE_A_PATH_WRITE', { a: head }) };
   }
   return { kind: 'open', target: head };
 }

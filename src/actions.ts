@@ -537,16 +537,16 @@ export function firstBlockOfKind(
 /** Короткая строка для подтверждения и для отчёта об отказе. */
 export function describeAction(a: Action): string {
   const at = (t?: string) => (t ? `[${t}] ` : '');
-  if (a.kind === 'file') return `${at(a.project)}${tf('файл {path} ({n} символов)', { path: a.path, n: a.content.length })}`;
-  if (a.kind === 'run') return `${at(a.project)}${tf('команда: {cmd}', { cmd: a.command.replace(/\s+/g, ' ').slice(0, 140) })}`;
-  if (a.kind === 'tool') return `${at(a.project)}${tf('тул «{tool}»: {cmd}', { tool: a.tool, cmd: a.command.replace(/\s+/g, ' ').slice(0, 140) })}`;
-  if (a.kind === 'look') return `${at(a.project)}${tf('смотреть картинку: {path}', { path: a.path || t('(путь не указан)') })}`;
+  if (a.kind === 'file') return `${at(a.project)}${tf('FILE_PATH_N_CHARS', { path: a.path, n: a.content.length })}`;
+  if (a.kind === 'run') return `${at(a.project)}${tf('COMMAND_CMD', { cmd: a.command.replace(/\s+/g, ' ').slice(0, 140) })}`;
+  if (a.kind === 'tool') return `${at(a.project)}${tf('TOOL_TOOL_CMD', { tool: a.tool, cmd: a.command.replace(/\s+/g, ' ').slice(0, 140) })}`;
+  if (a.kind === 'look') return `${at(a.project)}${tf('LOOK_AT_THE_IMAGE_PATH', { path: a.path || t('PATH_NOT_SET') })}`;
   if (a.kind === 'image') {
     const p = a.params;
-    const refs = p.refs?.length ? tf(', референсы: {n}', { n: p.refs.length }) : '';
-    return `${at(a.project)}${tf('генерация: {n} × {size}, «{prompt}»', { n: p.n ?? 1, size: p.size ?? '512x512', prompt: p.prompt.replace(/\s+/g, ' ').slice(0, 100) })}${refs}`;
+    const refs = p.refs?.length ? tf('REFERENCES_N', { n: p.refs.length }) : '';
+    return `${at(a.project)}${tf('GENERATION_N_SIZE_PROMPT', { n: p.n ?? 1, size: p.size ?? '512x512', prompt: p.prompt.replace(/\s+/g, ' ').slice(0, 100) })}${refs}`;
   }
-  return `${at(a.host)}${tf('команда на сервере: {cmd}', { cmd: a.command.replace(/\s+/g, ' ').slice(0, 140) })}`;
+  return `${at(a.host)}${tf('COMMAND_ON_THE_SERVER_CMD', { cmd: a.command.replace(/\s+/g, ' ').slice(0, 140) })}`;
 }
 
 /**

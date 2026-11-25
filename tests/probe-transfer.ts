@@ -151,8 +151,8 @@ check('сетап: открыт последний разговор (Бета)',
 // ═══ уровень 4 — разговор: экспорт участников, импорт как новый ═══════════════
 {
   mkdirSync(join(home, 'agents'), { recursive: true });
-  writeFileSync(join(home, 'agents', 'lawyer.json'), JSON.stringify({ name: 'Юрист', emoji: '⚖', color: 'blue', prompt: 'Ты юрист.' }, null, 2) + '\n');
-  writeFileSync(join(home, 'agents', 'observer.json'), JSON.stringify({ name: 'Наблюдатель', emoji: '👁', color: 'white', prompt: 'Ты наблюдатель.' }, null, 2) + '\n');
+  writeFileSync(join(home, 'agents', 'lawyer.json'), JSON.stringify({ name: 'Юрист', color: 'blue', prompt: 'Ты юрист.' }, null, 2) + '\n');
+  writeFileSync(join(home, 'agents', 'observer.json'), JSON.stringify({ name: 'Наблюдатель', color: 'white', prompt: 'Ты наблюдатель.' }, null, 2) + '\n');
   const alpha = app.store!.load(s1.id)!;
   alpha.participants = [MANAGER_ID, 'lawyer'];
   alpha.createdAt = 1_700_000_000_000;
